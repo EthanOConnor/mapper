@@ -417,6 +417,8 @@ private:
 	void updateMapCache(bool use_background);
 	/** Redraws all dirty caches. */
 	void updateAllDirtyCaches();
+	void ensureVisibleTemplatesAreLoading(int first_template, int last_template);
+	void scheduleTemplateLoad(OpenOrienteering::Template* temp);
 	/** Shifts the content in the cache by the given amount of pixels. */
 	void shiftCache(int sx, int sy, QImage& cache);
 	void shiftCache(int sx, int sy, QPixmap& cache);

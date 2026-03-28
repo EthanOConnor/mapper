@@ -20,6 +20,8 @@
 #ifndef OPENORIENTEERING_GDAL_TILED_TEMPLATE_T_H
 #define OPENORIENTEERING_GDAL_TILED_TEMPLATE_T_H
 
+#include <array>
+
 #include <QObject>
 #include <QString>
 
@@ -74,18 +76,84 @@ private slots:
 	 */
 	void tiledTemplateExtent();
 
+	/**
+	 * Verify that the tiled renderer interprets clip_rect in map coordinates,
+	 * independent of the painter's current view transform.
+	 */
+	void tiledDrawUsesMapClipRect();
+
+	/**
+	 * Verify that tiled and non-tiled GDAL rasters with the same geotransform
+	 * produce the same template placement, including across CRS conversion.
+	 */
+	void tiledGeoreferencingMatchesNonTiled();
+
+	/**
+	 * Verify that a georeferenced tiled raster recomputes its placement when
+	 * the map becomes geospatial after the template has already loaded.
+	 */
+	void tiledTemplateUpdatesAfterMapBecomesGeospatial();
+
+	/**
+	 * Verify that a zoomed-out draw requests subsampled tile images rather than
+	 * always caching full native blocks.
+	 */
+	void zoomedOutDrawUsesSubsampledTiles();
+
+	/**
+	 * Verify that overview tiles are budgeted by decoded bytes rather than a
+	 * flat tile-count cap, so the full visible overview grid can stay cached.
+	 */
+	void overviewCacheCanExceedOldTileCountLimit();
+
+	/**
+	 * Verify that switching to a higher-resolution zoom level drops queued
+	 * requests from the previous subsampling level.
+	 */
+	void zoomChangeDropsQueuedLowerResolutionRequests();
+
+	/**
+	 * Verify that overview selection uses on-screen pixel scale rather than
+	 * raw map zoom, avoiding overly coarse level choices.
+	 */
+	void onScreenScaleChoosesSharperLevel();
+
+	/**
+	 * Verify that visible tiles are queued ahead of overscan tiles so the
+	 * current viewport fills before speculative border loading.
+	 */
+	void visibleTilesArePrioritizedAheadOfOverscan();
+
+	/**
+	 * Verify that a visible unloaded tiled template gets scheduled for loading
+	 * when the map widget redraws template caches after reopen.
+	 */
+	void visibleUnloadedTiledTemplateLoadsOnPaint();
+
 private:
 	/**
 	 * Create a tiled GeoTIFF in GDAL's virtual filesystem for testing.
 	 * Returns the /vsimem/ path.
 	 */
-	QString createTiledTestRaster(int width, int height, int block_w, int block_h);
+	QString createTiledTestRaster(
+		int width,
+		int height,
+		int block_w,
+		int block_h,
+		int epsg_code = 32632,
+		const std::array<double, 6>& geotransform = { 500000.0, 1.0, 0.0, 6000000.0, 0.0, -1.0 }
+	);
 
 	/**
 	 * Create a non-tiled (striped) GeoTIFF in GDAL's virtual filesystem.
 	 * Returns the /vsimem/ path.
 	 */
-	QString createNonTiledTestRaster(int width, int height);
+	QString createNonTiledTestRaster(
+		int width,
+		int height,
+		int epsg_code = 32632,
+		const std::array<double, 6>& geotransform = { 500000.0, 1.0, 0.0, 6000000.0, 0.0, -1.0 }
+	);
 
 	int test_counter = 0;
 };

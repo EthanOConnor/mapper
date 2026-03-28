@@ -30,6 +30,8 @@
 #include <QHash>
 #include <QImage>
 #include <QPoint>
+#include <QPointF>
+#include <QRect>
 #include <QQueue>
 #include <QSet>
 #include <QSize>
@@ -39,6 +41,7 @@
 #include "templates/template.h"
 #include "templates/template_image.h"
 
+class GdalTiledTemplateTest;
 class QByteArray;
 class QPainter;
 class QRectF;
@@ -104,44 +107,93 @@ protected:
 	void setupTiledGeoreferencing();
 
 private:
+	struct RequestWindow
+	{
+		int tile_x_min = 0;
+		int tile_y_min = 0;
+		int tile_x_max = -1;
+		int tile_y_max = -1;
+		int subsampling = 1;
+
+		bool operator==(const RequestWindow& other) const
+		{
+			return tile_x_min == other.tile_x_min
+			       && tile_y_min == other.tile_y_min
+			       && tile_x_max == other.tile_x_max
+			       && tile_y_max == other.tile_y_max
+			       && subsampling == other.subsampling;
+		}
+	};
+
+	struct TileRequest
+	{
+		int tile_x = 0;
+		int tile_y = 0;
+		int subsampling = 1;
+		quint64 generation = 0;
+	};
+
 	/**
 	 * Background thread function for loading tiles from GDAL.
 	 */
-	void tileWorkerLoop();
+	void tileWorkerLoop(GDALDatasetH worker_dataset);
 
 	/**
 	 * Queue a tile for background loading. Safe to call from const context
 	 * (drawTemplate) because tile loading is a cache operation, not a
 	 * semantic state change.
 	 */
-	void requestTile(int tile_x, int tile_y) const;
+	void requestTile(int tile_x, int tile_y, int subsampling, quint64 generation) const;
 
 	/**
 	 * Called on the UI thread when a tile has been loaded by the worker.
 	 */
-	void onTileLoaded(quint64 key, QImage tile_image);
+	void onTileLoaded(quint64 key, int tile_x, int tile_y, QImage tile_image);
+	void onTileLoadFailed(quint64 key, int tile_x, int tile_y);
 
 	/**
 	 * Compute a cache key from tile grid coordinates.
 	 */
-	static quint64 tileKey(int tile_x, int tile_y);
+	static quint64 tileKey(int tile_x, int tile_y, int subsampling);
+
+	const QImage* findBestCachedTile(int tile_x, int tile_y, int desired_subsampling) const;
+
+	static int chooseTileSubsampling(double scale, const QSize& block_size);
+
+	void noteTileAccess(quint64 key) const;
+	void evictCachedTilesToBudget();
+	void markTileAreaDirty(int tile_x, int tile_y) const;
+	void discardQueuedTileRequests() const;
+	quint64 beginRequestGeneration(const RequestWindow& request_window) const;
 
 	// Tiled source state (null/empty when using the non-tiled path)
 	GDALDatasetH tiled_dataset = nullptr;
+	std::vector<GDALDatasetH> worker_datasets;
 	GdalImageReader::RasterInfo tiled_raster_info;
 	QSize tiled_raster_size;  ///< Full virtual raster dimensions in pixels.
 
 	// Background tile loading
-	mutable std::thread worker_thread;
+	std::vector<std::thread> worker_threads;
 	mutable std::atomic<bool> worker_stop{false};
 	mutable std::mutex queue_mutex;
 	mutable std::condition_variable queue_cv;
-	mutable QQueue<QPoint> tile_queue;
+	mutable QQueue<TileRequest> tile_queue;
 	mutable QSet<quint64> loading_tiles;  ///< Keys of in-flight tile requests.
 
 	// Tile cache (mutable: drawTemplate is const but caching is a display concern)
 	mutable QHash<quint64, QImage> tile_cache;
-	int tile_cache_budget = 256;  ///< Maximum number of cached tiles.
+	mutable QHash<quint64, quint64> tile_cache_access;
+	mutable quint64 tile_cache_access_counter = 0;
+	mutable qsizetype tile_cache_bytes = 0;
+	qsizetype tile_cache_budget_bytes = 512 * 1024 * 1024;  ///< Roughly 512 MiB of decoded tiles.
+	mutable std::atomic<int> active_subsampling{0};
+	mutable std::atomic<quint64> active_request_generation{0};
+	mutable RequestWindow current_request_window;
+	int worker_thread_count = 6;
+	mutable int debug_draw_logs_remaining = 0;
+	mutable int debug_tile_logs_remaining = 0;
+
+	friend class ::GdalTiledTemplateTest;
 };
 
 

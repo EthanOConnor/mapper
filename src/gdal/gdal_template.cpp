@@ -24,11 +24,14 @@
 #include <cmath>
 #include <iterator>
 #include <memory>
+#include <tuple>
+#include <limits>
 
 #include <Qt>
 #include <QtGlobal>
 #include <QByteArray>
 #include <QChar>
+#include <QDebug>
 #include <QElapsedTimer>
 #include <QImageReader>
 #include <QMetaObject>
@@ -49,11 +52,67 @@
 #include "gdal/gdal_file.h"
 #include "gdal/gdal_image_reader.h"
 #include "gdal/gdal_manager.h"
+#include "gui/util_gui.h"
 #include "util/transformation.h"
 #include "util/util.h"
 
 
 namespace OpenOrienteering {
+
+namespace {
+
+bool shouldDebugGdalTemplate()
+{
+	static bool const enabled = qEnvironmentVariableIsSet("MAPPER_GDAL_DEBUG");
+	return enabled;
+}
+
+int tileSubsamplingForScale(double scale, const QSize& block_size)
+{
+	if (!(scale > 0.0) || block_size.isEmpty())
+		return 1;
+
+	auto const max_subsampling = std::max(1, std::min(block_size.width(), block_size.height()));
+	int subsampling = 1;
+	while (subsampling * 2 <= max_subsampling
+	       && scale * (subsampling * 2) <= 1.0)
+	{
+		subsampling *= 2;
+	}
+	return subsampling;
+}
+
+qsizetype tileByteCost(const QImage& tile)
+{
+	return qsizetype(tile.bytesPerLine()) * tile.height();
+}
+
+struct RasterIoCancellationContext
+{
+	std::atomic<bool>* stop_flag = nullptr;
+	std::atomic<quint64>* active_request_generation = nullptr;
+	quint64 request_generation = 0;
+};
+
+int tileReadProgress(double /*complete*/, const char* /*message*/, void* user_data)
+{
+	auto* context = static_cast<RasterIoCancellationContext*>(user_data);
+	if (!context)
+		return true;
+
+	if (context->stop_flag && context->stop_flag->load(std::memory_order_relaxed))
+		return false;
+
+	if (context->active_request_generation
+	    && context->active_request_generation->load(std::memory_order_relaxed) != context->request_generation)
+	{
+		return false;
+	}
+
+	return true;
+}
+
+}  // namespace
 
 // static
 bool GdalTemplate::canRead(const QString& path)
@@ -90,12 +149,23 @@ GdalTemplate::GdalTemplate(const GdalTemplate& proto)
 GdalTemplate::~GdalTemplate()
 {
 	// Ensure the worker thread is stopped before members are destroyed.
-	if (worker_thread.joinable())
+	if (!worker_threads.empty())
 	{
 		worker_stop = true;
-		queue_cv.notify_one();
-		worker_thread.join();
+		queue_cv.notify_all();
+		for (auto& worker_thread : worker_threads)
+		{
+			if (worker_thread.joinable())
+				worker_thread.join();
+		}
+		worker_threads.clear();
 	}
+	for (auto worker_dataset : worker_datasets)
+	{
+		if (worker_dataset)
+			GDALClose(worker_dataset);
+	}
+	worker_datasets.clear();
 	if (tiled_dataset)
 	{
 		GDALClose(tiled_dataset);
@@ -195,6 +265,11 @@ bool GdalTemplate::loadTemplateFileImpl()
 		}
 
 		tiled_raster_info = raster_info;
+		if (shouldDebugGdalTemplate())
+		{
+			debug_draw_logs_remaining = 8;
+			debug_tile_logs_remaining = 8;
+		}
 
 		// Set up georeferencing from the GDAL geotransform.
 		// We use setupTiledGeoreferencing() instead of calculateGeoreferencing()
@@ -223,9 +298,35 @@ bool GdalTemplate::loadTemplateFileImpl()
 			}
 		}
 
-		// Start the background tile worker.
+		// Start the background tile workers.
 		worker_stop = false;
-		worker_thread = std::thread(&GdalTemplate::tileWorkerLoop, this);
+		worker_datasets.clear();
+		worker_datasets.reserve(worker_thread_count);
+		for (int i = 0; i < worker_thread_count; ++i)
+		{
+			CPLErrorReset();
+			auto worker_dataset = GDALOpen(template_path.toUtf8(), GA_ReadOnly);
+			if (!worker_dataset)
+			{
+				setErrorString(tr("Failed to open tiled raster worker: %1")
+				               .arg(QString::fromUtf8(CPLGetLastErrorMsg())));
+				for (auto opened_dataset : worker_datasets)
+				{
+					if (opened_dataset)
+						GDALClose(opened_dataset);
+				}
+				worker_datasets.clear();
+				GDALClose(tiled_dataset);
+				tiled_dataset = nullptr;
+				return false;
+			}
+			worker_datasets.push_back(worker_dataset);
+		}
+
+		worker_threads.clear();
+		worker_threads.reserve(worker_thread_count);
+		for (int i = 0; i < worker_thread_count; ++i)
+			worker_threads.emplace_back(&GdalTemplate::tileWorkerLoop, this, worker_datasets[i]);
 
 		return true;
 	}
@@ -272,13 +373,24 @@ bool GdalTemplate::loadTemplateFileImpl()
 
 void GdalTemplate::unloadTemplateFileImpl()
 {
-	// Stop the tile worker thread.
-	if (worker_thread.joinable())
+	// Stop the tile worker threads.
+	if (!worker_threads.empty())
 	{
 		worker_stop = true;
-		queue_cv.notify_one();
-		worker_thread.join();
+		queue_cv.notify_all();
+		for (auto& worker_thread : worker_threads)
+		{
+			if (worker_thread.joinable())
+				worker_thread.join();
+		}
+		worker_threads.clear();
 	}
+	for (auto worker_dataset : worker_datasets)
+	{
+		if (worker_dataset)
+			GDALClose(worker_dataset);
+	}
+	worker_datasets.clear();
 
 	// Release GDAL dataset.
 	if (tiled_dataset)
@@ -289,7 +401,12 @@ void GdalTemplate::unloadTemplateFileImpl()
 
 	// Clear tile cache and state.
 	tile_cache.clear();
+	tile_cache_access.clear();
+	tile_cache_bytes = 0;
 	loading_tiles.clear();
+	active_subsampling.store(0, std::memory_order_relaxed);
+	active_request_generation.store(0, std::memory_order_relaxed);
+	current_request_window = {};
 	{
 		std::lock_guard<std::mutex> lock(queue_mutex);
 		tile_queue.clear();
@@ -324,10 +441,13 @@ void GdalTemplate::drawTemplate(QPainter* painter, const QRectF& clip_rect, doub
 	painter->setOpacity(opacity);
 
 	// Determine the visible area in template pixel coordinates.
-	// The painter transform maps template pixels → device pixels.
-	// We need the inverse: device/map clip_rect → template pixels.
-	auto const inv_transform = painter->transform().inverted();
-	auto const visible_rect = inv_transform.mapRect(clip_rect);
+	// clip_rect is passed in map coordinates, not device/view coordinates,
+	// so we must transform it with the template's map<->template matrices.
+	QRectF visible_rect;
+	rectIncludeSafe(visible_rect, mapToTemplate(MapCoordF(clip_rect.topLeft())));
+	rectIncludeSafe(visible_rect, mapToTemplate(MapCoordF(clip_rect.topRight())));
+	rectIncludeSafe(visible_rect, mapToTemplate(MapCoordF(clip_rect.bottomLeft())));
+	rectIncludeSafe(visible_rect, mapToTemplate(MapCoordF(clip_rect.bottomRight())));
 
 	// Template pixel origin is at (-width/2, -height/2) because
 	// TemplateImage centers the image. Convert to raster pixel coords.
@@ -350,33 +470,114 @@ void GdalTemplate::drawTemplate(QPainter* painter, const QRectF& clip_rect, doub
 	tile_y_min = std::max(tile_y_min, 0);
 	tile_x_max = std::min(tile_x_max, max_tile_x);
 	tile_y_max = std::min(tile_y_max, max_tile_y);
+	auto effective_scale = scale;
+	if (on_screen)
+	{
+		effective_scale = Util::mmToPixelPhysical(scale);
+	}
+	else
+	{
+		auto dpi = painter->device()->physicalDpiX();
+		if (!dpi)
+			dpi = painter->device()->logicalDpiX();
+		if (dpi > 0)
+			effective_scale *= dpi / 25.4;
+	}
+
+	auto const subsampling = chooseTileSubsampling(effective_scale, tiled_raster_info.block_size);
+
+	if (shouldDebugGdalTemplate() && debug_draw_logs_remaining > 0)
+	{
+		--debug_draw_logs_remaining;
+		auto const bbox = calculateTemplateBoundingBox();
+		qInfo().noquote()
+			<< "GdalTemplate draw"
+			<< "path=" << template_path
+			<< "clip_rect=" << clip_rect
+			<< "visible_rect=" << visible_rect
+			<< "bbox=" << bbox
+			<< "scale=(" << transform.template_scale_x << "," << transform.template_scale_y << ")"
+			<< "translation=(" << transform.template_x / 1000.0 << "," << transform.template_y / 1000.0 << ")"
+			<< "subsampling=" << subsampling
+			<< "tiles=" << QStringLiteral("[%1..%2]x[%3..%4]")
+			              .arg(tile_x_min).arg(tile_x_max).arg(tile_y_min).arg(tile_y_max);
+	}
+
+	auto const request_generation = beginRequestGeneration(RequestWindow{
+		tile_x_min, tile_y_min, tile_x_max, tile_y_max, subsampling
+	});
 
 	// Draw cached tiles and request missing ones.
+	struct MissingTile
+	{
+		int tile_x;
+		int tile_y;
+		bool intersects_visible_rect;
+		qreal distance_sq;
+	};
+	std::vector<MissingTile> missing_tiles;
+	auto const visible_center_x = (visible_rect.left() + visible_rect.right()) * 0.5;
+	auto const visible_center_y = (visible_rect.top() + visible_rect.bottom()) * 0.5;
+
 	for (int ty = tile_y_min; ty <= tile_y_max; ++ty)
 	{
 		for (int tx = tile_x_min; tx <= tile_x_max; ++tx)
 		{
-			auto const key = tileKey(tx, ty);
+			auto const key = tileKey(tx, ty, subsampling);
 			auto it = tile_cache.constFind(key);
+			auto const source_w = std::min(block_w, tiled_raster_size.width() - tx * block_w);
+			auto const source_h = std::min(block_h, tiled_raster_size.height() - ty * block_h);
 			if (it != tile_cache.constEnd())
 			{
+				noteTileAccess(key);
 				// Draw cached tile at its position in template pixel space.
 				auto const px = tx * block_w - half_w;
 				auto const py = ty * block_h - half_h;
-				painter->drawImage(QPointF(px, py), it.value());
+				painter->drawImage(QRectF(px, py, source_w, source_h), it.value());
 #ifdef Mapper_DEVELOPMENT_BUILD
 				++tiles_drawn;
 #endif
 			}
 			else
 			{
-				requestTile(tx, ty);
+				if (auto const* fallback = findBestCachedTile(tx, ty, subsampling))
+				{
+					auto const px = tx * block_w - half_w;
+					auto const py = ty * block_h - half_h;
+					painter->drawImage(QRectF(px, py, source_w, source_h), *fallback);
+#ifdef Mapper_DEVELOPMENT_BUILD
+					++tiles_drawn;
+#endif
+				}
+				auto const tile_center_x = tx * block_w - half_w + source_w * 0.5;
+				auto const tile_center_y = ty * block_h - half_h + source_h * 0.5;
+				auto const dx = tile_center_x - visible_center_x;
+				auto const dy = tile_center_y - visible_center_y;
+				auto const tile_left = tx * block_w - half_w;
+				auto const tile_top = ty * block_h - half_h;
+				auto const intersects_visible_rect =
+					tile_left < visible_rect.right()
+					&& tile_left + source_w > visible_rect.left()
+					&& tile_top < visible_rect.bottom()
+					&& tile_top + source_h > visible_rect.top();
+				missing_tiles.push_back(MissingTile{ tx, ty, intersects_visible_rect, dx * dx + dy * dy });
 #ifdef Mapper_DEVELOPMENT_BUILD
 				++tiles_requested;
 #endif
 			}
 		}
 	}
+
+	std::sort(missing_tiles.begin(), missing_tiles.end(), [](auto const& lhs, auto const& rhs) {
+		if (lhs.intersects_visible_rect != rhs.intersects_visible_rect)
+			return lhs.intersects_visible_rect > rhs.intersects_visible_rect;
+		if (lhs.distance_sq != rhs.distance_sq)
+			return lhs.distance_sq < rhs.distance_sq;
+		return std::tie(lhs.tile_y, lhs.tile_x) < std::tie(rhs.tile_y, rhs.tile_x);
+	});
+
+	for (auto it = missing_tiles.rbegin(); it != missing_tiles.rend(); ++it)
+				requestTile(it->tile_x, it->tile_y, subsampling, request_generation);
 
 	painter->setRenderHint(QPainter::SmoothPixmapTransform, false);
 
@@ -401,11 +602,11 @@ QRectF GdalTemplate::getTemplateExtent() const
 
 // --- Background tile loading ---
 
-void GdalTemplate::tileWorkerLoop()
+void GdalTemplate::tileWorkerLoop(GDALDatasetH worker_dataset)
 {
 	while (true)
 	{
-		QPoint tile_coord;
+		TileRequest tile_request;
 		{
 			std::unique_lock<std::mutex> lock(queue_mutex);
 			queue_cv.wait(lock, [this] {
@@ -413,105 +614,276 @@ void GdalTemplate::tileWorkerLoop()
 			});
 			if (worker_stop.load())
 				return;
-			tile_coord = tile_queue.dequeue();
+			tile_request = tile_queue.dequeue();
 		}
 
 		auto const block_w = tiled_raster_info.block_size.width();
 		auto const block_h = tiled_raster_info.block_size.height();
 
 		// Determine the pixel rectangle for this tile, clamped to raster bounds.
-		int const px = tile_coord.x() * block_w;
-		int const py = tile_coord.y() * block_h;
+		int const px = tile_request.tile_x * block_w;
+		int const py = tile_request.tile_y * block_h;
 		int const read_w = std::min(block_w, tiled_raster_size.width() - px);
 		int const read_h = std::min(block_h, tiled_raster_size.height() - py);
 
 		if (read_w <= 0 || read_h <= 0)
 			continue;
 
-		QImage tile(read_w, read_h, tiled_raster_info.image_format);
+		auto const subsampling = std::max(1, tile_request.subsampling);
+		auto const output_w = std::max(1, (read_w + subsampling - 1) / subsampling);
+		auto const output_h = std::max(1, (read_h + subsampling - 1) / subsampling);
+
+		QImage tile(output_w, output_h, tiled_raster_info.image_format);
 		if (tile.isNull())
 			continue;
 
 		tile.fill(Qt::white);
 
+		GDALRasterIOExtraArg extra_arg;
+		INIT_RASTERIO_EXTRA_ARG(extra_arg);
+		RasterIoCancellationContext cancellation_context{
+			&worker_stop,
+			&active_request_generation,
+			tile_request.generation
+		};
+		extra_arg.pfnProgress = tileReadProgress;
+		extra_arg.pProgressData = &cancellation_context;
+
 		CPLErrorReset();
-		auto result = GDALDatasetRasterIO(
-			tiled_dataset, GF_Read,
+		auto result = GDALDatasetRasterIOEx(
+			worker_dataset, GF_Read,
 			px, py, read_w, read_h,
-			tile.bits() + tiled_raster_info.band_offset, read_w, read_h,
+			tile.bits() + tiled_raster_info.band_offset, output_w, output_h,
 			GDT_Byte,
 			tiled_raster_info.bands.count(), tiled_raster_info.bands.data(),
 			tiled_raster_info.pixel_space, tile.bytesPerLine(),
-			tiled_raster_info.band_space);
+			tiled_raster_info.band_space,
+			&extra_arg);
 
 		if (result >= CE_Warning)
 		{
-			qDebug("GdalTemplate: Tile read failed at (%d,%d): %s",
-			       tile_coord.x(), tile_coord.y(),
-			       CPLGetLastErrorMsg());
+			auto const canceled = worker_stop.load(std::memory_order_relaxed)
+			                      || active_request_generation.load(std::memory_order_relaxed) != tile_request.generation;
+			if (!canceled)
+			{
+				qDebug("GdalTemplate: Tile read failed at (%d,%d): %s",
+				       tile_request.tile_x, tile_request.tile_y,
+				       CPLGetLastErrorMsg());
+			}
+
+			auto const key = tileKey(tile_request.tile_x, tile_request.tile_y, subsampling);
+			QMetaObject::invokeMethod(
+				const_cast<GdalTemplate*>(this),
+				[this, key, tile_x = tile_request.tile_x, tile_y = tile_request.tile_y]() {
+					onTileLoadFailed(key, tile_x, tile_y);
+				},
+				Qt::QueuedConnection);
 			continue;
+		}
+
+		if (shouldDebugGdalTemplate() && debug_tile_logs_remaining > 0)
+		{
+			--debug_tile_logs_remaining;
+			qInfo().noquote()
+				<< "GdalTemplate tileRead"
+				<< "path=" << template_path
+				<< "tile=(" << tile_request.tile_x << "," << tile_request.tile_y << ")"
+				<< "pixel_window=(" << px << "," << py << "," << read_w << "," << read_h << ")"
+				<< "subsampling=" << subsampling
+				<< "output_size=(" << output_w << "," << output_h << ")";
 		}
 
 		tiled_raster_info.postprocessing(tile);
 
-		auto const key = tileKey(tile_coord.x(), tile_coord.y());
+		auto const key = tileKey(tile_request.tile_x, tile_request.tile_y, subsampling);
 
 		// Post the loaded tile to the UI thread.
 		QMetaObject::invokeMethod(
 			const_cast<GdalTemplate*>(this),
-			[this, key, tile = std::move(tile)]() mutable {
-				onTileLoaded(key, std::move(tile));
+			[this, key, tile_x = tile_request.tile_x, tile_y = tile_request.tile_y, tile = std::move(tile)]() mutable {
+				onTileLoaded(key, tile_x, tile_y, std::move(tile));
 			},
 			Qt::QueuedConnection);
 	}
 }
 
 
-void GdalTemplate::requestTile(int tile_x, int tile_y) const
+void GdalTemplate::requestTile(int tile_x, int tile_y, int subsampling, quint64 generation) const
 {
-	auto const key = tileKey(tile_x, tile_y);
+	auto const key = tileKey(tile_x, tile_y, subsampling);
 	if (loading_tiles.contains(key))
 		return;
 
 	loading_tiles.insert(key);
 	{
 		std::lock_guard<std::mutex> lock(queue_mutex);
-		tile_queue.enqueue(QPoint(tile_x, tile_y));
+		tile_queue.prepend(TileRequest{ tile_x, tile_y, subsampling, generation });
 	}
 	queue_cv.notify_one();
 }
 
 
-void GdalTemplate::onTileLoaded(quint64 key, QImage tile_image)
+void GdalTemplate::onTileLoaded(quint64 key, int tile_x, int tile_y, QImage tile_image)
 {
-	// Simple LRU-like eviction: if over budget, drop random entries.
-	// A proper LRU would track access order, but for a first implementation,
-	// clearing the oldest half is good enough.
-	if (tile_cache.size() >= tile_cache_budget)
-	{
-		auto it = tile_cache.begin();
-		int to_remove = tile_cache.size() / 4;
-		while (to_remove > 0 && it != tile_cache.end())
-		{
-			auto const evict_key = it.key();
-			it = tile_cache.erase(it);
-			loading_tiles.remove(evict_key);
-			--to_remove;
-		}
-	}
+	auto const existing = tile_cache.constFind(key);
+	if (existing != tile_cache.constEnd())
+		tile_cache_bytes -= tileByteCost(existing.value());
 
 	tile_cache.insert(key, std::move(tile_image));
+	tile_cache_bytes += tileByteCost(tile_cache.value(key));
+	noteTileAccess(key);
+	evictCachedTilesToBudget();
 	loading_tiles.remove(key);
 
-	// Trigger repaint of the template's visible area.
-	setTemplateAreaDirty();
+	// Only repaint the loaded tile footprint instead of the full template.
+	markTileAreaDirty(tile_x, tile_y);
+}
+
+
+void GdalTemplate::onTileLoadFailed(quint64 key, int tile_x, int tile_y)
+{
+	loading_tiles.remove(key);
+	markTileAreaDirty(tile_x, tile_y);
 }
 
 
 // static
-quint64 GdalTemplate::tileKey(int tile_x, int tile_y)
+quint64 GdalTemplate::tileKey(int tile_x, int tile_y, int subsampling)
 {
-	return (quint64(quint32(tile_x)) << 32) | quint64(quint32(tile_y));
+	int level = 0;
+	for (int factor = std::max(1, subsampling); factor > 1; factor >>= 1)
+		++level;
+	return (quint64(level & 0xFF) << 56)
+	       | (quint64(quint32(tile_x) & 0x0FFFFFFF) << 28)
+	       | quint64(quint32(tile_y) & 0x0FFFFFFF);
+}
+
+
+const QImage* GdalTemplate::findBestCachedTile(int tile_x, int tile_y, int desired_subsampling) const
+{
+	auto const max_subsampling = std::max(1, std::min(tiled_raster_info.block_size.width(),
+	                                                   tiled_raster_info.block_size.height()));
+
+	for (int delta = 1; delta <= max_subsampling; delta <<= 1)
+	{
+		if (desired_subsampling / delta >= 1)
+		{
+			auto it = tile_cache.constFind(tileKey(tile_x, tile_y, desired_subsampling / delta));
+			if (it != tile_cache.constEnd())
+			{
+				noteTileAccess(it.key());
+				return &it.value();
+			}
+		}
+
+		auto coarser = desired_subsampling * delta;
+		if (coarser <= max_subsampling)
+		{
+			auto it = tile_cache.constFind(tileKey(tile_x, tile_y, coarser));
+			if (it != tile_cache.constEnd())
+			{
+				noteTileAccess(it.key());
+				return &it.value();
+			}
+		}
+	}
+
+	return nullptr;
+}
+
+
+// static
+int GdalTemplate::chooseTileSubsampling(double scale, const QSize& block_size)
+{
+	return tileSubsamplingForScale(scale, block_size);
+}
+
+
+void GdalTemplate::noteTileAccess(quint64 key) const
+{
+	tile_cache_access.insert(key, ++tile_cache_access_counter);
+}
+
+
+void GdalTemplate::evictCachedTilesToBudget()
+{
+	while (tile_cache_bytes > tile_cache_budget_bytes && !tile_cache.isEmpty())
+	{
+		bool found = false;
+		quint64 oldest_key = 0;
+		quint64 oldest_access = std::numeric_limits<quint64>::max();
+
+		for (auto it = tile_cache.constBegin(); it != tile_cache.constEnd(); ++it)
+		{
+			auto const access = tile_cache_access.value(it.key(), 0);
+			if (!found || access < oldest_access)
+			{
+				found = true;
+				oldest_key = it.key();
+				oldest_access = access;
+			}
+		}
+
+		if (!found)
+			break;
+
+		auto it = tile_cache.find(oldest_key);
+		if (it == tile_cache.end())
+			break;
+
+		tile_cache_bytes -= tileByteCost(it.value());
+		tile_cache.erase(it);
+		tile_cache_access.remove(oldest_key);
+	}
+}
+
+
+void GdalTemplate::markTileAreaDirty(int tile_x, int tile_y) const
+{
+	auto const block_w = tiled_raster_info.block_size.width();
+	auto const block_h = tiled_raster_info.block_size.height();
+	auto const source_w = std::min(block_w, tiled_raster_size.width() - tile_x * block_w);
+	auto const source_h = std::min(block_h, tiled_raster_size.height() - tile_y * block_h);
+	if (source_w <= 0 || source_h <= 0)
+		return;
+
+	auto const half_w = tiled_raster_size.width() * 0.5;
+	auto const half_h = tiled_raster_size.height() * 0.5;
+	auto const template_rect = QRectF(tile_x * block_w - half_w,
+	                                  tile_y * block_h - half_h,
+	                                  source_w,
+	                                  source_h);
+
+	QRectF map_rect;
+	rectIncludeSafe(map_rect, templateToMap(template_rect.topLeft()));
+	rectInclude(map_rect, templateToMap(template_rect.topRight()));
+	rectInclude(map_rect, templateToMap(template_rect.bottomLeft()));
+	rectInclude(map_rect, templateToMap(template_rect.bottomRight()));
+	map->setTemplateAreaDirty(const_cast<GdalTemplate*>(this), map_rect, getTemplateBoundingBoxPixelBorder());
+}
+
+
+void GdalTemplate::discardQueuedTileRequests() const
+{
+	std::lock_guard<std::mutex> lock(queue_mutex);
+	while (!tile_queue.isEmpty())
+	{
+		auto const request = tile_queue.dequeue();
+		loading_tiles.remove(tileKey(request.tile_x, request.tile_y, request.subsampling));
+	}
+}
+
+
+quint64 GdalTemplate::beginRequestGeneration(const RequestWindow& request_window) const
+{
+	if (request_window == current_request_window)
+		return active_request_generation.load(std::memory_order_relaxed);
+
+	active_subsampling.store(request_window.subsampling, std::memory_order_relaxed);
+	current_request_window = request_window;
+	auto const generation = active_request_generation.fetch_add(1, std::memory_order_relaxed) + 1;
+	discardQueuedTileRequests();
+	return generation;
 }
 
 
@@ -523,47 +895,26 @@ void GdalTemplate::setupTiledGeoreferencing()
 		return;
 	}
 
-	// Same as TemplateImage::calculateGeoreferencing(), but the pass-point
-	// math uses tiled_raster_size instead of image.width()/height().
-	// This avoids allocating a full-size QImage for huge raster sources.
-	georef = std::make_unique<Georeferencing>();
-	georef->setProjectedCRS(QString{}, available_georef.effective.crs_spec);
-	georef->setTransformationDirectly(available_georef.effective.transform.pixel_to_world);
+	// Reuse the normal georeferencing path so mixed-CRS rasters are
+	// reprojected through the map CRS. getTemplateExtent() provides the tiled
+	// raster dimensions, so this no longer depends on a full in-memory image.
+	calculateGeoreferencing();
 
-	if (map->getGeoreferencing().getState() != Georeferencing::Geospatial)
-		return;
-
-	auto const w = double(tiled_raster_size.width());
-	auto const h = double(tiled_raster_size.height());
-
-	bool ok;
-	MapCoordF top_left = map->getGeoreferencing().toMapCoordF(georef.get(), MapCoordF(0.0, 0.0), &ok);
-	if (!ok) { qDebug("%s: top_left failed", Q_FUNC_INFO); return; }
-	MapCoordF top_right = map->getGeoreferencing().toMapCoordF(georef.get(), MapCoordF(w, 0.0), &ok);
-	if (!ok) { qDebug("%s: top_right failed", Q_FUNC_INFO); return; }
-	MapCoordF bottom_left = map->getGeoreferencing().toMapCoordF(georef.get(), MapCoordF(0.0, h), &ok);
-	if (!ok) { qDebug("%s: bottom_left failed", Q_FUNC_INFO); return; }
-
-	PassPointList pp_list;
-	PassPoint pp;
-	pp.src_coords = MapCoordF(-0.5 * w, -0.5 * h);
-	pp.dest_coords = top_left;
-	pp_list.push_back(pp);
-	pp.src_coords = MapCoordF(0.5 * w, -0.5 * h);
-	pp.dest_coords = top_right;
-	pp_list.push_back(pp);
-	pp.src_coords = MapCoordF(-0.5 * w, 0.5 * h);
-	pp.dest_coords = bottom_left;
-	pp_list.push_back(pp);
-
-	QTransform q_transform;
-	if (!pp_list.estimateNonIsometricSimilarityTransform(&q_transform))
+	if (shouldDebugGdalTemplate())
 	{
-		qDebug("%s: transform estimation failed", Q_FUNC_INFO);
-		return;
+		auto const bbox = calculateTemplateBoundingBox();
+		qInfo().noquote()
+			<< "GdalTemplate setupTiledGeoreferencing"
+			<< "path=" << template_path
+			<< "raster_size=" << tiled_raster_size
+			<< "block_size=" << tiled_raster_info.block_size
+			<< "crs=" << available_georef.effective.crs_spec
+			<< "pixel_to_world=" << available_georef.effective.transform.pixel_to_world
+			<< "scale=(" << transform.template_scale_x << "," << transform.template_scale_y << ")"
+			<< "translation=(" << transform.template_x / 1000.0 << "," << transform.template_y / 1000.0 << ")"
+			<< "rotation=" << transform.template_rotation
+			<< "bbox=" << bbox;
 	}
-	transform = TemplateTransform::fromQTransform(q_transform);
-	updateTransformationMatrices();
 }
 
 

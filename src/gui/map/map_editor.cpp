@@ -676,15 +676,6 @@ bool MapEditorController::loadFrom(const QString& path, const FileFormat& format
 		return false;
 	}
 	
-	map->loadTemplateFilesAsync(*main_view, [controller = QPointer<MapEditorController>(this)](const QString& message) {
-		auto* window = controller ? controller->getWindow() : nullptr;
-		if (!window)
-			return;
-		if (message.isEmpty())
-			window->clearStatusBarMessage();
-		else
-			window->showStatusBarMessageImmediately(message);
-	});
 	setMapAndView(map, main_view);
 	map->setHasUnsavedChanges(false);
 	if (!importer->warnings().empty())
@@ -780,6 +771,18 @@ void MapEditorController::attach(MainWindow* window)
 	// Create map widget
 	map_widget = new MapWidget(mode == MapEditor, mode == SymbolEditor);
 	map_widget->setMapView(main_view);
+	if (map && main_view)
+	{
+		map->loadTemplateFilesAsync(*main_view, [controller = QPointer<MapEditorController>(this)](const QString& message) {
+			auto* window = controller ? controller->getWindow() : nullptr;
+			if (!window)
+				return;
+			if (message.isEmpty())
+				window->clearStatusBarMessage();
+			else
+				window->showStatusBarMessageImmediately(message);
+		});
+	}
 	map_widget->setZoomDisplay(zoom_display_function);
 	
 	// Create menu and toolbar together, so actions can be inserted into one or both

@@ -273,7 +273,8 @@ bool TemplateImage::postLoadSetup(QWidget* dialog_parent, bool& out_center_in_vi
 			{
 				// Use the center coordinates of the image as initial reference point.
 				calculateGeoreferencing();
-				auto const center_pixel = MapCoordF(0.5 * (image.width() - 1), 0.5 * (image.height() - 1));
+				auto const extent = getTemplateExtent();
+				auto const center_pixel = MapCoordF(0.5 * (extent.width() - 1), 0.5 * (extent.height() - 1));
 				initial_georef.setProjectedRefPoint(georef->toProjectedCoords(center_pixel));
 				initial_georef.setCombinedScaleFactor(1.0);
 				initial_georef.setGrivation(0.0);
@@ -694,6 +695,16 @@ void TemplateImage::calculateGeoreferencing()
 
 void TemplateImage::updatePosFromGeoreferencing()
 {
+	auto const extent = getTemplateExtent();
+	if (!extent.isValid())
+	{
+		qDebug("%s failed", Q_FUNC_INFO);
+		return;
+	}
+
+	auto const width = extent.width();
+	auto const height = extent.height();
+
 	// Determine map coords of three image corner points
 	// by transforming the points from one Georeferencing into the other
 	bool ok;
@@ -703,13 +714,13 @@ void TemplateImage::updatePosFromGeoreferencing()
 		qDebug("%s failed", Q_FUNC_INFO);
 		return; // TODO: proper error message?
 	}
-	MapCoordF top_right = map->getGeoreferencing().toMapCoordF(georef.get(), MapCoordF(image.width(), 0.0), &ok);
+	MapCoordF top_right = map->getGeoreferencing().toMapCoordF(georef.get(), MapCoordF(width, 0.0), &ok);
 	if (!ok)
 	{
 		qDebug("%s failed", Q_FUNC_INFO);
 		return; // TODO: proper error message?
 	}
-	MapCoordF bottom_left = map->getGeoreferencing().toMapCoordF(georef.get(), MapCoordF(0.0, image.height()), &ok);
+	MapCoordF bottom_left = map->getGeoreferencing().toMapCoordF(georef.get(), MapCoordF(0.0, height), &ok);
 	if (!ok)
 	{
 		qDebug("%s failed", Q_FUNC_INFO);
@@ -720,13 +731,13 @@ void TemplateImage::updatePosFromGeoreferencing()
 	PassPointList pp_list;
 	
 	PassPoint pp;
-	pp.src_coords = MapCoordF(-0.5 * image.width(), -0.5 * image.height());
+	pp.src_coords = MapCoordF(extent.topLeft());
 	pp.dest_coords = top_left;
 	pp_list.push_back(pp);
-	pp.src_coords = MapCoordF(0.5 * image.width(), -0.5 * image.height());
+	pp.src_coords = MapCoordF(extent.topRight());
 	pp.dest_coords = top_right;
 	pp_list.push_back(pp);
-	pp.src_coords = MapCoordF(-0.5 * image.width(), 0.5 * image.height());
+	pp.src_coords = MapCoordF(extent.bottomLeft());
 	pp.dest_coords = bottom_left;
 	pp_list.push_back(pp);
 	

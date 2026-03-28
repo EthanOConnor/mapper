@@ -82,6 +82,15 @@ class QGesture;
 
 namespace OpenOrienteering {
 
+namespace {
+
+const char* templateLoadScheduledProperty()
+{
+	return "MapWidget::templateLoadScheduled";
+}
+
+}  // namespace
+
 MapWidget::MapWidget(bool show_help, bool force_antialiasing, QWidget* parent)
  : QWidget(parent)
  , view(nullptr)
@@ -302,24 +311,7 @@ void MapWidget::visibilityChanged(MapView::VisibilityFeature feature, bool activ
 		}
 		else if (temp && temp->getTemplateState() == Template::Unloaded && active)
 		{
-			// The template must be loaded.
-			QToolTip::showText(QCursor::pos(),
-			                   qApp->translate("OpenOrienteering::MainWindow", "Opening %1")
-			                   .arg(temp->getTemplateFilename()) );
-			// Use a small delay so that some UI events can be processed first.
-			QPointer<MapWidget> widget(this);
-			QTimer::singleShot(10, temp, ([temp, widget]() {
-				if (temp->getTemplateState() != Template::Loaded)
-				{
-					temp->loadTemplateFile();
-					QToolTip::hideText();
-					if (temp->getTemplateState() == Template::Invalid)
-						QMessageBox::warning(widget.data(),
-						                     qApp->translate("OpenOrienteering::MainWindow", "Error"),
-						                     qApp->translate("OpenOrienteering::Importer", "Failed to load template '%1', reason: %2")
-						                     .arg(temp->getTemplateFilename(), temp->errorString()) );
-				}
-			}));
+			scheduleTemplateLoad(temp);
 		}
 		break;
 		
@@ -1339,6 +1331,7 @@ void MapWidget::updateTemplateCache(QImage& cache, QRect& dirty_rect, int first_
 	
 	Map* map = view->getMap();
 	QRectF map_view_rect = view->calculateViewedRect(viewportToView(dirty_rect));
+	ensureVisibleTemplatesAreLoading(first_template, last_template);
 	
 	map->drawTemplates(&painter, map_view_rect, first_template, last_template, view, true);
 	
@@ -1420,6 +1413,60 @@ void MapWidget::updateAllDirtyCaches()
 		if (above_template_cache_dirty_rect.isValid() && isAboveTemplateVisible())
 			updateTemplateCache(above_template_cache, above_template_cache_dirty_rect, view->getMap()->getFirstFrontTemplate(), view->getMap()->getNumTemplates() - 1, false);
 	}
+}
+
+void MapWidget::ensureVisibleTemplatesAreLoading(int first_template, int last_template)
+{
+	if (!view)
+		return;
+
+	auto* map = view->getMap();
+	for (int i = first_template; i <= last_template; ++i)
+	{
+		auto* temp = map->getTemplate(i);
+		if (!temp || temp->getTemplateState() != Template::Unloaded)
+			continue;
+
+		auto visibility = view->getTemplateVisibility(temp);
+		visibility.visible &= visibility.opacity > 0;
+		if (visibility.visible)
+			scheduleTemplateLoad(temp);
+	}
+}
+
+void MapWidget::scheduleTemplateLoad(Template* temp)
+{
+	if (!temp || temp->getTemplateState() != Template::Unloaded)
+		return;
+	if (temp->property(templateLoadScheduledProperty()).toBool())
+		return;
+
+	temp->setProperty(templateLoadScheduledProperty(), true);
+	QToolTip::showText(QCursor::pos(),
+	                   qApp->translate("OpenOrienteering::MainWindow", "Opening %1")
+	                   .arg(temp->getTemplateFilename()));
+
+	QPointer<MapWidget> widget(this);
+	QTimer::singleShot(10, temp, [temp, widget]() {
+		temp->setProperty(templateLoadScheduledProperty(), false);
+		if (temp->getTemplateState() == Template::Loaded)
+		{
+			QToolTip::hideText();
+			return;
+		}
+
+		temp->loadTemplateFile();
+		QToolTip::hideText();
+		if (auto* alive_widget = widget.data())
+			alive_widget->updateEverything();
+		if (temp->getTemplateState() == Template::Invalid)
+		{
+			QMessageBox::warning(widget.data(),
+			                     qApp->translate("OpenOrienteering::MainWindow", "Error"),
+			                     qApp->translate("OpenOrienteering::Importer", "Failed to load template '%1', reason: %2")
+			                     .arg(temp->getTemplateFilename(), temp->errorString()));
+		}
+	});
 }
 
 void MapWidget::shiftCache(int sx, int sy, QImage& cache)
