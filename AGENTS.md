@@ -29,6 +29,12 @@ These principles apply across all our work, regardless of language or project.
 ### Concise, not clever
 Write the simplest code that solves the problem. No abstractions for hypothetical future needs. Three similar lines beat a premature helper function.
 
+### Deep-patterned, not special-cased
+Prefer systematic solutions over one-off fixes. If a problem appears in one place, understand whether it's an instance of a broader pattern and solve the pattern. A single well-chosen abstraction applied consistently beats ten scattered `if` statements. The code should read as an expression of the underlying structure, not a patchwork of exceptions.
+
+### Match the texture of the codebase
+New code should be indistinguishable from existing code in style, idiom, and level of abstraction. Read surrounding code before writing. If the project uses Qt's endian API, use Qt's endian API — don't invent a wrapper. If the project doesn't use `auto`, neither do we. The goal is a PR that looks like it was written by someone who's been on the project for years.
+
 ### No overengineering
 Don't add features, configurability, or "improvements" beyond what was asked. A bug fix doesn't need surrounding code cleaned up. Stay in scope.
 
