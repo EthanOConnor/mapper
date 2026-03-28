@@ -8,6 +8,7 @@
 | Upstream `INSTALL.md` | Build instructions (theirs) |
 | `AGENTS.md` | Our engineering invariants and contribution discipline |
 | `CLAUDE.md` | Quick-reference entry point for AI agents |
+| `DESIGN-tiled-raster.md` | Active design for viewport-aware GDAL raster loading |
 
 Everything else in the repo is upstream's. Read it, learn from it, contribute to it — but always through PRs.
 
@@ -77,6 +78,14 @@ Reference issue numbers with `(#NNN)` where applicable.
 
 ### C++ standard
 C++14 is the project baseline. Don't use later features unless the project has already adopted them in the area you're touching.
+
+### Qt6 forward compatibility
+Qt6 migration is on the horizon (#2483). All new code must use only Qt6-safe APIs:
+- No `QStringRef` (use `QString` or `QStringView`)
+- No `QMatrix` (use `QTransform`)
+- No `QRegExp` (use `QRegularExpression`)
+- No `QPrinter::PaperSize` (use `QPageSize`)
+- Match existing project conventions for types (`int` not `qsizetype`, etc.)
 
 ### Build system
 CMake. Don't introduce new build tools or dependencies without strong justification and upstream discussion first.
