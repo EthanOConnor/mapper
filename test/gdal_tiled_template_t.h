@@ -101,10 +101,16 @@ private slots:
 	void zoomedOutDrawUsesSubsampledTiles();
 
 	/**
-	 * Verify that overview tiles are budgeted by decoded bytes rather than a
-	 * flat tile-count cap, so the full visible overview grid can stay cached.
+	 * Verify that a zoomed-out draw schedules and caches larger logical
+	 * macrotiles rather than the native full-resolution block grid.
 	 */
-	void overviewCacheCanExceedOldTileCountLimit();
+	void zoomedOutDrawUsesMacroTileGrid();
+
+	/**
+	 * Verify that a cropped tiled source keeps coarse logical tiles aligned
+	 * to the native TMS tile matrix origin, including partial edge tiles.
+	 */
+	void croppedTmsOriginKeepsCoarseGridAligned();
 
 	/**
 	 * Verify that switching to a higher-resolution zoom level drops queued
@@ -113,16 +119,58 @@ private slots:
 	void zoomChangeDropsQueuedLowerResolutionRequests();
 
 	/**
+	 * Verify that a generation change keeps relevant in-flight requests
+	 * deduplicated while dropping stale in-flight keys.
+	 */
+	void generationChangeKeepsRelevantInFlightTilesAndDropsStaleOnes();
+
+	/**
+	 * Verify that re-requesting an already queued tile promotes it to the
+	 * front so newly visible tiles are not stranded behind older overscan work.
+	 */
+	void requeuedTileMovesToFront();
+
+	/**
+	 * Verify that an overscan request yields when visible tiles are still
+	 * queued, so workers stay focused on filling the viewport first.
+	 */
+	void overscanRequestYieldsToQueuedVisibleTiles();
+
+	/**
 	 * Verify that overview selection uses on-screen pixel scale rather than
 	 * raw map zoom, avoiding overly coarse level choices.
 	 */
 	void onScreenScaleChoosesSharperLevel();
 
 	/**
+	 * Verify that a zoomed-out tiled render stays vertically aligned with the
+	 * non-tiled path when overview rendering kicks in.
+	 */
+	void zoomedOutTiledRenderMatchesNonTiledPosition();
+
+	/**
+	 * Verify that the overview threshold is biased slightly toward coarser
+	 * levels so near-1:1 draws do not over-request native tiles.
+	 */
+	void overviewThresholdSlightlyPrefersCoarserLevel();
+
+	/**
 	 * Verify that visible tiles are queued ahead of overscan tiles so the
 	 * current viewport fills before speculative border loading.
 	 */
 	void visibleTilesArePrioritizedAheadOfOverscan();
+
+	/**
+	 * Verify that byte-budget eviction removes the least-recently-used cache
+	 * entry rather than scanning for or dropping a recently touched tile.
+	 */
+	void cacheEvictsLeastRecentlyUsedTile();
+
+	/**
+	 * Verify that cropping from a coarser cached edge tile uses the actual
+	 * cached image size, avoiding visible jumps when overview levels switch.
+	 */
+	void coarserFallbackUsesActualCachedImageScale();
 
 	/**
 	 * Verify that a visible unloaded tiled template gets scheduled for loading

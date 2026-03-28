@@ -20,6 +20,7 @@
 #include "gdal_tiled_template_t.h"
 
 #include <array>
+#include <limits>
 #include <memory>
 #include <vector>
 
@@ -661,7 +662,7 @@ void GdalTiledTemplateTest::zoomedOutDrawUsesSubsampledTiles()
 	}
 
 	QVERIFY(!temp.tile_cache.isEmpty());
-	auto const cached_tile = temp.tile_cache.constBegin().value();
+	auto const cached_tile = temp.tile_cache.constBegin().value().image;
 	QVERIFY2(cached_tile.width() < 1024,
 	         qPrintable(QStringLiteral("Expected subsampled tile width, got %1").arg(cached_tile.width())));
 	QVERIFY2(cached_tile.height() < 1024,
@@ -671,7 +672,7 @@ void GdalTiledTemplateTest::zoomedOutDrawUsesSubsampledTiles()
 }
 
 
-void GdalTiledTemplateTest::overviewCacheCanExceedOldTileCountLimit()
+void GdalTiledTemplateTest::zoomedOutDrawUsesMacroTileGrid()
 {
 	auto path = createTiledTestRaster(4352, 4352, 256, 256);
 	QVERIFY(!path.isEmpty());
@@ -695,14 +696,68 @@ void GdalTiledTemplateTest::overviewCacheCanExceedOldTileCountLimit()
 	temp.drawTemplate(&painter, bbox, 0.0625, true, 1.0);
 	painter.end();
 
-	for (int i = 0; i < 1000 && temp.tile_cache.size() < 257; ++i)
+	auto const subsampling = temp.active_subsampling.load();
+	QVERIFY(subsampling > 1);
+	auto const logical_tile_w = temp.tiled_raster_info.block_size.width() * subsampling;
+	auto const logical_tile_h = temp.tiled_raster_info.block_size.height() * subsampling;
+	auto const expected_overview_tiles =
+		((temp.tiled_raster_size.width() - 1) / logical_tile_w + 1)
+		* ((temp.tiled_raster_size.height() - 1) / logical_tile_h + 1);
+	auto const native_tile_count =
+		((temp.tiled_raster_size.width() - 1) / temp.tiled_raster_info.block_size.width() + 1)
+		* ((temp.tiled_raster_size.height() - 1) / temp.tiled_raster_info.block_size.height() + 1);
+	QVERIFY(expected_overview_tiles < native_tile_count);
+
+	for (int i = 0; i < 1000 && temp.tile_cache.size() < expected_overview_tiles; ++i)
 	{
 		QCoreApplication::processEvents();
 		QTest::qWait(5);
 	}
 
-	QVERIFY2(temp.tile_cache.size() >= 257,
-	         qPrintable(QStringLiteral("Expected overview cache to exceed 256 tiles, got %1").arg(temp.tile_cache.size())));
+	QCOMPARE(temp.tile_cache.size(), expected_overview_tiles);
+	QVERIFY2(temp.tile_cache.size() < native_tile_count,
+	         qPrintable(QStringLiteral("Expected overview grid smaller than native grid, got %1 vs %2")
+	                    .arg(temp.tile_cache.size())
+	                    .arg(native_tile_count)));
+
+	VSIUnlink(path.toUtf8().constData());
+}
+
+
+void GdalTiledTemplateTest::croppedTmsOriginKeepsCoarseGridAligned()
+{
+	auto path = createTiledTestRaster(2048, 2048, 256, 256);
+	QVERIFY(!path.isEmpty());
+
+	Map map;
+	setupMapGeoreferencing(map);
+
+	TestableGdalTemplate temp(path, &map);
+	temp.forceGeoreferenced(true);
+	temp.worker_thread_count = 1;
+	QVERIFY(temp.loadTemplateFile());
+	QVERIFY(temp.isTiledSource());
+	temp.setTemplateState(Template::Loaded);
+
+	temp.tiled_origin_tile = QPoint(0, 2);
+	temp.has_tiled_origin_tile = true;
+
+	QCOMPARE(temp.sourceAlignmentOffsetPixels(4), QPoint(0, 512));
+
+	auto const bbox = temp.calculateTemplateBoundingBox();
+	QVERIFY(!bbox.isEmpty());
+
+	QImage canvas(512, 512, QImage::Format_ARGB32_Premultiplied);
+	canvas.fill(Qt::transparent);
+	QPainter painter(&canvas);
+	temp.drawTemplate(&painter, bbox, 0.05, true, 1.0);
+	painter.end();
+
+	QCOMPARE(temp.active_subsampling.load(), 4);
+	QCOMPARE(temp.current_request_window.visible_tile_x_min, 0);
+	QCOMPARE(temp.current_request_window.visible_tile_x_max, 1);
+	QCOMPARE(temp.current_request_window.visible_tile_y_min, 0);
+	QCOMPARE(temp.current_request_window.visible_tile_y_max, 2);
 
 	VSIUnlink(path.toUtf8().constData());
 }
@@ -744,7 +799,7 @@ void GdalTiledTemplateTest::zoomChangeDropsQueuedLowerResolutionRequests()
 		temp.drawTemplate(&painter, bbox, 0.0625, true, 1.0);
 	}
 
-	QVERIFY(!temp.tile_queue.isEmpty());
+	QVERIFY(!temp.tile_queue.empty());
 	QVERIFY(temp.active_subsampling.load() > 1);
 
 	{
@@ -752,12 +807,112 @@ void GdalTiledTemplateTest::zoomChangeDropsQueuedLowerResolutionRequests()
 		temp.drawTemplate(&painter, bbox, 1.0, true, 1.0);
 	}
 
-	QVERIFY(!temp.tile_queue.isEmpty());
+	QVERIFY(!temp.tile_queue.empty());
 	QCOMPARE(temp.active_subsampling.load(), 1);
 	for (auto const& request : temp.tile_queue)
 		QCOMPARE(request.subsampling, 1);
 
 	VSIUnlink(path.toUtf8().constData());
+}
+
+
+void GdalTiledTemplateTest::generationChangeKeepsRelevantInFlightTilesAndDropsStaleOnes()
+{
+	auto path = createTiledTestRaster(4096, 4096, 256, 256);
+	QVERIFY(!path.isEmpty());
+
+	Map map;
+	setupMapGeoreferencing(map);
+
+	TestableGdalTemplate temp(path, &map);
+	temp.forceGeoreferenced(true);
+	temp.worker_thread_count = 1;
+	QVERIFY(temp.loadTemplateFile());
+	QVERIFY(temp.isTiledSource());
+	temp.setTemplateState(Template::Loaded);
+
+	temp.worker_stop = true;
+	temp.queue_cv.notify_all();
+	for (auto& worker_thread : temp.worker_threads)
+	{
+		if (worker_thread.joinable())
+			worker_thread.join();
+	}
+	temp.worker_threads.clear();
+
+	auto const generation1 = temp.beginRequestGeneration(GdalTemplate::RequestWindow{ 0, 0, 1, 1, 1 });
+	QCOMPARE(generation1, quint64(1));
+
+	temp.requestTile(0, 0, 1, generation1);
+	temp.requestTile(1, 0, 1, generation1);
+	QCOMPARE(temp.tile_queue.size(), 2);
+	QCOMPARE(temp.queued_tiles.size(), 2);
+	QVERIFY(temp.loading_tiles.isEmpty());
+
+	auto const in_flight = temp.tile_queue.front();
+	temp.tile_queue.pop_front();
+	auto const in_flight_key = GdalTemplate::tileKey(in_flight.tile_x, in_flight.tile_y, in_flight.subsampling);
+	temp.queued_tiles.remove(in_flight_key);
+	temp.loading_tiles.insert(in_flight_key);
+	QVERIFY(temp.loading_tiles.contains(in_flight_key));
+	QCOMPARE(temp.tile_queue.size(), 1);
+
+	auto const generation2 = temp.beginRequestGeneration(GdalTemplate::RequestWindow{ 1, 0, 2, 1, 1 });
+	QCOMPARE(generation2, generation1 + 1);
+	QVERIFY(temp.tile_queue.empty());
+	QVERIFY(temp.loading_tiles.contains(in_flight_key));
+	QCOMPARE(temp.loading_tiles.size(), 1);
+
+	temp.requestTile(in_flight.tile_x, in_flight.tile_y, in_flight.subsampling, generation2);
+	QVERIFY(temp.loading_tiles.contains(in_flight_key));
+	QVERIFY(temp.tile_queue.empty());
+
+	temp.requestTile(in_flight.tile_x, in_flight.tile_y, in_flight.subsampling, generation2);
+	QVERIFY(temp.tile_queue.empty());
+
+	auto const stale_key = GdalTemplate::tileKey(0, 0, 1);
+	QVERIFY(!temp.loading_tiles.contains(stale_key));
+	temp.requestTile(0, 0, 1, generation2);
+	QCOMPARE(temp.tile_queue.size(), 1);
+	QVERIFY(temp.queued_tiles.contains(stale_key));
+
+	VSIUnlink(path.toUtf8().constData());
+}
+
+
+void GdalTiledTemplateTest::requeuedTileMovesToFront()
+{
+	Map map;
+	TestableGdalTemplate temp(QString{}, &map);
+
+	auto const generation = quint64(1);
+	temp.requestTile(10, 10, 1, generation);
+	temp.requestTile(11, 10, 1, generation);
+	QCOMPARE(temp.tile_queue.front().tile_x, 11);
+
+	temp.requestTile(10, 10, 1, generation);
+	QCOMPARE(temp.tile_queue.front().tile_x, 10);
+	QCOMPARE(temp.tile_queue.size(), 2);
+	QCOMPARE(temp.queued_tiles.size(), 2);
+}
+
+
+void GdalTiledTemplateTest::overscanRequestYieldsToQueuedVisibleTiles()
+{
+	Map map;
+	TestableGdalTemplate temp(QString{}, &map);
+
+	temp.current_request_window = GdalTemplate::RequestWindow{ 0, 0, 2, 0, 1, 1, 0, 1, 0 };
+	temp.requestTile(1, 0, 1, 1);
+	temp.requestTile(0, 0, 1, 1);
+
+	QVERIFY(!temp.shouldContinueTileRequest(0, 0, 1));
+	QVERIFY(temp.shouldContinueTileRequest(1, 0, 1));
+
+	temp.tile_queue.clear();
+	temp.queued_tiles.clear();
+	temp.requestTile(0, 0, 1, 1);
+	QVERIFY(temp.shouldContinueTileRequest(0, 0, 1));
 }
 
 
@@ -801,6 +956,117 @@ void GdalTiledTemplateTest::onScreenScaleChoosesSharperLevel()
 }
 
 
+void GdalTiledTemplateTest::zoomedOutTiledRenderMatchesNonTiledPosition()
+{
+	auto const geotransform = std::array<double, 6>{
+		-13601969.2610288, 0.074404761904762, 0.0,
+		6043110.1630686, 0.0, -0.074404761904762
+	};
+	auto tiled_path = createTiledTestRaster(4097, 3001, 256, 256, 3857, geotransform);
+	auto non_tiled_path = createNonTiledTestRaster(4097, 3001, 3857, geotransform);
+	QVERIFY(!tiled_path.isEmpty());
+	QVERIFY(!non_tiled_path.isEmpty());
+
+	Map map;
+	setupWilburtonLikeGeoreferencing(map);
+
+	TestableGdalTemplate tiled_template(tiled_path, &map);
+	TestableGdalTemplate non_tiled_template(non_tiled_path, &map);
+	tiled_template.forceGeoreferenced(true);
+	non_tiled_template.forceGeoreferenced(true);
+	tiled_template.worker_thread_count = 1;
+	QVERIFY(tiled_template.loadTemplateFile());
+	QVERIFY(non_tiled_template.loadTemplateFile());
+	tiled_template.setTemplateState(Template::Loaded);
+	non_tiled_template.setTemplateState(Template::Loaded);
+
+	auto const bbox = non_tiled_template.calculateTemplateBoundingBox();
+	QVERIFY(!bbox.isEmpty());
+
+	QImage tiled_canvas(512, 512, QImage::Format_ARGB32_Premultiplied);
+	tiled_canvas.fill(Qt::transparent);
+	{
+		QPainter painter(&tiled_canvas);
+		tiled_template.drawTemplate(&painter, bbox, 0.05, true, 1.0);
+	}
+
+	auto const subsampling = tiled_template.active_subsampling.load();
+	QVERIFY(subsampling > 1);
+	auto const logical_tile_w = tiled_template.tiled_raster_info.block_size.width() * subsampling;
+	auto const logical_tile_h = tiled_template.tiled_raster_info.block_size.height() * subsampling;
+	auto const expected_tiles =
+		((tiled_template.tiled_raster_size.width() - 1) / logical_tile_w + 1)
+		* ((tiled_template.tiled_raster_size.height() - 1) / logical_tile_h + 1);
+	for (int i = 0; i < 1000 && tiled_template.tile_cache.size() < expected_tiles; ++i)
+	{
+		QCoreApplication::processEvents();
+		QTest::qWait(5);
+	}
+	QCOMPARE(tiled_template.tile_cache.size(), expected_tiles);
+
+	tiled_canvas.fill(Qt::transparent);
+	{
+		QPainter painter(&tiled_canvas);
+		tiled_template.drawTemplate(&painter, bbox, 0.05, true, 1.0);
+	}
+
+	QImage non_tiled_canvas(512, 512, QImage::Format_ARGB32_Premultiplied);
+	non_tiled_canvas.fill(Qt::transparent);
+	{
+		QPainter painter(&non_tiled_canvas);
+		non_tiled_template.drawTemplate(&painter, bbox, 0.05, true, 1.0);
+	}
+
+	auto diff_for_shift = [&](int y_shift) {
+		qint64 total = 0;
+		int count = 0;
+		for (int y = 0; y < tiled_canvas.height(); ++y)
+		{
+			auto const other_y = y + y_shift;
+			if (other_y < 0 || other_y >= non_tiled_canvas.height())
+				continue;
+			for (int x = 0; x < tiled_canvas.width(); ++x)
+			{
+				auto const tiled_pixel = tiled_canvas.pixelColor(x, y);
+				auto const non_tiled_pixel = non_tiled_canvas.pixelColor(x, other_y);
+				if (tiled_pixel.alpha() == 0 && non_tiled_pixel.alpha() == 0)
+					continue;
+				total += qAbs(tiled_pixel.red() - non_tiled_pixel.red());
+				total += qAbs(tiled_pixel.green() - non_tiled_pixel.green());
+				total += qAbs(tiled_pixel.blue() - non_tiled_pixel.blue());
+				++count;
+			}
+		}
+		return count > 0 ? double(total) / count : std::numeric_limits<double>::infinity();
+	};
+
+	auto best_shift = 0;
+	auto best_diff = diff_for_shift(0);
+	for (int shift = -6; shift <= 6; ++shift)
+	{
+		auto const shifted_diff = diff_for_shift(shift);
+		if (shifted_diff < best_diff)
+		{
+			best_diff = shifted_diff;
+			best_shift = shift;
+		}
+	}
+
+	QCOMPARE(best_shift, 0);
+
+	VSIUnlink(tiled_path.toUtf8().constData());
+	VSIUnlink(non_tiled_path.toUtf8().constData());
+}
+
+
+void GdalTiledTemplateTest::overviewThresholdSlightlyPrefersCoarserLevel()
+{
+	QCOMPARE(GdalTemplate::chooseTileSubsampling(0.55, QSize(1024, 1024)), 2);
+	QCOMPARE(GdalTemplate::chooseTileSubsampling(0.75, QSize(1024, 1024)), 2);
+	QCOMPARE(GdalTemplate::chooseTileSubsampling(1.1, QSize(1024, 1024)), 1);
+}
+
+
 void GdalTiledTemplateTest::visibleTilesArePrioritizedAheadOfOverscan()
 {
 	auto path = createTiledTestRaster(4096, 4096, 256, 256);
@@ -841,7 +1107,7 @@ void GdalTiledTemplateTest::visibleTilesArePrioritizedAheadOfOverscan()
 		temp.drawTemplate(&painter, clip_rect, 1.0, true, 1.0);
 	}
 
-	QVERIFY(!temp.tile_queue.isEmpty());
+	QVERIFY(!temp.tile_queue.empty());
 
 	auto const top_left = QPointF(temp.mapToTemplate(MapCoordF(clip_rect.topLeft())));
 	auto const top_right = QPointF(temp.mapToTemplate(MapCoordF(clip_rect.topRight())));
@@ -863,10 +1129,12 @@ void GdalTiledTemplateTest::visibleTilesArePrioritizedAheadOfOverscan()
 	bool saw_overscan_request = false;
 	for (auto const& request : temp.tile_queue)
 	{
-		auto const source_w = std::min(block_w, temp.tiled_raster_size.width() - request.tile_x * block_w);
-		auto const source_h = std::min(block_h, temp.tiled_raster_size.height() - request.tile_y * block_h);
-		auto const tile_left = request.tile_x * block_w - half_w;
-		auto const tile_top = request.tile_y * block_h - half_h;
+		auto const tile_span_w = block_w * request.subsampling;
+		auto const tile_span_h = block_h * request.subsampling;
+		auto const source_w = std::min(tile_span_w, temp.tiled_raster_size.width() - request.tile_x * tile_span_w);
+		auto const source_h = std::min(tile_span_h, temp.tiled_raster_size.height() - request.tile_y * tile_span_h);
+		auto const tile_left = request.tile_x * tile_span_w - half_w;
+		auto const tile_top = request.tile_y * tile_span_h - half_h;
 		auto const intersects_visible_rect =
 			tile_left < visible_rect.right()
 			&& tile_left + source_w > visible_rect.left()
@@ -880,6 +1148,103 @@ void GdalTiledTemplateTest::visibleTilesArePrioritizedAheadOfOverscan()
 	}
 
 	VSIUnlink(path.toUtf8().constData());
+}
+
+
+void GdalTiledTemplateTest::cacheEvictsLeastRecentlyUsedTile()
+{
+	auto path = createTiledTestRaster(512, 512, 256, 256);
+	QVERIFY(!path.isEmpty());
+
+	Map map;
+	setupMapGeoreferencing(map);
+
+	TestableGdalTemplate temp(path, &map);
+	temp.forceGeoreferenced(true);
+	temp.worker_thread_count = 1;
+	QVERIFY(temp.loadTemplateFile());
+	QVERIFY(temp.isTiledSource());
+	temp.setTemplateState(Template::Loaded);
+
+	temp.worker_stop = true;
+	temp.queue_cv.notify_all();
+	for (auto& worker_thread : temp.worker_threads)
+	{
+		if (worker_thread.joinable())
+			worker_thread.join();
+	}
+	temp.worker_threads.clear();
+
+	temp.tile_cache_lru.clear();
+	temp.tile_cache.clear();
+	temp.tile_cache_bytes = 0;
+
+	auto make_tile = [](QRgb color) {
+		QImage tile(4, 4, QImage::Format_ARGB32_Premultiplied);
+		tile.fill(color);
+		return tile;
+	};
+
+	auto const tile_a = make_tile(qRgba(255, 0, 0, 255));
+	auto const tile_b = make_tile(qRgba(0, 255, 0, 255));
+	auto const tile_c = make_tile(qRgba(0, 0, 255, 255));
+	auto const tile_cost = qsizetype(tile_a.bytesPerLine()) * tile_a.height();
+	temp.tile_cache_budget_bytes = tile_cost * 2;
+
+	auto const key_a = GdalTemplate::tileKey(0, 0, 1);
+	auto const key_b = GdalTemplate::tileKey(1, 0, 1);
+	auto const key_c = GdalTemplate::tileKey(2, 0, 1);
+
+	temp.onTileLoaded(key_a, 0, 0, tile_a);
+	temp.onTileLoaded(key_b, 1, 0, tile_b);
+	temp.noteTileAccess(key_a);
+	temp.onTileLoaded(key_c, 2, 0, tile_c);
+
+	QCOMPARE(temp.tile_cache.size(), 2);
+	QVERIFY(temp.tile_cache.contains(key_a));
+	QVERIFY(!temp.tile_cache.contains(key_b));
+	QVERIFY(temp.tile_cache.contains(key_c));
+	QCOMPARE(temp.tile_cache_bytes, tile_cost * 2);
+	QCOMPARE(temp.tile_cache_lru.front(), key_c);
+	QCOMPARE(temp.tile_cache_lru.back(), key_a);
+
+	VSIUnlink(path.toUtf8().constData());
+}
+
+
+void GdalTiledTemplateTest::coarserFallbackUsesActualCachedImageScale()
+{
+	Map map;
+	TestableGdalTemplate temp(QString{}, &map);
+
+	temp.tiled_raster_info.block_size = QSize(256, 256);
+	temp.tiled_raster_size = QSize(1024, 1001);
+	auto const key = GdalTemplate::tileKey(0, 0, 4);
+	temp.tile_cache_lru.push_front(key);
+
+	QImage cached_tile(256, 251, QImage::Format_ARGB32_Premultiplied);
+	cached_tile.fill(Qt::white);
+	temp.tile_cache.insert(key, GdalTemplate::CachedTileEntry{ cached_tile, temp.tile_cache_lru.begin() });
+
+	QRectF source_rect;
+	auto const* fallback = temp.findBestCachedTile(0, 1, 2, &source_rect);
+	QVERIFY(fallback);
+	QCOMPARE(fallback->size(), cached_tile.size());
+
+	auto const cached_rect = QRect(0, 0, 1024, 1001);
+	auto const desired_rect = QRect(0, 512, 512, 489);
+	auto const expected_scale_x = cached_tile.width() / double(cached_rect.width());
+	auto const expected_scale_y = cached_tile.height() / double(cached_rect.height());
+	auto const expected_rect = QRectF(
+		(desired_rect.x() - cached_rect.x()) * expected_scale_x,
+		(desired_rect.y() - cached_rect.y()) * expected_scale_y,
+		desired_rect.width() * expected_scale_x,
+		desired_rect.height() * expected_scale_y);
+
+	QVERIFY(qAbs(source_rect.left() - expected_rect.left()) < 0.001);
+	QVERIFY(qAbs(source_rect.top() - expected_rect.top()) < 0.001);
+	QVERIFY(qAbs(source_rect.width() - expected_rect.width()) < 0.001);
+	QVERIFY(qAbs(source_rect.height() - expected_rect.height()) < 0.001);
 }
 
 
