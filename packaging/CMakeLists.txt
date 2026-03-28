@@ -52,8 +52,10 @@ function(deploy_qt_translations basename)
 		endforeach()
 	endif()
 	
+	# Build the translation bundle from the top-level build tree. Single-config
+	# generators such as Ninja do not emit a build graph in subdirectories.
 	install(CODE 
-	  "execute_process(COMMAND \"${CMAKE_COMMAND}\" --build \"${CMAKE_CURRENT_BINARY_DIR}\" --target \"${basename}-translations\")"
+	  "execute_process(COMMAND \"${CMAKE_COMMAND}\" --build \"${PROJECT_BINARY_DIR}\" --target \"${basename}-translations\")"
 	)
 	
 	set(generated_translations )
