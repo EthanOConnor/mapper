@@ -16,10 +16,9 @@
 #    You should have received a copy of the GNU General Public License
 #    along with OpenOrienteering.  If not, see <http://www.gnu.org/licenses/>.
 
+cmake_minimum_required(VERSION 3.14)
 
 project(Clipper)
-
-cmake_minimum_required(VERSION 2.8.3)
 
 # Configuration options
 
@@ -73,7 +72,8 @@ else()
 	endif()
 	set(CLIPPER_SOURCE
 	  DOWNLOAD_DIR ${PROJECT_SOURCE_DIR}/download
-	  URL "http://sourceforge.net/projects/polyclipping/files/clipper_ver${CLIPPER_VERSION}.zip/download"
+	  DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+	  URL "https://sourceforge.net/projects/polyclipping/files/clipper_ver${CLIPPER_VERSION}.zip/download"
 	  URL_MD5 ${CLIPPER_MD5}
 	)
 endif()
