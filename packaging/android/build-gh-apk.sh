@@ -16,6 +16,7 @@ OUTPUT_APK=$6
 
 ANDROID_INSTALL_ROOT=${ANDROID_INSTALL_ROOT:-"$BUILD_DIR/android-toolchain"}
 BUILD_PARALLELISM=${BUILD_PARALLELISM:-$(nproc)}
+CMAKE_GENERATOR=${CMAKE_GENERATOR:-Unix Makefiles}
 
 mkdir -p "$(dirname "$OUTPUT_APK")"
 
@@ -29,7 +30,7 @@ unset ANDROID_SDK_ROOT
 
 # RelWithDebInfo still produces a release-style APK, but avoids the superbuild
 # toolchain's hard failure on unsigned pure Release packaging.
-cmake -S "$SUPERBUILD_SOURCE_DIR" -B "$BUILD_DIR" -G Ninja \
+cmake -S "$SUPERBUILD_SOURCE_DIR" -B "$BUILD_DIR" -G "$CMAKE_GENERATOR" \
 	-DCMAKE_BUILD_TYPE=RelWithDebInfo \
 	"-DMapper_CI_SOURCE_DIR=$SOURCE_DIR" \
 	"-DMapper_CI_VERSION_DISPLAY=" \
