@@ -357,6 +357,8 @@ public slots:
 	void showTemplateWindow(bool show);
 	/** Shows a file selector to open a template. */
 	void openTemplateClicked();
+	/** Shows the online imagery dialog to add a network tile source. */
+	void openOnlineImageryClicked();
 	/** Shows the ReopenTemplateDialog. */
 	void reopenTemplateClicked();
 	/** Adjusts action availability based on the presence of templates */
@@ -770,6 +772,7 @@ private:
 	QPointer<QWidget> template_dock_widget;
 	TemplateListWidget* template_list_widget;
 	QAction* open_template_act = {};
+	QAction* online_imagery_act = {};
 	QAction* reopen_template_act = {};
 	
 	QAction* tags_window_act = {};

@@ -60,6 +60,7 @@ class TemplateListWidget : public QWidget
 	
 public:
 	static std::unique_ptr<Template> showOpenTemplateDialog(QWidget* dialog_parent, MapEditorController& controller);
+	static std::unique_ptr<Template> showOnlineImageryDialog(QWidget* dialog_parent, MapEditorController& controller);
 	
 	~TemplateListWidget() override;
 	

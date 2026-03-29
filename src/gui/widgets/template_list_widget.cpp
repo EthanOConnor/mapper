@@ -708,23 +708,28 @@ void TemplateListWidget::openTemplate()
 	}
 }
 
-void TemplateListWidget::openOnlineTemplate()
+// static
+std::unique_ptr<Template> TemplateListWidget::showOnlineImageryDialog(QWidget* dialog_parent, MapEditorController& controller)
 {
 #ifdef MAPPER_USE_GDAL
-	OnlineTemplateDialog dialog(map, controller, window());
+	auto* map = controller.getMap();
+	if (!map)
+		return {};
+
+	OnlineTemplateDialog dialog(*map, controller, dialog_parent);
 	dialog.setWindowModality(Qt::WindowModal);
 	if (dialog.exec() != QDialog::Accepted)
-		return;
+		return {};
 
 	auto path = dialog.generatedPath();
 	if (path.isEmpty())
-		return;
+		return {};
 
-	auto new_template = Template::templateForPath(path, &map);
+	auto new_template = Template::templateForPath(path, map);
 	if (!new_template)
 	{
-		QMessageBox::warning(window(), tr("Error"), tr("Could not open the generated imagery file."));
-		return;
+		QMessageBox::warning(dialog_parent, tr("Error"), tr("Could not open the generated imagery file."));
+		return {};
 	}
 
 	// Load directly — bypass setupAndLoad() which would show interactive
@@ -733,9 +738,9 @@ void TemplateListWidget::openOnlineTemplate()
 	// is_georeferenced when the geotransform is valid.
 	if (!new_template->loadTemplateFile())
 	{
-		QMessageBox::warning(window(), tr("Error"),
+		QMessageBox::warning(dialog_parent, tr("Error"),
 		                     tr("Could not load imagery: %1").arg(new_template->errorString()));
-		return;
+		return {};
 	}
 
 	// Complete the state transitions that setupAndLoad() normally does
@@ -744,13 +749,26 @@ void TemplateListWidget::openOnlineTemplate()
 	new_template->setTemplateState(Template::Loaded);
 	new_template->setTemplateAreaDirty();
 	emit new_template->templateStateChanged();
+	return new_template;
+#else
+	Q_UNUSED(dialog_parent)
+	Q_UNUSED(controller)
+	return {};
+#endif
+}
+
+
+void TemplateListWidget::openOnlineTemplate()
+{
+	auto new_template = showOnlineImageryDialog(window(), controller);
+	if (!new_template)
+		return;
 
 	int pos = -1;
 	int row = currentRow();
 	if (row >= 0)
 		pos = posFromRow(row);
 	map.addTemplate(pos, std::move(new_template));
-#endif
 }
 
 void TemplateListWidget::regenerateOnlineTemplate()
