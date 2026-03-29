@@ -53,7 +53,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            appstream desktop-file-utils file flatpak flatpak-builder \
+            appstream desktop-file-utils elfutils file flatpak flatpak-builder \
             cmake ninja-build g++ ccache gh git ruby ruby-dev rpm \
             libgdal-dev libproj-dev \
             qtbase5-dev qtbase5-private-dev \
