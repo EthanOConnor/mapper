@@ -70,12 +70,7 @@ while IFS= read -r icon; do
 	cp "$icon" "$icon_dir/$FLATPAK_ID.png"
 done < <(find "$FLATPAK_ROOT/share/icons/hicolor" -path '*/apps/Mapper.png' | sort)
 
-install -Dm644 \
-	"$SCRIPT_DIR/org.openorienteering.Mapper.coc.metainfo.xml" \
-	"$FLATPAK_ROOT/share/metainfo/$FLATPAK_ID.metainfo.xml"
-
 desktop-file-validate "$flatpak_desktop"
-appstreamcli validate --no-net "$FLATPAK_ROOT/share/metainfo/$FLATPAK_ID.metainfo.xml"
 
 cat > "$DIST_DIR/flatpak.yml" <<EOF
 id: $FLATPAK_ID
