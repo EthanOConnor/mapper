@@ -33,6 +33,7 @@ jobs:
     env:
       BUILD_DIR: build/android-release
       SUPERBUILD_SOURCE_DIR: .tmp/superbuild
+      SUPERBUILD_REF: 33349002a2dbbb364cfaccf88afcef420bc24d69
       TARGET: aarch64-linux-android
       TARGET_ABI: arm64-v8a
       SOURCE_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref != '' && inputs.source_ref || github.sha }}
@@ -67,7 +68,9 @@ jobs:
 
       - name: Check out superbuild
         run: |
-          git clone --depth 1 --branch master https://github.com/OpenOrienteering/superbuild.git "$SUPERBUILD_SOURCE_DIR"
+          git clone --depth 1 https://github.com/OpenOrienteering/superbuild.git "$SUPERBUILD_SOURCE_DIR"
+          git -C "$SUPERBUILD_SOURCE_DIR" fetch --depth 1 origin "$SUPERBUILD_REF"
+          git -C "$SUPERBUILD_SOURCE_DIR" checkout --detach "$SUPERBUILD_REF"
 
       - name: Compute artifact metadata
         run: |

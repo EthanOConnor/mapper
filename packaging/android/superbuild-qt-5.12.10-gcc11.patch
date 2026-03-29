@@ -1,0 +1,39 @@
+--- a/qt-5.12.10.cmake
++++ b/qt-5.12.10.cmake
+@@ -130,6 +130,19 @@ set(qtbase-9fbaac8_patch [[
+          isEmpty(QMAKE_DEFAULT_LIBDIRS): QMAKE_DEFAULT_LIBDIRS = /lib /usr/lib
+      }
+ ]])
++
++set(qtbase-gcc-11-moc_patch [[
++diff --git a/src/tools/moc/generator.cpp b/src/tools/moc/generator.cpp
++--- a/src/tools/moc/generator.cpp
+++++ b/src/tools/moc/generator.cpp
++@@ -37,6 +37,7 @@
++ #include <QtCore/qplugin.h>
++ #include <QtCore/qstringview.h>
++ 
+++#include <limits>
++ #include <math.h>
++ #include <stdio.h>
++]])
+ 
+ # copyright and patches for superbuild of Qt
+ 
+@@ -211,6 +223,7 @@ superbuild_package(
+   
+   SOURCE_WRITE
+     gcc-13.patch    qtbase-gcc-13_patch
++    qtbase-gcc-11-moc.patch  qtbase-gcc-11-moc_patch
+     qtbase-8467bed.patch  qtbase-8467bed_patch
+     qtbase-9fbaac8.patch  qtbase-9fbaac8_patch
+   SOURCE
+@@ -248,6 +261,8 @@ superbuild_package(
+     COMMAND
+       patch -p1 < gcc-13.patch
+     COMMAND
++      patch -p1 < qtbase-gcc-11-moc.patch
++    COMMAND
+       patch -p1 < qtbase-8467bed.patch
+     COMMAND
+       patch -p1 < qtbase-9fbaac8.patch

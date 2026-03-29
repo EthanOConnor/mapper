@@ -17,6 +17,7 @@ OUTPUT_APK=$6
 ANDROID_INSTALL_ROOT=${ANDROID_INSTALL_ROOT:-"$BUILD_DIR/android-toolchain"}
 BUILD_PARALLELISM=${BUILD_PARALLELISM:-$(nproc)}
 CMAKE_GENERATOR=${CMAKE_GENERATOR:-Unix Makefiles}
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 
 mkdir -p "$(dirname "$OUTPUT_APK")"
 
@@ -27,6 +28,11 @@ target_install_dir="$BUILD_DIR/$TARGET/install"
 unset ANDROID_HOME
 unset ANDROID_NDK_ROOT
 unset ANDROID_SDK_ROOT
+
+superbuild_patch="$SCRIPT_DIR/superbuild-qt-5.12.10-gcc11.patch"
+if ! grep -q 'qtbase-gcc-11-moc.patch' "$SUPERBUILD_SOURCE_DIR/qt-5.12.10.cmake"; then
+	patch -d "$SUPERBUILD_SOURCE_DIR" -p1 < "$superbuild_patch"
+fi
 
 # RelWithDebInfo still produces a release-style APK, but avoids the superbuild
 # toolchain's hard failure on unsigned pure Release packaging.
