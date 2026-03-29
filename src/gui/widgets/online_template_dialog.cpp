@@ -96,7 +96,17 @@ OnlineTemplateDialog::OnlineTemplateDialog(Map& map, MapEditorController& contro
 }
 
 
-OnlineTemplateDialog::~OnlineTemplateDialog() = default;
+OnlineTemplateDialog::~OnlineTemplateDialog()
+{
+	// Abort any in-flight network request so the finished signal
+	// doesn't fire after our members are destroyed.
+	if (network)
+	{
+		disconnect(network, nullptr, this, nullptr);
+		network->deleteLater();
+		network = nullptr;
+	}
+}
 
 
 void OnlineTemplateDialog::onAddClicked()

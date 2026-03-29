@@ -255,8 +255,11 @@ OnlineImageryTemplateBuilder::generateXml(
 		result.error = tr("Could not write imagery file: %1").arg(file.errorString());
 		return result;
 	}
-	file.write(xml.toUtf8());
-	file.close();
+	if (file.write(xml.toUtf8()) < 0)
+	{
+		result.error = tr("Could not write imagery file: %1").arg(file.errorString());
+		return result;
+	}
 
 	result.xml_path = output_path;
 	return result;
