@@ -54,7 +54,8 @@ done < <(find "$APPDIR/usr/lib/$PACKAGE_NAME/plugins" -type f -name '*.so' | sor
 
 "$LINUXDEPLOY_BIN" "${linuxdeploy_args[@]}"
 
-cp -a "$APPDIR/usr" "$PACKAGE_ROOT/"
+mkdir -p "$PACKAGE_ROOT/usr"
+cp -a "$APPDIR/usr/." "$PACKAGE_ROOT/usr/"
 
 mkdir -p "$FLATPAK_ROOT"
 cp -a "$PACKAGE_ROOT/usr/." "$FLATPAK_ROOT/"
