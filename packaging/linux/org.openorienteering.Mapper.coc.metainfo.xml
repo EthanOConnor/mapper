@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>org.openorienteering.Mapper.coc</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>OpenOrienteering Mapper</name>
+  <summary>Map drawing program with tiled raster and online tile source support</summary>
+  <description>
+    <p>
+      OpenOrienteering Mapper is a desktop application for drawing and editing orienteering maps.
+    </p>
+    <p>
+      This fork release adds tiled raster and online tile source support so large local imagery and
+      remote imagery services can be used as practical mapping templates.
+    </p>
+  </description>
+  <launchable type="desktop-id">org.openorienteering.Mapper.coc.desktop</launchable>
+  <url type="homepage">https://github.com/EthanOConnor/mapper</url>
+  <content_rating type="oars-1.1" />
+</component>

@@ -20,7 +20,9 @@
 
 #include "mapper_resource.h"
 
+#include <QCoreApplication>
 #include <QDir>
+#include <QFileInfo>
 #include <QLatin1String>
 #include <QString>
 #include <QStringList>
@@ -32,13 +34,27 @@ namespace OpenOrienteering {
 
 namespace MapperResource {
 
+namespace {
+
+QString environmentPath(const char* name)
+{
+	auto value = qEnvironmentVariable(name);
+	if (value.isEmpty())
+		return {};
+	
+	auto info = QFileInfo{value};
+	return info.exists() ? info.absoluteFilePath() : QString{};
+}
+
+}
+
 void setSeachPaths()
 {
 	QStringList data_paths;
-	data_paths.reserve(3);
+	data_paths.reserve(5);
 	
 	QStringList doc_paths;
-	doc_paths.reserve(3);
+	doc_paths.reserve(5);
 	
 #if defined(MAPPER_DEVELOPMENT_BUILD) && defined(MAPPER_DEVELOPMENT_RES_DIR)
 	// Use the directory where Mapper is built during development, 
@@ -66,6 +82,29 @@ void setSeachPaths()
 	data_paths.append(assets);
 	doc_paths.append(assets + QLatin1String("/doc"));
 #else
+	auto const data_override = environmentPath("MAPPER_DATA_PATH");
+	if (!data_override.isEmpty())
+		data_paths.append(data_override);
+	
+	auto const doc_override = environmentPath("MAPPER_DOC_PATH");
+	if (!doc_override.isEmpty())
+		doc_paths.append(doc_override);
+	
+#ifdef MAPPER_PACKAGE_NAME
+	auto app_dir = QDir{ QCoreApplication::applicationDirPath() };
+	auto relative_data_dir = QFileInfo{
+	  app_dir.absoluteFilePath(QLatin1String("../share/") + QLatin1String(MAPPER_PACKAGE_NAME))
+	};
+	if (relative_data_dir.isDir())
+		data_paths.append(relative_data_dir.absoluteFilePath());
+	
+	auto relative_doc_dir = QFileInfo{
+	  app_dir.absoluteFilePath(QLatin1String("../share/doc/") + QLatin1String(MAPPER_PACKAGE_NAME))
+	};
+	if (relative_doc_dir.isDir())
+		doc_paths.append(relative_doc_dir.absoluteFilePath());
+#endif
+	
 	data_paths.append(QString::fromLatin1(MAPPER_DATA_DESTINATION));
 	doc_paths.append(QString::fromLatin1(MAPPER_ABOUT_DESTINATION));
 #endif

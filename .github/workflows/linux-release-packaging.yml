@@ -1,0 +1,133 @@
+name: Linux Release Packaging
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Release tag to upload assets to
+        required: true
+        default: v0.9.7-coc-0.2
+      source_ref:
+        description: Git ref to build
+        required: true
+        default: v0.9.7-coc-0.2
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.release_tag }}
+  cancel-in-progress: false
+
+jobs:
+  linux-release:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    env:
+      BUILD_DIR: build/linux-release
+      DIST_DIR: dist/linux-release
+      PACKAGE_NAME: openorienteering-mapper-coc
+      FLATPAK_ID: org.openorienteering.Mapper.coc
+    steps:
+      - name: Check out workflow source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Check out release source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          ref: ${{ inputs.source_ref }}
+          path: source-tree
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            appstream desktop-file-utils file flatpak flatpak-builder \
+            cmake ninja-build g++ ccache gh git ruby ruby-dev rpm \
+            libgdal-dev libproj-dev \
+            qtbase5-dev qtbase5-private-dev \
+            qttools5-dev qttools5-dev-tools \
+            libqt5sensors5-dev libqt5serialport5-dev \
+            libqt5network5 \
+            qt5-image-formats-plugins \
+            libpolyclipping-dev \
+            libcups2-dev \
+            doxygen
+          sudo gem install --no-document fpm
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+
+      - name: Download linuxdeploy tools
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$DIST_DIR/tools"
+          linuxdeploy_url="$(gh api repos/linuxdeploy/linuxdeploy/releases/latest --jq '.assets[] | select(.name == "linuxdeploy-x86_64.AppImage") | .browser_download_url')"
+          linuxdeploy_qt_url="$(gh api repos/linuxdeploy/linuxdeploy-plugin-qt/releases/latest --jq '.assets[] | select(.name == "linuxdeploy-plugin-qt-x86_64.AppImage") | .browser_download_url')"
+          curl -L "$linuxdeploy_url" -o "$DIST_DIR/tools/linuxdeploy-x86_64.AppImage"
+          curl -L "$linuxdeploy_qt_url" -o "$DIST_DIR/tools/linuxdeploy-plugin-qt-x86_64.AppImage"
+          chmod +x "$DIST_DIR/tools/"*.AppImage
+          ln -sf linuxdeploy-plugin-qt-x86_64.AppImage "$DIST_DIR/tools/linuxdeploy-plugin-qt"
+          echo "$GITHUB_WORKSPACE/$DIST_DIR/tools" >> "$GITHUB_PATH"
+
+      - name: Compute artifact metadata
+        run: |
+          echo "SOURCE_SHA=$(git -C source-tree rev-parse --short=7 HEAD)" >> "$GITHUB_ENV"
+          echo "ASSET_PREFIX=OpenOrienteering-Mapper-linux-x86_64-$(git -C source-tree rev-parse --short=7 HEAD)" >> "$GITHUB_ENV"
+
+      - name: Configure build
+        run: |
+          cmake -S source-tree -B "$BUILD_DIR" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=OFF \
+            -DMapper_AUTORUN_SYSTEM_TESTS=OFF \
+            -DMapper_AUTORUN_MANUAL_TESTS=OFF \
+            -DMapper_USE_GDAL=ON \
+            -DMapper_PACKAGE_NAME="$PACKAGE_NAME" \
+            -DMapper_PACKAGE_QT=ON \
+            -DMapper_PACKAGE_PROJ=ON \
+            -DMapper_PACKAGE_GDAL=ON \
+            -DMapper_PACKAGE_ASSISTANT=OFF \
+            -DMapper_MANUAL_QTHELP=OFF \
+            -DMapper_MANUAL_PDF=OFF \
+            -DGDAL_DATA_DIR=/usr/share/gdal \
+            -DPROJ_DATA_DIR=/usr/share/proj
+
+      - name: Build release targets
+        run: |
+          cmake --build "$BUILD_DIR" \
+            --target Mapper Mapper_translations mapper-gdal-info \
+            --parallel $(nproc)
+
+      - name: Package Linux release assets
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: 1
+          LINUXDEPLOY_BIN: ${{ github.workspace }}/${{ env.DIST_DIR }}/tools/linuxdeploy-x86_64.AppImage
+          QMAKE: /usr/lib/qt5/bin/qmake
+        run: |
+          bash packaging/linux/package-release-assets.sh \
+            source-tree \
+            "$BUILD_DIR" \
+            "$DIST_DIR" \
+            "$ASSET_PREFIX" \
+            "$FLATPAK_ID" \
+            "$PACKAGE_NAME"
+
+      - name: Upload Linux release assets as workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-release-assets
+          path: dist/linux-release/release/*
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+      - name: Attach Linux assets to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ inputs.release_tag }}" dist/linux-release/release/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
