@@ -106,7 +106,7 @@ jobs:
       - name: Build release targets
         run: |
           cmake --build "$BUILD_DIR" \
-            --target Mapper Mapper_translations mapper-gdal-info \
+            --target Mapper Mapper-manual Mapper_translations mapper-gdal-info \
             --parallel $(nproc)
 
       - name: Package Linux release assets
