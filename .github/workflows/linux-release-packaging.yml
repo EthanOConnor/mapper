@@ -11,12 +11,18 @@ on:
         description: Git ref to build
         required: true
         default: v0.9.7-coc-0.2
+  push:
+    branches: [tiled-raster-loading]
+    paths:
+      - .github/workflows/linux-release-packaging.yml
+      - packaging/linux/**
+      - src/mapper_resource.cpp
 
 permissions:
   contents: write
 
 concurrency:
-  group: ${{ github.workflow }}-${{ inputs.release_tag }}
+  group: ${{ github.workflow }}-${{ inputs.release_tag || 'v0.9.7-coc-0.2' }}
   cancel-in-progress: false
 
 jobs:
@@ -28,6 +34,8 @@ jobs:
       DIST_DIR: dist/linux-release
       PACKAGE_NAME: openorienteering-mapper-coc
       FLATPAK_ID: org.openorienteering.Mapper.coc
+      RELEASE_TAG: ${{ inputs.release_tag || 'v0.9.7-coc-0.2' }}
+      SOURCE_REF: ${{ inputs.source_ref || 'v0.9.7-coc-0.2' }}
     steps:
       - name: Check out workflow source
         uses: actions/checkout@v4
@@ -38,7 +46,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
-          ref: ${{ inputs.source_ref }}
+          ref: ${{ env.SOURCE_REF }}
           path: source-tree
 
       - name: Install dependencies
@@ -128,6 +136,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload "${{ inputs.release_tag }}" dist/linux-release/release/* \
+          gh release upload "$RELEASE_TAG" dist/linux-release/release/* \
             --repo "$GITHUB_REPOSITORY" \
             --clobber
