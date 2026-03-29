@@ -126,21 +126,22 @@ fpm_common=(
 	--license "GPL-3.0-or-later"
 	--maintainer "Ethan O'Connor"
 	--description "OpenOrienteering Mapper fork release with tiled raster and online tile source support"
-	usr
 )
 
 fpm \
 	"${fpm_common[@]}" \
 	-t deb \
 	-a amd64 \
-	-p "$RELEASE_DIR/$ASSET_PREFIX.deb"
+	-p "$RELEASE_DIR/$ASSET_PREFIX.deb" \
+	usr
 
 fpm \
 	"${fpm_common[@]}" \
 	-t rpm \
 	-a x86_64 \
 	--rpm-os linux \
-	-p "$RELEASE_DIR/$ASSET_PREFIX.rpm"
+	-p "$RELEASE_DIR/$ASSET_PREFIX.rpm" \
+	usr
 
 (
 	cd "$RELEASE_DIR"
