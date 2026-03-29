@@ -42,6 +42,7 @@
 #include <ogr_srs_api.h>
 
 #include "global.h"
+#include "settings.h"
 #include "core/georeferencing.h"
 #include "core/latlon.h"
 #include "core/map.h"
@@ -130,6 +131,10 @@ void GdalTiledTemplateTest::initTestCase()
 
 	GdalManager();
 	GDALAllRegister();
+
+	// Keep on-screen overview selection deterministic across runners whose
+	// reported physical DPI differs.
+	Settings::getInstance().setSetting(Settings::General_PixelsPerInch, 96.0);
 }
 
 
