@@ -493,6 +493,26 @@ bool GdalTemplate::loadTemplateFileImpl()
 }
 
 
+bool GdalTemplate::postLoadSetup(QWidget* dialog_parent, bool& out_center_in_view)
+{
+	if (!isTiledSource())
+		return TemplateImage::postLoadSetup(dialog_parent, out_center_in_view);
+
+	// Tiled sources (WMS/TMS/WMTS) have their georeferencing fully
+	// determined at load time from the GDAL geotransform. Skip the
+	// interactive georeferencing/CRS dialogs that TemplateImage shows.
+	if (is_georeferenced)
+	{
+		out_center_in_view = false;
+		return true;
+	}
+
+	// Georeferencing was expected but not available — fail cleanly.
+	setErrorString(::OpenOrienteering::TemplateImage::tr("Georeferencing not found"));
+	return false;
+}
+
+
 void GdalTemplate::unloadTemplateFileImpl()
 {
 	// Stop the tile worker threads.
