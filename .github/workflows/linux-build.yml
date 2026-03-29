@@ -1,0 +1,54 @@
+name: Linux Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [tiled-raster-loading]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux-x64:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      BUILD_DIR: build/linux
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build g++ \
+            libgdal-dev libproj-dev \
+            qtbase5-dev qttools5-dev qttools5-dev-tools \
+            libqt5sensors5-dev libqt5serialport5-dev \
+            qt5-image-formats-plugins \
+            libpolyclipping-dev \
+            libcups2-dev \
+            doxygen
+
+      - name: Configure
+        run: |
+          cmake -S . -B "$BUILD_DIR" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DMapper_USE_GDAL=ON \
+            -DMapper_MANUAL_QTHELP=OFF \
+            -DMapper_MANUAL_PDF=OFF
+
+      - name: Build
+        run: cmake --build "$BUILD_DIR" --parallel $(nproc)
+
+      - name: Test
+        run: |
+          cd "$BUILD_DIR"
+          ctest --output-on-failure -j $(nproc)

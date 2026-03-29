@@ -1,0 +1,55 @@
+name: macOS Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [tiled-raster-loading]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos-arm64:
+    runs-on: macos-14
+    timeout-minutes: 30
+    env:
+      BUILD_DIR: build/macos
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install dependencies
+        run: |
+          brew install cmake ninja gdal proj qt@5 doxygen
+
+      - name: Configure
+        run: |
+          export PATH="/opt/homebrew/opt/qt@5/bin:$PATH"
+          cmake -S . -B "$BUILD_DIR" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$(brew --prefix qt@5)" \
+            -DMapper_USE_GDAL=ON \
+            -DMapper_MANUAL_QTHELP=OFF \
+            -DMapper_MANUAL_PDF=OFF
+
+      - name: Build
+        run: cmake --build "$BUILD_DIR" --parallel $(sysctl -n hw.logicalcpu)
+
+      - name: Test
+        run: |
+          cd "$BUILD_DIR"
+          ctest --output-on-failure -j $(sysctl -n hw.logicalcpu)
+
+      - name: Upload app bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64-app
+          path: build/macos/src/Mapper.app
+          if-no-files-found: error
+          retention-days: 7

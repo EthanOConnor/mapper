@@ -39,6 +39,12 @@ option(CMAKE_FIND_PACKAGE_PREFER_CONFIG "Lookup package config files before usin
 # Project declaration
 
 project(Mapper VERSION 0.9.7 LANGUAGES CXX C)
+
+# COC fork version overlay — does not change the upstream version number.
+set(Mapper_COC_VERSION "0.1")
+if(NOT Mapper_VERSION_DISPLAY)
+	set(Mapper_VERSION_DISPLAY "${Mapper_VERSION}-coc-${Mapper_COC_VERSION}")
+endif()
 set(Mapper_COPYRIGHT "(C) 2026 The OpenOrienteering developers")
 
 math(EXPR Mapper_VERSION_CODE "${Mapper_VERSION_MAJOR} * 10000 + ${Mapper_VERSION_MINOR} * 100 + ${Mapper_VERSION_PATCH} * 2 + ${CMAKE_SIZEOF_VOID_P} / 4 - 1")
