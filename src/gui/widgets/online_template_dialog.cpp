@@ -20,6 +20,7 @@
 #include "online_template_dialog.h"
 
 #include <Qt>
+#include <QComboBox>
 #include <QHBoxLayout>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -32,6 +33,8 @@
 #include <QNetworkRequest>
 #include <QPushButton>
 #include <QRectF>
+#include <QSettings>
+#include <QStringList>
 #include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -62,10 +65,11 @@ OnlineTemplateDialog::OnlineTemplateDialog(Map& map, MapEditorController& contro
 	url_edit->setPlaceholderText(tr("https://tile.example.com/{z}/{x}/{y}.png"));
 	layout->addWidget(url_edit);
 
-	auto* helper_label = new QLabel(
-		tr("XYZ tile URL or ArcGIS MapServer link"), this);
-	helper_label->setStyleSheet(QStringLiteral("color: gray; font-size: small;"));
-	layout->addWidget(helper_label);
+	source_chooser = new QComboBox(this);
+	populateSourceChooser();
+	layout->addWidget(source_chooser);
+	connect(source_chooser, QOverload<int>::of(&QComboBox::activated),
+	        this, &OnlineTemplateDialog::onSourceChosen);
 
 	status_label = new QLabel(this);
 	status_label->setWordWrap(true);
@@ -269,7 +273,83 @@ void OnlineTemplateDialog::generateAndAccept()
 	}
 
 	generated_path = result.xml_path;
+	saveRecentSource(pending_source.original_input, pending_source.display_name);
 	accept();
+}
+
+
+void OnlineTemplateDialog::populateSourceChooser()
+{
+	source_chooser->clear();
+
+	// Placeholder
+	source_chooser->addItem(tr("Presets and recently used"), QString{});
+
+	// Built-in presets
+	source_chooser->insertSeparator(source_chooser->count());
+	source_chooser->addItem(
+		tr("OpenStreetMap"),
+		QStringLiteral("https://tile.openstreetmap.org/{z}/{x}/{y}.png"));
+	source_chooser->addItem(
+		tr("Esri World Imagery"),
+		QStringLiteral("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"));
+
+	// Recent sources from settings
+	QSettings settings;
+	auto recent_urls = settings.value(QStringLiteral("onlineImagery/recentUrls")).toStringList();
+	auto recent_names = settings.value(QStringLiteral("onlineImagery/recentNames")).toStringList();
+	if (!recent_urls.isEmpty())
+	{
+		source_chooser->insertSeparator(source_chooser->count());
+		for (int i = 0; i < recent_urls.size(); ++i)
+		{
+			auto name = (i < recent_names.size() && !recent_names[i].isEmpty())
+			            ? recent_names[i] : recent_urls[i];
+			source_chooser->addItem(name, recent_urls[i]);
+		}
+	}
+}
+
+
+void OnlineTemplateDialog::onSourceChosen(int index)
+{
+	auto url = source_chooser->itemData(index).toString();
+	if (!url.isEmpty())
+		url_edit->setText(url);
+	// Reset to placeholder so re-selecting the same item works
+	source_chooser->setCurrentIndex(0);
+}
+
+
+// static
+void OnlineTemplateDialog::saveRecentSource(const QString& url, const QString& display_name)
+{
+	constexpr int max_recent = 5;
+	QSettings settings;
+	auto urls = settings.value(QStringLiteral("onlineImagery/recentUrls")).toStringList();
+	auto names = settings.value(QStringLiteral("onlineImagery/recentNames")).toStringList();
+
+	// Remove duplicate if already present
+	int existing = urls.indexOf(url);
+	if (existing >= 0)
+	{
+		urls.removeAt(existing);
+		if (existing < names.size())
+			names.removeAt(existing);
+	}
+
+	// Prepend
+	urls.prepend(url);
+	names.prepend(display_name);
+
+	// Trim
+	while (urls.size() > max_recent)
+		urls.removeLast();
+	while (names.size() > max_recent)
+		names.removeLast();
+
+	settings.setValue(QStringLiteral("onlineImagery/recentUrls"), urls);
+	settings.setValue(QStringLiteral("onlineImagery/recentNames"), names);
 }
 
 

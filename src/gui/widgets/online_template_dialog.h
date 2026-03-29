@@ -25,6 +25,7 @@
 
 #include "gdal/online_imagery_source.h"
 
+class QComboBox;
 class QLabel;
 class QLineEdit;
 class QNetworkAccessManager;
@@ -64,11 +65,15 @@ private:
 	void showProgress(const QString& message);
 	void clearStatus();
 	void generateAndAccept();
+	void populateSourceChooser();
+	void onSourceChosen(int index);
+	static void saveRecentSource(const QString& url, const QString& display_name);
 
 	Map& map;
 	MapEditorController& controller;
 
 	QLineEdit* url_edit;
+	QComboBox* source_chooser;
 	QLabel* status_label;
 	QPushButton* add_button;
 
