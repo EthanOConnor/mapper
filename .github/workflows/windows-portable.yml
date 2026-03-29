@@ -22,6 +22,8 @@ jobs:
     env:
       BUILD_DIR: build/windows-portable
       DIST_DIR: dist/OpenOrienteering-Mapper-windows-x64
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 200M
     steps:
       - name: Configure checkout line endings
         shell: powershell
@@ -52,7 +54,17 @@ jobs:
             mingw-w64-x86_64-qt5-serialport
             mingw-w64-x86_64-qt5-tools
             mingw-w64-x86_64-qt5-translations
+            mingw-w64-x86_64-ccache
             mingw-w64-x86_64-doxygen
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-windows-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            ccache-windows-${{ github.ref_name }}-
+            ccache-windows-
 
       - name: Compute artifact metadata
         run: |
@@ -64,6 +76,8 @@ jobs:
           rm -rf "$BUILD_DIR" "$DIST_DIR"
           cmake -S . -B "$BUILD_DIR" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DBUILD_TESTING=OFF \
             -DMapper_AUTORUN_SYSTEM_TESTS=OFF \
             -DMapper_AUTORUN_MANUAL_TESTS=OFF \

@@ -18,6 +18,8 @@ jobs:
     timeout-minutes: 30
     env:
       BUILD_DIR: build/linux
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 200M
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -28,7 +30,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            cmake ninja-build g++ \
+            cmake ninja-build g++ ccache \
             libgdal-dev libproj-dev \
             qtbase5-dev qttools5-dev qttools5-dev-tools \
             libqt5sensors5-dev libqt5serialport5-dev \
@@ -37,16 +39,30 @@ jobs:
             libcups2-dev \
             doxygen
 
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-linux-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            ccache-linux-${{ github.ref_name }}-
+            ccache-linux-
+
       - name: Configure
         run: |
           cmake -S . -B "$BUILD_DIR" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DMapper_USE_GDAL=ON \
             -DMapper_MANUAL_QTHELP=OFF \
             -DMapper_MANUAL_PDF=OFF
 
       - name: Build
         run: cmake --build "$BUILD_DIR" --parallel $(nproc)
+
+      - name: Print ccache stats
+        run: ccache -s
 
       - name: Test
         run: |

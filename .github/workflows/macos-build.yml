@@ -18,21 +18,45 @@ jobs:
     timeout-minutes: 30
     env:
       BUILD_DIR: build/macos
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 200M
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      HOMEBREW_NO_INSTALL_CLEANUP: 1
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
+      - name: Restore Homebrew cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/Homebrew/downloads
+            ~/Library/Caches/Homebrew/api
+          key: brew-macos14-${{ hashFiles('.github/workflows/macos-build.yml') }}
+          restore-keys: brew-macos14-
+
       - name: Install dependencies
         run: |
-          brew install cmake ninja gdal proj qt@5 doxygen
+          brew install cmake ninja gdal proj qt@5 ccache doxygen
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-macos-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            ccache-macos-${{ github.ref_name }}-
+            ccache-macos-
 
       - name: Configure
         run: |
           export PATH="/opt/homebrew/opt/qt@5/bin:$PATH"
           cmake -S . -B "$BUILD_DIR" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_PREFIX_PATH="$(brew --prefix qt@5)" \
             -DMapper_USE_GDAL=ON \
             -DMapper_MANUAL_QTHELP=OFF \
@@ -40,6 +64,9 @@ jobs:
 
       - name: Build
         run: cmake --build "$BUILD_DIR" --parallel $(sysctl -n hw.logicalcpu)
+
+      - name: Print ccache stats
+        run: ccache -s
 
       - name: Test
         run: |
