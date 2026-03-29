@@ -41,7 +41,7 @@ option(CMAKE_FIND_PACKAGE_PREFER_CONFIG "Lookup package config files before usin
 project(Mapper VERSION 0.9.7 LANGUAGES CXX C)
 
 # COC fork version overlay — does not change the upstream version number.
-set(Mapper_COC_VERSION "0.1")
+set(Mapper_COC_VERSION "0.2")
 if(NOT Mapper_VERSION_DISPLAY)
 	set(Mapper_VERSION_DISPLAY "${Mapper_VERSION}-coc-${Mapper_COC_VERSION}")
 endif()
