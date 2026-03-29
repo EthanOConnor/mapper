@@ -157,11 +157,25 @@ void OnlineTemplateDialog::onAddClicked()
 
 		auto metadata_url = QUrl(pending_source.normalized_url + QStringLiteral("?f=pjson"));
 		auto request = QNetworkRequest(metadata_url);
+#if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
 		request.setTransferTimeout(15000);
+#endif
 
 		connect(network, &QNetworkAccessManager::finished,
 		        this, &OnlineTemplateDialog::onMetadataReplyFinished);
-		network->get(request);
+		auto* reply = network->get(request);
+#if QT_VERSION < QT_VERSION_CHECK(5, 15, 0)
+		auto* timeout = new QTimer(reply);
+		timeout->setSingleShot(true);
+		connect(timeout, &QTimer::timeout, reply, [reply]() {
+			if (!reply->isFinished())
+			{
+				reply->setProperty("mapperTimedOut", true);
+				reply->abort();
+			}
+		});
+		timeout->start(15000);
+#endif
 		return;
 	}
 
@@ -181,7 +195,10 @@ void OnlineTemplateDialog::onMetadataReplyFinished(QNetworkReply* reply)
 
 	if (reply->error() != QNetworkReply::NoError)
 	{
-		showError(tr("Could not read imagery metadata: %1").arg(reply->errorString()));
+		if (reply->property("mapperTimedOut").toBool())
+			showError(tr("Could not read imagery metadata: request timed out."));
+		else
+			showError(tr("Could not read imagery metadata: %1").arg(reply->errorString()));
 		return;
 	}
 
