@@ -32,8 +32,10 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             cmake ninja-build g++ ccache \
             libgdal-dev libproj-dev \
-            qtbase5-dev qttools5-dev qttools5-dev-tools \
+            qtbase5-dev qtbase5-private-dev \
+            qttools5-dev qttools5-dev-tools \
             libqt5sensors5-dev libqt5serialport5-dev \
+            libqt5network5 \
             qt5-image-formats-plugins \
             libpolyclipping-dev \
             libcups2-dev \
