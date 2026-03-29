@@ -98,6 +98,10 @@
 #include "tools/tool.h"
 #include "util/item_delegates.h"
 
+#ifdef MAPPER_USE_GDAL
+#include "gui/widgets/online_template_dialog.h"
+#endif
+
 
 #ifdef __clang_analyzer__
 #define singleShot(A, B, C) singleShot(A, B, #C) // NOLINT 
@@ -237,7 +241,10 @@ TemplateListWidget::TemplateListWidget(Map& map, MapView& main_view, MapEditorCo
 	auto* new_button_menu = new QMenu(this);
 	if (!mobile_mode)
 	{
-		new_button_menu->addAction(QIcon(QString::fromLatin1(":/images/open.png")), tr("Open..."), this, &TemplateListWidget::openTemplate);
+		new_button_menu->addAction(QIcon(QString::fromLatin1(":/images/open.png")), tr("From this computer..."), this, &TemplateListWidget::openTemplate);
+#ifdef MAPPER_USE_GDAL
+		new_button_menu->addAction(tr("Online imagery..."), this, &TemplateListWidget::openOnlineTemplate);
+#endif
 		new_button_menu->addAction(controller.getAction("reopentemplate"));
 	}
 	duplicate_action = new_button_menu->addAction(QIcon(QString::fromLatin1(":/images/tool-duplicate.png")), tr("Duplicate"), this, &TemplateListWidget::duplicateTemplate);
@@ -699,6 +706,57 @@ void TemplateListWidget::openTemplate()
 		
 		map.addTemplate(pos, std::move(new_template));
 	}
+}
+
+void TemplateListWidget::openOnlineTemplate()
+{
+#ifdef MAPPER_USE_GDAL
+	OnlineTemplateDialog dialog(map, controller, window());
+	dialog.setWindowModality(Qt::WindowModal);
+	if (dialog.exec() != QDialog::Accepted)
+		return;
+
+	auto path = dialog.generatedPath();
+	if (path.isEmpty())
+		return;
+
+	auto new_template = Template::templateForPath(path, &map);
+	if (!new_template)
+	{
+		QMessageBox::warning(window(), tr("Error"), tr("Could not open the generated imagery file."));
+		return;
+	}
+
+	// Load directly — bypass setupAndLoad() which would show interactive
+	// georeferencing/CRS dialogs. The generated GDAL XML already contains
+	// full georeferencing info and loadTemplateFileImpl() auto-sets
+	// is_georeferenced when the geotransform is valid.
+	if (!new_template->loadTemplateFile())
+	{
+		QMessageBox::warning(window(), tr("Error"),
+		                     tr("Could not load imagery: %1").arg(new_template->errorString()));
+		return;
+	}
+
+	// Complete the state transitions that setupAndLoad() normally does
+	// after postLoadSetup(). Without these, the template stays in
+	// Configuring state and the renderer skips it.
+	new_template->setTemplateState(Template::Loaded);
+	new_template->setTemplateAreaDirty();
+	emit new_template->templateStateChanged();
+
+	int pos = -1;
+	int row = currentRow();
+	if (row >= 0)
+		pos = posFromRow(row);
+	map.addTemplate(pos, std::move(new_template));
+#endif
+}
+
+void TemplateListWidget::regenerateOnlineTemplate()
+{
+	// TODO: Phase 1 regeneration from current map extent.
+	// Requires re-running the builder with the current extent and reloading.
 }
 
 void TemplateListWidget::deleteTemplate()

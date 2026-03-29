@@ -23,9 +23,6 @@
 #include <algorithm>
 #include <cmath>
 #include <iterator>
-#include <limits>
-#include <memory>
-#include <tuple>
 
 #include <Qt>
 #include <QtGlobal>
@@ -92,51 +89,6 @@ int tileSubsamplingForScale(double scale, const QSize& block_size)
 qsizetype tileByteCost(const QImage& tile)
 {
 	return qsizetype(tile.bytesPerLine()) * tile.height();
-}
-
-int positiveModulo(qint64 value, int divisor)
-{
-	if (divisor <= 0)
-		return 0;
-
-	auto result = int(value % divisor);
-	if (result < 0)
-		result += divisor;
-	return result;
-}
-
-/**
- * Restrict overview subsampling to levels where the TMS tile origin aligns.
- *
- * For TMS sources, chooseOverviewReadPlan() reads directly from a GDAL
- * overview band and maps coordinates with a linear pixel ratio.  That
- * mapping is only correct when the DataWindow's tile origin is an exact
- * multiple of the overview's downsample factor; otherwise the overview
- * band's pixel registration is offset from the base band, shifting the
- * rendered content.  (For example, TileY 366160 % 32 = 16, which
- * produces a 4096-pixel -- 25% -- southward shift on a 16384-pixel
- * raster.)
- *
- * This function finds the largest power-of-two subsampling at which the
- * origin IS aligned, so chooseOverviewReadPlan() selects only safe
- * overview levels.  When no aligned level exists (subsampling falls to 1),
- * the caller skips the direct-overview path and GDALDatasetRasterIOEx
- * handles overview selection internally.
- */
-int alignedOverviewSubsampling(const QPoint& origin_tile, bool has_origin_tile, int requested_subsampling)
-{
-	auto aligned_subsampling = std::max(1, requested_subsampling);
-	if (!has_origin_tile)
-		return aligned_subsampling;
-
-	while (aligned_subsampling > 1
-	       && (positiveModulo(origin_tile.x(), aligned_subsampling) != 0
-	           || positiveModulo(origin_tile.y(), aligned_subsampling) != 0))
-	{
-		aligned_subsampling >>= 1;
-	}
-
-	return aligned_subsampling;
 }
 
 bool readTmsTileOrigin(const QString& template_path, QPoint* origin_tile)
@@ -247,26 +199,6 @@ QRect sourceRectForTile(const QSize& raster_size,
 	return QRect(int(px), int(py), int(end_x - px), int(end_y - py));
 }
 
-QSize outputSizeForSourceRect(const QRect& source_rect, int subsampling)
-{
-	auto const safe_subsampling = std::max(1, subsampling);
-	if (source_rect.isEmpty())
-		return QSize();
-
-	return QSize((source_rect.width() + safe_subsampling - 1) / safe_subsampling,
-	             (source_rect.height() + safe_subsampling - 1) / safe_subsampling);
-}
-
-QRectF templateRectForTileRect(const QRect& raster_rect, const QSize& raster_size)
-{
-	auto const half_w = raster_size.width() * 0.5;
-	auto const half_h = raster_size.height() * 0.5;
-	return QRectF(raster_rect.x() - half_w,
-	              raster_rect.y() - half_h,
-	              raster_rect.width(),
-	              raster_rect.height());
-}
-
 QRectF sourceRectWithinCachedTile(const QRect& desired_rect, const QRect& cached_rect, const QSize& cached_image_size)
 {
 	if (cached_rect.isEmpty() || cached_image_size.isEmpty())
@@ -288,80 +220,6 @@ struct RasterIoCancellationContext
 	int tile_y = 0;
 	int subsampling = 1;
 };
-
-struct OverviewReadPlan
-{
-	int overview_index = -1;
-	QRect overview_rect;
-};
-
-OverviewReadPlan chooseOverviewReadPlan(GDALDatasetH dataset,
-                                        int band_number,
-                                        const QSize& base_raster_size,
-                                        const QRect& source_rect,
-                                        int requested_subsampling)
-{
-	OverviewReadPlan plan;
-	if (!dataset || band_number <= 0 || source_rect.isEmpty() || requested_subsampling <= 1)
-		return plan;
-
-	auto* base_band = GDALGetRasterBand(dataset, band_number);
-	if (!base_band)
-		return plan;
-
-	auto const overview_count = GDALGetOverviewCount(base_band);
-	if (overview_count <= 0)
-		return plan;
-
-	auto best_error = std::numeric_limits<double>::infinity();
-	QSize best_overview_size;
-	for (int i = 0; i < overview_count; ++i)
-	{
-		auto* overview_band = GDALGetOverview(base_band, i);
-		if (!overview_band)
-			continue;
-
-		auto const overview_size = QSize(GDALGetRasterBandXSize(overview_band),
-		                                 GDALGetRasterBandYSize(overview_band));
-		if (overview_size.isEmpty())
-			continue;
-
-		auto const downsample = std::max(
-			base_raster_size.width() / double(overview_size.width()),
-			base_raster_size.height() / double(overview_size.height()));
-		if (!(downsample > 1.0))
-			continue;
-
-		auto const error = std::abs(std::log(downsample / requested_subsampling));
-		if (error < best_error)
-		{
-			best_error = error;
-			plan.overview_index = i;
-			best_overview_size = overview_size;
-		}
-	}
-
-	if (plan.overview_index < 0)
-		return plan;
-	if (best_error > std::log(1.5))
-	{
-		plan.overview_index = -1;
-		return plan;
-	}
-
-	auto const x0 = int((qint64(source_rect.x()) * best_overview_size.width()) / base_raster_size.width());
-	auto const y0 = int((qint64(source_rect.y()) * best_overview_size.height()) / base_raster_size.height());
-	auto const x1 = int((qint64(source_rect.x() + source_rect.width()) * best_overview_size.width()) / base_raster_size.width());
-	auto const y1 = int((qint64(source_rect.y() + source_rect.height()) * best_overview_size.height()) / base_raster_size.height());
-	plan.overview_rect = QRect(x0, y0, x1 - x0, y1 - y0);
-	if (plan.overview_rect.isEmpty())
-	{
-		plan.overview_index = -1;
-		return plan;
-	}
-
-	return plan;
-}
 
 }  // namespace
 
@@ -527,6 +385,14 @@ bool GdalTemplate::loadTemplateFileImpl()
 		// to avoid allocating a full-size QImage for the raster dimensions.
 		auto georef_option = reader.readGeoTransform();
 		available_georef = findAvailableGeoreferencing(georef_option);
+
+		// For tiled sources, enable georeferencing automatically when the
+		// GDAL geotransform provides valid CRS + transform data. This is
+		// needed because postLoadSetup() (which normally sets is_georeferenced
+		// via user dialog) may be bypassed for generated online templates.
+		if (!is_georeferenced && isGeoreferencingUsable())
+			is_georeferenced = true;
+
 		if (is_georeferenced)
 		{
 			if (!isGeoreferencingUsable())
@@ -700,22 +566,29 @@ void GdalTemplate::drawTemplate(QPainter* painter, const QRectF& clip_rect, doub
 	painter->setOpacity(opacity);
 
 	// Determine the visible area in template pixel coordinates.
-	// clip_rect is passed in map coordinates, not device/view coordinates,
-	// so we must transform it with the template's map<->template matrices.
+	// clip_rect is in map coordinates; transform to template pixel space.
 	QRectF visible_rect;
 	rectIncludeSafe(visible_rect, mapToTemplate(MapCoordF(clip_rect.topLeft())));
 	rectIncludeSafe(visible_rect, mapToTemplate(MapCoordF(clip_rect.topRight())));
 	rectIncludeSafe(visible_rect, mapToTemplate(MapCoordF(clip_rect.bottomLeft())));
 	rectIncludeSafe(visible_rect, mapToTemplate(MapCoordF(clip_rect.bottomRight())));
 
-	// Template pixel origin is at (-width/2, -height/2) because
-	// TemplateImage centers the image. Convert to raster pixel coords.
+	// Template pixel space is centered: raster pixel (0,0) is at
+	// template pixel (-half_w, -half_h).
 	auto const half_w = tiled_raster_size.width() * 0.5;
 	auto const half_h = tiled_raster_size.height() * 0.5;
 
 	auto const block_w = tiled_raster_info.block_size.width();
 	auto const block_h = tiled_raster_info.block_size.height();
 
+	// Choose how many native pixels each tile covers. At subsampling=1, each
+	// tile covers block_w × block_h raster pixels (one server tile). At
+	// subsampling=2, each tile covers 2*block_w × 2*block_h raster pixels
+	// (4 server tiles merged, but GDAL fetches the z-1 tile instead).
+	// The key invariant: tile (tx, ty) at subsampling s always covers raster
+	// pixels [tx*step_w .. (tx+1)*step_w), where step_w = s * block_w.
+	// This means the grid origin (0,0) is always at the raster origin,
+	// so tiles never shift position when subsampling changes.
 	auto effective_scale = scale;
 	if (on_screen)
 	{
@@ -729,25 +602,41 @@ void GdalTemplate::drawTemplate(QPainter* painter, const QRectF& clip_rect, doub
 		if (dpi > 0)
 			effective_scale *= dpi / 25.4;
 	}
+	auto subsampling = chooseTileSubsampling(effective_scale, tiled_raster_info.block_size);
 
-	auto const subsampling = chooseTileSubsampling(effective_scale, tiled_raster_info.block_size);
-	auto const tile_span_w = qint64(block_w) * subsampling;
-	auto const tile_span_h = qint64(block_h) * subsampling;
-	auto const alignment_offset = sourceAlignmentOffsetPixels(subsampling);
+	// GDAL WMS/TMS overview bands have a registration bug: when TileX or
+	// TileY is not a multiple of the overview factor, the sub-tile pixel
+	// offset is lost (m_tx/m_ty are right-shifted, discarding remainder
+	// bits). Cap subsampling to the highest level where both tile origin
+	// coordinates are aligned, so GDAL only uses correct overview levels.
+	if (has_tiled_origin_tile)
+	{
+		while (subsampling > 1
+		       && (tiled_origin_tile.x() % subsampling != 0
+		           || tiled_origin_tile.y() % subsampling != 0))
+		{
+			subsampling >>= 1;
+		}
+	}
 
-	// Determine the tile grid range that covers the visible area, plus 1 tile overscan.
-	int tile_x_min = tileIndexForRasterCoord(visible_rect.left() + half_w, tile_span_w, alignment_offset.x()) - 1;
-	int tile_y_min = tileIndexForRasterCoord(visible_rect.top() + half_h, tile_span_h, alignment_offset.y()) - 1;
-	int tile_x_max = tileIndexForRasterCoord(visible_rect.right() + half_w, tile_span_w, alignment_offset.x()) + 1;
-	int tile_y_max = tileIndexForRasterCoord(visible_rect.bottom() + half_h, tile_span_h, alignment_offset.y()) + 1;
-	int visible_tile_x_min = tileIndexForRasterCoord(visible_rect.left() + half_w, tile_span_w, alignment_offset.x());
-	int visible_tile_y_min = tileIndexForRasterCoord(visible_rect.top() + half_h, tile_span_h, alignment_offset.y());
-	int visible_tile_x_max = tileIndexForRasterCoord(visible_rect.right() + half_w, tile_span_w, alignment_offset.x());
-	int visible_tile_y_max = tileIndexForRasterCoord(visible_rect.bottom() + half_h, tile_span_h, alignment_offset.y());
+	// Step size: how many raster pixels each tile covers at this subsampling.
+	auto const step_w = qint64(block_w) * subsampling;
+	auto const step_h = qint64(block_h) * subsampling;
+	auto const alignment = sourceAlignmentOffsetPixels(subsampling);
+
+	// Visible tile range (no overscan) and full range (+1 tile border).
+	int visible_tile_x_min = tileIndexForRasterCoord(visible_rect.left() + half_w, step_w, alignment.x());
+	int visible_tile_y_min = tileIndexForRasterCoord(visible_rect.top() + half_h, step_h, alignment.y());
+	int visible_tile_x_max = tileIndexForRasterCoord(visible_rect.right() + half_w, step_w, alignment.x());
+	int visible_tile_y_max = tileIndexForRasterCoord(visible_rect.bottom() + half_h, step_h, alignment.y());
+	int tile_x_min = visible_tile_x_min - 1;
+	int tile_y_min = visible_tile_y_min - 1;
+	int tile_x_max = visible_tile_x_max + 1;
+	int tile_y_max = visible_tile_y_max + 1;
 
 	// Clamp to raster bounds.
-	int const max_tile_x = maxTileIndexForRasterExtent(tiled_raster_size.width(), tile_span_w, alignment_offset.x());
-	int const max_tile_y = maxTileIndexForRasterExtent(tiled_raster_size.height(), tile_span_h, alignment_offset.y());
+	int const max_tile_x = maxTileIndexForRasterExtent(tiled_raster_size.width(), step_w, alignment.x());
+	int const max_tile_y = maxTileIndexForRasterExtent(tiled_raster_size.height(), step_h, alignment.y());
 	tile_x_min = std::max(tile_x_min, 0);
 	tile_y_min = std::max(tile_y_min, 0);
 	tile_x_max = std::min(tile_x_max, max_tile_x);
@@ -757,23 +646,6 @@ void GdalTemplate::drawTemplate(QPainter* painter, const QRectF& clip_rect, doub
 	visible_tile_x_max = std::max(0, std::min(visible_tile_x_max, max_tile_x));
 	visible_tile_y_max = std::max(0, std::min(visible_tile_y_max, max_tile_y));
 
-	if (shouldDebugGdalTemplate() && debug_draw_logs_remaining > 0)
-	{
-		--debug_draw_logs_remaining;
-		auto const bbox = calculateTemplateBoundingBox();
-		qInfo().noquote()
-			<< "GdalTemplate draw"
-			<< "path=" << template_path
-			<< "clip_rect=" << clip_rect
-			<< "visible_rect=" << visible_rect
-			<< "bbox=" << bbox
-			<< "scale=(" << transform.template_scale_x << "," << transform.template_scale_y << ")"
-			<< "translation=(" << transform.template_x / 1000.0 << "," << transform.template_y / 1000.0 << ")"
-			<< "subsampling=" << subsampling
-			<< "tiles=" << QStringLiteral("[%1..%2]x[%3..%4]")
-			              .arg(tile_x_min).arg(tile_x_max).arg(tile_y_min).arg(tile_y_max);
-	}
-
 	auto const request_window = RequestWindow{
 		tile_x_min, tile_y_min, tile_x_max, tile_y_max, subsampling,
 		visible_tile_x_min, visible_tile_y_min, visible_tile_x_max, visible_tile_y_max
@@ -781,62 +653,58 @@ void GdalTemplate::drawTemplate(QPainter* painter, const QRectF& clip_rect, doub
 	auto const request_generation = beginRequestGeneration(request_window);
 
 	// Draw cached tiles and request missing ones.
-	struct MissingTile
-	{
-		int tile_x;
-		int tile_y;
-		bool intersects_visible_rect;
-		qreal distance_sq;
-	};
-	std::vector<MissingTile> missing_tiles;
 	auto const visible_center_x = (visible_rect.left() + visible_rect.right()) * 0.5;
 	auto const visible_center_y = (visible_rect.top() + visible_rect.bottom()) * 0.5;
+
+	struct MissingTile { int tx, ty; bool visible; qreal dist_sq; };
+	std::vector<MissingTile> missing;
 
 	for (int ty = tile_y_min; ty <= tile_y_max; ++ty)
 	{
 		for (int tx = tile_x_min; tx <= tile_x_max; ++tx)
 		{
+			auto const src = sourceRectForTile(
+				tiled_raster_size, tiled_raster_info.block_size,
+				alignment, tx, ty, subsampling);
+			if (src.isEmpty())
+				continue;
+			auto const dest_rect = QRectF(
+				src.x() - half_w, src.y() - half_h,
+				src.width(), src.height());
+
 			auto const key = tileKey(tx, ty, subsampling);
 			auto it = tile_cache.constFind(key);
-			auto const source_rect = sourceRectForTile(
-				tiled_raster_size,
-				tiled_raster_info.block_size,
-				alignment_offset,
-				tx,
-				ty,
-				subsampling);
-			if (source_rect.isEmpty())
-				continue;
-
-			auto const template_rect = templateRectForTileRect(source_rect, tiled_raster_size);
-			auto const intersects_visible_rect =
-				template_rect.left() < visible_rect.right()
-				&& template_rect.right() > visible_rect.left()
-				&& template_rect.top() < visible_rect.bottom()
-				&& template_rect.bottom() > visible_rect.top();
 			if (it != tile_cache.constEnd())
 			{
 				noteTileAccess(key);
-				painter->drawImage(template_rect, it.value().image);
+				painter->drawImage(dest_rect, it.value().image);
 #ifdef Mapper_DEVELOPMENT_BUILD
 				++tiles_drawn;
 #endif
 			}
 			else
 			{
-				QRectF fallback_source_rect;
-				if (auto const* fallback = findBestCachedTile(tx, ty, subsampling, &fallback_source_rect))
+				// Try to find a coarser cached tile that covers this area.
+				// findBestCachedTile maps through raster coordinates so it
+				// returns the correct sub-rect regardless of grid geometry.
+				QRectF source_rect;
+				auto const* fallback = findBestCachedTile(tx, ty, subsampling, &source_rect);
+				if (fallback)
 				{
-					painter->drawImage(template_rect, *fallback, fallback_source_rect);
+					painter->drawImage(dest_rect, *fallback, source_rect);
 #ifdef Mapper_DEVELOPMENT_BUILD
 					++tiles_drawn;
 #endif
 				}
-				auto const tile_center_x = template_rect.left() + template_rect.width() * 0.5;
-				auto const tile_center_y = template_rect.top() + template_rect.height() * 0.5;
-				auto const dx = tile_center_x - visible_center_x;
-				auto const dy = tile_center_y - visible_center_y;
-				missing_tiles.push_back(MissingTile{ tx, ty, intersects_visible_rect, dx * dx + dy * dy });
+
+				auto const is_visible =
+					dest_rect.right() > visible_rect.left()
+					&& dest_rect.left() < visible_rect.right()
+					&& dest_rect.bottom() > visible_rect.top()
+					&& dest_rect.top() < visible_rect.bottom();
+				auto const cx = dest_rect.center().x() - visible_center_x;
+				auto const cy = dest_rect.center().y() - visible_center_y;
+				missing.push_back(MissingTile{tx, ty, is_visible, cx*cx + cy*cy});
 #ifdef Mapper_DEVELOPMENT_BUILD
 				++tiles_requested;
 #endif
@@ -844,16 +712,15 @@ void GdalTemplate::drawTemplate(QPainter* painter, const QRectF& clip_rect, doub
 		}
 	}
 
-	std::sort(missing_tiles.begin(), missing_tiles.end(), [](auto const& lhs, auto const& rhs) {
-		if (lhs.intersects_visible_rect != rhs.intersects_visible_rect)
-			return lhs.intersects_visible_rect < rhs.intersects_visible_rect;
-		if (lhs.distance_sq != rhs.distance_sq)
-			return lhs.distance_sq > rhs.distance_sq;
-		return std::tie(lhs.tile_y, lhs.tile_x) > std::tie(rhs.tile_y, rhs.tile_x);
+	// Request missing tiles: visible before overscan, nearest-first within
+	// each group. Reversed because requestTile pushes to the queue front.
+	std::sort(missing.begin(), missing.end(), [](auto const& a, auto const& b) {
+		if (a.visible != b.visible)
+			return a.visible < b.visible;
+		return a.dist_sq > b.dist_sq;
 	});
-
-	for (auto const& tile : missing_tiles)
-		requestTile(tile.tile_x, tile.tile_y, subsampling, request_generation);
+	for (auto const& m : missing)
+		requestTile(m.tx, m.ty, subsampling, request_generation);
 
 	painter->setRenderHint(QPainter::SmoothPixmapTransform, false);
 
@@ -916,42 +783,28 @@ void GdalTemplate::tileWorkerLoop(GDALDatasetH worker_dataset)
 			loading_tiles.insert(tile_request_key);
 		}
 
-		auto const alignment_offset = sourceAlignmentOffsetPixels(tile_request.subsampling);
-		auto const source_rect = sourceRectForTile(
-			tiled_raster_size,
-			tiled_raster_info.block_size,
-			alignment_offset,
-			tile_request.tile_x,
-			tile_request.tile_y,
-			tile_request.subsampling);
-		auto const overview_subsampling = alignedOverviewSubsampling(
-			tiled_origin_tile,
-			has_tiled_origin_tile,
-			tile_request.subsampling);
-		auto const desired_output_size = outputSizeForSourceRect(source_rect, tile_request.subsampling);
-		auto const overview_plan = chooseOverviewReadPlan(
-			worker_dataset,
-			tiled_raster_info.bands.empty() ? 0 : tiled_raster_info.bands.front(),
-			tiled_raster_size,
-			source_rect,
-			overview_subsampling);
-		auto const use_direct_overview = overview_plan.overview_index >= 0;
-		auto const output_size = desired_output_size;
-		int const px = source_rect.x();
-		int const py = source_rect.y();
-		int const read_w = source_rect.width();
-		int const read_h = source_rect.height();
+		auto const subsampling = std::max(1, tile_request.subsampling);
+		auto const src = sourceRectForTile(
+			tiled_raster_size, tiled_raster_info.block_size,
+			sourceAlignmentOffsetPixels(subsampling),
+			tile_request.tile_x, tile_request.tile_y, subsampling);
 
-		if (read_w <= 0 || read_h <= 0)
+		if (src.isEmpty())
 		{
 			std::lock_guard<std::mutex> lock(queue_mutex);
 			loading_tiles.remove(tile_request_key);
 			continue;
 		}
 
-		auto const subsampling = std::max(1, tile_request.subsampling);
-		auto const output_w = output_size.width();
-		auto const output_h = output_size.height();
+		int const px = src.x();
+		int const py = src.y();
+		int const read_w = src.width();
+		int const read_h = src.height();
+
+		// Output is always ~block_w × block_h pixels. GDAL automatically
+		// selects the right server zoom level for the downsampling ratio.
+		auto const output_w = std::max(1, (read_w + subsampling - 1) / subsampling);
+		auto const output_h = std::max(1, (read_h + subsampling - 1) / subsampling);
 
 		QImage tile(output_w, output_h, tiled_raster_info.image_format);
 		if (tile.isNull())
@@ -976,45 +829,16 @@ void GdalTemplate::tileWorkerLoop(GDALDatasetH worker_dataset)
 		extra_arg.pProgressData = &cancellation_context;
 
 		CPLErrorReset();
-		CPLErr result = CE_None;
-		if (use_direct_overview)
-		{
-			for (int band_offset = 0; band_offset < tiled_raster_info.bands.count(); ++band_offset)
-			{
-				auto* base_band = GDALGetRasterBand(worker_dataset, tiled_raster_info.bands[band_offset]);
-				auto* overview_band = base_band ? GDALGetOverview(base_band, overview_plan.overview_index) : nullptr;
-				if (!overview_band)
-				{
-					result = CE_Failure;
-					break;
-				}
-
-				result = GDALRasterIOEx(
-					overview_band, GF_Read,
-					overview_plan.overview_rect.x(), overview_plan.overview_rect.y(),
-					overview_plan.overview_rect.width(), overview_plan.overview_rect.height(),
-					tile.bits() + tiled_raster_info.band_offset + band_offset * tiled_raster_info.band_space,
-					output_w, output_h,
-					GDT_Byte,
-					tiled_raster_info.pixel_space,
-					tile.bytesPerLine(),
-					&extra_arg);
-				if (result >= CE_Warning)
-					break;
-			}
-		}
-		else
-		{
-			result = GDALDatasetRasterIOEx(
-				worker_dataset, GF_Read,
-				px, py, read_w, read_h,
-				tile.bits() + tiled_raster_info.band_offset, output_w, output_h,
-				GDT_Byte,
-				tiled_raster_info.bands.count(), tiled_raster_info.bands.data(),
-				tiled_raster_info.pixel_space, tile.bytesPerLine(),
-				tiled_raster_info.band_space,
-				&extra_arg);
-		}
+		// GDAL automatically uses overviews when output_w < read_w.
+		auto result = GDALDatasetRasterIOEx(
+			worker_dataset, GF_Read,
+			px, py, read_w, read_h,
+			tile.bits() + tiled_raster_info.band_offset, output_w, output_h,
+			GDT_Byte,
+			tiled_raster_info.bands.count(), tiled_raster_info.bands.data(),
+			tiled_raster_info.pixel_space, tile.bytesPerLine(),
+			tiled_raster_info.band_space,
+			&extra_arg);
 
 		if (result >= CE_Warning)
 		{
@@ -1280,15 +1104,15 @@ int GdalTemplate::chooseTileSubsampling(double scale, const QSize& block_size)
 }
 
 
-QPoint GdalTemplate::sourceAlignmentOffsetPixels(int subsampling) const
+QPoint GdalTemplate::sourceAlignmentOffsetPixels(int /*subsampling*/) const
 {
-	if (!has_tiled_origin_tile || tiled_raster_info.block_size.isEmpty())
-		return {};
-
-	auto const safe_subsampling = std::max(1, subsampling);
-	return QPoint(
-		positiveModulo(tiled_origin_tile.x(), safe_subsampling) * tiled_raster_info.block_size.width(),
-		positiveModulo(tiled_origin_tile.y(), safe_subsampling) * tiled_raster_info.block_size.height());
+	// Alignment offsets are not used. The GDAL WMS/TMS driver has a bug
+	// where overview bands discard the sub-tile offset when TileX/TileY
+	// is not a multiple of the overview factor (the remainder bits of
+	// m_tx/m_ty are lost during right-shift). Instead of compensating
+	// here, we cap the subsampling to aligned levels in drawTemplate()
+	// and pad DataWindow origins in the online imagery builder.
+	return {};
 }
 
 
@@ -1321,17 +1145,16 @@ void GdalTemplate::evictCachedTilesToBudget()
 
 void GdalTemplate::markTileAreaDirty(int tile_x, int tile_y, int subsampling) const
 {
-	auto const source_rect = sourceRectForTile(
-		tiled_raster_size,
-		tiled_raster_info.block_size,
-		sourceAlignmentOffsetPixels(subsampling),
-		tile_x,
-		tile_y,
-		subsampling);
-	if (source_rect.isEmpty())
+	auto const src = sourceRectForTile(
+		tiled_raster_size, tiled_raster_info.block_size,
+		sourceAlignmentOffsetPixels(std::max(1, subsampling)),
+		tile_x, tile_y, std::max(1, subsampling));
+	if (src.isEmpty())
 		return;
 
-	auto const template_rect = templateRectForTileRect(source_rect, tiled_raster_size);
+	auto const half_w = tiled_raster_size.width() * 0.5;
+	auto const half_h = tiled_raster_size.height() * 0.5;
+	auto const template_rect = QRectF(src.x() - half_w, src.y() - half_h, src.width(), src.height());
 
 	QRectF map_rect;
 	rectIncludeSafe(map_rect, templateToMap(template_rect.topLeft()));

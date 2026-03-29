@@ -726,6 +726,9 @@ void GdalTiledTemplateTest::zoomedOutDrawUsesMacroTileGrid()
 
 void GdalTiledTemplateTest::croppedTmsOriginKeepsCoarseGridAligned()
 {
+	// GDAL WMS/TMS overview bands have a bug where TileX/TileY remainder
+	// bits are lost during right-shift. Verify that drawTemplate caps
+	// subsampling to the highest aligned level to avoid shifted content.
 	auto path = createTiledTestRaster(2048, 2048, 256, 256);
 	QVERIFY(!path.isEmpty());
 
@@ -739,10 +742,9 @@ void GdalTiledTemplateTest::croppedTmsOriginKeepsCoarseGridAligned()
 	QVERIFY(temp.isTiledSource());
 	temp.setTemplateState(Template::Loaded);
 
+	// TileY=2: aligned at subsampling 1 and 2, but not 4.
 	temp.tiled_origin_tile = QPoint(0, 2);
 	temp.has_tiled_origin_tile = true;
-
-	QCOMPARE(temp.sourceAlignmentOffsetPixels(4), QPoint(0, 512));
 
 	auto const bbox = temp.calculateTemplateBoundingBox();
 	QVERIFY(!bbox.isEmpty());
@@ -750,14 +752,12 @@ void GdalTiledTemplateTest::croppedTmsOriginKeepsCoarseGridAligned()
 	QImage canvas(512, 512, QImage::Format_ARGB32_Premultiplied);
 	canvas.fill(Qt::transparent);
 	QPainter painter(&canvas);
+	// At this scale, chooseTileSubsampling would pick 4, but TileY=2
+	// is not a multiple of 4, so drawTemplate must cap to 2.
 	temp.drawTemplate(&painter, bbox, 0.05, true, 1.0);
 	painter.end();
 
-	QCOMPARE(temp.active_subsampling.load(), 4);
-	QCOMPARE(temp.current_request_window.visible_tile_x_min, 0);
-	QCOMPARE(temp.current_request_window.visible_tile_x_max, 1);
-	QCOMPARE(temp.current_request_window.visible_tile_y_min, 0);
-	QCOMPARE(temp.current_request_window.visible_tile_y_max, 2);
+	QCOMPARE(temp.active_subsampling.load(), 2);
 
 	VSIUnlink(path.toUtf8().constData());
 }

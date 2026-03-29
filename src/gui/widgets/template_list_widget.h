@@ -121,6 +121,8 @@ protected:
 #endif
 	
 	void openTemplate();
+	void openOnlineTemplate();
+	void regenerateOnlineTemplate();
 	void deleteTemplate();
 	void duplicateTemplate();
 	void moveTemplateUp();

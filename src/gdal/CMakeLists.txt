@@ -19,6 +19,7 @@
 find_package(GDAL MODULE REQUIRED)
 find_package(Qt5Core REQUIRED)
 find_package(Qt5Gui REQUIRED)
+find_package(Qt5Network REQUIRED)
 find_package(Qt5Widgets REQUIRED)
 set(CMAKE_AUTOMOC ON)
  
@@ -36,6 +37,7 @@ set(MAPPER_GDAL_SOURCES
   kmz_groundoverlay_export.cpp
   ogr_file_format.cpp
   ogr_template.cpp
+  online_imagery_template_builder.cpp
   mapper-osmconf.ini
 )
 	
@@ -54,7 +56,7 @@ target_compile_definitions(mapper-gdal INTERFACE MAPPER_USE_GDAL)
 target_include_directories(mapper-gdal SYSTEM PRIVATE ${GDAL_INCLUDE_DIRS})
 target_include_directories(mapper-gdal PRIVATE "${PROJECT_SOURCE_DIR}/src")
 
-target_link_libraries(mapper-gdal ${GDAL_LIBRARIES} Qt5::Core Qt5::Gui Qt5::Widgets Mapper_Common)
+target_link_libraries(mapper-gdal ${GDAL_LIBRARIES} Qt5::Core Qt5::Gui Qt5::Network Qt5::Widgets Mapper_Common)
 
 set_target_properties(mapper-gdal PROPERTIES PREFIX "")
 

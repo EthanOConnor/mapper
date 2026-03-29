@@ -212,6 +212,7 @@ set(Mapper_Common_SRCS
   gui/widgets/symbol_widget.cpp
   gui/widgets/tag_select_widget.cpp
   gui/widgets/tags_widget.cpp
+  gui/widgets/online_template_dialog.cpp
   gui/widgets/template_list_widget.cpp
   gui/widgets/text_browser.cpp
   gui/widgets/toast.cpp
