@@ -1,0 +1,97 @@
+name: Android Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Git ref to build; leave blank to build the workflow ref itself
+        required: false
+      release_tag:
+        description: Existing release tag to upload the APK to; leave blank for artifact-only builds
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.release_tag || inputs.source_ref || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  android-arm64:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    env:
+      BUILD_DIR: build/android-release
+      SUPERBUILD_SOURCE_DIR: .tmp/superbuild
+      TARGET: aarch64-linux-android
+      TARGET_ABI: arm64-v8a
+      SOURCE_REF: ${{ inputs.source_ref != '' && inputs.source_ref || github.sha }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      APP_ID: org.openorienteering.mapper.coc
+    steps:
+      - name: Check out workflow source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Check out build source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          ref: ${{ env.SOURCE_REF }}
+          path: source-tree
+
+      - name: Set up Java 8
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "8"
+
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake doxygen graphviz ninja-build patch python3-lxml \
+            sharutils unzip zip \
+            '^libxcb.*-dev' libglu1-mesa-dev libx11-xcb-dev libxi-dev libxrender-dev
+
+      - name: Check out superbuild
+        run: |
+          git clone --depth 1 --branch master https://github.com/OpenOrienteering/superbuild.git "$SUPERBUILD_SOURCE_DIR"
+
+      - name: Compute artifact metadata
+        run: |
+          source_sha="$(git -C source-tree rev-parse --short=7 HEAD)"
+          echo "SOURCE_SHA=$source_sha" >> "$GITHUB_ENV"
+          echo "ASSET_NAME=OpenOrienteering-Mapper-android-${TARGET_ABI}-${source_sha}.apk" >> "$GITHUB_ENV"
+
+      - name: Build Android APK
+        env:
+          ANDROID_INSTALL_ROOT: ${{ github.workspace }}/.tmp/android-sdk
+        run: |
+          bash packaging/android/build-gh-apk.sh \
+            "$SUPERBUILD_SOURCE_DIR" \
+            source-tree \
+            "$BUILD_DIR" \
+            "$TARGET" \
+            "$APP_ID" \
+            "$BUILD_DIR/release/$ASSET_NAME"
+
+      - name: Upload Android APK as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-arm64-apk
+          path: ${{ env.BUILD_DIR }}/release/*.apk
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+      - name: Attach Android APK to release
+        if: ${{ env.RELEASE_TAG != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$RELEASE_TAG" "$BUILD_DIR/release/$ASSET_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
