@@ -67,6 +67,8 @@ jobs:
         run: ccache -s
 
       - name: Test
+        env:
+          QT_QPA_PLATFORM: offscreen
         run: |
           cd "$BUILD_DIR"
           ctest --output-on-failure -j $(nproc)
