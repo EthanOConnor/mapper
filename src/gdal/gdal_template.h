@@ -174,6 +174,7 @@ private:
 	                               int tile_y,
 	                               int subsampling);
 	int capSubsamplingForTmsAlignment(int subsampling) const;
+	int chooseTiledSubsampling(double scale) const;
 
 	GDALDatasetH tiled_dataset = nullptr;
 	GDALDatasetH worker_dataset = nullptr;

@@ -267,6 +267,8 @@ bool GdalTemplate::loadTemplateFileImpl()
 
 		tiled_raster_info = raster_info;
 		tiled_raster_size = raster_info.size;
+		tiled_origin_tile = {};
+		has_tiled_origin_tile = readTmsTileOrigin(template_path, &tiled_origin_tile);
 		available_georef = std::move(georef_options);
 
 		if (!is_georeferenced && isGeoreferencingUsable())
@@ -364,7 +366,7 @@ void GdalTemplate::updateRenderContext(const ViewRenderContext& context)
 		return;
 
 	auto const scale = std::max(getTemplateScaleX(), getTemplateScaleY()) * context.view_zoom;
-	auto const subsampling = chooseTileSubsampling(Util::mmToPixelPhysical(scale), tiled_raster_info.block_size);
+	auto const subsampling = chooseTiledSubsampling(Util::mmToPixelPhysical(scale));
 	auto const window = tileWindowForMapRect(context.visible_map_rect, subsampling);
 	auto const replace_pending_tiles = !(window == wanted_window);
 	wanted_window = window;
@@ -393,7 +395,7 @@ void GdalTemplate::drawTemplate(QPainter* painter, const QRectF& clip_rect, doub
 			dpi = painter->device()->logicalDpiX();
 		if (dpi > 0)
 			effective_scale *= dpi / 25.4;
-		subsampling = chooseTileSubsampling(effective_scale, tiled_raster_info.block_size);
+		subsampling = chooseTiledSubsampling(effective_scale);
 	}
 
 	auto const window = tileWindowForMapRect(clip_rect, subsampling);
@@ -476,6 +478,8 @@ void GdalTemplate::shutdownTiledSource()
 	tiled_raster_info = {};
 	tiled_raster_size = {};
 	wanted_window = {};
+	tiled_origin_tile = {};
+	has_tiled_origin_tile = false;
 }
 
 
@@ -816,6 +820,9 @@ int GdalTemplate::capSubsamplingForTmsAlignment(int subsampling) const
 	if (!has_tiled_origin_tile)
 		return subsampling;
 
+	// GDAL WMS/TMS overview bands lose the sub-tile remainder bits of TileX
+	// and TileY when the origin is not aligned with the overview factor.
+	// Restrict GDAL to overview levels that keep the cropped origin aligned.
 	while (subsampling > 1
 	       && (tiled_origin_tile.x() % subsampling != 0
 	           || tiled_origin_tile.y() % subsampling != 0))
@@ -823,6 +830,12 @@ int GdalTemplate::capSubsamplingForTmsAlignment(int subsampling) const
 		subsampling >>= 1;
 	}
 	return subsampling;
+}
+
+
+int GdalTemplate::chooseTiledSubsampling(double scale) const
+{
+	return capSubsamplingForTmsAlignment(chooseTileSubsampling(scale, tiled_raster_info.block_size));
 }
 
 
