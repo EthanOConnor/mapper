@@ -29,6 +29,7 @@
 #include <QByteArray>
 #include <QChar>
 #include <QDebug>
+#include <QFile>
 #include <QImageReader>
 #include <QImageWriter>
 #include <QMetaObject>
@@ -38,6 +39,7 @@
 #include <QRectF>
 #include <QString>
 #include <QVariant>
+#include <QXmlStreamReader>
 
 #include <cpl_conv.h>
 #include <gdal.h>
@@ -695,6 +697,76 @@ void GdalTemplate::markTileAreaDirty(int tile_x, int tile_y, int subsampling)
 }
 
 
+// static
+bool GdalTemplate::readTmsTileOrigin(const QString& template_path, QPoint* origin_tile)
+{
+	QFile xml_file(template_path);
+	if (!xml_file.open(QIODevice::ReadOnly | QIODevice::Text))
+		return false;
+
+	QXmlStreamReader xml(&xml_file);
+	bool is_tms_service = false;
+	bool in_data_window = false;
+	qint64 tile_x = 0;
+	qint64 tile_y = 0;
+	bool have_tile_x = false;
+	bool have_tile_y = false;
+
+	while (!xml.atEnd())
+	{
+		xml.readNext();
+		if (!xml.isStartElement())
+		{
+			if (in_data_window && xml.isEndElement() && xml.name() == QLatin1String("DataWindow"))
+				in_data_window = false;
+			continue;
+		}
+
+		if (xml.name() == QLatin1String("Service"))
+		{
+			auto const service_name = xml.attributes().value(QStringLiteral("name"));
+			is_tms_service = service_name.compare(QLatin1String("TMS"), Qt::CaseInsensitive) == 0;
+			continue;
+		}
+
+		if (xml.name() == QLatin1String("DataWindow"))
+		{
+			in_data_window = true;
+			continue;
+		}
+
+		if (!is_tms_service || !in_data_window)
+			continue;
+
+		if (xml.name() == QLatin1String("TileX"))
+		{
+			bool ok = false;
+			auto const value = xml.readElementText(QXmlStreamReader::SkipChildElements).trimmed().toLongLong(&ok);
+			if (!ok)
+				return false;
+			tile_x = value;
+			have_tile_x = true;
+		}
+		else if (xml.name() == QLatin1String("TileY"))
+		{
+			bool ok = false;
+			auto const value = xml.readElementText(QXmlStreamReader::SkipChildElements).trimmed().toLongLong(&ok);
+			if (!ok)
+				return false;
+			tile_y = value;
+			have_tile_y = true;
+		}
+	}
+
+	if (xml.hasError() || !is_tms_service || !have_tile_x || !have_tile_y)
+		return false;
+
+	if (origin_tile)
+		*origin_tile = QPoint(int(tile_x), int(tile_y));
+	return true;
+}
+
+
 GdalTemplate::TileWindow GdalTemplate::tileWindowForMapRect(const QRectF& map_rect, int subsampling) const
 {
 	TileWindow window;
@@ -735,6 +807,22 @@ GdalTileKey GdalTemplate::tileKey(int tile_x, int tile_y, int subsampling)
 int GdalTemplate::chooseTileSubsampling(double scale, const QSize& block_size)
 {
 	return tileSubsamplingForScale(scale, block_size);
+}
+
+
+int GdalTemplate::capSubsamplingForTmsAlignment(int subsampling) const
+{
+	subsampling = std::max(1, subsampling);
+	if (!has_tiled_origin_tile)
+		return subsampling;
+
+	while (subsampling > 1
+	       && (tiled_origin_tile.x() % subsampling != 0
+	           || tiled_origin_tile.y() % subsampling != 0))
+	{
+		subsampling >>= 1;
+	}
+	return subsampling;
 }
 
 

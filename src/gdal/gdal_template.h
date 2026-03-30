@@ -29,6 +29,7 @@
 
 #include <QHash>
 #include <QImage>
+#include <QPoint>
 #include <QSet>
 #include <QSize>
 #include <QString>
@@ -164,6 +165,7 @@ private:
 	void markTileAreaDirty(int tile_x, int tile_y, int subsampling);
 	TileWindow tileWindowForMapRect(const QRectF& map_rect, int subsampling) const;
 
+	static bool readTmsTileOrigin(const QString& template_path, QPoint* origin_tile);
 	static GdalTileKey tileKey(int tile_x, int tile_y, int subsampling);
 	static int chooseTileSubsampling(double scale, const QSize& block_size);
 	static QRect sourceRectForTile(const QSize& raster_size,
@@ -171,12 +173,15 @@ private:
 	                               int tile_x,
 	                               int tile_y,
 	                               int subsampling);
+	int capSubsamplingForTmsAlignment(int subsampling) const;
 
 	GDALDatasetH tiled_dataset = nullptr;
 	GDALDatasetH worker_dataset = nullptr;
 	GdalImageReader::RasterInfo tiled_raster_info;
 	QSize tiled_raster_size;
 	TileWindow wanted_window;
+	QPoint tiled_origin_tile;
+	bool has_tiled_origin_tile = false;
 
 	std::thread worker_thread;
 	std::atomic<bool> worker_stop{false};

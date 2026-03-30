@@ -24,6 +24,7 @@
 #include <QBuffer>
 #include <QCoreApplication>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QTemporaryDir>
 #include <QXmlStreamReader>
@@ -118,6 +119,16 @@ QString createTiledGeoTiff(const QString& path,
 	return (result < CE_Warning) ? path : QString{};
 }
 
+QString writeTextFile(const QString& path, const QByteArray& contents)
+{
+	QFile file(path);
+	if (!file.open(QIODevice::WriteOnly | QIODevice::Text))
+		return {};
+	if (file.write(contents) != contents.size())
+		return {};
+	return path;
+}
+
 }  // namespace
 
 
@@ -159,6 +170,47 @@ private slots:
 		QVERIFY(!small_tiled_path.isEmpty());
 		auto small_tiled_info = GdalImageReader(small_tiled_path).readRasterInfo();
 		QCOMPARE(small_tiled_info.block_size, QSize());
+	}
+
+	void tmsTileOriginParsingTest()
+	{
+		QTemporaryDir dir;
+		QVERIFY(dir.isValid());
+
+		auto const tms_xml_path = writeTextFile(
+			dir.filePath(QStringLiteral("tms.xml")),
+			R"(<?xml version="1.0" encoding="UTF-8"?>
+<GDAL_WMS>
+  <Service name="TMS">
+    <ServerUrl>https://example.test/${z}/${x}/${y}.png</ServerUrl>
+  </Service>
+  <DataWindow>
+    <TileX>84192</TileX>
+    <TileY>183072</TileY>
+  </DataWindow>
+</GDAL_WMS>
+)");
+		QVERIFY(!tms_xml_path.isEmpty());
+
+		QPoint origin_tile;
+		QVERIFY(GdalTemplate::readTmsTileOrigin(tms_xml_path, &origin_tile));
+		QCOMPARE(origin_tile, QPoint(84192, 183072));
+
+		auto const wms_xml_path = writeTextFile(
+			dir.filePath(QStringLiteral("wms.xml")),
+			R"(<?xml version="1.0" encoding="UTF-8"?>
+<GDAL_WMS>
+  <Service name="WMS">
+    <ServerUrl>https://example.test/wms</ServerUrl>
+  </Service>
+  <DataWindow>
+    <TileX>10</TileX>
+    <TileY>20</TileY>
+  </DataWindow>
+</GDAL_WMS>
+)");
+		QVERIFY(!wms_xml_path.isEmpty());
+		QVERIFY(!GdalTemplate::readTmsTileOrigin(wms_xml_path, &origin_tile));
 	}
 
 	void tiledCoreMathTest()
@@ -204,6 +256,16 @@ private slots:
 		QCOMPARE(edge_window.tile_x_max, 1);
 		QCOMPARE(edge_window.tile_y_max, 0);
 		QCOMPARE(edge_window.subsampling, 2);
+
+		QCOMPARE(temp.capSubsamplingForTmsAlignment(8), 8);
+		temp.has_tiled_origin_tile = true;
+		temp.tiled_origin_tile = QPoint(6, 12);
+		QCOMPARE(temp.capSubsamplingForTmsAlignment(8), 2);
+		QCOMPARE(temp.capSubsamplingForTmsAlignment(4), 2);
+		QCOMPARE(temp.capSubsamplingForTmsAlignment(2), 2);
+		temp.tiled_origin_tile = QPoint(84192, 183072);
+		QCOMPARE(temp.capSubsamplingForTmsAlignment(64), 32);
+		QCOMPARE(temp.capSubsamplingForTmsAlignment(32), 32);
 
 		temp.tiled_dataset = nullptr;
 	}
