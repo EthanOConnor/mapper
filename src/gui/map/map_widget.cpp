@@ -130,10 +130,12 @@ void MapWidget::setMapView(MapView* view)
 	{
 		if (this->view)
 		{
-			auto* map = view->getMap();
+			auto* map = this->view->getMap();
 			map->removeMapWidget(this);
 			disconnect(map);
 			disconnect(this->view);
+			for (int i = 0; i < map->getNumTemplates(); ++i)
+				disconnect(map->getTemplate(i), nullptr, this, nullptr);
 		}
 		
 		this->view = view;
@@ -152,7 +154,12 @@ void MapWidget::setMapView(MapView* view)
 			connect(map, &Map::symbolDeleted, this, &MapWidget::updatePlaceholder);
 			connect(map, &Map::templateAdded, this, &MapWidget::updatePlaceholder);
 			connect(map, &Map::templateDeleted, this, &MapWidget::updatePlaceholder);
-			connect(map, &Map::templateAdded, this, &MapWidget::scheduleRenderContextUpdate);
+			for (int i = 0; i < map->getNumTemplates(); ++i)
+				connect(map->getTemplate(i), &Template::templateStateChanged, this, &MapWidget::scheduleRenderContextUpdate);
+			connect(map, &Map::templateAdded, this, [this](int, Template* temp) {
+				connect(temp, &Template::templateStateChanged, this, &MapWidget::scheduleRenderContextUpdate);
+				scheduleRenderContextUpdate();
+			});
 			connect(map, &Map::templateChanged, this, &MapWidget::scheduleRenderContextUpdate);
 
 			scheduleRenderContextUpdate();
