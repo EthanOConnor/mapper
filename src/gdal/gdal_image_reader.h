@@ -84,6 +84,7 @@ public:
 	{
 		QVarLengthArray<int, 4> bands;
 		QSize size;
+		QSize block_size;       ///< The native block/tile size, or empty if not tiled.
 		QImage::Format image_format = QImage::Format_Invalid;
 		std::function<void(QImage&)> postprocessing = GdalImageReader::noop;
 		int pixel_space = 1;   ///< The byte offset from one pixel to the next one.

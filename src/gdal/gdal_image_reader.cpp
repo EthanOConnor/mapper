@@ -270,6 +270,21 @@ GdalImageReader::RasterInfo GdalImageReader::readRasterInfo() const
 			}
 		}
 	}
+
+	if (!raster.bands.empty())
+	{
+		auto raster_band = GDALGetRasterBand(dataset, raster.bands.front());
+		GDALGetBlockSize(raster_band, &raster.block_size.rwidth(), &raster.block_size.rheight());
+		// Only treat as tiled if the block size is meaningfully smaller than
+		// the raster and represents true tiles rather than strip layout.
+		auto const min_tile_dim = 64;
+		if (raster.block_size == raster.size
+		    || raster.block_size.width() < min_tile_dim
+		    || raster.block_size.height() < min_tile_dim)
+		{
+			raster.block_size = {};
+		}
+	}
 	
 	return raster;
 }

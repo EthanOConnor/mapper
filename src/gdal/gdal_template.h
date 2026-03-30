@@ -20,18 +20,54 @@
 #ifndef OPENORIENTEERING_GDAL_TEMPLATE_H
 #define OPENORIENTEERING_GDAL_TEMPLATE_H
 
+#include <atomic>
+#include <condition_variable>
+#include <deque>
+#include <mutex>
+#include <thread>
 #include <vector>
 
+#include <QHash>
+#include <QImage>
+#include <QSet>
+#include <QSize>
 #include <QString>
 
+#include "gdal/gdal_image_reader.h"
 #include "templates/template.h"
 #include "templates/template_image.h"
 
 class QByteArray;
+class QPainter;
+class QWidget;
+class QRectF;
+
+typedef void* GDALDatasetH;
 
 namespace OpenOrienteering {
 
 class Map;
+
+struct GdalTileKey
+{
+	int tile_x = 0;
+	int tile_y = 0;
+	int subsampling = 1;
+
+	bool operator==(const GdalTileKey& other) const
+	{
+		return tile_x == other.tile_x
+		       && tile_y == other.tile_y
+		       && subsampling == other.subsampling;
+	}
+};
+
+inline uint qHash(const GdalTileKey& key, uint seed = 0)
+{
+	seed = ::qHash(key.tile_x, seed);
+	seed = ::qHash(key.tile_y, seed);
+	return ::qHash(key.subsampling, seed);
+}
 
 
 /**
@@ -59,11 +95,92 @@ public:
 	LookupResult tryToFindTemplateFile(const QString& map_path) override;
 	
 	bool fileExists() const override;
+
+	bool isTiledSource() const;
 	
 protected:
 	bool loadTemplateFileImpl() override;
+	bool postLoadSetup(QWidget* dialog_parent, bool& out_center_in_view) override;
+	void unloadTemplateFileImpl() override;
+
+	void updateRenderContext(const ViewRenderContext& context) override;
+	void drawTemplate(QPainter* painter, const QRectF& clip_rect, double scale, bool on_screen, qreal opacity) const override;
+	QRectF getTemplateExtent() const override;
 	
 	bool applyCornerPassPoints();
+	void setupTiledGeoreferencing();
+	void updateTiledPosFromGeoreferencing();
+
+private:
+	struct TileWindow
+	{
+		int tile_x_min = 0;
+		int tile_y_min = 0;
+		int tile_x_max = -1;
+		int tile_y_max = -1;
+		int subsampling = 1;
+
+		bool isEmpty() const
+		{
+			return tile_x_min > tile_x_max || tile_y_min > tile_y_max;
+		}
+
+		bool operator==(const TileWindow& other) const
+		{
+			return tile_x_min == other.tile_x_min
+			       && tile_y_min == other.tile_y_min
+			       && tile_x_max == other.tile_x_max
+			       && tile_y_max == other.tile_y_max
+			       && subsampling == other.subsampling;
+		}
+	};
+
+	struct TileRequest
+	{
+		int tile_x = 0;
+		int tile_y = 0;
+		int subsampling = 1;
+	};
+
+	using CacheOrder = std::deque<GdalTileKey>;
+	using TileQueue = std::deque<TileRequest>;
+
+	struct CachedTileEntry
+	{
+		QImage image;
+	};
+
+	void shutdownTiledSource();
+	void tileWorkerLoop();
+	void queueWantedTiles(const TileWindow& window, bool replace_pending_tiles);
+	QImage readTileImage(GDALDatasetH dataset, int tile_x, int tile_y, int subsampling) const;
+	void onTileLoaded(const GdalTileKey& key, QImage tile_image);
+	void onTileLoadFailed(const GdalTileKey& key);
+	void evictCachedTilesToBudget();
+	void markTileAreaDirty(int tile_x, int tile_y, int subsampling);
+	TileWindow tileWindowForMapRect(const QRectF& map_rect, int subsampling) const;
+
+	static GdalTileKey tileKey(int tile_x, int tile_y, int subsampling);
+	static int chooseTileSubsampling(double scale, const QSize& block_size);
+
+	GDALDatasetH tiled_dataset = nullptr;
+	GDALDatasetH worker_dataset = nullptr;
+	GdalImageReader::RasterInfo tiled_raster_info;
+	QSize tiled_raster_size;
+	TileWindow wanted_window;
+
+	std::thread worker_thread;
+	std::atomic<bool> worker_stop{false};
+	std::mutex queue_mutex;
+	std::condition_variable queue_cv;
+	TileQueue tile_queue;
+	QSet<GdalTileKey> queued_tiles;
+	QSet<GdalTileKey> loading_tiles;
+
+	CacheOrder cache_order;
+	QHash<GdalTileKey, CachedTileEntry> tile_cache;
+	qsizetype tile_cache_bytes = 0;
+	qsizetype tile_cache_budget_bytes = 512 * 1024 * 1024;
 };
 
 
