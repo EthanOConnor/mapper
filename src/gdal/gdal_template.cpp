@@ -814,9 +814,9 @@ int GdalTemplate::chooseTileSubsampling(double scale, const QSize& block_size)
 }
 
 
-int GdalTemplate::capSubsamplingForTmsAlignment(int subsampling) const
+int GdalTemplate::chooseTiledSubsampling(double scale) const
 {
-	subsampling = std::max(1, subsampling);
+	auto subsampling = chooseTileSubsampling(scale, tiled_raster_info.block_size);
 	if (!has_tiled_origin_tile)
 		return subsampling;
 
@@ -830,12 +830,6 @@ int GdalTemplate::capSubsamplingForTmsAlignment(int subsampling) const
 		subsampling >>= 1;
 	}
 	return subsampling;
-}
-
-
-int GdalTemplate::chooseTiledSubsampling(double scale) const
-{
-	return capSubsamplingForTmsAlignment(chooseTileSubsampling(scale, tiled_raster_info.block_size));
 }
 
 

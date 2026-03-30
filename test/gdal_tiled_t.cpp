@@ -257,16 +257,12 @@ private slots:
 		QCOMPARE(edge_window.tile_y_max, 0);
 		QCOMPARE(edge_window.subsampling, 2);
 
-		QCOMPARE(temp.capSubsamplingForTmsAlignment(8), 8);
+		QCOMPARE(temp.chooseTiledSubsampling(4.0), 1);
 		temp.has_tiled_origin_tile = true;
 		temp.tiled_origin_tile = QPoint(6, 12);
-		QCOMPARE(temp.capSubsamplingForTmsAlignment(8), 2);
-		QCOMPARE(temp.capSubsamplingForTmsAlignment(4), 2);
-		QCOMPARE(temp.capSubsamplingForTmsAlignment(2), 2);
 		QCOMPARE(temp.chooseTiledSubsampling(0.125), 2);
 		temp.tiled_origin_tile = QPoint(84192, 183072);
-		QCOMPARE(temp.capSubsamplingForTmsAlignment(64), 32);
-		QCOMPARE(temp.capSubsamplingForTmsAlignment(32), 32);
+		QCOMPARE(temp.chooseTiledSubsampling(0.03), 32);
 		QCOMPARE(temp.chooseTiledSubsampling(0.01), 32);
 
 		temp.tiled_dataset = nullptr;
