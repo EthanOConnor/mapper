@@ -46,6 +46,8 @@ typedef void* GDALDatasetH;
 
 namespace OpenOrienteering {
 
+class GdalTiledTest;
+
 class Map;
 
 struct GdalTileKey
@@ -112,6 +114,8 @@ protected:
 	void updateTiledPosFromGeoreferencing();
 
 private:
+	friend class GdalTiledTest;
+
 	struct TileWindow
 	{
 		int tile_x_min = 0;
@@ -162,6 +166,11 @@ private:
 
 	static GdalTileKey tileKey(int tile_x, int tile_y, int subsampling);
 	static int chooseTileSubsampling(double scale, const QSize& block_size);
+	static QRect sourceRectForTile(const QSize& raster_size,
+	                               const QSize& block_size,
+	                               int tile_x,
+	                               int tile_y,
+	                               int subsampling);
 
 	GDALDatasetH tiled_dataset = nullptr;
 	GDALDatasetH worker_dataset = nullptr;

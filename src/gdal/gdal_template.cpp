@@ -107,11 +107,11 @@ int maxTileIndexForRasterExtent(int raster_extent, qint64 tile_span)
 	return int((qint64(raster_extent) - 1) / tile_span);
 }
 
-QRect sourceRectForTile(const QSize& raster_size,
-                        const QSize& block_size,
-                        int tile_x,
-                        int tile_y,
-                        int subsampling)
+QRect sourceRectForTileImpl(const QSize& raster_size,
+                            const QSize& block_size,
+                            int tile_x,
+                            int tile_y,
+                            int subsampling)
 {
 	auto const safe_subsampling = std::max(1, subsampling);
 	auto const tile_span_w = qint64(block_size.width()) * safe_subsampling;
@@ -731,6 +731,17 @@ GdalTileKey GdalTemplate::tileKey(int tile_x, int tile_y, int subsampling)
 int GdalTemplate::chooseTileSubsampling(double scale, const QSize& block_size)
 {
 	return tileSubsamplingForScale(scale, block_size);
+}
+
+
+// static
+QRect GdalTemplate::sourceRectForTile(const QSize& raster_size,
+                                      const QSize& block_size,
+                                      int tile_x,
+                                      int tile_y,
+                                      int subsampling)
+{
+	return sourceRectForTileImpl(raster_size, block_size, tile_x, tile_y, subsampling);
 }
 
 
