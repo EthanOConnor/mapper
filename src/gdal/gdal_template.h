@@ -156,7 +156,7 @@ private:
 	};
 
 	void shutdownTiledSource();
-	void tileWorkerLoop();
+	void tileWorkerLoop(GDALDatasetH worker_dataset);
 	void queueWantedTiles(const TileWindow& window, bool replace_pending_tiles);
 	QImage readTileImage(GDALDatasetH dataset, int tile_x, int tile_y, int subsampling) const;
 	void onTileLoaded(const GdalTileKey& key, QImage tile_image);
@@ -177,17 +177,19 @@ private:
 	static QRectF sourceRectWithinCachedTile(const QRect& desired_rect,
 	                                         const QRect& cached_rect,
 	                                         const QSize& cached_image_size);
+	static int workerCountForDriverName(const char* driver_name);
 	int chooseTiledSubsampling(double scale) const;
+	int workerCountForSource() const;
 
 	GDALDatasetH tiled_dataset = nullptr;
-	GDALDatasetH worker_dataset = nullptr;
 	GdalImageReader::RasterInfo tiled_raster_info;
 	QSize tiled_raster_size;
 	TileWindow wanted_window;
 	QPoint tiled_origin_tile;
 	bool has_tiled_origin_tile = false;
 
-	std::thread worker_thread;
+	std::vector<GDALDatasetH> worker_datasets;
+	std::vector<std::thread> worker_threads;
 	std::atomic<bool> worker_stop{false};
 	std::mutex queue_mutex;
 	std::condition_variable queue_cv;

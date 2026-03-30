@@ -129,6 +129,37 @@ QString writeTextFile(const QString& path, const QByteArray& contents)
 	return path;
 }
 
+QString createTmsXml(const QString& path)
+{
+	return writeTextFile(
+		path,
+		R"(<?xml version="1.0" encoding="UTF-8"?>
+<GDAL_WMS>
+  <Service name="TMS">
+    <ServerUrl>https://example.test/${z}/${x}/${y}.png</ServerUrl>
+  </Service>
+  <DataWindow>
+    <UpperLeftX>-13618288.0</UpperLeftX>
+    <UpperLeftY>6050654.0</UpperLeftY>
+    <LowerRightX>-13617776.0</LowerRightX>
+    <LowerRightY>6050142.0</LowerRightY>
+    <SizeX>512</SizeX>
+    <SizeY>512</SizeY>
+    <TileLevel>18</TileLevel>
+    <TileX>84192</TileX>
+    <TileY>183072</TileY>
+    <YOrigin>top</YOrigin>
+  </DataWindow>
+  <Projection>EPSG:3857</Projection>
+  <BlockSizeX>256</BlockSizeX>
+  <BlockSizeY>256</BlockSizeY>
+  <BandsCount>3</BandsCount>
+  <ZeroBlockHttpCodes>404</ZeroBlockHttpCodes>
+  <Cache />
+</GDAL_WMS>
+)");
+}
+
 }  // namespace
 
 
@@ -177,19 +208,7 @@ private slots:
 		QTemporaryDir dir;
 		QVERIFY(dir.isValid());
 
-		auto const tms_xml_path = writeTextFile(
-			dir.filePath(QStringLiteral("tms.xml")),
-			R"(<?xml version="1.0" encoding="UTF-8"?>
-<GDAL_WMS>
-  <Service name="TMS">
-    <ServerUrl>https://example.test/${z}/${x}/${y}.png</ServerUrl>
-  </Service>
-  <DataWindow>
-    <TileX>84192</TileX>
-    <TileY>183072</TileY>
-  </DataWindow>
-</GDAL_WMS>
-)");
+		auto const tms_xml_path = createTmsXml(dir.filePath(QStringLiteral("tms.xml")));
 		QVERIFY(!tms_xml_path.isEmpty());
 
 		QPoint origin_tile;
@@ -285,6 +304,29 @@ private slots:
 		temp.tiled_dataset = nullptr;
 	}
 
+	void workerCountForSourceTest()
+	{
+		QTemporaryDir dir;
+		QVERIFY(dir.isValid());
+
+		auto tiled_path = createTiledGeoTiff(dir.filePath(QStringLiteral("local.tif")),
+		                                     QSize(128, 128),
+		                                     QSize(64, 64),
+		                                     true);
+		QVERIFY(!tiled_path.isEmpty());
+
+		Map map;
+
+		GdalTemplate local_template(tiled_path, &map);
+		local_template.tiled_dataset = GDALOpen(tiled_path.toUtf8(), GA_ReadOnly);
+		QVERIFY(local_template.tiled_dataset);
+		QCOMPARE(local_template.workerCountForSource(), 1);
+		QCOMPARE(GdalTemplate::workerCountForDriverName("GTiff"), 1);
+		QCOMPARE(GdalTemplate::workerCountForDriverName("WMS"), 4);
+		QCOMPARE(GdalTemplate::workerCountForDriverName(nullptr), 1);
+		local_template.shutdownTiledSource();
+	}
+
 	void duplicateLoadedTiledTemplateTest()
 	{
 		QTemporaryDir dir;
@@ -309,6 +351,9 @@ private slots:
 		QCOMPARE(gdal_template->getTemplateState(), Template::Loaded);
 		QVERIFY(gdal_template->isTiledSource());
 		QVERIFY(gdal_template->isTemplateGeoreferenced());
+		QCOMPARE(gdal_template->workerCountForSource(), 1);
+		QCOMPARE(gdal_template->worker_datasets.size(), std::size_t(1));
+		QCOMPARE(gdal_template->worker_threads.size(), std::size_t(1));
 
 		std::unique_ptr<Template> duplicate{gdal_template->duplicate()};
 		QVERIFY(duplicate);
@@ -318,6 +363,9 @@ private slots:
 		QVERIFY(duplicate_gdal);
 		QVERIFY(duplicate_gdal->isTiledSource());
 		QVERIFY(duplicate_gdal->isTemplateGeoreferenced());
+		QCOMPARE(duplicate_gdal->workerCountForSource(), 1);
+		QCOMPARE(duplicate_gdal->worker_datasets.size(), std::size_t(1));
+		QCOMPARE(duplicate_gdal->worker_threads.size(), std::size_t(1));
 	}
 
 	void roundTripGeoreferencedTiledTemplateTest()

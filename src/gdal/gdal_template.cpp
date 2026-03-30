@@ -246,16 +246,6 @@ bool GdalTemplate::loadTemplateFileImpl()
 			return false;
 		}
 
-		CPLErrorReset();
-		worker_dataset = GDALOpen(template_path.toUtf8(), GA_ReadOnly);
-		if (!worker_dataset)
-		{
-			setErrorString(tr("Failed to open tiled raster worker: %1")
-			               .arg(QString::fromUtf8(CPLGetLastErrorMsg())));
-			shutdownTiledSource();
-			return false;
-		}
-
 		if (raster_info.image_format == QImage::Format_Indexed8
 		    && !raster_info.bands.empty())
 		{
@@ -294,8 +284,26 @@ bool GdalTemplate::loadTemplateFileImpl()
 			}
 		}
 
+		auto const worker_count = workerCountForSource();
+		worker_datasets.reserve(worker_count);
+		for (int i = 0; i < worker_count; ++i)
+		{
+			CPLErrorReset();
+			auto worker_dataset = GDALOpen(template_path.toUtf8(), GA_ReadOnly);
+			if (!worker_dataset)
+			{
+				setErrorString(tr("Failed to open tiled raster worker: %1")
+				               .arg(QString::fromUtf8(CPLGetLastErrorMsg())));
+				shutdownTiledSource();
+				return false;
+			}
+			worker_datasets.push_back(worker_dataset);
+		}
+
 		worker_stop = false;
-		worker_thread = std::thread(&GdalTemplate::tileWorkerLoop, this);
+		worker_threads.reserve(worker_datasets.size());
+		for (auto worker_dataset : worker_datasets)
+			worker_threads.emplace_back(&GdalTemplate::tileWorkerLoop, this, worker_dataset);
 		return true;
 	}
 
@@ -453,19 +461,22 @@ QRectF GdalTemplate::getTemplateExtent() const
 
 void GdalTemplate::shutdownTiledSource()
 {
-	if (worker_thread.joinable())
+	worker_stop = true;
+	queue_cv.notify_all();
+	for (auto& worker_thread : worker_threads)
 	{
-		worker_stop = true;
-		queue_cv.notify_all();
-		worker_thread.join();
+		if (worker_thread.joinable())
+			worker_thread.join();
 	}
+	worker_threads.clear();
 	worker_stop = false;
 
-	if (worker_dataset)
+	for (auto worker_dataset : worker_datasets)
 	{
-		GDALClose(worker_dataset);
-		worker_dataset = nullptr;
+		if (worker_dataset)
+			GDALClose(worker_dataset);
 	}
+	worker_datasets.clear();
 	if (tiled_dataset)
 	{
 		GDALClose(tiled_dataset);
@@ -490,7 +501,7 @@ void GdalTemplate::shutdownTiledSource()
 }
 
 
-void GdalTemplate::tileWorkerLoop()
+void GdalTemplate::tileWorkerLoop(GDALDatasetH worker_dataset)
 {
 	while (true)
 	{
@@ -596,7 +607,7 @@ void GdalTemplate::queueWantedTiles(const TileWindow& window, bool replace_pendi
 			queued_tiles.insert(missing.key);
 		}
 	}
-	queue_cv.notify_one();
+	queue_cv.notify_all();
 }
 
 
@@ -879,6 +890,23 @@ int GdalTemplate::chooseTiledSubsampling(double scale) const
 		subsampling >>= 1;
 	}
 	return subsampling;
+}
+
+
+int GdalTemplate::workerCountForSource() const
+{
+	if (!tiled_dataset)
+		return 1;
+
+	auto* driver = GDALGetDatasetDriver(tiled_dataset);
+	auto const driver_name = driver ? GDALGetDriverShortName(driver) : nullptr;
+	return workerCountForDriverName(driver_name);
+}
+
+
+int GdalTemplate::workerCountForDriverName(const char* driver_name)
+{
+	return driver_name && qstrcmp(driver_name, "WMS") == 0 ? 4 : 1;
 }
 
 
