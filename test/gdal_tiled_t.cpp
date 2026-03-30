@@ -236,6 +236,14 @@ private slots:
 		         QRect(0, 0, 128, 128));
 		QCOMPARE(GdalTemplate::sourceRectForTile(QSize(130, 130), QSize(64, 64), 2, 2, 2),
 		         QRect());
+		QCOMPARE(GdalTemplate::sourceRectWithinCachedTile(QRect(64, 0, 64, 64),
+		                                                  QRect(0, 0, 128, 128),
+		                                                  QSize(64, 64)),
+		         QRectF(32.0, 0.0, 32.0, 32.0));
+		QCOMPARE(GdalTemplate::sourceRectWithinCachedTile(QRect(128, 0, 2, 64),
+		                                                  QRect(0, 0, 130, 128),
+		                                                  QSize(65, 64)),
+		         QRectF(64.0, 0.0, 1.0, 32.0));
 
 		Map map;
 		GdalTemplate temp(QStringLiteral("dummy.tif"), &map);
@@ -264,6 +272,15 @@ private slots:
 		temp.tiled_origin_tile = QPoint(84192, 183072);
 		QCOMPARE(temp.chooseTiledSubsampling(0.03), 32);
 		QCOMPARE(temp.chooseTiledSubsampling(0.01), 32);
+
+		auto const coarse_key = GdalTemplate::tileKey(0, 0, 2);
+		temp.tile_cache.insert(coarse_key, GdalTemplate::CachedTileEntry{ QImage(64, 64, QImage::Format_ARGB32_Premultiplied) });
+
+		QRectF fallback_source_rect;
+		auto const* fallback = temp.findBestCachedTile(1, 0, 1, &fallback_source_rect);
+		QVERIFY(fallback);
+		QCOMPARE(fallback->size(), QSize(64, 64));
+		QCOMPARE(fallback_source_rect, QRectF(32.0, 0.0, 32.0, 32.0));
 
 		temp.tiled_dataset = nullptr;
 	}

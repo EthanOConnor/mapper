@@ -420,7 +420,14 @@ void GdalTemplate::drawTemplate(QPainter* painter, const QRectF& clip_rect, doub
 				continue;
 			}
 
-			if (!on_screen)
+			if (on_screen)
+			{
+				QRectF fallback_source_rect;
+				auto const* fallback = findBestCachedTile(tx, ty, subsampling, &fallback_source_rect);
+				if (fallback)
+					painter->drawImage(dest_rect, *fallback, fallback_source_rect);
+			}
+			else
 			{
 				auto tile = readTileImage(tiled_dataset, tx, ty, subsampling);
 				if (!tile.isNull())
@@ -701,6 +708,48 @@ void GdalTemplate::markTileAreaDirty(int tile_x, int tile_y, int subsampling)
 }
 
 
+const QImage* GdalTemplate::findBestCachedTile(int tile_x, int tile_y, int subsampling, QRectF* source_rect) const
+{
+	auto const desired_rect = sourceRectForTile(
+		tiled_raster_size,
+		tiled_raster_info.block_size,
+		tile_x,
+		tile_y,
+		subsampling);
+	if (desired_rect.isEmpty())
+		return nullptr;
+
+	auto const max_subsampling = std::max(1, std::min(tiled_raster_info.block_size.width(),
+	                                                   tiled_raster_info.block_size.height()));
+	auto const safe_subsampling = std::max(1, subsampling);
+	int coarser_tile_x = tile_x / 2;
+	int coarser_tile_y = tile_y / 2;
+	for (int coarser_subsampling = safe_subsampling * 2;
+	     coarser_subsampling <= max_subsampling;
+	     coarser_subsampling <<= 1, coarser_tile_x /= 2, coarser_tile_y /= 2)
+	{
+		auto it = tile_cache.constFind(tileKey(coarser_tile_x, coarser_tile_y, coarser_subsampling));
+		if (it == tile_cache.constEnd())
+			continue;
+
+		auto const cached_rect = sourceRectForTile(
+			tiled_raster_size,
+			tiled_raster_info.block_size,
+			coarser_tile_x,
+			coarser_tile_y,
+			coarser_subsampling);
+		if (!cached_rect.contains(desired_rect))
+			continue;
+
+		if (source_rect)
+			*source_rect = sourceRectWithinCachedTile(desired_rect, cached_rect, it.value().image.size());
+		return &it.value().image;
+	}
+
+	return nullptr;
+}
+
+
 // static
 bool GdalTemplate::readTmsTileOrigin(const QString& template_path, QPoint* origin_tile)
 {
@@ -841,6 +890,23 @@ QRect GdalTemplate::sourceRectForTile(const QSize& raster_size,
                                       int subsampling)
 {
 	return sourceRectForTileImpl(raster_size, block_size, tile_x, tile_y, subsampling);
+}
+
+
+// static
+QRectF GdalTemplate::sourceRectWithinCachedTile(const QRect& desired_rect,
+                                                const QRect& cached_rect,
+                                                const QSize& cached_image_size)
+{
+	if (cached_rect.isEmpty() || cached_image_size.isEmpty())
+		return QRectF();
+
+	auto const scale_x = cached_image_size.width() / double(cached_rect.width());
+	auto const scale_y = cached_image_size.height() / double(cached_rect.height());
+	return QRectF((desired_rect.x() - cached_rect.x()) * scale_x,
+	              (desired_rect.y() - cached_rect.y()) * scale_y,
+	              desired_rect.width() * scale_x,
+	              desired_rect.height() * scale_y);
 }
 
 

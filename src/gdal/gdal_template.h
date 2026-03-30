@@ -164,6 +164,7 @@ private:
 	void evictCachedTilesToBudget();
 	void markTileAreaDirty(int tile_x, int tile_y, int subsampling);
 	TileWindow tileWindowForMapRect(const QRectF& map_rect, int subsampling) const;
+	const QImage* findBestCachedTile(int tile_x, int tile_y, int subsampling, QRectF* source_rect) const;
 
 	static bool readTmsTileOrigin(const QString& template_path, QPoint* origin_tile);
 	static GdalTileKey tileKey(int tile_x, int tile_y, int subsampling);
@@ -173,6 +174,9 @@ private:
 	                               int tile_x,
 	                               int tile_y,
 	                               int subsampling);
+	static QRectF sourceRectWithinCachedTile(const QRect& desired_rect,
+	                                         const QRect& cached_rect,
+	                                         const QSize& cached_image_size);
 	int chooseTiledSubsampling(double scale) const;
 
 	GDALDatasetH tiled_dataset = nullptr;
