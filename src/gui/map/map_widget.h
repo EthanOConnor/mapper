@@ -66,6 +66,7 @@ class MapEditorTool;
 class PieMenu;
 class Template;
 class TouchCursor;
+struct ViewRenderContext;
 
 
 /**
@@ -458,6 +459,13 @@ private:
 	
 	/** Draws a help message at the center of the MapWidget. */
 	void showHelpMessage(QPainter* painter, const QString& text) const;
+
+	/** Schedules publication of the current view render context. */
+	void scheduleRenderContextUpdate();
+	/** Publishes the latest view render context to visible loaded templates. */
+	void publishRenderContext();
+	/** Builds the current shared view render context snapshot. */
+	ViewRenderContext currentViewRenderContext() const;
 	
 	/**
 	 * Updates the content of the zoom display.
@@ -492,6 +500,8 @@ private:
 	bool pinching;
 	qreal pinching_factor;
 	QPoint pinching_center;
+	bool render_context_update_scheduled;
+	quint64 render_context_sequence;
 	
 	// Panning (operation)
 	QPoint pan_offset;

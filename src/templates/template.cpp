@@ -116,6 +116,11 @@ Q_STATIC_ASSERT(std::is_nothrow_move_constructible<TemplateTransform>::value);
 Q_STATIC_ASSERT(std::is_nothrow_copy_assignable<TemplateTransform>::value);
 Q_STATIC_ASSERT(std::is_nothrow_move_assignable<TemplateTransform>::value);
 
+void Template::updateRenderContext(const ViewRenderContext& context)
+{
+	Q_UNUSED(context);
+}
+
 // static
 TemplateTransform TemplateTransform::fromQTransform(const QTransform& qt) noexcept
 {

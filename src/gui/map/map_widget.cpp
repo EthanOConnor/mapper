@@ -94,6 +94,8 @@ MapWidget::MapWidget(bool show_help, bool force_antialiasing, QWidget* parent)
  , dragging(false)
  , pinching(false)
  , pinching_factor(1.0)
+ , render_context_update_scheduled(false)
+ , render_context_sequence(0)
  , below_template_cache_dirty_rect(rect())
  , above_template_cache_dirty_rect(rect())
  , map_cache_dirty_rect(rect())
@@ -150,6 +152,10 @@ void MapWidget::setMapView(MapView* view)
 			connect(map, &Map::symbolDeleted, this, &MapWidget::updatePlaceholder);
 			connect(map, &Map::templateAdded, this, &MapWidget::updatePlaceholder);
 			connect(map, &Map::templateDeleted, this, &MapWidget::updatePlaceholder);
+			connect(map, &Map::templateAdded, this, &MapWidget::scheduleRenderContextUpdate);
+			connect(map, &Map::templateChanged, this, &MapWidget::scheduleRenderContextUpdate);
+
+			scheduleRenderContextUpdate();
 		}
 		
 		update();
@@ -277,11 +283,53 @@ QRectF MapWidget::mapToViewport(const QRectF& input) const
 	return result;
 }
 
+void MapWidget::scheduleRenderContextUpdate()
+{
+	if (!view || render_context_update_scheduled)
+		return;
+
+	render_context_update_scheduled = true;
+	QTimer::singleShot(0, this, &MapWidget::publishRenderContext);
+}
+
+void MapWidget::publishRenderContext()
+{
+	render_context_update_scheduled = false;
+	if (!view || view->areAllTemplatesHidden())
+		return;
+
+	auto context = currentViewRenderContext();
+	context.sequence = ++render_context_sequence;
+
+	auto* map = view->getMap();
+	for (int i = 0; i < map->getNumTemplates(); ++i)
+	{
+		auto* temp = map->getTemplate(i);
+		if (temp->getTemplateState() != Template::Loaded || !view->isTemplateVisible(temp))
+			continue;
+
+		temp->updateRenderContext(context);
+	}
+}
+
+ViewRenderContext MapWidget::currentViewRenderContext() const
+{
+	Q_ASSERT(view);
+
+	ViewRenderContext context;
+	context.visible_map_rect = view->calculateViewedRect(viewportToView(rect()));
+	context.viewport_size_px = rect().size();
+	context.view_zoom = view->getZoom();
+	context.on_screen = true;
+	return context;
+}
+
 void MapWidget::viewChanged(MapView::ChangeFlags changes)
 {
 	setDrawingBoundingBox(drawing_dirty_rect_map, drawing_dirty_rect_border, true);
 	setActivityBoundingBox(activity_dirty_rect_map, activity_dirty_rect_border, true);
 	updateEverything();
+	scheduleRenderContextUpdate();
 	if (changes.testFlag(MapView::ZoomChange))
 		updateZoomDisplay();
 }
@@ -318,6 +366,8 @@ void MapWidget::visibilityChanged(MapView::VisibilityFeature feature, bool activ
 						                     qApp->translate("OpenOrienteering::MainWindow", "Error"),
 						                     qApp->translate("OpenOrienteering::Importer", "Failed to load template '%1', reason: %2")
 						                     .arg(temp->getTemplateFilename(), temp->errorString()) );
+					else if (widget)
+						widget->scheduleRenderContextUpdate();
 				}
 			}));
 		}
@@ -335,11 +385,14 @@ void MapWidget::visibilityChanged(MapView::VisibilityFeature feature, bool activ
 		updateEverything();
 		break;
 	}
+
+	scheduleRenderContextUpdate();
 }
 
 void MapWidget::setPanOffset(const QPoint& offset)
 {
 	pan_offset = offset;
+	scheduleRenderContextUpdate();
 	update();
 }
 
@@ -986,6 +1039,7 @@ void MapWidget::resizeEvent(QResizeEvent* event)
 	}
 	
 	QWidget::resizeEvent(event);
+	scheduleRenderContextUpdate();
 }
 
 void MapWidget::mousePressEvent(QMouseEvent* event)
