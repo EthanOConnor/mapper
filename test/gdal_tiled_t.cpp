@@ -298,6 +298,33 @@ private slots:
 		QVERIFY(reloaded_gdal->isTiledSource());
 		QCOMPARE(reloaded_gdal->availableGeoreferencing().effective.crs_spec, original_crs);
 	}
+
+	void nonGeoreferencedTiledRasterFallsBackToFullImageTest()
+	{
+		QTemporaryDir dir;
+		QVERIFY(dir.isValid());
+
+		auto tiled_path = createTiledGeoTiff(dir.filePath(QStringLiteral("non-georef.tif")),
+		                                     QSize(128, 128),
+		                                     QSize(64, 64),
+		                                     false);
+		QVERIFY(!tiled_path.isEmpty());
+
+		Map map;
+		auto temp = Template::templateForPath(tiled_path, &map);
+		QVERIFY(temp);
+		QCOMPARE(temp->getTemplateType(), "GdalTemplate");
+
+		map.addTemplate(0, std::move(temp));
+		auto* gdal_template = dynamic_cast<GdalTemplate*>(map.getTemplate(0));
+		QVERIFY(gdal_template);
+		gdal_template->setTemplateState(Template::Unloaded);
+		QVERIFY(gdal_template->loadTemplateFile());
+		QCOMPARE(gdal_template->getTemplateState(), Template::Loaded);
+		QVERIFY(!gdal_template->isTiledSource());
+		QVERIFY(!gdal_template->isTemplateGeoreferenced());
+		QCOMPARE(gdal_template->getTemplateExtent(), QRectF(-64.0, -64.0, 128.0, 128.0));
+	}
 };
 
 }  // namespace OpenOrienteering

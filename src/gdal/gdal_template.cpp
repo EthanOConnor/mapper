@@ -227,8 +227,12 @@ bool GdalTemplate::loadTemplateFileImpl()
 	qDebug("GdalTemplate: Using GDAL driver '%s'", reader.format().constData());
 
 	auto raster_info = reader.readRasterInfo();
-	if (!raster_info.block_size.isEmpty()
-	    && raster_info.image_format != QImage::Format_Invalid)
+	auto georef_options = findAvailableGeoreferencing(reader.readGeoTransform());
+	auto const can_use_tiled_source = !raster_info.block_size.isEmpty()
+	                                  && raster_info.image_format != QImage::Format_Invalid
+	                                  && (!georef_options.effective.transform.source.isEmpty()
+	                                      || property(applyCornerPassPointsProperty()).toBool());
+	if (can_use_tiled_source)
 	{
 		GdalManager();
 		CPLErrorReset();
@@ -261,7 +265,7 @@ bool GdalTemplate::loadTemplateFileImpl()
 
 		tiled_raster_info = raster_info;
 		tiled_raster_size = raster_info.size;
-		available_georef = findAvailableGeoreferencing(reader.readGeoTransform());
+		available_georef = std::move(georef_options);
 
 		if (!is_georeferenced && isGeoreferencingUsable())
 			is_georeferenced = true;
@@ -307,7 +311,7 @@ bool GdalTemplate::loadTemplateFileImpl()
 		}
 	}
 
-	available_georef = findAvailableGeoreferencing(reader.readGeoTransform());
+	available_georef = std::move(georef_options);
 	if (is_georeferenced)
 	{
 		if (!isGeoreferencingUsable())
