@@ -501,7 +501,6 @@ private:
 	qreal pinching_factor;
 	QPoint pinching_center;
 	bool render_context_update_scheduled;
-	quint64 render_context_sequence;
 	
 	// Panning (operation)
 	QPoint pan_offset;

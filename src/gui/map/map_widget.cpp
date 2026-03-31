@@ -95,7 +95,6 @@ MapWidget::MapWidget(bool show_help, bool force_antialiasing, QWidget* parent)
  , pinching(false)
  , pinching_factor(1.0)
  , render_context_update_scheduled(false)
- , render_context_sequence(0)
  , below_template_cache_dirty_rect(rect())
  , above_template_cache_dirty_rect(rect())
  , map_cache_dirty_rect(rect())
@@ -306,7 +305,6 @@ void MapWidget::publishRenderContext()
 		return;
 
 	auto context = currentViewRenderContext();
-	context.sequence = ++render_context_sequence;
 
 	auto* map = view->getMap();
 	for (int i = 0; i < map->getNumTemplates(); ++i)
@@ -325,9 +323,7 @@ ViewRenderContext MapWidget::currentViewRenderContext() const
 
 	ViewRenderContext context;
 	context.visible_map_rect = view->calculateViewedRect(viewportToView(rect()));
-	context.viewport_size_px = rect().size();
 	context.view_zoom = view->getZoom();
-	context.on_screen = true;
 	return context;
 }
 

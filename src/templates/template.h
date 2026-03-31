@@ -31,7 +31,6 @@
 #include <QObject>
 #include <QPointF>
 #include <QRectF>
-#include <QSize>
 #include <QString>
 #include <QStringRef>
 
@@ -67,10 +66,7 @@ class Object;
 struct ViewRenderContext
 {
 	QRectF visible_map_rect;
-	QSize viewport_size_px;
 	double view_zoom = 1.0;
-	bool on_screen = true;
-	quint64 sequence = 0;
 };
 
 
