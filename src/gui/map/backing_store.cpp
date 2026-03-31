@@ -21,7 +21,6 @@
 #include "backing_store.h"
 
 #include <cmath>
-#include <algorithm>
 
 namespace OpenOrienteering {
 
@@ -33,15 +32,22 @@ BackingStore::BackingStore(int tile_size)
 }
 
 
+void BackingStore::adjustGridOffset(QPointF delta)
+{
+	grid_offset += delta;
+}
+
+
 void BackingStore::tilesForViewRect(const QRectF& view_rect,
                                     int& col_min, int& col_max,
                                     int& row_min, int& row_max) const
 {
-	col_min = static_cast<int>(std::floor(view_rect.left() / tile_size));
-	col_max = static_cast<int>(std::floor((view_rect.right() - 1) / tile_size));
-	row_min = static_cast<int>(std::floor(view_rect.top() / tile_size));
-	row_max = static_cast<int>(std::floor((view_rect.bottom() - 1) / tile_size));
-	// For zero-width/height rects, ensure max >= min.
+	// Translate view rect into tile-grid space (subtract grid offset).
+	QRectF adjusted = view_rect.translated(-grid_offset);
+	col_min = static_cast<int>(std::floor(adjusted.left() / tile_size));
+	col_max = static_cast<int>(std::floor((adjusted.right() - 1) / tile_size));
+	row_min = static_cast<int>(std::floor(adjusted.top() / tile_size));
+	row_max = static_cast<int>(std::floor((adjusted.bottom() - 1) / tile_size));
 	if (col_max < col_min) col_max = col_min;
 	if (row_max < row_min) row_max = row_min;
 }
@@ -49,7 +55,8 @@ void BackingStore::tilesForViewRect(const QRectF& view_rect,
 
 QRectF BackingStore::tileViewRect(TileKey key) const
 {
-	return QRectF(key.col * tile_size, key.row * tile_size,
+	return QRectF(key.col * tile_size + grid_offset.x(),
+	              key.row * tile_size + grid_offset.y(),
 	              tile_size, tile_size);
 }
 
@@ -57,8 +64,8 @@ QRectF BackingStore::tileViewRect(TileKey key) const
 QRect BackingStore::tileViewportRect(TileKey key, QPointF viewport_origin) const
 {
 	return QRect(
-		qRound(key.col * tile_size + viewport_origin.x()),
-		qRound(key.row * tile_size + viewport_origin.y()),
+		qRound(key.col * tile_size + grid_offset.x() + viewport_origin.x()),
+		qRound(key.row * tile_size + grid_offset.y() + viewport_origin.y()),
 		tile_size, tile_size
 	);
 }
@@ -96,12 +103,12 @@ void BackingStore::dirtyViewRect(const QRectF& view_rect)
 	int col_min, col_max, row_min, row_max;
 	tilesForViewRect(view_rect, col_min, col_max, row_min, row_max);
 
-	for (auto& [key, tile] : tiles)
+	for (auto& kv : tiles)
 	{
-		if (key.col >= col_min && key.col <= col_max
-		    && key.row >= row_min && key.row <= row_max)
+		if (kv.first.col >= col_min && kv.first.col <= col_max
+		    && kv.first.row >= row_min && kv.first.row <= row_max)
 		{
-			tile.dirty = true;
+			kv.second.dirty = true;
 		}
 	}
 }
@@ -109,14 +116,15 @@ void BackingStore::dirtyViewRect(const QRectF& view_rect)
 
 void BackingStore::dirtyAll()
 {
-	for (auto& [key, tile] : tiles)
-		tile.dirty = true;
+	for (auto& kv : tiles)
+		kv.second.dirty = true;
 }
 
 
 void BackingStore::clear()
 {
 	tiles.clear();
+	grid_offset = {};
 }
 
 
@@ -138,6 +146,43 @@ void BackingStore::evict(const QRectF& retain_rect)
 			++it;
 		}
 	}
+}
+
+
+bool BackingStore::allTilesClean(const QRectF& view_rect) const
+{
+	int col_min, col_max, row_min, row_max;
+	tilesForViewRect(view_rect, col_min, col_max, row_min, row_max);
+
+	for (int row = row_min; row <= row_max; ++row)
+	{
+		for (int col = col_min; col <= col_max; ++col)
+		{
+			auto* t = tile({col, row});
+			if (!t || t->dirty)
+				return false;
+		}
+	}
+	return true;
+}
+
+
+void BackingStore::promoteToFallback()
+{
+	if (tiles.empty())
+		return;
+
+	fallback = std::make_unique<FallbackData>();
+	fallback->tiles = std::move(tiles);
+	fallback->grid_offset = grid_offset;
+	tiles.clear();
+	grid_offset = {};
+}
+
+
+void BackingStore::clearFallback()
+{
+	fallback.reset();
 }
 
 

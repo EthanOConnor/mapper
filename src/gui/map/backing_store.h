@@ -21,6 +21,7 @@
 #ifndef OPENORIENTEERING_BACKING_STORE_H
 #define OPENORIENTEERING_BACKING_STORE_H
 
+#include <memory>
 #include <unordered_map>
 
 #include <QImage>
@@ -35,10 +36,6 @@ namespace OpenOrienteering {
 
 /**
  * Identifies a tile by its column and row in the tile grid.
- *
- * The grid is anchored in view space: tile (0,0) covers
- * view coordinates [0, tile_size) x [0, tile_size).
- * Negative indices are valid and cover the negative view-space quadrants.
  */
 struct TileKey
 {
@@ -50,14 +47,10 @@ struct TileKey
 };
 
 
-/**
- * Hash function for TileKey, allowing use in std::unordered_map.
- */
 struct TileKeyHash
 {
 	std::size_t operator()(TileKey k) const noexcept
 	{
-		// Combine col and row with a simple hash.
 		auto h1 = std::hash<int>{}(k.col);
 		auto h2 = std::hash<int>{}(k.row);
 		return h1 ^ (h2 * 2654435761u);
@@ -65,12 +58,6 @@ struct TileKeyHash
 };
 
 
-/**
- * A single backing-store tile.
- *
- * Each tile owns a QImage that covers a fixed region of view space.
- * The tile tracks whether it is dirty (needs redraw).
- */
 struct BackingTile
 {
 	QImage image;
@@ -81,110 +68,89 @@ struct BackingTile
 /**
  * A retained tiled backing store for scene rendering.
  *
- * Instead of a single widget-sized cache image, BackingStore keeps a grid
- * of fixed-size QImage tiles anchored in view space. This means:
+ * Tiles are anchored in view space via a movable grid offset.
+ * When the view center changes (pan completion), the grid offset is
+ * adjusted so existing tiles remain valid without re-rendering.
  *
- * - Panning reuses tiles that remain visible rather than invalidating
- *   the entire cache.
- * - Only tiles that are actually dirty need to be redrawn.
- * - Overscan tiles outside the current viewport can be retained for
- *   smoother scrolling.
- *
- * The tile grid is conceptually infinite. Tiles are created on demand and
- * evicted when they fall outside a configurable retention margin around
- * the viewport.
- *
- * Coordinates:
- * - "View space" is the MapView coordinate system with origin at view center,
- *   measured in pixels. The widget viewport maps to view space by subtracting
- *   (widget_width/2, widget_height/2) plus any transient pan offset.
- * - Each tile covers a tile_size x tile_size square in view space.
- * - TileKey(col, row) covers view rect [col*tile_size, (col+1)*tile_size) x
- *   [row*tile_size, (row+1)*tile_size).
+ * When the zoom or rotation changes, current tiles are promoted to
+ * a fallback buffer. The fallback tiles can be composited at a
+ * different scale as a temporary backdrop while new tiles render.
  */
 class BackingStore
 {
 public:
-	/**
-	 * Constructs a backing store with the given tile size in pixels.
-	 * 256 is a reasonable default; it balances per-tile overhead against
-	 * granularity of dirty tracking and memory retention.
-	 */
 	explicit BackingStore(int tile_size = 256);
 
-	/** Returns the tile size in pixels. */
 	int tileSize() const { return tile_size; }
 
-	/**
-	 * Returns the set of TileKeys that cover the given view-space rectangle.
-	 *
-	 * Use this to determine which tiles need to be rendered or composited.
-	 */
+	// --- Grid offset ---
+
+	/** The grid offset shifts how tile keys map to view space.
+	 *  Tile (col,row) covers view rect [col*ts + offset.x, ...]. */
+	QPointF gridOffset() const { return grid_offset; }
+
+	/** Shifts the grid offset. Tiles keep their keys and content. */
+	void adjustGridOffset(QPointF delta);
+
+	/** Resets grid offset to zero. Does not invalidate tiles. */
+	void resetGridOffset() { grid_offset = {}; }
+
+	// --- Tile coordinate mapping ---
+
 	void tilesForViewRect(const QRectF& view_rect,
 	                      int& col_min, int& col_max,
 	                      int& row_min, int& row_max) const;
 
-	/**
-	 * Returns the view-space rectangle covered by the given tile.
-	 */
+	/** Returns the view-space rect for a tile (includes grid offset). */
 	QRectF tileViewRect(TileKey key) const;
 
-	/**
-	 * Returns the viewport rectangle for a tile, given the current
-	 * widget size and pan offset.
-	 *
-	 * viewport_origin is QPointF(widget_width/2 + pan_offset.x(),
-	 *                            widget_height/2 + pan_offset.y()).
-	 */
+	/** Returns the viewport rect for a tile.
+	 *  viewport_origin = QPointF(width/2 + pan_offset.x, height/2 + pan_offset.y). */
 	QRect tileViewportRect(TileKey key, QPointF viewport_origin) const;
 
-	/**
-	 * Ensures a tile exists for the given key and returns a reference.
-	 * If the tile does not exist yet, creates it as dirty.
-	 */
-	BackingTile& ensureTile(TileKey key);
+	// --- Tile access ---
 
-	/**
-	 * Returns a pointer to the tile if it exists, or nullptr.
-	 */
+	BackingTile& ensureTile(TileKey key);
 	BackingTile* tile(TileKey key);
 	const BackingTile* tile(TileKey key) const;
 
-	/**
-	 * Marks all tiles whose view-space coverage intersects the given
-	 * view-space rectangle as dirty.
-	 */
-	void dirtyViewRect(const QRectF& view_rect);
+	// --- Dirty tracking ---
 
-	/**
-	 * Marks all retained tiles as dirty.
-	 */
+	void dirtyViewRect(const QRectF& view_rect);
 	void dirtyAll();
 
-	/**
-	 * Discards all tiles, releasing memory.
-	 */
+	// --- Lifecycle ---
+
 	void clear();
-
-	/**
-	 * Evicts tiles that do not intersect the given view-space rectangle
-	 * (typically the viewport plus some margin).
-	 */
 	void evict(const QRectF& retain_rect);
-
-	/**
-	 * Returns true if the store has no tiles at all.
-	 */
 	bool isEmpty() const { return tiles.empty(); }
-
-	/**
-	 * Returns the number of tiles currently retained.
-	 */
 	int tileCount() const { return static_cast<int>(tiles.size()); }
+
+	/** Returns true if all tiles covering the view rect exist and are clean. */
+	bool allTilesClean(const QRectF& view_rect) const;
+
+	// --- Zoom fallback ---
+
+	struct FallbackData
+	{
+		std::unordered_map<TileKey, BackingTile, TileKeyHash> tiles;
+		QPointF grid_offset;
+	};
+
+	/** Moves current tiles + grid offset into the fallback buffer.
+	 *  Existing fallback is discarded. Current store becomes empty
+	 *  with grid offset reset to zero. */
+	void promoteToFallback();
+
+	bool hasFallback() const { return fallback != nullptr; }
+	const FallbackData* fallbackData() const { return fallback.get(); }
+	void clearFallback();
 
 private:
 	int tile_size;
+	QPointF grid_offset;
 	std::unordered_map<TileKey, BackingTile, TileKeyHash> tiles;
+	std::unique_ptr<FallbackData> fallback;
 };
 
 

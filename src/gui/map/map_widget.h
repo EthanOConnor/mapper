@@ -39,6 +39,8 @@
 #include <QVariant>
 #include <QWidget>
 
+#include <QTransform>
+
 #include "core/map_coord.h"
 #include "core/map_view.h"
 #include "gui/map/backing_store.h"
@@ -421,6 +423,16 @@ private:
 	 * @param fallback_color Fill color for missing tiles (Qt::white or Qt::transparent).
 	 */
 	void compositeStoreTiles(const BackingStore& store, QPainter& painter, const QRect& clip_rect, const QColor& fallback_color);
+	/**
+	 * Composites fallback (stale zoom) tiles from a backing store,
+	 * scaled to match the current view transform.
+	 */
+	void compositeFallbackTiles(const BackingStore& store, QPainter& painter, const QRect& clip_rect);
+	/**
+	 * Adjusts grid offsets on all three backing stores by the given
+	 * pixel delta. Used to retain tiles across pan completion.
+	 */
+	void adjustAllGridOffsets(QPointF delta);
 	/** Redraws all dirty caches. */
 	void updateAllDirtyCaches();
 	
@@ -508,17 +520,25 @@ private:
 	QPoint pan_offset;
 	
 	// Tiled backing stores (view-space anchored tile grids)
-	/** Backing store for templates below map layer */
 	BackingStore below_template_store;
 	QRect below_template_cache_dirty_rect;
 
-	/** Backing store for templates above map layer */
 	BackingStore above_template_store;
 	QRect above_template_cache_dirty_rect;
 
-	/** Backing store for map objects */
 	BackingStore map_store;
 	QRect map_cache_dirty_rect;
+
+	// Zoom fallback state
+	/** World transform at the time the current (non-fallback) tiles were rendered. */
+	QTransform last_rendered_transform;
+	/** World transform from the previous zoom level, used to scale fallback tiles. */
+	QTransform fallback_transform;
+	/** True when backing stores hold fallback tiles from a previous zoom level. */
+	bool has_zoom_fallback = false;
+	/** True when finishDragging has adjusted grid offsets and the upcoming
+	 *  CenterChange from viewChanged should NOT clear the stores. */
+	bool pan_adjusted = false;
 	
 	// Dirty regions for drawings (tools) and activities
 	/** Dirty rect for the current tool, in viewport coordinates (pixels). */

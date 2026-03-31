@@ -331,13 +331,32 @@ void MapWidget::viewChanged(MapView::ChangeFlags changes)
 	setDrawingBoundingBox(drawing_dirty_rect_map, drawing_dirty_rect_border, true);
 	setActivityBoundingBox(activity_dirty_rect_map, activity_dirty_rect_border, true);
 
-	// Any view change (center, zoom, rotation) invalidates the world transform,
-	// so all backing-store tiles must be rebuilt. During *transient* panning
-	// (pan_offset != 0, center unchanged), tiles remain valid and the compositor
-	// just shifts which tiles are visible — that is where the pan reuse lives.
-	below_template_store.clear();
-	above_template_store.clear();
-	map_store.clear();
+	if (changes & (MapView::ZoomChange | MapView::RotationChange))
+	{
+		// Zoom or rotation changed — promote current tiles to fallback
+		// so they can be drawn scaled as a temporary backdrop.
+		fallback_transform = last_rendered_transform;
+		below_template_store.promoteToFallback();
+		above_template_store.promoteToFallback();
+		map_store.promoteToFallback();
+		has_zoom_fallback = true;
+		pan_adjusted = false;
+	}
+	else if (pan_adjusted)
+	{
+		// Center-only change from finishDragging — grid offsets already
+		// adjusted, tiles remain valid. Just mark edges dirty so new
+		// tiles fill any gaps.
+		pan_adjusted = false;
+	}
+	else
+	{
+		// Center change from moveMap, ensureVisibilityOfRect, etc.
+		// Tiles are invalid (no grid offset adjustment was made).
+		below_template_store.clear();
+		above_template_store.clear();
+		map_store.clear();
+	}
 
 	updateEverything();
 	scheduleRenderContextUpdate();
@@ -428,7 +447,15 @@ void MapWidget::finishDragging(const QPoint& cursor_pos)
 {
 	Q_ASSERT(dragging);
 	dragging = false;
-	view->finishPanning(cursor_pos - drag_start_pos);
+
+	QPoint pan_delta = cursor_pos - drag_start_pos;
+
+	// Adjust grid offsets BEFORE finishPanning changes the center.
+	// In the new view space, old view point v maps to v - pan_delta.
+	adjustAllGridOffsets(QPointF(-pan_delta.x(), -pan_delta.y()));
+	pan_adjusted = true;
+
+	view->finishPanning(pan_delta);
 	setCursor(normal_cursor);
 }
 
@@ -998,6 +1025,15 @@ void MapWidget::paintEvent(QPaintEvent* event)
 	// widget rect rather than the pan-translated target.
 	QRect composite_clip = rect();
 
+	// Draw zoom-fallback tiles first (scaled from previous zoom level)
+	// so they provide a backdrop while current tiles are rendering.
+	if (has_zoom_fallback)
+	{
+		compositeFallbackTiles(below_template_store, painter, composite_clip);
+		compositeFallbackTiles(map_store, painter, composite_clip);
+		compositeFallbackTiles(above_template_store, painter, composite_clip);
+	}
+
 	if (!view->areAllTemplatesHidden() && isBelowTemplateVisible() && !below_template_store.isEmpty() && view->getMap()->getFirstFrontTemplate() > 0)
 	{
 		compositeStoreTiles(below_template_store, painter, composite_clip, Qt::white);
@@ -1404,9 +1440,7 @@ bool MapWidget::isBelowTemplateVisible() const
 
 void MapWidget::updateAllDirtyCaches()
 {
-	// All three layers now use tiled backing stores anchored in view space.
-	// Unlike the legacy single-image caches, tiles can be updated during
-	// transient pan without translation artifacts.
+	last_rendered_transform = view->worldTransform();
 
 	if (map_cache_dirty_rect.isValid() || !map_store.isEmpty())
 		updateMapTiles();
@@ -1418,6 +1452,21 @@ void MapWidget::updateAllDirtyCaches()
 
 		if ((above_template_cache_dirty_rect.isValid() || !above_template_store.isEmpty()) && isAboveTemplateVisible())
 			updateTemplateTiles(above_template_store, above_template_cache_dirty_rect, view->getMap()->getFirstFrontTemplate(), view->getMap()->getNumTemplates() - 1, false);
+	}
+
+	// Discard fallback once all visible current tiles are fully rendered.
+	if (has_zoom_fallback)
+	{
+		QRectF vr = viewportToView(rect());
+		if (below_template_store.allTilesClean(vr)
+		    && map_store.allTilesClean(vr)
+		    && above_template_store.allTilesClean(vr))
+		{
+			below_template_store.clearFallback();
+			above_template_store.clearFallback();
+			map_store.clearFallback();
+			has_zoom_fallback = false;
+		}
 	}
 }
 
@@ -1464,11 +1513,11 @@ void MapWidget::updateTemplateTiles(BackingStore& store, QRect& dirty_rect, int 
 				painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
 			}
 
-			painter.translate(-col * ts, -row * ts);
+			QRectF tile_vr = store.tileViewRect(key);
+			painter.translate(-tile_vr.x(), -tile_vr.y());
 			painter.setWorldTransform(view->worldTransform(), true);
 
-			QRectF tile_view_rect(col * ts, row * ts, ts, ts);
-			QRectF tile_map_rect = view->calculateViewedRect(tile_view_rect);
+			QRectF tile_map_rect = view->calculateViewedRect(tile_vr);
 			map->drawTemplates(&painter, tile_map_rect, first_template, last_template, view, true);
 
 			painter.end();
@@ -1515,7 +1564,6 @@ void MapWidget::updateMapTiles()
 
 			QPainter painter(&tile.image);
 
-			// Map layer uses transparent background.
 			painter.setCompositionMode(QPainter::CompositionMode_Clear);
 			painter.fillRect(0, 0, ts, ts, Qt::transparent);
 			painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
@@ -1523,11 +1571,11 @@ void MapWidget::updateMapTiles()
 			if (use_antialiasing)
 				painter.setRenderHint(QPainter::Antialiasing);
 
-			painter.translate(-col * ts, -row * ts);
+			QRectF tile_vr = map_store.tileViewRect(key);
+			painter.translate(-tile_vr.x(), -tile_vr.y());
 			painter.setWorldTransform(view->worldTransform(), true);
 
-			QRectF tile_view_rect(col * ts, row * ts, ts, ts);
-			QRectF tile_map_rect = view->calculateViewedRect(tile_view_rect);
+			QRectF tile_map_rect = view->calculateViewedRect(tile_vr);
 
 			RenderConfig config = { *map, tile_map_rect, view->calculateFinalZoomFactor(), options, 1.0 };
 
@@ -1586,6 +1634,59 @@ void MapWidget::compositeStoreTiles(const BackingStore& store, QPainter& painter
 			}
 		}
 	}
+}
+
+
+void MapWidget::compositeFallbackTiles(const BackingStore& store, QPainter& painter, const QRect& clip_rect)
+{
+	if (!store.hasFallback())
+		return;
+
+	auto* fb = store.fallbackData();
+	int ts = store.tileSize();
+
+	QPointF viewport_origin(width() / 2.0 + pan_offset.x(),
+	                        height() / 2.0 + pan_offset.y());
+
+	// Transform from old view space to new view space.
+	// worldTransform maps map→view, so:
+	//   old_view → map → new_view = new_wt * old_wt.inverted()
+	bool invertible;
+	QTransform old_to_new = view->worldTransform() * fallback_transform.inverted(&invertible);
+	if (!invertible)
+		return;
+
+	for (auto it = fb->tiles.begin(); it != fb->tiles.end(); ++it)
+	{
+		const TileKey& key = it->first;
+		const BackingTile& tile = it->second;
+
+		if (tile.image.isNull() || tile.dirty)
+			continue;
+
+		// Tile origin in old view space (with old grid offset)
+		QPointF tile_origin(key.col * ts + fb->grid_offset.x(),
+		                    key.row * ts + fb->grid_offset.y());
+
+		// Map tile corners from old view space → new view space → viewport
+		QPointF new_tl = old_to_new.map(tile_origin) + viewport_origin;
+		QPointF new_br = old_to_new.map(tile_origin + QPointF(ts, ts)) + viewport_origin;
+
+		QRectF dest = QRectF(new_tl, new_br).normalized();
+		if (!dest.intersects(QRectF(clip_rect)))
+			continue;
+
+		// drawImage with dest QRectF handles scaling automatically.
+		painter.drawImage(dest, tile.image);
+	}
+}
+
+
+void MapWidget::adjustAllGridOffsets(QPointF delta)
+{
+	below_template_store.adjustGridOffset(delta);
+	above_template_store.adjustGridOffset(delta);
+	map_store.adjustGridOffset(delta);
 }
 
 
