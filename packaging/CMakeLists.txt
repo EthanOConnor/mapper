@@ -20,23 +20,77 @@ message(STATUS "Configuring ${PROJECT_NAME} packaging")
 
 option(Mapper_PACKAGE_QT_ALL_TRANSLATIONS "Add all Qt translations to the packages" OFF)
 
+function(cache_qt_translations_dir)
+	if(Qt5Translations_DIR AND EXISTS "${Qt5Translations_DIR}")
+		return()
+	endif()
+
+	find_package(Qt5Core REQUIRED QUIET)
+	find_package(Qt5LinguistTools REQUIRED QUIET) # for Qt5::lconvert
+
+	set(_qt_translation_roots
+	  "${QT_LIBRARY_DIR}"
+	  "${Qt5Core_DIR}"
+	  "${Qt5LinguistTools_DIR}"
+	)
+
+	get_target_property(_qt5core_lib Qt5::Core IMPORTED_LOCATION_RELEASE)
+	if(NOT _qt5core_lib)
+		get_target_property(_qt5core_lib Qt5::Core IMPORTED_LOCATION)
+	endif()
+	if(_qt5core_lib)
+		get_filename_component(_qt5core_dir "${_qt5core_lib}" DIRECTORY)
+		list(APPEND _qt_translation_roots "${_qt5core_dir}")
+	endif()
+
+	get_target_property(_qt5lconvert Qt5::lconvert IMPORTED_LOCATION_RELEASE)
+	if(NOT _qt5lconvert)
+		get_target_property(_qt5lconvert Qt5::lconvert IMPORTED_LOCATION)
+	endif()
+	if(_qt5lconvert)
+		get_filename_component(_qt5lconvert_dir "${_qt5lconvert}" DIRECTORY)
+		list(APPEND _qt_translation_roots "${_qt5lconvert_dir}")
+	endif()
+
+	unset(_qt_translation_hints)
+	foreach(_root IN LISTS _qt_translation_roots)
+		if(NOT _root)
+			continue()
+		endif()
+		get_filename_component(_root "${_root}" REALPATH)
+		list(APPEND _qt_translation_hints
+		  "${_root}"
+		  "${_root}/.."
+		  "${_root}/../.."
+		  "${_root}/../../.."
+		)
+	endforeach()
+	list(REMOVE_DUPLICATES _qt_translation_hints)
+
+	find_path(_mapper_qt_translations_dir
+	  NAMES qtbase_de.qm qt_de.qm
+	  HINTS ${_qt_translation_hints}
+	  PATH_SUFFIXES
+	    translations
+	    share/qt5/translations
+	    share/translations
+	  NO_DEFAULT_PATH
+	)
+
+	if(NOT _mapper_qt_translations_dir)
+		set(_mapper_qt_translations_dir "Qt5Translations_DIR-NOTFOUND")
+	endif()
+
+	set(Qt5Translations_DIR "${_mapper_qt_translations_dir}" CACHE PATH
+	  "The Qt5 translations directory"
+	)
+endfunction(cache_qt_translations_dir)
+
 function(deploy_qt_translations basename)
 	find_package(Qt5LinguistTools REQUIRED QUIET) # for Qt5::lconvert
 	
 	if(NOT Qt5Translations_DIR)
-		find_package(Qt5Core REQUIRED QUIET)
-		get_target_property(QMAKE_EXECUTABLE Qt5::qmake IMPORTED_LOCATION)
-		execute_process(
-		  COMMAND "${QMAKE_EXECUTABLE}" -query QT_INSTALL_TRANSLATIONS
-		  OUTPUT_VARIABLE Qt5Translations_DIR
-		)
-		string(STRIP "${Qt5Translations_DIR}" Qt5Translations_DIR)
-		if(NOT EXISTS ${Qt5Translations_DIR})
-			set(Qt5Translations_DIR "Qt5Translations_DIR-NOTFOUND")
-		endif()
-		set(Qt5Translations_DIR "${Qt5Translations_DIR}" CACHE PATH
-		  "The Qt5 translations directory"
-		)
+		cache_qt_translations_dir()
 	endif()
 	
 	if(Mapper_PACKAGE_QT_ALL_TRANSLATIONS)
@@ -126,12 +180,9 @@ set(CPACK_STRIP_FILES "TRUE")
 
 set(CPACK_SOURCE_PACKAGE_FILE_NAME
     "openorienteering-mapper_${Mapper_VERSION_FILESYSTEM}-src")
-set(CPACK_SOURCE_IGNORE_FILES 
+set(CPACK_SOURCE_IGNORE_FILES
   "${PROJECT_BINARY_DIR}"
   "/[.]git/"
-  "/3rd-party/clipper/download/"
-  "/3rd-party/proj/download/"
-  "/3rd-party/qt5/download/"
   ${CPACK_SOURCE_IGNORE_FILES}
 )
 
