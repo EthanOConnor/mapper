@@ -558,7 +558,13 @@ void MapWidget::markTemplateCacheDirty(const QRectF& view_rect, int pixel_border
 		cache_dirty_rect = cache_dirty_rect.united(integer_rect);
 	else
 		cache_dirty_rect = integer_rect;
-	
+
+	// During transient panning, keep shifting the existing template cache.
+	// Async tiled updates can otherwise clear a dirty cache region and leave
+	// temporary white holes until the missing tiles arrive.
+	if (pan_offset != QPoint())
+		return;
+
 	update(integer_rect);
 }
 
@@ -1471,6 +1477,9 @@ void MapWidget::updateAllDirtyCaches()
 	
 	if (!view->areAllTemplatesHidden())
 	{
+		if (pan_offset != QPoint())
+			return;
+
 		if (below_template_cache_dirty_rect.isValid() && isBelowTemplateVisible())
 			updateTemplateCache(below_template_cache, below_template_cache_dirty_rect, 0, view->getMap()->getFirstFrontTemplate() - 1, true);
 		

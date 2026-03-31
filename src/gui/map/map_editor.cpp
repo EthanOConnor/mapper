@@ -1042,6 +1042,9 @@ void MapEditorController::createActions()
 	//QAction* template_config_window_act = newCheckAction("templateconfigwindow", tr("Template configurations window"), this, SLOT(showTemplateConfigurationsWindow(bool)), "window-new", tr("Show/Hide the template configurations window"));
 	//QAction* template_visibilities_window_act = newCheckAction("templatevisibilitieswindow", tr("Template visibilities window"), this, SLOT(showTemplateVisbilitiesWindow(bool)), "window-new", tr("Show/Hide the template visibilities window"));
 	open_template_act = newAction("opentemplate", tr("Open template..."), this, SLOT(openTemplateClicked()), nullptr, QString{}, "templates_menu.html");
+#ifdef MAPPER_USE_GDAL
+	open_online_template_act = newAction("openonlineimagery", tr("Online imagery..."), this, SLOT(openOnlineImageryClicked()), nullptr, QString{}, "templates_menu.html");
+#endif
 	reopen_template_act = newAction("reopentemplate", tr("Reopen template..."), this, SLOT(reopenTemplateClicked()), nullptr, QString{}, "templates_menu.html");
 	
 	tags_window_act = newCheckAction("tagswindow", tr("Tag editor"), this, SLOT(showTagsWindow(bool)), "tag-editor.png", tr("Show/Hide the tag editor window"), "tag_editor.html");
@@ -1297,6 +1300,9 @@ void MapEditorController::createMenuAndToolbars()
 	template_menu->addAction(template_visibilities_window_act);*/
 	template_menu->addSeparator();
 	template_menu->addAction(open_template_act);
+#ifdef MAPPER_USE_GDAL
+	template_menu->addAction(open_online_template_act);
+#endif
 	template_menu->addAction(reopen_template_act);
 	
 	// Extend and activate general toolbar
@@ -2335,6 +2341,17 @@ void MapEditorController::showTemplateWindow(bool show)
 void MapEditorController::openTemplateClicked()
 {
 	auto new_template = TemplateListWidget::showOpenTemplateDialog(window, *this);
+	if (new_template)
+	{
+		map->addTemplate(-1, std::move(new_template));
+		hideAllTemplates(false);
+		showTemplateWindow(true);
+	}
+}
+
+void MapEditorController::openOnlineImageryClicked()
+{
+	auto new_template = TemplateListWidget::showOnlineImageryDialog(window, *this);
 	if (new_template)
 	{
 		map->addTemplate(-1, std::move(new_template));

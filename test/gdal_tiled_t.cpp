@@ -42,6 +42,7 @@
 #include "gdal/gdal_image_reader.h"
 #include "gdal/gdal_manager.h"
 #include "gdal/gdal_template.h"
+#include "gdal/online_imagery_template_builder.h"
 #include "templates/template.h"
 
 namespace OpenOrienteering {
@@ -230,6 +231,101 @@ private slots:
 )");
 		QVERIFY(!wms_xml_path.isEmpty());
 		QVERIFY(!GdalTemplate::readTmsTileOrigin(wms_xml_path, &origin_tile));
+	}
+
+	void onlineImageryClassificationTest()
+	{
+		auto arcgis_template = OnlineImageryTemplateBuilder::classifyUrl(
+			QStringLiteral("https://server.example.test/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"));
+		QCOMPARE(arcgis_template.source.kind, OnlineImagerySource::Kind::ArcGisTiledMapServer);
+		QCOMPARE(arcgis_template.source.normalized_url,
+		         QStringLiteral("https://server.example.test/ArcGIS/rest/services/World_Imagery/MapServer"));
+
+		auto xyz = OnlineImageryTemplateBuilder::classifyUrl(
+			QStringLiteral("https://tile.openstreetmap.org/{z}/{x}/{y}.png"));
+		QCOMPARE(xyz.source.kind, OnlineImagerySource::Kind::XyzTiles);
+		QCOMPARE(xyz.source.normalized_url,
+		         QStringLiteral("https://tile.openstreetmap.org/${z}/${x}/${y}.png"));
+		QCOMPARE(xyz.source.tile_size, QSize(256, 256));
+		QCOMPARE(xyz.source.max_tile_level, 19);
+
+		auto arcgis = OnlineImageryTemplateBuilder::classifyUrl(
+			QStringLiteral("https://server.example.test/ArcGIS/rest/services/World_Imagery/MapServer/tile/5/10/12"));
+		QCOMPARE(arcgis.source.kind, OnlineImagerySource::Kind::ArcGisTiledMapServer);
+		QCOMPARE(arcgis.source.normalized_url,
+		         QStringLiteral("https://server.example.test/ArcGIS/rest/services/World_Imagery/MapServer"));
+
+		auto arcgis_root = OnlineImageryTemplateBuilder::classifyUrl(
+			QStringLiteral("https://server.example.test/ArcGIS/rest/services/World_Imagery/MapServer"));
+		QCOMPARE(arcgis_root.source.kind, OnlineImagerySource::Kind::ArcGisTiledMapServer);
+		QCOMPARE(arcgis_root.source.normalized_url,
+		         QStringLiteral("https://server.example.test/ArcGIS/rest/services/World_Imagery/MapServer"));
+		QCOMPARE(arcgis_root.source.tile_size, QSize(256, 256));
+		QCOMPARE(arcgis_root.source.max_tile_level, 20);
+
+		auto unsupported = OnlineImageryTemplateBuilder::classifyUrl(
+			QStringLiteral("https://tiles.example.test/{s}/{z}/{x}/{y}.png"));
+		QVERIFY(!unsupported.error.isEmpty());
+	}
+
+	void onlineImageryCoordinateMathTest()
+	{
+		auto const origin = OnlineImageryTemplateBuilder::latLonToWebMercator(0.0, 0.0);
+		QVERIFY(qAbs(origin.x()) < 0.001);
+		QVERIFY(qAbs(origin.y()) < 0.001);
+
+		auto const east = OnlineImageryTemplateBuilder::latLonToWebMercator(0.0, 180.0);
+		QVERIFY(qAbs(east.x() - 20037508.342789244) < 0.001);
+		QVERIFY(qAbs(east.y()) < 0.001);
+
+		auto const crop = OnlineImageryTemplateBuilder::snapToTileGrid(
+			QRectF(-10018754.171394622, -10018754.171394622, 20037508.342789244, 20037508.342789244),
+			2,
+			256);
+		QCOMPARE(crop.tile_x_min, 0);
+		QCOMPARE(crop.tile_x_max, 3);
+		QCOMPARE(crop.tile_y_min, 0);
+		QCOMPARE(crop.tile_y_max, 3);
+		QCOMPARE(crop.pixel_width, 1024);
+		QCOMPARE(crop.pixel_height, 1024);
+		QVERIFY(qAbs(crop.west + 20037508.342789244) < 0.001);
+		QVERIFY(qAbs(crop.north - 20037508.342789244) < 0.001);
+		QVERIFY(qAbs(crop.east - 20037508.342789244) < 0.001);
+		QVERIFY(qAbs(crop.south + 20037508.342789244) < 0.001);
+
+		auto const detailed_crop = OnlineImageryTemplateBuilder::snapToTileGrid(
+			QRectF(-13602122.057404, 6039136.730755, 4891.969811, 4891.969810),
+			19,
+			256);
+		QCOMPARE(detailed_crop.tile_x_min % 32, 0);
+		QCOMPARE(detailed_crop.tile_y_min % 32, 0);
+		QCOMPARE(detailed_crop.tile_x_max % 32, 31);
+		QCOMPARE(detailed_crop.tile_y_max % 32, 31);
+	}
+
+	void onlineImageryOutputFileNameTest()
+	{
+		QTemporaryDir dir;
+		QVERIFY(dir.isValid());
+
+		OnlineImagerySource source;
+		source.kind = OnlineImagerySource::Kind::XyzTiles;
+		source.display_name = QStringLiteral("openstreetmap");
+		source.normalized_url = QStringLiteral("https://tile.openstreetmap.org/${z}/${x}/${y}.png");
+
+		auto named_path = OnlineImageryTemplateBuilder::outputFileName(
+			dir.filePath(QStringLiteral("wilburton.omap")),
+			source,
+			QStringLiteral("Wilburton Hill"));
+		QCOMPARE(QFileInfo(named_path).dir().absolutePath(), dir.path());
+		QVERIFY(QFileInfo(named_path).fileName().startsWith(QStringLiteral("wilburton_hill_wilburton_online_")));
+		QVERIFY(named_path.endsWith(QStringLiteral(".xml")));
+
+		auto default_path = OnlineImageryTemplateBuilder::outputFileName(
+			dir.filePath(QStringLiteral("wilburton.omap")),
+			source,
+			QString{});
+		QVERIFY(QFileInfo(default_path).fileName().startsWith(QStringLiteral("openstreetmap_wilburton_online_")));
 	}
 
 	void tiledCoreMathTest()
