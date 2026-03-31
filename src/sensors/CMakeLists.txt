@@ -21,9 +21,6 @@ find_package(Qt5Widgets REQUIRED)
 find_package(Qt5Sensors)
 find_package(Qt5Positioning)
 find_package(Qt5SerialPort)
-if(ANDROID)
-	find_package(Qt5AndroidExtras REQUIRED)
-endif()
 
 set(CMAKE_AUTOMOC ON)
 
@@ -165,7 +162,7 @@ target_link_libraries(mapper-sensors
     Qt5::Gui
     Qt5::Widgets
 )
-foreach(lib Qt5::Positioning Qt5::Sensors Qt5::SerialPort Qt5::AndroidExtras)
+foreach(lib Qt5::Positioning Qt5::Sensors Qt5::SerialPort)
 	if(TARGET ${lib})
 		target_link_libraries(mapper-sensors  PRIVATE ${lib})
 	endif()

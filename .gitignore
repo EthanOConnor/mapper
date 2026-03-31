@@ -1,12 +1,10 @@
 .DS_Store
 CMakeLists.txt.user
+CMakeLists.txt.user*
 .idea
 *.kdev4
-*.pro.user*
-CMakeLists.txt.user*
 *~
 build*/
 help/*.qhc
 3rd-party/*/download
 !3rd-party/*/download/README.txt
-packaging/android/Mapper

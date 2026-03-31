@@ -20,12 +20,8 @@
 find_package(Qt5Core REQUIRED)
 find_package(Qt5Widgets REQUIRED)
 
-if(ANDROID)
-	find_package(Qt5AndroidExtras REQUIRED)
-else()
-	find_package(Qt5Network REQUIRED)
-	find_package(Qt5PrintSupport REQUIRED)
-endif()
+find_package(Qt5Network REQUIRED)
+find_package(Qt5PrintSupport REQUIRED)
 
 set(CMAKE_AUTOMOC ON)
 
@@ -327,7 +323,6 @@ foreach(lib
   mapper-sensors
   printsupport
   scaling-icon-engine
-  Qt5::AndroidExtras
   Qt5::Network
 )
 	if(TARGET ${lib})
@@ -361,13 +356,9 @@ if(WIN32)
 	list(APPEND Mapper_SRCS ${CMAKE_CURRENT_BINARY_DIR}/resources.rc)
 endif()
 
-if(ANDROID)
-	add_library(Mapper SHARED ${Mapper_SRCS})
-else()
-	add_executable(Mapper WIN32 MACOSX_BUNDLE ${Mapper_SRCS})
-	target_compile_definitions(Mapper PRIVATE MAPPER_USE_QTSINGLEAPPLICATION)
-	target_link_libraries(Mapper QtSingleApplication)
-endif()
+add_executable(Mapper WIN32 MACOSX_BUNDLE ${Mapper_SRCS})
+target_compile_definitions(Mapper PRIVATE MAPPER_USE_QTSINGLEAPPLICATION)
+target_link_libraries(Mapper QtSingleApplication)
 
 target_link_libraries(Mapper
   Mapper_Common
@@ -389,16 +380,6 @@ endif()
 install(TARGETS Mapper
   RUNTIME DESTINATION "${MAPPER_RUNTIME_DESTINATION}"
   BUNDLE DESTINATION "${MAPPER_RUNTIME_DESTINATION}"   # macOS
-  LIBRARY DESTINATION "${MAPPER_RUNTIME_DESTINATION}"  # Android
-)
-
-
-# Java sources for Android
-# This target's sources will be build with the APK.
-
-add_custom_target(Mapper_Android SOURCES
-  android/java/org/openorienteering/mapper/MapperActivity.java
-  android/java/org/openorienteering/mapper/MapperService.java
 )
 
 

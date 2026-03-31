@@ -110,9 +110,7 @@ if(NOT CMAKE_SIZEOF_VOID_P AND MINGW)
 		set(CMAKE_SIZEOF_VOID_P 8)
 	endif()
 endif()
-if(ANDROID)
-	set(_system_name "Android-${CMAKE_ANDROID_ARCH_ABI}")
-elseif(APPLE)
+if(APPLE)
 	set(_system_name "macOS")
 elseif(CMAKE_SIZEOF_VOID_P EQUAL 4)
 	set(_system_name "${CMAKE_SYSTEM_NAME}-x86")
@@ -191,10 +189,6 @@ elseif(APPLE)
 	install(FILES "${CPACK_PACKAGE_ICON}"
 	  DESTINATION "${MAPPER_DATA_DESTINATION}"
 	)
-	
-elseif(ANDROID)
-	set(CPACK_GENERATOR_DEFAULT "")
-	# Nothing else here: We always add the 'android' subdirectory.
 	
 elseif(UNIX AND EXISTS /usr/bin/dpkg AND EXISTS /usr/bin/lsb_release)
 	# Packaging on Debian or similar
@@ -351,11 +345,6 @@ if(Mapper_PACKAGE_QT)
 	  Widgets
 	)
 
-	if(ANDROID)
-		set(MAPPER_QT_PLUGINS ) # Ignore for now, handled by androiddeployqt
-		list(REMOVE_ITEM MAPPER_QT_MODULES Sql) # Not deploying Qt Assistant
-	endif()
-	
 	find_package(Qt5Positioning QUIET)
 	if(TARGET Qt5::Positioning)
 		list(APPEND MAPPER_QT_MODULES SerialPort) # Always with serialport NMEA
@@ -461,7 +450,7 @@ foreach(_qt_plugin ${MAPPER_QT_PLUGINS})
 endforeach(_qt_plugin)
 
 
-if(UNIX AND NOT APPLE AND NOT ANDROID)
+if(UNIX AND NOT APPLE)
 	install(
 	  FILES "${PROJECT_SOURCE_DIR}/doc/man/Mapper.1"
 	  DESTINATION "share/man/man1")
