@@ -314,11 +314,7 @@ TemplateImage::GeoreferencingOption GdalImageReader::readGeoTransform()
 		auto const result = GDALGetGeoTransform(dataset, geo_transform.data());
 		if (result == CE_None)
 		{
-#if GDAL_VERSION_NUM >= GDAL_COMPUTE_VERSION(3,0,0) && !defined(ACCEPT_USE_OF_DEPRECATED_PROJ_API_H)
 			georef.crs_spec = toWkt(GDALGetSpatialRef(dataset));
-#else
-			georef.crs_spec = toProjSpec(GDALGetProjectionRef(dataset));
-#endif
 			georef.transform.source = GDALGetDriverShortName(GDALGetDatasetDriver(dataset));
 			georef.transform.pixel_to_world = { geo_transform[1], geo_transform[2],
 			                                    geo_transform[4], geo_transform[5],
@@ -328,19 +324,6 @@ TemplateImage::GeoreferencingOption GdalImageReader::readGeoTransform()
 	return georef;
 }
 
-
-// static
-QString GdalImageReader::toProjSpec(const QByteArray& gdal_spec)
-{
-	auto const spatial_reference = OSRNewSpatialReference(gdal_spec);
-	char* proj_spec_cstring;
-	auto const ogr_error = OSRExportToProj4(spatial_reference, &proj_spec_cstring);
-	auto result = QByteArray(ogr_error == OGRERR_NONE ? proj_spec_cstring : nullptr);
-	CPLFree(proj_spec_cstring);
-	OSRDestroySpatialReference(spatial_reference);
-	result.replace("+k=0 ", "+k=1 ");  // https://github.com/OSGeo/PROJ/issues/1700
-	return QString::fromUtf8(result);
-}
 
 // static
 void GdalImageReader::noop(QImage& /*image*/)

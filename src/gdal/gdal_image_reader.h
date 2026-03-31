@@ -103,9 +103,6 @@ public:
 	 */
 	TemplateImage::GeoreferencingOption readGeoTransform();
 	
-	static QString toProjSpec(const QByteArray& gdal_spec);
-	
-	
 	// Translation
 	
 	Q_DECLARE_TR_FUNCTIONS(OpenOrienteering::GdalImageReader)
