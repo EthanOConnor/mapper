@@ -982,17 +982,7 @@ void MapWidget::paintEvent(QPaintEvent* event)
 	}
 	else if (pan_offset != QPoint())
 	{
-		// Background color
-		if (pan_offset.x() > 0)
-			painter.fillRect(QRect(0, pan_offset.y(), pan_offset.x(), height() - pan_offset.y()), QColor(Qt::gray));
-		else if (pan_offset.x() < 0)
-			painter.fillRect(QRect(width() + pan_offset.x(), pan_offset.y(), -pan_offset.x(), height() - pan_offset.y()), QColor(Qt::gray));
-		
-		if (pan_offset.y() > 0)
-			painter.fillRect(QRect(0, 0, width(), pan_offset.y()), QColor(Qt::gray));
-		else if (pan_offset.y() < 0)
-			painter.fillRect(QRect(0, height() + pan_offset.y(), width(), -pan_offset.y()), QColor(Qt::gray));
-		
+		// Tiled compositor covers all areas — no gray bar fill needed.
 		target.translate(pan_offset);
 	}
 	
