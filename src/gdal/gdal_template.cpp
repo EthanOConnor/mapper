@@ -419,12 +419,21 @@ void GdalTemplate::drawTemplate(QPainter* painter, const QRectF& clip_rect, doub
 				continue;
 
 			auto const dest_rect = QRectF(src.x() - half_w, src.y() - half_h, src.width(), src.height());
+			// Screen-space overlap workaround: expand each tile's draw
+			// rect by half a raster pixel so adjacent tiles overdraw
+			// slightly, hiding seams from SmoothPixmapTransform and
+			// sub-pixel rounding at internal GDAL tile boundaries.
+			// Not a true source-side guard band (the source read is
+			// unchanged); gated to on_screen to avoid altering print.
+			auto const draw_rect = on_screen
+				? dest_rect.adjusted(-0.5, -0.5, 0.5, 0.5)
+				: dest_rect;
 			auto const key = tileKey(tx, ty, subsampling);
 
 			auto it = tile_cache.constFind(key);
 			if (it != tile_cache.constEnd())
 			{
-				painter->drawImage(dest_rect, it.value().image);
+				painter->drawImage(draw_rect, it.value().image);
 				continue;
 			}
 
@@ -433,13 +442,13 @@ void GdalTemplate::drawTemplate(QPainter* painter, const QRectF& clip_rect, doub
 				QRectF fallback_source_rect;
 				auto const* fallback = findBestCachedTile(tx, ty, subsampling, &fallback_source_rect);
 				if (fallback)
-					painter->drawImage(dest_rect, *fallback, fallback_source_rect);
+					painter->drawImage(draw_rect, *fallback, fallback_source_rect);
 			}
 			else
 			{
 				auto tile = readTileImage(tiled_dataset, tx, ty, subsampling);
 				if (!tile.isNull())
-					painter->drawImage(dest_rect, tile);
+					painter->drawImage(draw_rect, tile);
 			}
 		}
 	}
