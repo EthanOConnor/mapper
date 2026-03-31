@@ -1499,20 +1499,21 @@ void MapWidget::updateTemplateTiles(BackingStore& store, QRect& dirty_rect, int 
 		for (int col = col_min; col <= col_max; ++col)
 		{
 			TileKey key{col, row};
-			BackingTile& tile = store.ensureTile(key);
-			if (!tile.dirty)
-				continue;
 
-			// Budget: limit tile renders per frame when fallback is active.
-			// The fallback provides coverage, so we can spread work.
+			// Check budget before creating the tile.
+			{
+				BackingTile* existing = store.tile(key);
+				if (existing && !existing->dirty)
+					continue;
+			}
 			if (store.hasFallback() && tiles_rendered >= 6)
 			{
-				// Schedule another paint to continue rendering.
 				QTimer::singleShot(0, this, [this]() { update(); });
 				goto done;
 			}
 
 			{
+				BackingTile& tile = store.ensureTile(key);
 				QPainter painter(&tile.image);
 
 				if (use_background)
@@ -1534,8 +1535,8 @@ void MapWidget::updateTemplateTiles(BackingStore& store, QRect& dirty_rect, int 
 				map->drawTemplates(&painter, tile_map_rect, first_template, last_template, view, true);
 
 				painter.end();
+				tile.dirty = false;
 			}
-			tile.dirty = false;
 			++tiles_rendered;
 		}
 	}
@@ -1581,10 +1582,12 @@ void MapWidget::updateMapTiles()
 		for (int col = col_min; col <= col_max; ++col)
 		{
 			TileKey key{col, row};
-			BackingTile& tile = map_store.ensureTile(key);
-			if (!tile.dirty)
-				continue;
 
+			{
+				BackingTile* existing = map_store.tile(key);
+				if (existing && !existing->dirty)
+					continue;
+			}
 			if (map_store.hasFallback() && tiles_rendered >= 6)
 			{
 				QTimer::singleShot(0, this, [this]() { update(); });
@@ -1592,6 +1595,7 @@ void MapWidget::updateMapTiles()
 			}
 
 			{
+				BackingTile& tile = map_store.ensureTile(key);
 				QPainter painter(&tile.image);
 
 				painter.setCompositionMode(QPainter::CompositionMode_Clear);
@@ -1620,8 +1624,8 @@ void MapWidget::updateMapTiles()
 					map->drawGrid(&painter, tile_map_rect);
 
 				painter.end();
+				tile.dirty = false;
 			}
-			tile.dirty = false;
 			++tiles_rendered;
 		}
 	}
@@ -1642,12 +1646,19 @@ void MapWidget::compositeStoreTiles(const BackingStore& store, QPainter& painter
 	int col_min, col_max, row_min, row_max;
 	store.tilesForViewRect(clip_view, col_min, col_max, row_min, row_max);
 
+	bool has_fallback = store.hasFallback();
+
 	for (int row = row_min; row <= row_max; ++row)
 	{
 		for (int col = col_min; col <= col_max; ++col)
 		{
 			TileKey key{col, row};
 			const BackingTile* tile = store.tile(key);
+
+			// Skip dirty tiles — their image content is not valid.
+			// When fallback is active, the scaled fallback shows through.
+			if (tile && tile->dirty)
+				continue;
 
 			QRect tile_vp = store.tileViewportRect(key, viewport_origin);
 			QRect draw_rect = tile_vp.intersected(clip_rect);
@@ -1661,8 +1672,10 @@ void MapWidget::compositeStoreTiles(const BackingStore& store, QPainter& painter
 				               draw_rect.width(), draw_rect.height());
 				painter.drawImage(draw_rect, tile->image, src_rect);
 			}
-			else if (fallback_color.alpha() > 0)
+			else if (fallback_color.alpha() > 0 && !has_fallback)
 			{
+				// Only fill with fallback color when there's no zoom
+				// fallback providing coverage underneath.
 				painter.fillRect(draw_rect, fallback_color);
 			}
 		}
