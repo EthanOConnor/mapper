@@ -267,6 +267,12 @@ void SpatialIndex::rebuild(const std::map<int, ObjectRenderablesMap>& data)
 	dirty = false;
 }
 
+void SpatialIndex::ensureBuilt(const std::map<int, ObjectRenderablesMap>& data)
+{
+	if (dirty)
+		rebuild(data);
+}
+
 void SpatialIndex::queryObjects(const QRectF& map_rect, std::vector<const Object*>& results) const
 {
 	results.clear();
@@ -313,6 +319,13 @@ MapRenderables::MapRenderables(Map* map)
 {
 	; // nothing
 }
+
+void MapRenderables::prepareDraw() const
+{
+	if (spatial_index.isDirty())
+		spatial_index.rebuild(*this);
+}
+
 
 void MapRenderables::draw(QPainter *painter, const RenderConfig &config) const
 {

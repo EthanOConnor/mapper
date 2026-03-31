@@ -331,8 +331,15 @@ public:
 
 	/**
 	 * Rebuild the index from the given MapRenderables data.
+	 * Must be called from the main thread only.
 	 */
 	void rebuild(const std::map<int, ObjectRenderablesMap>& data);
+
+	/**
+	 * Ensures the index is built (rebuilds if dirty).
+	 * Must be called on the main thread before concurrent reads.
+	 */
+	void ensureBuilt(const std::map<int, ObjectRenderablesMap>& data);
 
 	/**
 	 * Query objects whose extents overlap the given map-coord rect.
@@ -396,6 +403,12 @@ public:
 	 * @param config  The rendering configuration
 	 */
 	void draw(QPainter* painter, const RenderConfig& config) const;
+
+	/**
+	 * Ensures the spatial index is built. Must be called on the main thread
+	 * before concurrent draw() calls from worker threads.
+	 */
+	void prepareDraw() const;
 	
 	/**
 	 * Draws the renderables in a spot color overprinting simulation.

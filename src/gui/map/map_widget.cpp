@@ -1585,8 +1585,10 @@ void MapWidget::updateMapTiles()
 
 	bool use_antialiasing = force_antialiasing || Settings::getInstance().getSettingCached(Settings::MapDisplay_Antialiasing).toBool();
 
-	// Ensure renderables are up to date on the main thread before dispatching.
+	// Ensure renderables and spatial index are up to date on the main thread
+	// before dispatching to workers. Workers only read — no mutations allowed.
 	map->updateObjects();
+	map->mapRenderables().prepareDraw();
 
 	// Set up the render function if not already done. This closure captures
 	// the Map* by reference — safe because workers only run while the map exists
