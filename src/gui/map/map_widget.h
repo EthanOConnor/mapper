@@ -404,18 +404,11 @@ private:
 	/** Checks if there is any visible template below the map. */
 	bool isBelowTemplateVisible() const;
 	/**
-	 * Updates dirty tiles in a template backing store.
-	 * @param store The backing store to update.
-	 * @param dirty_rect Legacy dirty rect; propagated into store then cleared.
-	 * @param first_template Lowest template index to draw.
-	 * @param last_template Highest template index to draw.
-	 * @param use_background If true, fills tiles with white; else transparent.
+	 * Dispatches dirty scene tiles to the background thread pool.
+	 * Each tile renders all visible layers (below-templates, map,
+	 * above-templates) in a single pass so they're always consistent.
 	 */
-	void updateTemplateTiles(BackingStore& store, QRect& dirty_rect, int first_template, int last_template, bool use_background);
-	/**
-	 * Updates dirty tiles in the map backing store.
-	 */
-	void updateMapTiles();
+	void updateSceneTiles();
 	/**
 	 * Composites visible backing-store tiles onto the given painter.
 	 * @param store The backing store to composite from.
@@ -434,8 +427,8 @@ private:
 	 * pixel delta. Used to retain tiles across pan completion.
 	 */
 	void adjustAllGridOffsets(QPointF delta);
-	/** Installs completed map tiles from background workers. */
-	void installMapTileResults();
+	/** Installs completed scene tiles from background workers. */
+	void installSceneTileResults();
 	/** Redraws all dirty caches. */
 	void updateAllDirtyCaches();
 	
@@ -522,15 +515,9 @@ private:
 	// Panning (operation)
 	QPoint pan_offset;
 	
-	// Tiled backing stores (view-space anchored tile grids)
-	BackingStore below_template_store;
-	QRect below_template_cache_dirty_rect;
-
-	BackingStore above_template_store;
-	QRect above_template_cache_dirty_rect;
-
-	BackingStore map_store;
-	QRect map_cache_dirty_rect;
+	// Unified tiled backing store — all layers rendered together per tile
+	BackingStore scene_store;
+	QRect scene_dirty_rect;
 
 	// Zoom fallback state
 	/** World transform at the time the current (non-fallback) tiles were rendered. */
@@ -543,8 +530,8 @@ private:
 	 *  CenterChange from viewChanged should NOT clear the stores. */
 	bool pan_adjusted = false;
 
-	/** Background tile renderer for the map layer. */
-	TileRenderScheduler* map_tile_scheduler = nullptr;
+	/** Background tile renderer for the scene. */
+	TileRenderScheduler* tile_scheduler = nullptr;
 	
 	// Dirty regions for drawings (tools) and activities
 	/** Dirty rect for the current tool, in viewport coordinates (pixels). */

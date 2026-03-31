@@ -94,9 +94,7 @@ MapWidget::MapWidget(bool show_help, bool force_antialiasing, QWidget* parent)
  , pinching(false)
  , pinching_factor(1.0)
  , render_context_update_scheduled(false)
- , below_template_cache_dirty_rect(rect())
- , above_template_cache_dirty_rect(rect())
- , map_cache_dirty_rect(rect())
+ , scene_dirty_rect(rect())
  , drawing_dirty_rect_border(0)
  , activity_dirty_rect_border(0)
  , last_mouse_release_time(QTime::currentTime())
@@ -116,9 +114,9 @@ MapWidget::MapWidget(bool show_help, bool force_antialiasing, QWidget* parent)
 	setFocusPolicy(Qt::ClickFocus);
 	setSizePolicy(QSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding));
 
-	map_tile_scheduler = new TileRenderScheduler(this);
-	connect(map_tile_scheduler, &TileRenderScheduler::resultsReady,
-	        this, &MapWidget::installMapTileResults);
+	tile_scheduler = new TileRenderScheduler(this);
+	connect(tile_scheduler, &TileRenderScheduler::resultsReady,
+	        this, &MapWidget::installSceneTileResults);
 }
 
 MapWidget::~MapWidget()
@@ -337,46 +335,29 @@ void MapWidget::viewChanged(MapView::ChangeFlags changes)
 
 	if (changes & (MapView::ZoomChange | MapView::RotationChange))
 	{
-		// Zoom or rotation changed — promote current tiles to fallback
-		// so they can be drawn scaled as a temporary backdrop.
-		map_tile_scheduler->cancelPending();
-		map_store.resetInFlight();
+		tile_scheduler->cancelPending();
+		scene_store.resetInFlight();
 		if (!has_zoom_fallback)
 		{
-			// Promote map tiles to fallback — they'll be drawn scaled
-			// while background workers render at the new zoom.
 			fallback_transform = last_rendered_transform;
-			map_store.promoteToFallback();
+			scene_store.promoteToFallback();
 			has_zoom_fallback = true;
 		}
 		else
 		{
-			// Additional zoom steps: clear partial map tiles.
-			// The fallback from the first step is still valid.
-			map_store.clear();
+			scene_store.clear();
 		}
-		// Template layers render synchronously — just clear and re-render.
-		below_template_store.clear();
-		above_template_store.clear();
-
 		pan_adjusted = false;
 	}
 	else if (pan_adjusted)
 	{
-		// Center-only change from finishDragging — grid offsets already
-		// adjusted, tiles remain valid. Just mark edges dirty so new
-		// tiles fill any gaps.
 		pan_adjusted = false;
 	}
 	else
 	{
-		// Center change from moveMap, ensureVisibilityOfRect, etc.
-		// Tiles are invalid (no grid offset adjustment was made).
-		map_tile_scheduler->cancelPending();
-		map_store.resetInFlight();
-		below_template_store.clear();
-		above_template_store.clear();
-		map_store.clear();
+		tile_scheduler->cancelPending();
+		scene_store.resetInFlight();
+		scene_store.clear();
 	}
 
 	updateEverything();
@@ -426,8 +407,8 @@ void MapWidget::visibilityChanged(MapView::VisibilityFeature feature, bool activ
 		
 	case MapView::VisibilityFeature::GridVisible:
 	case MapView::VisibilityFeature::MapVisible:
-		map_cache_dirty_rect = rect();
-		map_store.dirtyAll();
+		scene_dirty_rect = rect();
+		scene_store.dirtyAll();
 		Q_FALLTHROUGH();
 	case MapView::VisibilityFeature::AllTemplatesHidden:
 		update();
@@ -601,45 +582,21 @@ void MapWidget::moveDirtyRect(QRect& dirty_rect, qreal x, qreal y)
 		dirty_rect = dirty_rect.translated(x, y).intersected(rect());
 }
 
-void MapWidget::markTemplateCacheDirty(const QRectF& view_rect, int pixel_border, bool front_cache)
+void MapWidget::markTemplateCacheDirty(const QRectF& view_rect, int pixel_border, bool /*front_cache*/)
 {
-	if (!front_cache)
-	{
-		// Below-template layer: dirty the backing-store tiles directly.
-		QRectF padded = view_rect.adjusted(-pixel_border, -pixel_border, pixel_border, pixel_border);
-		below_template_store.dirtyViewRect(padded);
-
-		// Also set the legacy dirty rect so updateAllDirtyCaches knows work is pending.
-		QRectF viewport_rect = viewToViewport(view_rect);
-		QRect integer_rect = QRect(viewport_rect.left() - (1+pixel_border), viewport_rect.top() - (1+pixel_border),
-		                           viewport_rect.width() + 2*(1+pixel_border), viewport_rect.height() + 2*(1+pixel_border));
-		if (!integer_rect.intersects(rect()))
-			return;
-		if (below_template_cache_dirty_rect.isValid())
-			below_template_cache_dirty_rect = below_template_cache_dirty_rect.united(integer_rect);
-		else
-			below_template_cache_dirty_rect = integer_rect;
-
-		// Tiled backing store handles pan correctly — no need to skip updates.
-		update(integer_rect);
-		return;
-	}
-
-	// Above-template layer: dirty the backing-store tiles directly.
-	QRectF padded_above = view_rect.adjusted(-pixel_border, -pixel_border, pixel_border, pixel_border);
-	above_template_store.dirtyViewRect(padded_above);
+	// All layers share one scene store — dirty the tiles that overlap.
+	QRectF padded = view_rect.adjusted(-pixel_border, -pixel_border, pixel_border, pixel_border);
+	scene_store.dirtyViewRect(padded);
 
 	QRectF viewport_rect = viewToViewport(view_rect);
 	QRect integer_rect = QRect(viewport_rect.left() - (1+pixel_border), viewport_rect.top() - (1+pixel_border),
-							   viewport_rect.width() + 2*(1+pixel_border), viewport_rect.height() + 2*(1+pixel_border));
-
+	                           viewport_rect.width() + 2*(1+pixel_border), viewport_rect.height() + 2*(1+pixel_border));
 	if (!integer_rect.intersects(rect()))
 		return;
-
-	if (above_template_cache_dirty_rect.isValid())
-		above_template_cache_dirty_rect = above_template_cache_dirty_rect.united(integer_rect);
+	if (scene_dirty_rect.isValid())
+		scene_dirty_rect = scene_dirty_rect.united(integer_rect);
 	else
-		above_template_cache_dirty_rect = integer_rect;
+		scene_dirty_rect = integer_rect;
 
 	update(integer_rect);
 }
@@ -647,8 +604,8 @@ void MapWidget::markTemplateCacheDirty(const QRectF& view_rect, int pixel_border
 void MapWidget::markObjectAreaDirty(const QRectF& map_rect)
 {
 	QRectF view_rect = view->calculateViewBoundingBox(map_rect);
-	map_store.dirtyViewRect(view_rect);
-	updateMapRect(map_rect, 0, map_cache_dirty_rect);
+	scene_store.dirtyViewRect(view_rect);
+	updateMapRect(map_rect, 0, scene_dirty_rect);
 }
 
 void MapWidget::setDrawingBoundingBox(QRectF map_rect, int pixel_border, bool do_update)
@@ -747,24 +704,16 @@ void MapWidget::updateDrawingLaterSlot()
 
 void MapWidget::updateEverything()
 {
-	map_cache_dirty_rect = rect();
-	below_template_cache_dirty_rect = map_cache_dirty_rect;
-	above_template_cache_dirty_rect = map_cache_dirty_rect;
-	below_template_store.dirtyAll();
-	above_template_store.dirtyAll();
-	map_store.dirtyAll();
-	update(map_cache_dirty_rect);
+	scene_dirty_rect = rect();
+	scene_store.dirtyAll();
+	update(scene_dirty_rect);
 }
 
 void MapWidget::updateEverythingInRect(const QRect& dirty_rect)
 {
 	QRectF dirty_view = viewportToView(dirty_rect);
-	rectIncludeSafe(map_cache_dirty_rect, dirty_rect);
-	map_store.dirtyViewRect(dirty_view);
-	rectIncludeSafe(below_template_cache_dirty_rect, dirty_rect);
-	below_template_store.dirtyViewRect(dirty_view);
-	rectIncludeSafe(above_template_cache_dirty_rect, dirty_rect);
-	above_template_store.dirtyViewRect(dirty_view);
+	rectIncludeSafe(scene_dirty_rect, dirty_rect);
+	scene_store.dirtyViewRect(dirty_view);
 	update(dirty_rect);
 }
 
@@ -1041,23 +990,19 @@ void MapWidget::paintEvent(QPaintEvent* event)
 		target.translate(pan_offset);
 	}
 	
-	// Compositing order:
-	// 1. Below-template layer (sync — always fully rendered, no fallback needed)
-	// 2. Map layer (async — uses fallback during zoom while workers render)
-	// 3. Above-template layer (sync — no fallback needed)
-	//
-	// Below-templates and above-templates render synchronously in
-	// updateAllDirtyCaches(), so they're always complete. Only the map
-	// layer renders on background threads and needs fallback coverage.
+	// Unified scene compositing: one store has all layers combined per tile.
 	QRect composite_clip = rect();
 
-	// --- Below-template layer (always renders a solid background) ---
-	bool below_has_content = !view->areAllTemplatesHidden() && isBelowTemplateVisible() && view->getMap()->getFirstFrontTemplate() > 0;
-	if (below_has_content && !below_template_store.isEmpty())
+	// Draw scaled fallback from pre-zoom state as backdrop.
+	if (has_zoom_fallback)
+		compositeFallbackTiles(scene_store, painter, composite_clip);
+
+	// Draw current scene tiles (all clean tiles composite on top of fallback).
+	if (!scene_store.isEmpty())
 	{
-		compositeStoreTiles(below_template_store, painter, composite_clip, Qt::white);
+		compositeStoreTiles(scene_store, painter, composite_clip, Qt::white);
 	}
-	else if (show_help && no_contents)
+	else if (show_help && no_contents && !has_zoom_fallback)
 	{
 		painter.save();
 		painter.setTransform(transform);
@@ -1069,29 +1014,10 @@ void MapWidget::paintEvent(QPaintEvent* event)
 			showHelpMessage(&painter, tr("Ready to draw!\n\nStart drawing or load a base map.\nTo load a base map, click\nTemplates -> Open template...") + QLatin1String("\n\n") + tr("Hint: Hold the middle mouse button to drag the map,\nzoom using the mouse wheel, if available."));
 		painter.restore();
 	}
-	else
+	else if (!has_zoom_fallback)
 	{
 		painter.fillRect(composite_clip, Qt::white);
 	}
-
-	// --- Map layer (async with zoom fallback) ---
-	const auto map_visibility = view->effectiveMapVisibility();
-	if (map_visibility.visible)
-	{
-		qreal saved_opacity = painter.opacity();
-		painter.setOpacity(map_visibility.opacity);
-		// Draw scaled fallback from pre-zoom state, then current tiles on top.
-		// Current clean tiles overwrite fallback; InFlight/Dirty areas show fallback.
-		if (has_zoom_fallback)
-			compositeFallbackTiles(map_store, painter, composite_clip);
-		if (!map_store.isEmpty())
-			compositeStoreTiles(map_store, painter, composite_clip, Qt::transparent);
-		painter.setOpacity(saved_opacity);
-	}
-
-	// --- Above-template layer (sync) ---
-	if (!view->areAllTemplatesHidden() && isAboveTemplateVisible() && !above_template_store.isEmpty() && view->getMap()->getNumTemplates() - view->getMap()->getFirstFrontTemplate() > 0)
-		compositeStoreTiles(above_template_store, painter, composite_clip, Qt::transparent);
 	
 	//painter.setClipRect(exposed);
 	
@@ -1124,9 +1050,7 @@ void MapWidget::resizeEvent(QResizeEvent* event)
 	// Tiled backing stores: existing tiles remain valid (view-space anchored).
 	// New viewport edges will naturally request tiles that are dirty or missing.
 	// Just mark the legacy dirty rects so updateAllDirtyCaches knows to run.
-	map_cache_dirty_rect = rect();
-	below_template_cache_dirty_rect = map_cache_dirty_rect;
-	above_template_cache_dirty_rect = map_cache_dirty_rect;
+	scene_dirty_rect = rect();
 	
 	for (QObject* const child : children())
 	{
@@ -1468,106 +1392,38 @@ void MapWidget::updateAllDirtyCaches()
 {
 	last_rendered_transform = view->worldTransform();
 
-	if (map_cache_dirty_rect.isValid() || !map_store.isEmpty())
-		updateMapTiles();
+	if (scene_dirty_rect.isValid() || !scene_store.isEmpty())
+		updateSceneTiles();
 
-	if (!view->areAllTemplatesHidden())
-	{
-		if ((below_template_cache_dirty_rect.isValid() || !below_template_store.isEmpty()) && isBelowTemplateVisible())
-			updateTemplateTiles(below_template_store, below_template_cache_dirty_rect, 0, view->getMap()->getFirstFrontTemplate() - 1, true);
-
-		if ((above_template_cache_dirty_rect.isValid() || !above_template_store.isEmpty()) && isAboveTemplateVisible())
-			updateTemplateTiles(above_template_store, above_template_cache_dirty_rect, view->getMap()->getFirstFrontTemplate(), view->getMap()->getNumTemplates() - 1, false);
-	}
-
-	// Discard map fallback once all visible map tiles are fully rendered.
+	// Discard fallback once all visible scene tiles are rendered.
 	if (has_zoom_fallback)
 	{
 		QRectF vr = viewportToView(rect());
-		if (map_store.allTilesClean(vr))
+		if (scene_store.allTilesClean(vr))
 		{
-			map_store.clearFallback();
+			scene_store.clearFallback();
 			has_zoom_fallback = false;
 		}
 	}
 }
 
-void MapWidget::updateTemplateTiles(BackingStore& store, QRect& dirty_rect, int first_template, int last_template, bool use_background)
+void MapWidget::updateSceneTiles()
 {
-	Q_ASSERT(containsVisibleTemplate(first_template, last_template));
-
 	QRectF view_rect = viewportToView(rect());
-	int overscan = store.tileSize();
+	int overscan = scene_store.tileSize();
 	QRectF padded = view_rect.adjusted(-overscan, -overscan, overscan, overscan);
 
 	int col_min, col_max, row_min, row_max;
-	store.tilesForViewRect(padded, col_min, col_max, row_min, row_max);
+	scene_store.tilesForViewRect(padded, col_min, col_max, row_min, row_max);
 
-	if (dirty_rect.isValid())
+	if (scene_dirty_rect.isValid())
 	{
-		store.dirtyViewRect(viewportToView(dirty_rect));
-		dirty_rect.setWidth(-1);
+		scene_store.dirtyViewRect(viewportToView(scene_dirty_rect));
+		scene_dirty_rect.setWidth(-1);
 	}
 
 	Map* map = view->getMap();
-	int ts = store.tileSize();
-
-	for (int row = row_min; row <= row_max; ++row)
-	{
-		for (int col = col_min; col <= col_max; ++col)
-		{
-			TileKey key{col, row};
-			BackingTile& tile = store.ensureTile(key);
-			if (tile.clean())
-				continue;
-
-			QPainter painter(&tile.image);
-
-			if (use_background)
-			{
-				painter.fillRect(0, 0, ts, ts, Qt::white);
-			}
-			else
-			{
-				painter.setCompositionMode(QPainter::CompositionMode_Clear);
-				painter.fillRect(0, 0, ts, ts, Qt::transparent);
-				painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
-			}
-
-			QRectF tile_vr = store.tileViewRect(key);
-			painter.translate(-tile_vr.x(), -tile_vr.y());
-			painter.setWorldTransform(view->worldTransform(), true);
-
-			QRectF tile_map_rect = view->calculateViewedRect(tile_vr);
-			map->drawTemplates(&painter, tile_map_rect, first_template, last_template, view, true);
-
-			painter.end();
-			tile.state = BackingTile::Clean;
-		}
-	}
-
-	int evict_margin = overscan * 2;
-	store.evict(view_rect.adjusted(-evict_margin, -evict_margin, evict_margin, evict_margin));
-}
-
-
-void MapWidget::updateMapTiles()
-{
-	QRectF view_rect = viewportToView(rect());
-	int overscan = map_store.tileSize();
-	QRectF padded = view_rect.adjusted(-overscan, -overscan, overscan, overscan);
-
-	int col_min, col_max, row_min, row_max;
-	map_store.tilesForViewRect(padded, col_min, col_max, row_min, row_max);
-
-	if (map_cache_dirty_rect.isValid())
-	{
-		map_store.dirtyViewRect(viewportToView(map_cache_dirty_rect));
-		map_cache_dirty_rect.setWidth(-1);
-	}
-
-	Map* map = view->getMap();
-	int ts = map_store.tileSize();
+	int ts = scene_store.tileSize();
 
 	bool use_antialiasing = force_antialiasing || Settings::getInstance().getSettingCached(Settings::MapDisplay_Antialiasing).toBool();
 
@@ -1576,36 +1432,60 @@ void MapWidget::updateMapTiles()
 	map->updateObjects();
 	map->mapRenderables().prepareDraw();
 
-	// Set up the render function if not already done. This closure captures
-	// the Map* by reference — safe because workers only run while the map exists
-	// and no mutations happen during rendering (cancellation drains workers first).
-	if (!map_tile_scheduler->hasPendingWork())
+	// Capture template visibility state for the render function.
+	bool templates_hidden = view->areAllTemplatesHidden();
+	int first_front_template = map->getFirstFrontTemplate();
+	int num_templates = map->getNumTemplates();
+	bool below_visible = !templates_hidden && isBelowTemplateVisible();
+	bool above_visible = !templates_hidden && isAboveTemplateVisible();
+	const MapView* snap_view = view;
+	auto map_vis = view->effectiveMapVisibility();
+
+	if (!tile_scheduler->hasPendingWork())
 	{
 		RenderConfig::Options options(RenderConfig::Screen | RenderConfig::HelperSymbols);
 		if (!use_antialiasing)
 			options |= RenderConfig::DisableAntialiasing | RenderConfig::ForceMinSize;
 
 		const MapRenderables* mr = &map->mapRenderables();
-		map_tile_scheduler->setRenderFunction(
-			[map, mr, options](QPainter& painter, const QRectF& tile_map_rect,
-			                   const TileRenderSnapshot& snapshot) {
-				RenderConfig config = { *map, tile_map_rect, snapshot.zoom_factor, options, 1.0 };
+		tile_scheduler->setRenderFunction(
+			[map, mr, options, snap_view, below_visible, above_visible,
+			 first_front_template, num_templates, map_vis](
+				QPainter& painter, const QRectF& tile_map_rect,
+				const TileRenderSnapshot& snapshot) {
+
+				// 1. Below-templates (white background)
+				painter.fillRect(painter.window(), Qt::white);
+				if (below_visible)
+					map->drawTemplates(&painter, tile_map_rect, 0, first_front_template - 1, snap_view, true);
+
+				// 2. Map objects
+				if (map_vis.visible)
+				{
+					qreal saved = painter.opacity();
+					painter.setOpacity(map_vis.opacity);
+
+					RenderConfig config = { *map, tile_map_rect, snapshot.zoom_factor, options, 1.0 };
 
 #ifndef Q_OS_ANDROID
-				if (snapshot.overprinting)
-					mr->drawOverprintingSimulation(&painter, config);
-				else
+					if (snapshot.overprinting)
+						mr->drawOverprintingSimulation(&painter, config);
+					else
 #endif
-					mr->draw(&painter, config);
+						mr->draw(&painter, config);
 
-				// Grid is drawn synchronously in installMapTileResults
-				// because Map::drawGrid is not const.
+					painter.setOpacity(saved);
+				}
+
+				// 3. Above-templates
+				if (above_visible)
+					map->drawTemplates(&painter, tile_map_rect, first_front_template, num_templates - 1, snap_view, true);
 			});
 	}
 
-	// Collect dirty tiles and dispatch them to worker threads.
+	// Collect dirty tiles and dispatch to worker threads.
 	std::vector<TileRenderJob> jobs;
-	int current_gen = map_tile_scheduler->generation();
+	int current_gen = tile_scheduler->generation();
 
 	TileRenderSnapshot snapshot;
 	snapshot.world_transform = view->worldTransform();
@@ -1620,18 +1500,16 @@ void MapWidget::updateMapTiles()
 		for (int col = col_min; col <= col_max; ++col)
 		{
 			TileKey key{col, row};
-			BackingTile& tile = map_store.ensureTile(key);
+			BackingTile& tile = scene_store.ensureTile(key);
 			if (tile.state != BackingTile::Dirty)
 				continue;
 
-			// Mark as in-flight so the compositor skips it.
 			tile.state = BackingTile::InFlight;
 
 			TileRenderJob job;
 			job.key = key;
-			job.tile_view_rect = map_store.tileViewRect(key);
+			job.tile_view_rect = scene_store.tileViewRect(key);
 			job.tile_map_rect = view->calculateViewedRect(job.tile_view_rect);
-			// Detach the image so the worker thread has its own copy.
 			job.image = QImage(ts, ts, QImage::Format_ARGB32_Premultiplied);
 			job.generation = current_gen;
 
@@ -1640,22 +1518,22 @@ void MapWidget::updateMapTiles()
 	}
 
 	if (!jobs.empty())
-		map_tile_scheduler->submit(jobs, snapshot);
+		tile_scheduler->submit(jobs, snapshot);
 
 	int evict_margin = overscan * 2;
-	map_store.evict(view_rect.adjusted(-evict_margin, -evict_margin, evict_margin, evict_margin));
+	scene_store.evict(view_rect.adjusted(-evict_margin, -evict_margin, evict_margin, evict_margin));
 }
 
 
-void MapWidget::installMapTileResults()
+void MapWidget::installSceneTileResults()
 {
-	auto results = map_tile_scheduler->collectResults();
+	auto results = tile_scheduler->collectResults();
 	if (results.empty())
 		return;
 
 	for (auto& result : results)
 	{
-		BackingTile* tile = map_store.tile(result.key);
+		BackingTile* tile = scene_store.tile(result.key);
 		if (tile && tile->state == BackingTile::InFlight)
 		{
 			tile->image = std::move(result.image);
@@ -1762,9 +1640,7 @@ void MapWidget::compositeFallbackTiles(const BackingStore& store, QPainter& pain
 
 void MapWidget::adjustAllGridOffsets(QPointF delta)
 {
-	below_template_store.adjustGridOffset(delta);
-	above_template_store.adjustGridOffset(delta);
-	map_store.adjustGridOffset(delta);
+	scene_store.adjustGridOffset(delta);
 }
 
 
