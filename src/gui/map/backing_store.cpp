@@ -121,6 +121,16 @@ void BackingStore::dirtyAll()
 }
 
 
+void BackingStore::resetInFlight()
+{
+	for (auto& kv : tiles)
+	{
+		if (kv.second.state == BackingTile::InFlight)
+			kv.second.state = BackingTile::Dirty;
+	}
+}
+
+
 void BackingStore::clear()
 {
 	tiles.clear();

@@ -335,13 +335,12 @@ void MapWidget::viewChanged(MapView::ChangeFlags changes)
 	setDrawingBoundingBox(drawing_dirty_rect_map, drawing_dirty_rect_border, true);
 	setActivityBoundingBox(activity_dirty_rect_map, activity_dirty_rect_border, true);
 
-	// Cancel any in-flight map tile renders — they're for the old view.
-	map_tile_scheduler->cancelPending();
-
 	if (changes & (MapView::ZoomChange | MapView::RotationChange))
 	{
 		// Zoom or rotation changed — promote current tiles to fallback
 		// so they can be drawn scaled as a temporary backdrop.
+		map_tile_scheduler->cancelPending();
+		map_store.resetInFlight();
 		if (!has_zoom_fallback)
 		{
 			// Only promote on the first zoom step. Subsequent steps
@@ -374,6 +373,8 @@ void MapWidget::viewChanged(MapView::ChangeFlags changes)
 	{
 		// Center change from moveMap, ensureVisibilityOfRect, etc.
 		// Tiles are invalid (no grid offset adjustment was made).
+		map_tile_scheduler->cancelPending();
+		map_store.resetInFlight();
 		below_template_store.clear();
 		above_template_store.clear();
 		map_store.clear();
@@ -1041,36 +1042,22 @@ void MapWidget::paintEvent(QPaintEvent* event)
 		target.translate(pan_offset);
 	}
 	
-	// All three layers composite from tiled backing stores.
-	// The compositors handle pan_offset internally, so we clip to the
-	// widget rect rather than the pan-translated target.
+	// Each layer draws its fallback (scaled) then its current tiles on top.
+	// This ensures the map fallback paints OVER below-template current tiles,
+	// not underneath them (which would cause the map to flicker out when
+	// below-template tiles render before async map tiles arrive).
 	QRect composite_clip = rect();
 
-	// Draw zoom-fallback tiles first (scaled from previous zoom level)
-	// so they provide a backdrop while current tiles are rendering.
-	if (has_zoom_fallback)
-	{
-		compositeFallbackTiles(below_template_store, painter, composite_clip);
-		const auto map_vis_fb = view->effectiveMapVisibility();
-		if (map_vis_fb.visible)
-		{
-			qreal saved = painter.opacity();
-			painter.setOpacity(map_vis_fb.opacity);
-			compositeFallbackTiles(map_store, painter, composite_clip);
-			painter.setOpacity(saved);
-		}
-		compositeFallbackTiles(above_template_store, painter, composite_clip);
-	}
-
-	// Below-template layer
+	// --- Below-template layer ---
 	bool below_has_content = !view->areAllTemplatesHidden() && isBelowTemplateVisible() && view->getMap()->getFirstFrontTemplate() > 0;
+	if (has_zoom_fallback)
+		compositeFallbackTiles(below_template_store, painter, composite_clip);
 	if (below_has_content && !below_template_store.isEmpty())
 	{
 		compositeStoreTiles(below_template_store, painter, composite_clip, Qt::white);
 	}
 	else if (!has_zoom_fallback)
 	{
-		// No fallback covering us — need to fill background ourselves.
 		if (show_help && no_contents)
 		{
 			painter.save();
@@ -1089,17 +1076,22 @@ void MapWidget::paintEvent(QPaintEvent* event)
 		}
 	}
 
-	// Map layer
+	// --- Map layer ---
 	const auto map_visibility = view->effectiveMapVisibility();
-	if (!map_store.isEmpty() && map_visibility.visible)
+	if (map_visibility.visible)
 	{
 		qreal saved_opacity = painter.opacity();
 		painter.setOpacity(map_visibility.opacity);
-		compositeStoreTiles(map_store, painter, composite_clip, Qt::transparent);
+		if (has_zoom_fallback)
+			compositeFallbackTiles(map_store, painter, composite_clip);
+		if (!map_store.isEmpty())
+			compositeStoreTiles(map_store, painter, composite_clip, Qt::transparent);
 		painter.setOpacity(saved_opacity);
 	}
 
-	// Above-template layer
+	// --- Above-template layer ---
+	if (has_zoom_fallback)
+		compositeFallbackTiles(above_template_store, painter, composite_clip);
 	if (!view->areAllTemplatesHidden() && isAboveTemplateVisible() && !above_template_store.isEmpty() && view->getMap()->getNumTemplates() - view->getMap()->getFirstFrontTemplate() > 0)
 		compositeStoreTiles(above_template_store, painter, composite_clip, Qt::transparent);
 	

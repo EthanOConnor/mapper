@@ -124,6 +124,9 @@ public:
 	void dirtyViewRect(const QRectF& view_rect);
 	void dirtyAll();
 
+	/** Reset any InFlight tiles back to Dirty (e.g. after cancelling workers). */
+	void resetInFlight();
+
 	// --- Lifecycle ---
 
 	void clear();
