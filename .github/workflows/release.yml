@@ -28,7 +28,7 @@ jobs:
             libqt5sensors5-dev libqt5serialport5-dev libqt5sql5-sqlite \
             qtpositioning5-dev qt5-image-formats-plugins \
             libproj-dev libgdal-dev libpolyclipping-dev zlib1g-dev \
-            doxygen libegl-dev libgl-dev
+            libcups2-dev doxygen libegl-dev libgl-dev
 
       - name: Configure
         run: cmake --preset ci-linux -DCMAKE_BUILD_TYPE=Release
@@ -88,7 +88,13 @@ jobs:
             mingw-w64-x86_64-doxygen
 
       - name: Configure
-        run: cmake --preset ci-windows
+        run: >
+          cmake --preset ci-windows
+          -DMapper_PACKAGE_QT=ON
+          -DMapper_PACKAGE_PROJ=ON
+          -DMapper_PACKAGE_GDAL=ON
+          -DGDAL_DATA_DIR=/mingw64/share/gdal
+          -DPROJ_DATA_DIR=/mingw64/share/proj
 
       - name: Build
         run: cmake --build --preset ci-windows --parallel

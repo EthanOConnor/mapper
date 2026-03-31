@@ -63,7 +63,11 @@
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release",
                 "Mapper_DEVELOPMENT_BUILD": "OFF",
-                "Mapper_USE_GDAL": "ON"
+                "Mapper_USE_GDAL": "ON",
+                "Mapper_PACKAGE_QT": "OFF",
+                "Mapper_PACKAGE_PROJ": "OFF",
+                "Mapper_PACKAGE_GDAL": "OFF",
+                "Mapper_PACKAGE_ASSISTANT": "OFF"
             }
         },
         {
@@ -75,12 +79,10 @@
                 "CMAKE_BUILD_TYPE": "Release",
                 "Mapper_DEVELOPMENT_BUILD": "OFF",
                 "Mapper_USE_GDAL": "ON",
-                "Mapper_PACKAGE_QT": "ON",
-                "Mapper_PACKAGE_PROJ": "ON",
-                "Mapper_PACKAGE_GDAL": "ON",
-                "Mapper_PACKAGE_ASSISTANT": "OFF",
-                "Mapper_MANUAL_QTHELP": "OFF",
-                "Mapper_MANUAL_PDF": "OFF"
+                "Mapper_PACKAGE_QT": "OFF",
+                "Mapper_PACKAGE_PROJ": "OFF",
+                "Mapper_PACKAGE_GDAL": "OFF",
+                "Mapper_PACKAGE_ASSISTANT": "OFF"
             }
         }
     ],

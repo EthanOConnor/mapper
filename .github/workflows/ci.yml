@@ -29,7 +29,7 @@ jobs:
             libqt5sensors5-dev libqt5serialport5-dev libqt5sql5-sqlite \
             qtpositioning5-dev qt5-image-formats-plugins \
             libproj-dev libgdal-dev libpolyclipping-dev zlib1g-dev \
-            doxygen libegl-dev libgl-dev
+            libcups2-dev doxygen libegl-dev libgl-dev
 
       - name: Set up ccache
         uses: hendrikmuhs/ccache-action@v1
