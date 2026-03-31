@@ -1,122 +1,141 @@
-# Engineering Principles and Contribution Discipline
+# Local Worktree Guidance
 
-## Document authority
+This file is local workspace guidance for the `full-speed-ahead` worktree. It is
+not upstream documentation.
 
-| Document | Role |
-|---|---|
-| Upstream `README.md` | Product truth (theirs, not ours to modify) |
-| Upstream `INSTALL.md` | Build instructions (theirs) |
-| `AGENTS.md` | Our engineering invariants and contribution discipline |
-| `CLAUDE.md` | Quick-reference entry point for AI agents |
-| `DESIGN-tiled-raster.md` | Active design for viewport-aware GDAL raster loading |
+## Branch Purpose
 
-Everything else in the repo is upstream's. Read it, learn from it, contribute to it — but always through PRs.
+This is an experimental integration branch. The goal is to push as many of our
+development goals forward as possible — tiled raster loading, online imagery,
+render pipeline improvements, and anything else that's ready — recording
+learnings and planning for later, more careful upstreamable implementations.
+
+This branch is **not** intended for upstream submission. It exists to:
+- Combine and exercise multiple features together in a real build.
+- Discover integration issues, performance problems, and design gaps early.
+- Record what works, what doesn't, and what the clean upstream version should
+  look like.
+- Move fast and learn, without the constraints of PR-ready discipline.
+
+Upstream-quality replay of individual features happens later in `pr/*` branches.
+See the workspace-level docs in `/Users/ethan/dev/oom/` (`AGENTS.md` and
+`CLAUDE.md`) for the full workspace layout, branch strategy, and feature
+lifecycle.
 
 ## Mission
 
-Submit pull requests to OpenOrienteering/mapper that:
-1. Fix real bugs or add real value
-2. Follow upstream conventions exactly
-3. Include appropriate tests
-4. Are small, focused, and easy to review
-5. Have commit messages that match the project's existing style
+- Move fast and learn. Ship working combinations of features.
+- Record design insights and integration lessons as you go (commit messages,
+  code comments, or `dev/` notes).
+- Keep the build healthy — broken builds waste more time than they save.
+- Don't worry about upstream polish, PR splitting, or commit hygiene here.
 
-We are guests in this codebase. Upstream acceptance is the measure of success.
+## Core Values
 
-## Cross-project engineering principles
+- Prefer ultra-clean, straightforward, easy-to-reason-about code.
+- Simplify relentlessly. Remove moving parts before adding new ones.
+- Use the best well-established practices and knowledge available for the
+  actual problem in front of us.
+- Make future change easier:
+  - reduce coupling
+  - keep responsibilities clear
+  - create seams that help later refactors and PR splitting
+- Be mindful of likely future migrations, especially Qt 6. Avoid pushing new
+  code deeper into avoidable Qt 5-specific corners when a neutral design is
+  available.
+- Separate data, configuration, constants, and naming from logic. Values that
+  may need to change later should live in one clear place when practical.
+- Write strong, robust code, but do not become paranoid about every
+  hypothetical failure mode up front.
+
+## Cross-project Engineering Principles
 
 These principles apply across all our work, regardless of language or project.
 
 ### Concise, not clever
-Write the simplest code that solves the problem. No abstractions for hypothetical future needs. Three similar lines beat a premature helper function.
+Write the simplest code that solves the problem. No abstractions for
+hypothetical future needs. Three similar lines beat a premature helper function.
 
 ### Deep-patterned, not special-cased
-Prefer systematic solutions over one-off fixes. If a problem appears in one place, understand whether it's an instance of a broader pattern and solve the pattern. A single well-chosen abstraction applied consistently beats ten scattered `if` statements. The code should read as an expression of the underlying structure, not a patchwork of exceptions.
+Prefer systematic solutions over one-off fixes. If a problem appears in one
+place, understand whether it's an instance of a broader pattern and solve the
+pattern. A single well-chosen abstraction applied consistently beats ten
+scattered `if` statements.
 
 ### Match the texture of the codebase
-New code should be indistinguishable from existing code in style, idiom, and level of abstraction. Read surrounding code before writing. If the project uses Qt's endian API, use Qt's endian API — don't invent a wrapper. If the project doesn't use `auto`, neither do we. The goal is a PR that looks like it was written by someone who's been on the project for years.
+New code should be indistinguishable from existing code in style, idiom, and
+level of abstraction. Read surrounding code before writing.
 
 ### No overengineering
-Don't add features, configurability, or "improvements" beyond what was asked. A bug fix doesn't need surrounding code cleaned up. Stay in scope.
+Don't add features, configurability, or "improvements" beyond what was asked.
+Stay in scope.
 
 ### Functional where possible
-Prefer pure functions over stateful methods. Keep side effects at boundaries. Predictable code is reviewable code — doubly important when contributing to someone else's project.
+Prefer pure functions over stateful methods. Keep side effects at boundaries.
 
 ### Data in files, not code
-Configuration, constants, and data belong in data files or resource systems, not hardcoded in source.
+Configuration, constants, and data belong in data files or resource systems, not
+hardcoded in source.
 
 ### No god classes
-If a class does everything, it's doing too much. Respect the existing separation of concerns in the codebase.
-
-### Documentation tracks reality
-If you change behavior, update the relevant docs in the same change. Don't add documentation where none exists upstream — that's a separate conversation with maintainers.
+If a class does everything, it's doing too much. Respect the existing separation
+of concerns in the codebase.
 
 ### Low resource consumption
-Treat CPU, memory, and battery as finite. Don't introduce expensive operations without justification.
+Treat CPU, memory, and battery as finite. Don't introduce expensive operations
+without justification.
 
-## Upstream conventions — non-negotiable
+## Design Guidance
 
-These are the project's own conventions. We follow them exactly.
+- Favor explicit control flow and state flow over cleverness.
+- Prefer small helpers or focused objects with clear ownership over giant
+  coordinator methods.
+- Keep policy separate from mechanism when it materially clarifies the design.
+- Keep "what we want", "what we need now", and "how to get it" distinct when
+  building async, cached, or progressive systems.
+- Avoid duplicated conditional logic, scattered magic values, and hidden
+  coupling through shared mutable state.
+- Choose the simplest design that solves the real problem well.
+- Do not introduce abstraction layers unless they clearly reduce complexity or
+  create a real long-term seam.
+
+## Upstream Awareness
+
+Even though this branch is not upstream-bound, keep upstream replay in mind:
+- When you learn something important about how a feature should be structured
+  for upstream, note it.
+- Prefer designs that will be easy to decompose into clean `pr/*` branches
+  later, but don't let that slow you down here.
+- If a quick hack is the right move to test an idea, do it — just mark it
+  clearly so the clean version is obvious later.
+
+## Upstream Conventions — Still Followed
+
+We follow the project's own conventions even in this experimental branch,
+because diverging from them makes later upstream replay harder.
 
 ### Coding style
 - Tabs for indentation, 4-space tab width
 - Pointer/reference binds to type: `Type* var`, not `Type *var`
 - Formatting per `doc/coding-style.xml`
-- clang-tidy clean against `.clang-tidy` before submitting
-- Run `./codespell.sh` before submitting
 
 ### Commit messages
-Match the existing style. Pattern: `Component: Imperative description` or `area: description`.
-```
-SensorsTest: Allow skipping the Powershell source test
-TemplateTest: Fix Unicode string initialization
-test: Capture output from WIN32 executable
-packaging: More time for hdiutil
-Fix GDAL use in CMake (#2480)
-```
-Reference issue numbers with `(#NNN)` where applicable.
+Match the existing style. Pattern: `Component: Imperative description` or
+`area: description`.
 
 ### C++ standard
-C++14 is the project baseline. Don't use later features unless the project has already adopted them in the area you're touching.
+C++14 is the project baseline.
 
 ### Qt6 forward compatibility
-Qt6 migration is on the horizon (#2483). All new code must use only Qt6-safe APIs:
-- No `QStringRef` (use `QString` or `QStringView`)
-- No `QMatrix` (use `QTransform`)
-- No `QRegExp` (use `QRegularExpression`)
-- No `QPrinter::PaperSize` (use `QPageSize`)
-- Match existing project conventions for types (`int` not `qsizetype`, etc.)
+All new code must use only Qt6-safe APIs. No `QStringRef`, `QMatrix`,
+`QRegExp`, or `QPrinter::PaperSize`.
 
 ### Build system
-CMake. Don't introduce new build tools or dependencies without strong justification and upstream discussion first.
+CMake. Keep the direct local build healthy.
 
-### Testing
-Qt Test framework, run via CTest. Changes to core functionality must include test coverage. Test files follow the pattern `ComponentTest.cpp` or `component_test.cpp`.
+## Build And Tooling
 
-## PR discipline
-
-### Before starting work
-1. Check the [issue tracker](https://github.com/OpenOrienteering/mapper/issues) for existing discussion and context
-2. Read the relevant existing code thoroughly before proposing changes
-3. Understand why the code is the way it is — there may be non-obvious reasons
-4. Branch from `upstream/master`: `git checkout -b fix-topic upstream/master`
-
-### Crafting a PR
-- One logical change per PR — don't bundle unrelated fixes
-- Small PRs review faster and merge easier
-- If a change requires multiple steps, consider a series of PRs
-- Run all existing tests and code checks before pushing
-- Clear PR description: what changed, why, and how to verify
-- Push to `origin`, PR targets `upstream/master`
-
-### Dependency updates
-Dependency changes go in their own dedicated PRs. Never bundle a dependency update with a feature or bugfix.
-
-### What NOT to do
-- Don't reformat code outside your diff (style-only changes are separate PRs)
-- Don't add dependencies without upstream discussion
-- Don't change build infrastructure speculatively
-- Don't submit half-finished work hoping for feedback — submit when it's ready
-- Don't include `CLAUDE.md`, `AGENTS.md`, or AI-tooling files in PR branches
-- Don't introduce C++ features beyond the project's established standard
-- Don't add comments, docstrings, or type annotations to code you didn't change
+- Keep the direct local CMake build healthy while developing.
+- Remember that upstream CI is superbuild-wrapped Azure, not just the local
+  direct build.
+- Local guidance files like this one should stay out of commits and PRs.

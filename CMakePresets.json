@@ -31,7 +31,11 @@
             "binaryDir": "${sourceDir}/build/dev-macos",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
-                "Mapper_DEVELOPMENT_BUILD": "ON"
+                "Mapper_DEVELOPMENT_BUILD": "ON",
+                "Mapper_PACKAGE_QT": "OFF",
+                "Mapper_PACKAGE_PROJ": "OFF",
+                "Mapper_PACKAGE_GDAL": "OFF",
+                "Mapper_PACKAGE_ASSISTANT": "OFF"
             }
         },
         {
@@ -41,7 +45,11 @@
             "binaryDir": "${sourceDir}/build/dev-windows",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
-                "Mapper_DEVELOPMENT_BUILD": "ON"
+                "Mapper_DEVELOPMENT_BUILD": "ON",
+                "Mapper_PACKAGE_QT": "OFF",
+                "Mapper_PACKAGE_PROJ": "OFF",
+                "Mapper_PACKAGE_GDAL": "OFF",
+                "Mapper_PACKAGE_ASSISTANT": "OFF"
             }
         },
         {

@@ -31,7 +31,8 @@ sudo apt-get install build-essential ninja-build \
   qtbase5-dev qtbase5-private-dev qttools5-dev qttools5-dev-tools \
   libqt5sensors5-dev libqt5serialport5-dev libqt5sql5-sqlite \
   qtpositioning5-dev qt5-image-formats-plugins \
-  libproj-dev libgdal-dev libpolyclipping-dev zlib1g-dev doxygen
+  libproj-dev libgdal-dev libpolyclipping-dev zlib1g-dev \
+  libcups2-dev doxygen graphviz
 ```
 
 Build and test:
@@ -45,7 +46,7 @@ ctest --preset dev-linux
 
 Install dependencies with Homebrew:
 ```
-brew install qt@5 proj gdal ninja
+brew install qt@5 proj gdal ninja doxygen
 ```
 
 Build and test:
@@ -106,7 +107,10 @@ See `.github/workflows/ci.yml` for PR validation and
 
 ## Packaging
 
-Desktop packages are built with CPack after a Release build:
+Development presets keep packaging disabled. The release workflow enables
+packaging explicitly.
+
+Linux and macOS packages can be built locally after a Release configure:
 
 ```
 cmake --preset ci-linux -DCMAKE_BUILD_TYPE=Release
@@ -114,8 +118,10 @@ cmake --build --preset ci-linux
 cd build/ci-linux && cpack
 ```
 
-Platform-specific generators: DEB (Linux), DragNDrop/DMG (macOS),
-ZIP/NSIS (Windows).
+Platform-specific outputs in the release workflow are:
+- DEB on Linux via CPack
+- DragNDrop/DMG on macOS via CPack
+- ZIP on Windows by staging the install tree and archiving it
 
 
 ## Binary Packages and Distribution
@@ -125,6 +131,7 @@ binary form creates certain legal obligations, such as the distribution of the
 corresponding source code and build instructions for GPL licensed binaries,
 and displaying copyright statements and disclaimers.
 
-Packages for macOS and Windows are built using CPack which comes with CMake.
-These packages bundle all 3rd-party components (Qt binaries and translations,
-PROJ and GDAL binaries and data, etc.).
+macOS packages are built using CPack. Windows release artifacts are created by
+installing into a staging directory and zipping that tree. Desktop release
+artifacts bundle the required 3rd-party components such as Qt binaries and
+translations, and PROJ / GDAL binaries and data.
