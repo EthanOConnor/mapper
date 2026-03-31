@@ -77,11 +77,11 @@ int tileSubsamplingForScale(double scale, const QSize& block_size)
 	if (!(scale > 0.0) || block_size.isEmpty())
 		return 1;
 
-	constexpr double target_screen_pixels_per_source_pixel = 1.5;
 	auto const max_subsampling = std::max(1, std::min(block_size.width(), block_size.height()));
+	auto const desired_subsampling = 1.0 / scale;
 	int subsampling = 1;
 	while (subsampling * 2 <= max_subsampling
-	       && scale * (subsampling * 2) <= target_screen_pixels_per_source_pixel)
+	       && desired_subsampling >= 1.5 * subsampling)
 	{
 		subsampling *= 2;
 	}

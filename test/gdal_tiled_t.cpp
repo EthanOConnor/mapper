@@ -244,6 +244,7 @@ private slots:
 		QVERIFY(keys.contains(GdalTemplate::tileKey(3, 4, 1)));
 
 		QCOMPARE(GdalTemplate::chooseTileSubsampling(4.0, QSize(64, 64)), 1);
+		QCOMPARE(GdalTemplate::chooseTileSubsampling(0.75, QSize(64, 64)), 1);
 		QCOMPARE(GdalTemplate::chooseTileSubsampling(0.5, QSize(64, 64)), 2);
 		QCOMPARE(GdalTemplate::chooseTileSubsampling(0.25, QSize(64, 64)), 4);
 
