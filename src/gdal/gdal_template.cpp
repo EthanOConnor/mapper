@@ -370,7 +370,7 @@ void GdalTemplate::unloadTemplateFileImpl()
 
 void GdalTemplate::updateRenderContext(const ViewRenderContext& context)
 {
-	if (!isTiledSource() || !context.on_screen)
+	if (!isTiledSource())
 		return;
 
 	auto const scale = std::max(getTemplateScaleX(), getTemplateScaleY()) * context.view_zoom;
