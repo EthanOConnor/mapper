@@ -692,6 +692,141 @@ void AreaRenderable::render(QPainter &painter, const RenderConfig &/*config*/) c
 
 
 
+// ### HatchFillRenderable ###
+
+HatchFillRenderable::HatchFillRenderable(const MapColor* color, const QPainterPath& outline,
+                                         qreal angle, qreal spacing, qreal offset,
+                                         qreal line_width, const QRectF& extent)
+ : Renderable(color)
+ , outline(outline)
+ , angle(angle)
+ , spacing(spacing)
+ , offset(offset)
+ , line_width(line_width)
+{
+	this->extent = extent;
+}
+
+PainterConfig HatchFillRenderable::getPainterConfig(const QPainterPath* /*clip_path*/) const
+{
+	// We handle clipping ourselves in render(), so clip_path is always nullptr.
+	return { color_priority, PainterConfig::PenOnly, line_width, nullptr };
+}
+
+void HatchFillRenderable::render(QPainter& painter, const RenderConfig& /*config*/) const
+{
+	painter.save();
+	painter.setClipPath(outline, Qt::IntersectClip);
+
+	QPen pen(painter.pen());
+	pen.setCapStyle(Qt::FlatCap);
+	pen.setJoinStyle(Qt::MiterJoin);
+	painter.setPen(pen);
+
+	const auto& canvas = extent;
+
+	if (qAbs(angle - M_PI / 2) < 0.0001)
+	{
+		// Special case: vertical lines
+		double first_offset = offset + ceil((canvas.left() - offset) / spacing) * spacing;
+		for (double cur = first_offset; cur < canvas.right(); cur += spacing)
+		{
+			painter.drawLine(QPointF(cur, canvas.top()), QPointF(cur, canvas.bottom()));
+		}
+	}
+	else if (qAbs(angle - 0) < 0.0001)
+	{
+		// Special case: horizontal lines
+		double first_offset = offset + ceil((canvas.top() - offset) / spacing) * spacing;
+		for (double cur = first_offset; cur < canvas.bottom(); cur += spacing)
+		{
+			painter.drawLine(QPointF(canvas.left(), cur), QPointF(canvas.right(), cur));
+		}
+	}
+	else
+	{
+		// General case
+		auto xfactor = 1.0 / sin(angle);
+		auto yfactor = 1.0 / cos(angle);
+
+		auto dist_x = xfactor * spacing;
+		auto dist_y = yfactor * spacing;
+		auto offset_x = xfactor * offset;
+		auto offset_y = yfactor * offset;
+
+		if (angle < M_PI / 2)
+		{
+			// Start with the upper left corner
+			offset_x += (-canvas.top()) / tan(angle);
+			offset_y -= canvas.left() * tan(angle);
+			auto start_x = offset_x + ceil((canvas.x() - offset_x) / dist_x) * dist_x;
+			auto start_y = canvas.top();
+			auto end_x = canvas.left();
+			auto end_y = offset_y + ceil((canvas.y() - offset_y) / dist_y) * dist_y;
+
+			while (true)
+			{
+				// Correct coordinates
+				if (start_x > canvas.right())
+				{
+					start_y += ((start_x - canvas.right()) / dist_x) * dist_y;
+					start_x = canvas.right();
+				}
+				if (end_y > canvas.bottom())
+				{
+					end_x += ((end_y - canvas.bottom()) / dist_y) * dist_x;
+					end_y = canvas.bottom();
+				}
+
+				if (start_y > canvas.bottom())
+					break;
+
+				painter.drawLine(QPointF(start_x, start_y), QPointF(end_x, end_y));
+
+				start_x += dist_x;
+				end_y += dist_y;
+			}
+		}
+		else
+		{
+			// Start with left lower corner
+			offset_x += (-canvas.bottom()) / tan(angle);
+			offset_y -= canvas.x() * tan(angle);
+			auto start_x = offset_x + ceil((canvas.x() - offset_x) / dist_x) * dist_x;
+			auto start_y = canvas.bottom();
+			auto end_x = canvas.x();
+			auto end_y = offset_y + ceil((canvas.bottom() - offset_y) / dist_y) * dist_y;
+
+			while (true)
+			{
+				// Correct coordinates
+				if (start_x > canvas.right())
+				{
+					start_y += ((start_x - canvas.right()) / dist_x) * dist_y;
+					start_x = canvas.right();
+				}
+				if (end_y < canvas.y())
+				{
+					end_x += ((end_y - canvas.y()) / dist_y) * dist_x;
+					end_y = canvas.y();
+				}
+
+				if (start_y < canvas.y())
+					break;
+
+				painter.drawLine(QPointF(start_x, start_y), QPointF(end_x, end_y));
+
+				start_x += dist_x;
+				end_y += dist_y;
+			}
+		}
+	}
+
+	painter.restore();
+}
+
+
+
 // ### TextRenderable ###
 
 TextRenderable::TextRenderable(const TextSymbol* symbol, const TextObject* text_object, const MapColor* color, double anchor_x, double anchor_y)
