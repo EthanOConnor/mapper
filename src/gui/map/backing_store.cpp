@@ -77,8 +77,10 @@ BackingTile& BackingStore::ensureTile(TileKey key)
 	if (it != tiles.end())
 		return it->second;
 
+	// Image is left null — allocated by the render job when dispatched.
+	// Dirty tiles that were previously rendered keep their stale image
+	// so the compositor can show it until fresh content arrives.
 	auto& tile = tiles[key];
-	tile.image = QImage(tile_size, tile_size, QImage::Format_ARGB32_Premultiplied);
 	tile.state = BackingTile::Dirty;
 	return tile;
 }

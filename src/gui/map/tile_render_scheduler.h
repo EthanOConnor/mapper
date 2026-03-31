@@ -39,6 +39,16 @@
 namespace OpenOrienteering {
 
 
+struct TileRenderSnapshot;
+
+/**
+ * The function type used by worker threads to render tile content.
+ * Must be thread-safe (read-only access to shared data).
+ */
+using TileRenderFunction = std::function<void(QPainter& painter,
+                                              const QRectF& tile_map_rect,
+                                              const TileRenderSnapshot& snapshot)>;
+
 /**
  * Snapshot of the view state needed by worker threads to render tiles.
  * Captured on the main thread before dispatching jobs, so workers
@@ -52,6 +62,7 @@ struct TileRenderSnapshot
 	bool overprinting;
 	bool grid_visible;
 	int generation;
+	TileRenderFunction render_func;
 };
 
 
@@ -97,16 +108,8 @@ class TileRenderScheduler : public QObject
 	Q_OBJECT
 
 public:
-	using RenderFunction = std::function<void(QPainter& painter,
-	                                          const QRectF& tile_map_rect,
-	                                          const TileRenderSnapshot& snapshot)>;
-
 	explicit TileRenderScheduler(QObject* parent = nullptr);
 	~TileRenderScheduler() override;
-
-	/** Sets the function that workers call to render map content into a tile.
-	 *  This function must be thread-safe (read-only access to map data). */
-	void setRenderFunction(RenderFunction func);
 
 	/** Returns the current generation counter. */
 	int generation() const { return gen.load(std::memory_order_relaxed); }
@@ -115,9 +118,11 @@ public:
 	 *  in-flight jobs from the previous generation. */
 	void cancelPending();
 
-	/** Submits a batch of tile render jobs. */
-	void submit(const std::vector<TileRenderJob>& jobs,
-	            const TileRenderSnapshot& snapshot);
+	/** Submits a batch of tile render jobs.
+	 *  The snapshot (including its render_func) is shared by all jobs
+	 *  in this batch and kept alive until all workers finish with it. */
+	void submit(std::vector<TileRenderJob> jobs,
+	            TileRenderSnapshot snapshot);
 
 	/** Collects completed results (called on the main thread).
 	 *  Returns results whose generation matches the current generation. */
@@ -133,12 +138,10 @@ signals:
 private:
 	void workerLoop();
 
-	RenderFunction render_func;
-
-	// Work queue
+	// Work queue — snapshot is shared across all jobs in a batch.
 	std::mutex queue_mutex;
 	std::condition_variable queue_cv;
-	std::queue<std::pair<TileRenderJob, TileRenderSnapshot>> work_queue;
+	std::queue<std::pair<TileRenderJob, std::shared_ptr<const TileRenderSnapshot>>> work_queue;
 
 	// Results
 	std::mutex result_mutex;

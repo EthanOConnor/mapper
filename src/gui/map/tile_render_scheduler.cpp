@@ -50,12 +50,6 @@ TileRenderScheduler::~TileRenderScheduler()
 }
 
 
-void TileRenderScheduler::setRenderFunction(RenderFunction func)
-{
-	render_func = std::move(func);
-}
-
-
 void TileRenderScheduler::cancelPending()
 {
 	gen.fetch_add(1, std::memory_order_release);
@@ -63,7 +57,7 @@ void TileRenderScheduler::cancelPending()
 	// Drain the work queue (no point rendering stale jobs).
 	{
 		std::lock_guard<std::mutex> lock(queue_mutex);
-		std::queue<std::pair<TileRenderJob, TileRenderSnapshot>> empty;
+		decltype(work_queue) empty;
 		work_queue.swap(empty);
 	}
 
@@ -75,16 +69,17 @@ void TileRenderScheduler::cancelPending()
 }
 
 
-void TileRenderScheduler::submit(const std::vector<TileRenderJob>& jobs,
-                                  const TileRenderSnapshot& snapshot)
+void TileRenderScheduler::submit(std::vector<TileRenderJob> jobs,
+                                  TileRenderSnapshot snapshot)
 {
 	if (jobs.empty())
 		return;
 
+	auto shared = std::make_shared<const TileRenderSnapshot>(std::move(snapshot));
 	{
 		std::lock_guard<std::mutex> lock(queue_mutex);
-		for (const auto& job : jobs)
-			work_queue.push({job, snapshot});
+		for (auto& job : jobs)
+			work_queue.push({std::move(job), shared});
 	}
 	in_flight.fetch_add(static_cast<int>(jobs.size()), std::memory_order_relaxed);
 	queue_cv.notify_all();
@@ -116,7 +111,7 @@ void TileRenderScheduler::workerLoop()
 {
 	while (true)
 	{
-		std::pair<TileRenderJob, TileRenderSnapshot> work;
+		std::pair<TileRenderJob, std::shared_ptr<const TileRenderSnapshot>> work;
 
 		{
 			std::unique_lock<std::mutex> lock(queue_mutex);
@@ -132,7 +127,7 @@ void TileRenderScheduler::workerLoop()
 		}
 
 		auto& job = work.first;
-		auto& snapshot = work.second;
+		const auto& snapshot = *work.second;
 
 		// Check if this job is still relevant.
 		if (job.generation != gen.load(std::memory_order_relaxed))
@@ -142,7 +137,7 @@ void TileRenderScheduler::workerLoop()
 		}
 
 		// Render the tile.
-		if (render_func)
+		if (snapshot.render_func)
 		{
 			QPainter painter(&job.image);
 
@@ -158,7 +153,7 @@ void TileRenderScheduler::workerLoop()
 			painter.translate(-job.tile_view_rect.x(), -job.tile_view_rect.y());
 			painter.setWorldTransform(snapshot.world_transform, true);
 
-			render_func(painter, job.tile_map_rect, snapshot);
+			snapshot.render_func(painter, job.tile_map_rect, snapshot);
 
 			painter.end();
 		}

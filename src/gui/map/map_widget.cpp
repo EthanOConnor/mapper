@@ -348,19 +348,23 @@ void MapWidget::viewChanged(MapView::ChangeFlags changes)
 			scene_store.clear();
 		}
 		pan_adjusted = false;
+		updateEverything();
 	}
 	else if (pan_adjusted)
 	{
+		// Grid offsets were already adjusted in finishDragging — tiles
+		// remain valid at their new positions.  Just repaint; new edge
+		// tiles will be dispatched by updateSceneTiles().
 		pan_adjusted = false;
+		update();
 	}
 	else
 	{
 		tile_scheduler->cancelPending();
 		scene_store.resetInFlight();
 		scene_store.clear();
+		updateEverything();
 	}
-
-	updateEverything();
 	scheduleRenderContextUpdate();
 	if (changes.testFlag(MapView::ZoomChange))
 		updateZoomDisplay();
@@ -452,9 +456,11 @@ void MapWidget::finishDragging(const QPoint& cursor_pos)
 
 	QPoint pan_delta = cursor_pos - drag_start_pos;
 
-	// Adjust grid offsets BEFORE finishPanning changes the center.
-	// In the new view space, old view point v maps to v - pan_delta.
-	adjustAllGridOffsets(QPointF(-pan_delta.x(), -pan_delta.y()));
+	// Adjust grid offsets to compensate for the center change that
+	// finishPanning will make.  After the center shifts, old view point v
+	// maps to v + pan_delta in the new view space, so shift the grid by
+	// +pan_delta to keep tiles aligned.
+	adjustAllGridOffsets(QPointF(pan_delta.x(), pan_delta.y()));
 	pan_adjusted = true;
 
 	view->finishPanning(pan_delta);
@@ -1447,47 +1453,11 @@ void MapWidget::updateSceneTiles()
 	const MapView* snap_view = view;
 	auto map_vis = view->effectiveMapVisibility();
 
-	if (!tile_scheduler->hasPendingWork())
-	{
-		RenderConfig::Options options(RenderConfig::Screen | RenderConfig::HelperSymbols);
-		if (!use_antialiasing)
-			options |= RenderConfig::DisableAntialiasing | RenderConfig::ForceMinSize;
+	RenderConfig::Options options(RenderConfig::Screen | RenderConfig::HelperSymbols);
+	if (!use_antialiasing)
+		options |= RenderConfig::DisableAntialiasing | RenderConfig::ForceMinSize;
 
-		const MapRenderables* mr = &map->mapRenderables();
-		tile_scheduler->setRenderFunction(
-			[map, mr, options, snap_view, below_visible, above_visible,
-			 first_front_template, num_templates, map_vis](
-				QPainter& painter, const QRectF& tile_map_rect,
-				const TileRenderSnapshot& snapshot) {
-
-				// 1. Below-templates (white background)
-				painter.fillRect(painter.window(), Qt::white);
-				if (below_visible)
-					map->drawTemplates(&painter, tile_map_rect, 0, first_front_template - 1, snap_view, true);
-
-				// 2. Map objects
-				if (map_vis.visible)
-				{
-					qreal saved = painter.opacity();
-					painter.setOpacity(map_vis.opacity);
-
-					RenderConfig config = { *map, tile_map_rect, snapshot.zoom_factor, options, 1.0 };
-
-#ifndef Q_OS_ANDROID
-					if (snapshot.overprinting)
-						mr->drawOverprintingSimulation(&painter, config);
-					else
-#endif
-						mr->draw(&painter, config);
-
-					painter.setOpacity(saved);
-				}
-
-				// 3. Above-templates
-				if (above_visible)
-					map->drawTemplates(&painter, tile_map_rect, first_front_template, num_templates - 1, snap_view, true);
-			});
-	}
+	const MapRenderables* mr = &map->mapRenderables();
 
 	// Collect dirty tiles and dispatch to worker threads.
 	std::vector<TileRenderJob> jobs;
@@ -1500,6 +1470,42 @@ void MapWidget::updateSceneTiles()
 	snapshot.overprinting = view->isOverprintingSimulationEnabled();
 	snapshot.grid_visible = view->isGridVisible();
 	snapshot.generation = current_gen;
+
+	// Build the render function fresh each dispatch so it always
+	// reflects the current template count, visibility, etc.
+	snapshot.render_func =
+		[map, mr, options, snap_view, below_visible, above_visible,
+		 first_front_template, num_templates, map_vis](
+			QPainter& painter, const QRectF& tile_map_rect,
+			const TileRenderSnapshot& snap) {
+
+			// 1. Below-templates (white background)
+			painter.fillRect(painter.window(), Qt::white);
+			if (below_visible)
+				map->drawTemplates(&painter, tile_map_rect, 0, first_front_template - 1, snap_view, true);
+
+			// 2. Map objects
+			if (map_vis.visible)
+			{
+				qreal saved = painter.opacity();
+				painter.setOpacity(map_vis.opacity);
+
+				RenderConfig config = { *map, tile_map_rect, snap.zoom_factor, options, 1.0 };
+
+#ifndef Q_OS_ANDROID
+				if (snap.overprinting)
+					mr->drawOverprintingSimulation(&painter, config);
+				else
+#endif
+					mr->draw(&painter, config);
+
+				painter.setOpacity(saved);
+			}
+
+			// 3. Above-templates
+			if (above_visible)
+				map->drawTemplates(&painter, tile_map_rect, first_front_template, num_templates - 1, snap_view, true);
+		};
 
 	for (int row = row_min; row <= row_max; ++row)
 	{
@@ -1571,11 +1577,6 @@ void MapWidget::compositeStoreTiles(const BackingStore& store, QPainter& painter
 			TileKey key{col, row};
 			const BackingTile* tile = store.tile(key);
 
-			// Skip dirty tiles — their image content is not valid.
-			// When fallback is active, the scaled fallback shows through.
-			if (tile && !tile->clean())
-				continue;
-
 			QRect tile_vp = store.tileViewportRect(key, viewport_origin);
 			QRect draw_rect = tile_vp.intersected(clip_rect);
 			if (draw_rect.isEmpty())
@@ -1583,6 +1584,9 @@ void MapWidget::compositeStoreTiles(const BackingStore& store, QPainter& painter
 
 			if (tile && !tile->image.isNull())
 			{
+				// Draw the tile — clean content or stale content from a
+				// previous render.  Showing stale content avoids flashing
+				// white while fresh tiles are being rendered.
 				QRect src_rect(draw_rect.x() - tile_vp.x(),
 				               draw_rect.y() - tile_vp.y(),
 				               draw_rect.width(), draw_rect.height());
@@ -1590,8 +1594,8 @@ void MapWidget::compositeStoreTiles(const BackingStore& store, QPainter& painter
 			}
 			else if (fallback_color.alpha() > 0 && !has_fallback)
 			{
-				// Only fill with fallback color when there's no zoom
-				// fallback providing coverage underneath.
+				// No image yet (brand-new tile) — fill with fallback
+				// color so no gray or stale frame-buffer shows through.
 				painter.fillRect(draw_rect, fallback_color);
 			}
 		}
@@ -1611,10 +1615,12 @@ void MapWidget::compositeFallbackTiles(const BackingStore& store, QPainter& pain
 	                        height() / 2.0 + pan_offset.y());
 
 	// Transform from old view space to new view space.
-	// worldTransform maps map→view, so:
-	//   old_view → map → new_view = new_wt * old_wt.inverted()
+	// worldTransform maps map→view.  We need old_view → map → new_view.
+	// In Qt's row-vector convention (A*B).map(p) = B(A(p)), so:
+	//   old_to_new = old_wt.inverted() * new_wt
+	// which maps: p → old_wt_inv(p) = map_point → new_wt(map_point) = new_view.
 	bool invertible;
-	QTransform old_to_new = view->worldTransform() * fallback_transform.inverted(&invertible);
+	QTransform old_to_new = fallback_transform.inverted(&invertible) * view->worldTransform();
 	if (!invertible)
 		return;
 
