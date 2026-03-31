@@ -648,7 +648,7 @@ QImage GdalTemplate::readTileImage(GDALDatasetH dataset, int tile_x, int tile_y,
 		src.x(), src.y(), src.width(), src.height(),
 		tile.bits() + tiled_raster_info.band_offset, output_w, output_h,
 		GDT_Byte,
-		tiled_raster_info.bands.count(), tiled_raster_info.bands.data(),
+		tiled_raster_info.bands.count(), const_cast<int*>(tiled_raster_info.bands.data()),
 		tiled_raster_info.pixel_space, tile.bytesPerLine(),
 		tiled_raster_info.band_space,
 		&extra_arg);
