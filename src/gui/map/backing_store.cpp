@@ -79,7 +79,7 @@ BackingTile& BackingStore::ensureTile(TileKey key)
 
 	auto& tile = tiles[key];
 	tile.image = QImage(tile_size, tile_size, QImage::Format_ARGB32_Premultiplied);
-	tile.dirty = true;
+	tile.state = BackingTile::Dirty;
 	return tile;
 }
 
@@ -108,7 +108,7 @@ void BackingStore::dirtyViewRect(const QRectF& view_rect)
 		if (kv.first.col >= col_min && kv.first.col <= col_max
 		    && kv.first.row >= row_min && kv.first.row <= row_max)
 		{
-			kv.second.dirty = true;
+			kv.second.state = BackingTile::Dirty;
 		}
 	}
 }
@@ -117,7 +117,7 @@ void BackingStore::dirtyViewRect(const QRectF& view_rect)
 void BackingStore::dirtyAll()
 {
 	for (auto& kv : tiles)
-		kv.second.dirty = true;
+		kv.second.state = BackingTile::Dirty;
 }
 
 
@@ -159,7 +159,7 @@ bool BackingStore::allTilesClean(const QRectF& view_rect) const
 		for (int col = col_min; col <= col_max; ++col)
 		{
 			auto* t = tile({col, row});
-			if (!t || t->dirty)
+			if (!t || !t->clean())
 				return false;
 		}
 	}

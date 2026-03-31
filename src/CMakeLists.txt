@@ -174,6 +174,7 @@ set(Mapper_Common_SRCS
   gui/map/map_notes.cpp
   gui/map/backing_store.cpp
   gui/map/map_widget.cpp
+  gui/map/tile_render_scheduler.cpp
   gui/map/rotate_map_dialog.cpp
   gui/map/stretch_map_dialog.cpp
   

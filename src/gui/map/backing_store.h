@@ -60,8 +60,13 @@ struct TileKeyHash
 
 struct BackingTile
 {
+	enum State { Dirty, InFlight, Clean };
+
 	QImage image;
-	bool dirty = true;
+	State state = Dirty;
+
+	bool dirty() const { return state == Dirty; }
+	bool clean() const { return state == Clean; }
 };
 
 

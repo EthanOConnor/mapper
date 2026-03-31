@@ -800,6 +800,11 @@ void Map::draw(QPainter* painter, const RenderConfig& config)
 	renderables->draw(painter, config);
 }
 
+const MapRenderables& Map::mapRenderables() const
+{
+	return *renderables;
+}
+
 void Map::drawOverprintingSimulation(QPainter* painter, const RenderConfig& config)
 {
 	// Update the renderables of all objects marked as dirty

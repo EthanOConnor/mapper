@@ -44,6 +44,7 @@
 #include "core/map_coord.h"
 #include "core/map_view.h"
 #include "gui/map/backing_store.h"
+#include "gui/map/tile_render_scheduler.h"
 
 class QColor;
 class QContextMenuEvent;
@@ -433,6 +434,8 @@ private:
 	 * pixel delta. Used to retain tiles across pan completion.
 	 */
 	void adjustAllGridOffsets(QPointF delta);
+	/** Installs completed map tiles from background workers. */
+	void installMapTileResults();
 	/** Redraws all dirty caches. */
 	void updateAllDirtyCaches();
 	
@@ -539,6 +542,9 @@ private:
 	/** True when finishDragging has adjusted grid offsets and the upcoming
 	 *  CenterChange from viewChanged should NOT clear the stores. */
 	bool pan_adjusted = false;
+
+	/** Background tile renderer for the map layer. */
+	TileRenderScheduler* map_tile_scheduler = nullptr;
 	
 	// Dirty regions for drawings (tools) and activities
 	/** Dirty rect for the current tool, in viewport coordinates (pixels). */

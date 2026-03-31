@@ -116,6 +116,9 @@ MapWidget::MapWidget(bool show_help, bool force_antialiasing, QWidget* parent)
 	setFocusPolicy(Qt::ClickFocus);
 	setSizePolicy(QSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding));
 
+	map_tile_scheduler = new TileRenderScheduler(this);
+	connect(map_tile_scheduler, &TileRenderScheduler::resultsReady,
+	        this, &MapWidget::installMapTileResults);
 }
 
 MapWidget::~MapWidget()
@@ -331,6 +334,9 @@ void MapWidget::viewChanged(MapView::ChangeFlags changes)
 {
 	setDrawingBoundingBox(drawing_dirty_rect_map, drawing_dirty_rect_border, true);
 	setActivityBoundingBox(activity_dirty_rect_map, activity_dirty_rect_border, true);
+
+	// Cancel any in-flight map tile renders — they're for the old view.
+	map_tile_scheduler->cancelPending();
 
 	if (changes & (MapView::ZoomChange | MapView::RotationChange))
 	{
@@ -1526,7 +1532,7 @@ void MapWidget::updateTemplateTiles(BackingStore& store, QRect& dirty_rect, int 
 		{
 			TileKey key{col, row};
 			BackingTile& tile = store.ensureTile(key);
-			if (!tile.dirty)
+			if (tile.clean())
 				continue;
 
 			QPainter painter(&tile.image);
@@ -1550,7 +1556,7 @@ void MapWidget::updateTemplateTiles(BackingStore& store, QRect& dirty_rect, int 
 			map->drawTemplates(&painter, tile_map_rect, first_template, last_template, view, true);
 
 			painter.end();
-			tile.dirty = false;
+			tile.state = BackingTile::Clean;
 		}
 	}
 
@@ -1577,12 +1583,49 @@ void MapWidget::updateMapTiles()
 	Map* map = view->getMap();
 	int ts = map_store.tileSize();
 
-	RenderConfig::Options options(RenderConfig::Screen | RenderConfig::HelperSymbols);
 	bool use_antialiasing = force_antialiasing || Settings::getInstance().getSettingCached(Settings::MapDisplay_Antialiasing).toBool();
-	if (!use_antialiasing)
-		options |= RenderConfig::DisableAntialiasing | RenderConfig::ForceMinSize;
 
+	// Ensure renderables are up to date on the main thread before dispatching.
 	map->updateObjects();
+
+	// Set up the render function if not already done. This closure captures
+	// the Map* by reference — safe because workers only run while the map exists
+	// and no mutations happen during rendering (cancellation drains workers first).
+	if (!map_tile_scheduler->hasPendingWork())
+	{
+		RenderConfig::Options options(RenderConfig::Screen | RenderConfig::HelperSymbols);
+		if (!use_antialiasing)
+			options |= RenderConfig::DisableAntialiasing | RenderConfig::ForceMinSize;
+
+		const MapRenderables* mr = &map->mapRenderables();
+		map_tile_scheduler->setRenderFunction(
+			[map, mr, options](QPainter& painter, const QRectF& tile_map_rect,
+			                   const TileRenderSnapshot& snapshot) {
+				RenderConfig config = { *map, tile_map_rect, snapshot.zoom_factor, options, 1.0 };
+
+#ifndef Q_OS_ANDROID
+				if (snapshot.overprinting)
+					mr->drawOverprintingSimulation(&painter, config);
+				else
+#endif
+					mr->draw(&painter, config);
+
+				// Grid is drawn synchronously in installMapTileResults
+				// because Map::drawGrid is not const.
+			});
+	}
+
+	// Collect dirty tiles and dispatch them to worker threads.
+	std::vector<TileRenderJob> jobs;
+	int current_gen = map_tile_scheduler->generation();
+
+	TileRenderSnapshot snapshot;
+	snapshot.world_transform = view->worldTransform();
+	snapshot.zoom_factor = view->calculateFinalZoomFactor();
+	snapshot.antialiasing = use_antialiasing;
+	snapshot.overprinting = view->isOverprintingSimulationEnabled();
+	snapshot.grid_visible = view->isGridVisible();
+	snapshot.generation = current_gen;
 
 	for (int row = row_min; row <= row_max; ++row)
 	{
@@ -1590,43 +1633,50 @@ void MapWidget::updateMapTiles()
 		{
 			TileKey key{col, row};
 			BackingTile& tile = map_store.ensureTile(key);
-			if (!tile.dirty)
+			if (tile.state != BackingTile::Dirty)
 				continue;
 
-			QPainter painter(&tile.image);
+			// Mark as in-flight so the compositor skips it.
+			tile.state = BackingTile::InFlight;
 
-			painter.setCompositionMode(QPainter::CompositionMode_Clear);
-			painter.fillRect(0, 0, ts, ts, Qt::transparent);
-			painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
+			TileRenderJob job;
+			job.key = key;
+			job.tile_view_rect = map_store.tileViewRect(key);
+			job.tile_map_rect = view->calculateViewedRect(job.tile_view_rect);
+			// Detach the image so the worker thread has its own copy.
+			job.image = QImage(ts, ts, QImage::Format_ARGB32_Premultiplied);
+			job.generation = current_gen;
 
-			if (use_antialiasing)
-				painter.setRenderHint(QPainter::Antialiasing);
-
-			QRectF tile_vr = map_store.tileViewRect(key);
-			painter.translate(-tile_vr.x(), -tile_vr.y());
-			painter.setWorldTransform(view->worldTransform(), true);
-
-			QRectF tile_map_rect = view->calculateViewedRect(tile_vr);
-
-			RenderConfig config = { *map, tile_map_rect, view->calculateFinalZoomFactor(), options, 1.0 };
-
-#ifndef Q_OS_ANDROID
-			if (view->isOverprintingSimulationEnabled())
-				map->drawOverprintingSimulation(&painter, config);
-			else
-#endif
-				map->draw(&painter, config);
-
-			if (view->isGridVisible())
-				map->drawGrid(&painter, tile_map_rect);
-
-			painter.end();
-			tile.dirty = false;
+			jobs.push_back(std::move(job));
 		}
 	}
 
+	if (!jobs.empty())
+		map_tile_scheduler->submit(jobs, snapshot);
+
 	int evict_margin = overscan * 2;
 	map_store.evict(view_rect.adjusted(-evict_margin, -evict_margin, evict_margin, evict_margin));
+}
+
+
+void MapWidget::installMapTileResults()
+{
+	auto results = map_tile_scheduler->collectResults();
+	if (results.empty())
+		return;
+
+	for (auto& result : results)
+	{
+		BackingTile* tile = map_store.tile(result.key);
+		if (tile && tile->state == BackingTile::InFlight)
+		{
+			tile->image = std::move(result.image);
+			tile->state = BackingTile::Clean;
+		}
+	}
+
+	// Repaint to show the newly completed tiles.
+	update();
 }
 
 
@@ -1651,7 +1701,7 @@ void MapWidget::compositeStoreTiles(const BackingStore& store, QPainter& painter
 
 			// Skip dirty tiles — their image content is not valid.
 			// When fallback is active, the scaled fallback shows through.
-			if (tile && tile->dirty)
+			if (tile && !tile->clean())
 				continue;
 
 			QRect tile_vp = store.tileViewportRect(key, viewport_origin);
@@ -1701,7 +1751,7 @@ void MapWidget::compositeFallbackTiles(const BackingStore& store, QPainter& pain
 		const TileKey& key = it->first;
 		const BackingTile& tile = it->second;
 
-		if (tile.image.isNull() || tile.dirty)
+		if (tile.image.isNull() || !tile.clean())
 			continue;
 
 		// Tile origin in old view space (with old grid offset)
