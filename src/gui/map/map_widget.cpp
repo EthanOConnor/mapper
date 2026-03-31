@@ -115,6 +115,17 @@ MapWidget::MapWidget(bool show_help, bool force_antialiasing, QWidget* parent)
 	setMouseTracking(true);
 	setFocusPolicy(Qt::ClickFocus);
 	setSizePolicy(QSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding));
+
+	// Zoom settle timer: after the last zoom event, wait briefly then
+	// render new tiles. During active zoom, only scaled fallback is shown.
+	auto* zoom_settle_timer = new QTimer(this);
+	zoom_settle_timer->setSingleShot(true);
+	zoom_settle_timer->setInterval(150);
+	zoom_settle_timer->setObjectName(QStringLiteral("zoom_settle_timer"));
+	connect(zoom_settle_timer, &QTimer::timeout, this, [this]() {
+		zoom_active = false;
+		updateEverything();
+	});
 }
 
 MapWidget::~MapWidget()
@@ -335,11 +346,31 @@ void MapWidget::viewChanged(MapView::ChangeFlags changes)
 	{
 		// Zoom or rotation changed — promote current tiles to fallback
 		// so they can be drawn scaled as a temporary backdrop.
-		fallback_transform = last_rendered_transform;
-		below_template_store.promoteToFallback();
-		above_template_store.promoteToFallback();
-		map_store.promoteToFallback();
-		has_zoom_fallback = true;
+		if (!has_zoom_fallback)
+		{
+			// Only promote on the first zoom step. Subsequent steps
+			// keep scaling from the original pre-zoom tiles.
+			fallback_transform = last_rendered_transform;
+			below_template_store.promoteToFallback();
+			above_template_store.promoteToFallback();
+			map_store.promoteToFallback();
+			has_zoom_fallback = true;
+		}
+		else
+		{
+			// Additional zoom steps: just clear current (partial) tiles.
+			// The fallback from the first step is still valid.
+			below_template_store.clear();
+			above_template_store.clear();
+			map_store.clear();
+		}
+
+		// Defer tile rendering until zooming settles.
+		zoom_active = true;
+		auto* timer = findChild<QTimer*>(QStringLiteral("zoom_settle_timer"));
+		if (timer)
+			timer->start();  // restart the 150ms countdown
+
 		pan_adjusted = false;
 	}
 	else if (pan_adjusted)
@@ -1440,6 +1471,11 @@ bool MapWidget::isBelowTemplateVisible() const
 
 void MapWidget::updateAllDirtyCaches()
 {
+	// While zoom is actively changing, don't render new tiles.
+	// The compositor will show scaled fallback tiles instead.
+	if (zoom_active)
+		return;
+
 	last_rendered_transform = view->worldTransform();
 
 	if (map_cache_dirty_rect.isValid() || !map_store.isEmpty())
@@ -1476,13 +1512,10 @@ void MapWidget::updateTemplateTiles(BackingStore& store, QRect& dirty_rect, int 
 
 	QRectF view_rect = viewportToView(rect());
 	int overscan = store.tileSize();
-	// When fallback is active, skip overscan — fallback covers the edges.
-	QRectF render_rect = store.hasFallback()
-		? view_rect
-		: view_rect.adjusted(-overscan, -overscan, overscan, overscan);
+	QRectF padded = view_rect.adjusted(-overscan, -overscan, overscan, overscan);
 
 	int col_min, col_max, row_min, row_max;
-	store.tilesForViewRect(render_rect, col_min, col_max, row_min, row_max);
+	store.tilesForViewRect(padded, col_min, col_max, row_min, row_max);
 
 	if (dirty_rect.isValid())
 	{
@@ -1492,56 +1525,41 @@ void MapWidget::updateTemplateTiles(BackingStore& store, QRect& dirty_rect, int 
 
 	Map* map = view->getMap();
 	int ts = store.tileSize();
-	int tiles_rendered = 0;
 
 	for (int row = row_min; row <= row_max; ++row)
 	{
 		for (int col = col_min; col <= col_max; ++col)
 		{
 			TileKey key{col, row};
+			BackingTile& tile = store.ensureTile(key);
+			if (!tile.dirty)
+				continue;
 
-			// Check budget before creating the tile.
+			QPainter painter(&tile.image);
+
+			if (use_background)
 			{
-				BackingTile* existing = store.tile(key);
-				if (existing && !existing->dirty)
-					continue;
+				painter.fillRect(0, 0, ts, ts, Qt::white);
 			}
-			if (store.hasFallback() && tiles_rendered >= 6)
+			else
 			{
-				QTimer::singleShot(0, this, [this]() { update(); });
-				goto done;
+				painter.setCompositionMode(QPainter::CompositionMode_Clear);
+				painter.fillRect(0, 0, ts, ts, Qt::transparent);
+				painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
 			}
 
-			{
-				BackingTile& tile = store.ensureTile(key);
-				QPainter painter(&tile.image);
+			QRectF tile_vr = store.tileViewRect(key);
+			painter.translate(-tile_vr.x(), -tile_vr.y());
+			painter.setWorldTransform(view->worldTransform(), true);
 
-				if (use_background)
-				{
-					painter.fillRect(0, 0, ts, ts, Qt::white);
-				}
-				else
-				{
-					painter.setCompositionMode(QPainter::CompositionMode_Clear);
-					painter.fillRect(0, 0, ts, ts, Qt::transparent);
-					painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
-				}
+			QRectF tile_map_rect = view->calculateViewedRect(tile_vr);
+			map->drawTemplates(&painter, tile_map_rect, first_template, last_template, view, true);
 
-				QRectF tile_vr = store.tileViewRect(key);
-				painter.translate(-tile_vr.x(), -tile_vr.y());
-				painter.setWorldTransform(view->worldTransform(), true);
-
-				QRectF tile_map_rect = view->calculateViewedRect(tile_vr);
-				map->drawTemplates(&painter, tile_map_rect, first_template, last_template, view, true);
-
-				painter.end();
-				tile.dirty = false;
-			}
-			++tiles_rendered;
+			painter.end();
+			tile.dirty = false;
 		}
 	}
 
-done:
 	int evict_margin = overscan * 2;
 	store.evict(view_rect.adjusted(-evict_margin, -evict_margin, evict_margin, evict_margin));
 }
@@ -1551,12 +1569,10 @@ void MapWidget::updateMapTiles()
 {
 	QRectF view_rect = viewportToView(rect());
 	int overscan = map_store.tileSize();
-	QRectF render_rect = map_store.hasFallback()
-		? view_rect
-		: view_rect.adjusted(-overscan, -overscan, overscan, overscan);
+	QRectF padded = view_rect.adjusted(-overscan, -overscan, overscan, overscan);
 
 	int col_min, col_max, row_min, row_max;
-	map_store.tilesForViewRect(render_rect, col_min, col_max, row_min, row_max);
+	map_store.tilesForViewRect(padded, col_min, col_max, row_min, row_max);
 
 	if (map_cache_dirty_rect.isValid())
 	{
@@ -1572,65 +1588,49 @@ void MapWidget::updateMapTiles()
 	if (!use_antialiasing)
 		options |= RenderConfig::DisableAntialiasing | RenderConfig::ForceMinSize;
 
-	// Ensure renderables are up to date once, not per tile.
 	map->updateObjects();
-
-	int tiles_rendered = 0;
 
 	for (int row = row_min; row <= row_max; ++row)
 	{
 		for (int col = col_min; col <= col_max; ++col)
 		{
 			TileKey key{col, row};
+			BackingTile& tile = map_store.ensureTile(key);
+			if (!tile.dirty)
+				continue;
 
-			{
-				BackingTile* existing = map_store.tile(key);
-				if (existing && !existing->dirty)
-					continue;
-			}
-			if (map_store.hasFallback() && tiles_rendered >= 6)
-			{
-				QTimer::singleShot(0, this, [this]() { update(); });
-				goto done;
-			}
+			QPainter painter(&tile.image);
 
-			{
-				BackingTile& tile = map_store.ensureTile(key);
-				QPainter painter(&tile.image);
+			painter.setCompositionMode(QPainter::CompositionMode_Clear);
+			painter.fillRect(0, 0, ts, ts, Qt::transparent);
+			painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
 
-				painter.setCompositionMode(QPainter::CompositionMode_Clear);
-				painter.fillRect(0, 0, ts, ts, Qt::transparent);
-				painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
+			if (use_antialiasing)
+				painter.setRenderHint(QPainter::Antialiasing);
 
-				if (use_antialiasing)
-					painter.setRenderHint(QPainter::Antialiasing);
+			QRectF tile_vr = map_store.tileViewRect(key);
+			painter.translate(-tile_vr.x(), -tile_vr.y());
+			painter.setWorldTransform(view->worldTransform(), true);
 
-				QRectF tile_vr = map_store.tileViewRect(key);
-				painter.translate(-tile_vr.x(), -tile_vr.y());
-				painter.setWorldTransform(view->worldTransform(), true);
+			QRectF tile_map_rect = view->calculateViewedRect(tile_vr);
 
-				QRectF tile_map_rect = view->calculateViewedRect(tile_vr);
-
-				RenderConfig config = { *map, tile_map_rect, view->calculateFinalZoomFactor(), options, 1.0 };
+			RenderConfig config = { *map, tile_map_rect, view->calculateFinalZoomFactor(), options, 1.0 };
 
 #ifndef Q_OS_ANDROID
-				if (view->isOverprintingSimulationEnabled())
-					map->drawOverprintingSimulation(&painter, config);
-				else
+			if (view->isOverprintingSimulationEnabled())
+				map->drawOverprintingSimulation(&painter, config);
+			else
 #endif
-					map->draw(&painter, config);
+				map->draw(&painter, config);
 
-				if (view->isGridVisible())
-					map->drawGrid(&painter, tile_map_rect);
+			if (view->isGridVisible())
+				map->drawGrid(&painter, tile_map_rect);
 
-				painter.end();
-				tile.dirty = false;
-			}
-			++tiles_rendered;
+			painter.end();
+			tile.dirty = false;
 		}
 	}
 
-done:
 	int evict_margin = overscan * 2;
 	map_store.evict(view_rect.adjusted(-evict_margin, -evict_margin, evict_margin, evict_margin));
 }
