@@ -536,9 +536,6 @@ private:
 	QTransform fallback_transform;
 	/** True when backing stores hold fallback tiles from a previous zoom level. */
 	bool has_zoom_fallback = false;
-	/** True while zoom is actively changing. While active, tile rendering
-	 *  is deferred — only fallback tiles (scaled) are shown. */
-	bool zoom_active = false;
 	/** True when finishDragging has adjusted grid offsets and the upcoming
 	 *  CenterChange from viewChanged should NOT clear the stores. */
 	bool pan_adjusted = false;

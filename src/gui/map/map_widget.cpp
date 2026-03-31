@@ -116,16 +116,6 @@ MapWidget::MapWidget(bool show_help, bool force_antialiasing, QWidget* parent)
 	setFocusPolicy(Qt::ClickFocus);
 	setSizePolicy(QSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding));
 
-	// Zoom settle timer: after the last zoom event, wait briefly then
-	// render new tiles. During active zoom, only scaled fallback is shown.
-	auto* zoom_settle_timer = new QTimer(this);
-	zoom_settle_timer->setSingleShot(true);
-	zoom_settle_timer->setInterval(150);
-	zoom_settle_timer->setObjectName(QStringLiteral("zoom_settle_timer"));
-	connect(zoom_settle_timer, &QTimer::timeout, this, [this]() {
-		zoom_active = false;
-		updateEverything();
-	});
 }
 
 MapWidget::~MapWidget()
@@ -364,12 +354,6 @@ void MapWidget::viewChanged(MapView::ChangeFlags changes)
 			above_template_store.clear();
 			map_store.clear();
 		}
-
-		// Defer tile rendering until zooming settles.
-		zoom_active = true;
-		auto* timer = findChild<QTimer*>(QStringLiteral("zoom_settle_timer"));
-		if (timer)
-			timer->start();  // restart the 150ms countdown
 
 		pan_adjusted = false;
 	}
@@ -1061,31 +1045,45 @@ void MapWidget::paintEvent(QPaintEvent* event)
 	if (has_zoom_fallback)
 	{
 		compositeFallbackTiles(below_template_store, painter, composite_clip);
-		compositeFallbackTiles(map_store, painter, composite_clip);
+		const auto map_vis_fb = view->effectiveMapVisibility();
+		if (map_vis_fb.visible)
+		{
+			qreal saved = painter.opacity();
+			painter.setOpacity(map_vis_fb.opacity);
+			compositeFallbackTiles(map_store, painter, composite_clip);
+			painter.setOpacity(saved);
+		}
 		compositeFallbackTiles(above_template_store, painter, composite_clip);
 	}
 
-	if (!view->areAllTemplatesHidden() && isBelowTemplateVisible() && !below_template_store.isEmpty() && view->getMap()->getFirstFrontTemplate() > 0)
+	// Below-template layer
+	bool below_has_content = !view->areAllTemplatesHidden() && isBelowTemplateVisible() && view->getMap()->getFirstFrontTemplate() > 0;
+	if (below_has_content && !below_template_store.isEmpty())
 	{
 		compositeStoreTiles(below_template_store, painter, composite_clip, Qt::white);
 	}
-	else if (show_help && no_contents)
+	else if (!has_zoom_fallback)
 	{
-		painter.save();
-		painter.setTransform(transform);
-		if (view->getMap()->getNumColors() == 0)
-			showHelpMessage(&painter, tr("Empty map!\n\nStart by defining some colors:\nSelect Symbols -> Color window to\nopen the color dialog and\ndefine the colors there."));
-		else if (view->getMap()->getNumSymbols() == 0)
-			showHelpMessage(&painter, tr("No symbols!\n\nNow define some symbols:\nRight-click in the symbol bar\nand select \"New symbol\"\nto create one."));
-		else
-			showHelpMessage(&painter, tr("Ready to draw!\n\nStart drawing or load a base map.\nTo load a base map, click\nTemplates -> Open template...") + QLatin1String("\n\n") + tr("Hint: Hold the middle mouse button to drag the map,\nzoom using the mouse wheel, if available."));
-		painter.restore();
-	}
-	else
-	{
-		painter.fillRect(composite_clip, Qt::white);
+		// No fallback covering us — need to fill background ourselves.
+		if (show_help && no_contents)
+		{
+			painter.save();
+			painter.setTransform(transform);
+			if (view->getMap()->getNumColors() == 0)
+				showHelpMessage(&painter, tr("Empty map!\n\nStart by defining some colors:\nSelect Symbols -> Color window to\nopen the color dialog and\ndefine the colors there."));
+			else if (view->getMap()->getNumSymbols() == 0)
+				showHelpMessage(&painter, tr("No symbols!\n\nNow define some symbols:\nRight-click in the symbol bar\nand select \"New symbol\"\nto create one."));
+			else
+				showHelpMessage(&painter, tr("Ready to draw!\n\nStart drawing or load a base map.\nTo load a base map, click\nTemplates -> Open template...") + QLatin1String("\n\n") + tr("Hint: Hold the middle mouse button to drag the map,\nzoom using the mouse wheel, if available."));
+			painter.restore();
+		}
+		else if (!below_has_content)
+		{
+			painter.fillRect(composite_clip, Qt::white);
+		}
 	}
 
+	// Map layer
 	const auto map_visibility = view->effectiveMapVisibility();
 	if (!map_store.isEmpty() && map_visibility.visible)
 	{
@@ -1095,6 +1093,7 @@ void MapWidget::paintEvent(QPaintEvent* event)
 		painter.setOpacity(saved_opacity);
 	}
 
+	// Above-template layer
 	if (!view->areAllTemplatesHidden() && isAboveTemplateVisible() && !above_template_store.isEmpty() && view->getMap()->getNumTemplates() - view->getMap()->getFirstFrontTemplate() > 0)
 		compositeStoreTiles(above_template_store, painter, composite_clip, Qt::transparent);
 	
@@ -1471,11 +1470,6 @@ bool MapWidget::isBelowTemplateVisible() const
 
 void MapWidget::updateAllDirtyCaches()
 {
-	// While zoom is actively changing, don't render new tiles.
-	// The compositor will show scaled fallback tiles instead.
-	if (zoom_active)
-		return;
-
 	last_rendered_transform = view->worldTransform();
 
 	if (map_cache_dirty_rect.isValid() || !map_store.isEmpty())
