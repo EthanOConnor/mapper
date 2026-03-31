@@ -1,0 +1,137 @@
+name: CI
+
+on:
+  push:
+    branches: [master, full-speed-ahead, 'pr/*', 'int/*']
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential ninja-build ccache \
+            qtbase5-dev qtbase5-private-dev qttools5-dev qttools5-dev-tools \
+            libqt5sensors5-dev libqt5serialport5-dev libqt5sql5-sqlite \
+            qtpositioning5-dev qt5-image-formats-plugins \
+            libproj-dev libgdal-dev libpolyclipping-dev zlib1g-dev \
+            doxygen libegl-dev libgl-dev
+
+      - name: Set up ccache
+        uses: hendrikmuhs/ccache-action@v1
+        with:
+          key: linux
+
+      - name: Configure
+        run: >
+          cmake --preset ci-linux
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      - name: Build
+        run: cmake --build --preset ci-linux --parallel
+
+      - name: Test
+        run: ctest --preset ci-linux
+
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - name: Configure checkout line endings
+        shell: powershell
+        run: git config --global core.autocrlf input
+
+      - uses: actions/checkout@v4
+
+      - name: Set up MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          path-type: minimal
+          update: true
+          cache: true
+          install: >-
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-ccache
+            mingw-w64-x86_64-gdal
+            mingw-w64-x86_64-proj
+            mingw-w64-x86_64-qt5-base
+            mingw-w64-x86_64-qt5-imageformats
+            mingw-w64-x86_64-qt5-location
+            mingw-w64-x86_64-qt5-sensors
+            mingw-w64-x86_64-qt5-serialport
+            mingw-w64-x86_64-qt5-tools
+            mingw-w64-x86_64-qt5-translations
+            mingw-w64-x86_64-doxygen
+
+      - name: Configure
+        run: cmake --preset ci-windows
+
+      - name: Build
+        run: cmake --build --preset ci-windows --parallel
+
+      - name: Test
+        run: ctest --preset ci-windows
+
+  macos:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          brew install qt@5 proj gdal ninja ccache
+          echo "$(brew --prefix qt@5)/bin" >> "$GITHUB_PATH"
+
+      - name: Set up ccache
+        uses: hendrikmuhs/ccache-action@v1
+        with:
+          key: macos
+
+      - name: Configure
+        run: >
+          cmake --preset ci-macos
+          -DCMAKE_PREFIX_PATH="$(brew --prefix qt@5)"
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      - name: Build
+        run: cmake --build --preset ci-macos --parallel
+
+      - name: Test
+        run: ctest --preset ci-macos
+
+  codespell:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 20
+
+      - name: Install codespell
+        run: pip install codespell
+
+      - name: Run codespell
+        run: ./codespell.sh

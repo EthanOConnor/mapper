@@ -1,0 +1,145 @@
+{
+    "version": 6,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 28,
+        "patch": 3
+    },
+    "configurePresets": [
+        {
+            "name": "base",
+            "hidden": true,
+            "generator": "Ninja",
+            "cacheVariables": {
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+            }
+        },
+        {
+            "name": "dev-linux",
+            "displayName": "Linux Development",
+            "inherits": "base",
+            "binaryDir": "${sourceDir}/build/dev-linux",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "Mapper_DEVELOPMENT_BUILD": "ON"
+            }
+        },
+        {
+            "name": "dev-macos",
+            "displayName": "macOS Development",
+            "inherits": "base",
+            "binaryDir": "${sourceDir}/build/dev-macos",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "Mapper_DEVELOPMENT_BUILD": "ON"
+            }
+        },
+        {
+            "name": "dev-windows",
+            "displayName": "Windows Development (MSYS2 MINGW64)",
+            "inherits": "base",
+            "binaryDir": "${sourceDir}/build/dev-windows",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "Mapper_DEVELOPMENT_BUILD": "ON"
+            }
+        },
+        {
+            "name": "ci-linux",
+            "displayName": "Linux CI",
+            "inherits": "base",
+            "binaryDir": "${sourceDir}/build/ci-linux",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "Mapper_DEVELOPMENT_BUILD": "OFF",
+                "Mapper_USE_GDAL": "ON"
+            }
+        },
+        {
+            "name": "ci-macos",
+            "displayName": "macOS CI",
+            "inherits": "base",
+            "binaryDir": "${sourceDir}/build/ci-macos",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "Mapper_DEVELOPMENT_BUILD": "OFF",
+                "Mapper_USE_GDAL": "ON"
+            }
+        },
+        {
+            "name": "ci-windows",
+            "displayName": "Windows CI (MSYS2 MINGW64)",
+            "inherits": "base",
+            "binaryDir": "${sourceDir}/build/ci-windows",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "Mapper_DEVELOPMENT_BUILD": "OFF",
+                "Mapper_USE_GDAL": "ON",
+                "Mapper_PACKAGE_QT": "ON",
+                "Mapper_PACKAGE_PROJ": "ON",
+                "Mapper_PACKAGE_GDAL": "ON",
+                "Mapper_PACKAGE_ASSISTANT": "OFF",
+                "Mapper_MANUAL_QTHELP": "OFF",
+                "Mapper_MANUAL_PDF": "OFF"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "dev-linux",
+            "configurePreset": "dev-linux"
+        },
+        {
+            "name": "dev-macos",
+            "configurePreset": "dev-macos"
+        },
+        {
+            "name": "dev-windows",
+            "configurePreset": "dev-windows"
+        },
+        {
+            "name": "ci-linux",
+            "configurePreset": "ci-linux"
+        },
+        {
+            "name": "ci-macos",
+            "configurePreset": "ci-macos"
+        },
+        {
+            "name": "ci-windows",
+            "configurePreset": "ci-windows"
+        }
+    ],
+    "testPresets": [
+        {
+            "name": "dev-linux",
+            "configurePreset": "dev-linux",
+            "output": { "outputOnFailure": true }
+        },
+        {
+            "name": "dev-macos",
+            "configurePreset": "dev-macos",
+            "output": { "outputOnFailure": true }
+        },
+        {
+            "name": "dev-windows",
+            "configurePreset": "dev-windows",
+            "output": { "outputOnFailure": true }
+        },
+        {
+            "name": "ci-linux",
+            "configurePreset": "ci-linux",
+            "output": { "outputOnFailure": true }
+        },
+        {
+            "name": "ci-macos",
+            "configurePreset": "ci-macos",
+            "output": { "outputOnFailure": true }
+        },
+        {
+            "name": "ci-windows",
+            "configurePreset": "ci-windows",
+            "output": { "outputOnFailure": true }
+        }
+    ]
+}

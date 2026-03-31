@@ -1,0 +1,150 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential ninja-build \
+            qtbase5-dev qtbase5-private-dev qttools5-dev qttools5-dev-tools \
+            libqt5sensors5-dev libqt5serialport5-dev libqt5sql5-sqlite \
+            qtpositioning5-dev qt5-image-formats-plugins \
+            libproj-dev libgdal-dev libpolyclipping-dev zlib1g-dev \
+            doxygen libegl-dev libgl-dev
+
+      - name: Configure
+        run: cmake --preset ci-linux -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build --preset ci-linux --parallel
+
+      - name: Test
+        run: ctest --preset ci-linux
+
+      - name: Package
+        run: cd build/ci-linux && cpack -G DEB
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-packages
+          path: build/ci-linux/*.deb
+          if-no-files-found: warn
+          retention-days: 30
+
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: msys2 {0}
+    env:
+      DIST_DIR: dist/OpenOrienteering-Mapper-windows-x64
+    steps:
+      - name: Configure checkout line endings
+        shell: powershell
+        run: git config --global core.autocrlf input
+
+      - uses: actions/checkout@v4
+
+      - name: Set up MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          path-type: minimal
+          update: true
+          cache: true
+          install: >-
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-gdal
+            mingw-w64-x86_64-proj
+            mingw-w64-x86_64-qt5-base
+            mingw-w64-x86_64-qt5-imageformats
+            mingw-w64-x86_64-qt5-location
+            mingw-w64-x86_64-qt5-sensors
+            mingw-w64-x86_64-qt5-serialport
+            mingw-w64-x86_64-qt5-tools
+            mingw-w64-x86_64-qt5-translations
+            mingw-w64-x86_64-doxygen
+
+      - name: Configure
+        run: cmake --preset ci-windows
+
+      - name: Build
+        run: cmake --build --preset ci-windows --parallel
+
+      - name: Test
+        run: ctest --preset ci-windows
+
+      - name: Stage install tree
+        run: cmake --install build/ci-windows --prefix "$(pwd)/$DIST_DIR"
+
+      - name: Create ZIP
+        shell: powershell
+        run: |
+          Compress-Archive -LiteralPath $env:DIST_DIR `
+            -DestinationPath dist/OpenOrienteering-Mapper-windows-x64.zip
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-packages
+          path: dist/OpenOrienteering-Mapper-windows-x64.zip
+          if-no-files-found: warn
+          retention-days: 30
+
+  macos:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          brew install qt@5 proj gdal ninja
+          echo "$(brew --prefix qt@5)/bin" >> "$GITHUB_PATH"
+
+      - name: Configure
+        run: >
+          cmake --preset ci-macos
+          -DCMAKE_PREFIX_PATH="$(brew --prefix qt@5)"
+          -DMapper_PACKAGE_QT=ON
+          -DMapper_PACKAGE_PROJ=ON
+          -DMapper_PACKAGE_GDAL=ON
+
+      - name: Build
+        run: cmake --build --preset ci-macos --parallel
+
+      - name: Test
+        run: ctest --preset ci-macos
+
+      - name: Package
+        run: cd build/ci-macos && cpack -G DragNDrop
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-packages
+          path: build/ci-macos/*.dmg
+          if-no-files-found: warn
+          retention-days: 30

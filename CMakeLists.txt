@@ -17,22 +17,11 @@
 #    You should have received a copy of the GNU General Public License
 #    along with OpenOrienteering.  If not, see <http://www.gnu.org/licenses/>.
  
-cmake_minimum_required(VERSION 3.14 FATAL_ERROR)
-
-if(POLICY CMP0115)
-    cmake_policy(SET CMP0115 NEW)
-endif()
-if(POLICY CMP0135)
-    cmake_policy(SET CMP0135 NEW)
-endif()
+cmake_minimum_required(VERSION 3.28.3)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 include(FeatureSummary)
-
-if(CCACHE_PROGRAM)
-    set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "${CCACHE_PROGRAM}")
-endif()
 
 option(CMAKE_FIND_PACKAGE_PREFER_CONFIG "Lookup package config files before using find modules" ON)
 
@@ -197,47 +186,20 @@ else()
 	find_package(Polyclipping 6.1.3 MODULE REQUIRED)
 endif()
 
-# We must not require a minimum version of PROJ via find_package
-# because PROJ config requires the major version to match exactly.
-find_package(PROJ CONFIG)
-if(NOT PROJ_LIBRARIES)
-	find_package(PkgConfig REQUIRED)
-	if(PKG_CONFIG_FOUND)
-		pkg_check_modules(PROJ4_PC IMPORTED_TARGET proj)
-	endif()
-	if(TARGET PkgConfig::PROJ4_PC)
-		set(PROJ_LIBRARIES PkgConfig::PROJ4_PC)
-		set(PROJ_VERSION "${PROJ4_PC_VERSION}")
-	endif()
+find_package(PROJ CONFIG REQUIRED)
+if(PROJ_VERSION VERSION_LESS 9.4)
+	message(FATAL_ERROR "At least PROJ 9.4 is required, found: ${PROJ_VERSION}")
 endif()
-if(NOT PROJ_VERSION OR PROJ_VERSION VERSION_LESS 4.9)
-	message(FATAL_ERROR "At least PROJ 4.9 is required")
-elseif(PROJ_VERSION VERSION_LESS 6.1)
-	# New PROJ API missing or incomplete.
-	# (proj_normalize_for_visualization() came in 6.1.)
-	set_property(TARGET "${PROJ_LIBRARIES}" APPEND PROPERTY
-	  INTERFACE_COMPILE_DEFINITIONS ACCEPT_USE_OF_DEPRECATED_PROJ_API_H)
-elseif(PROJ_VERSION VERSION_LESS 6.2.1)
-	# Datum Potsdam issue, https://github.com/OSGeo/PROJ/pull/1573
-	set_property(TARGET "${PROJ_LIBRARIES}" APPEND PROPERTY
-	  INTERFACE_COMPILE_DEFINITIONS PROJ_ISSUE_1573)
-endif()
+set(PROJ_LIBRARIES PROJ::proj)
 
 if(Mapper_USE_GDAL)
-	find_package(GDAL MODULE REQUIRED)
+	find_package(GDAL 3.8 REQUIRED)
 endif()
 
-find_package(Qt5Core 5.5 REQUIRED)
+find_package(Qt5Core 5.15 REQUIRED)
 add_definitions(-DQT_DISABLE_DEPRECATED_BEFORE=0x050500)
-if (ANDROID AND "${Qt5Core_VERSION}" VERSION_LESS 5.12.1)
-	message(FATAL_ERROR "At least Qt 5.12.1 is required to build for Android")
-elseif ("${Qt5Core_VERSION}" VERSION_LESS 5.8.0)
-	add_definitions("-D'Q_FALLTHROUGH()=(void)0'")
-endif()
 
-include("TestBigEndian")
-test_big_endian(big_endian)
-if(big_endian)
+if(CMAKE_CXX_BYTE_ORDER STREQUAL "BIG_ENDIAN")
 	add_definitions(-DMAPPER_BIG_ENDIAN)
 endif()
 
@@ -316,26 +278,6 @@ endif()
 
 add_subdirectory("doc/api")
 add_subdirectory("packaging/src")
-
-# Auxiliary targets
-
-set(ci
-  ci/azure-pipelines.yml
-  ci/build.yml
-  ci/codespell.yml
-  ci/filter-stderr.sed
-  ci/publish.yml
-  ci/publish-coverage.yml
-  ci/release-notes.yml
-  ci/setup-common.yml
-  ci/setup-macos.yml
-  ci/setup-msys2.yml
-  ci/setup-ubuntu.yml
-  ci/shell.sh
-  ci/openorienteering-mapper-ci.cmake
-)
-
-add_custom_target(CI SOURCES ${ci})
 
 # Configuration report
 
