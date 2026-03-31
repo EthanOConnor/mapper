@@ -1476,12 +1476,14 @@ void MapWidget::updateTemplateTiles(BackingStore& store, QRect& dirty_rect, int 
 
 	QRectF view_rect = viewportToView(rect());
 	int overscan = store.tileSize();
-	QRectF padded = view_rect.adjusted(-overscan, -overscan, overscan, overscan);
+	// When fallback is active, skip overscan — fallback covers the edges.
+	QRectF render_rect = store.hasFallback()
+		? view_rect
+		: view_rect.adjusted(-overscan, -overscan, overscan, overscan);
 
 	int col_min, col_max, row_min, row_max;
-	store.tilesForViewRect(padded, col_min, col_max, row_min, row_max);
+	store.tilesForViewRect(render_rect, col_min, col_max, row_min, row_max);
 
-	// Propagate the legacy dirty rect into the tile store.
 	if (dirty_rect.isValid())
 	{
 		store.dirtyViewRect(viewportToView(dirty_rect));
@@ -1490,6 +1492,7 @@ void MapWidget::updateTemplateTiles(BackingStore& store, QRect& dirty_rect, int 
 
 	Map* map = view->getMap();
 	int ts = store.tileSize();
+	int tiles_rendered = 0;
 
 	for (int row = row_min; row <= row_max; ++row)
 	{
@@ -1500,31 +1503,44 @@ void MapWidget::updateTemplateTiles(BackingStore& store, QRect& dirty_rect, int 
 			if (!tile.dirty)
 				continue;
 
-			QPainter painter(&tile.image);
-
-			if (use_background)
+			// Budget: limit tile renders per frame when fallback is active.
+			// The fallback provides coverage, so we can spread work.
+			if (store.hasFallback() && tiles_rendered >= 6)
 			{
-				painter.fillRect(0, 0, ts, ts, Qt::white);
-			}
-			else
-			{
-				painter.setCompositionMode(QPainter::CompositionMode_Clear);
-				painter.fillRect(0, 0, ts, ts, Qt::transparent);
-				painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
+				// Schedule another paint to continue rendering.
+				QTimer::singleShot(0, this, [this]() { update(); });
+				goto done;
 			}
 
-			QRectF tile_vr = store.tileViewRect(key);
-			painter.translate(-tile_vr.x(), -tile_vr.y());
-			painter.setWorldTransform(view->worldTransform(), true);
+			{
+				QPainter painter(&tile.image);
 
-			QRectF tile_map_rect = view->calculateViewedRect(tile_vr);
-			map->drawTemplates(&painter, tile_map_rect, first_template, last_template, view, true);
+				if (use_background)
+				{
+					painter.fillRect(0, 0, ts, ts, Qt::white);
+				}
+				else
+				{
+					painter.setCompositionMode(QPainter::CompositionMode_Clear);
+					painter.fillRect(0, 0, ts, ts, Qt::transparent);
+					painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
+				}
 
-			painter.end();
+				QRectF tile_vr = store.tileViewRect(key);
+				painter.translate(-tile_vr.x(), -tile_vr.y());
+				painter.setWorldTransform(view->worldTransform(), true);
+
+				QRectF tile_map_rect = view->calculateViewedRect(tile_vr);
+				map->drawTemplates(&painter, tile_map_rect, first_template, last_template, view, true);
+
+				painter.end();
+			}
 			tile.dirty = false;
+			++tiles_rendered;
 		}
 	}
 
+done:
 	int evict_margin = overscan * 2;
 	store.evict(view_rect.adjusted(-evict_margin, -evict_margin, evict_margin, evict_margin));
 }
@@ -1534,10 +1550,12 @@ void MapWidget::updateMapTiles()
 {
 	QRectF view_rect = viewportToView(rect());
 	int overscan = map_store.tileSize();
-	QRectF padded = view_rect.adjusted(-overscan, -overscan, overscan, overscan);
+	QRectF render_rect = map_store.hasFallback()
+		? view_rect
+		: view_rect.adjusted(-overscan, -overscan, overscan, overscan);
 
 	int col_min, col_max, row_min, row_max;
-	map_store.tilesForViewRect(padded, col_min, col_max, row_min, row_max);
+	map_store.tilesForViewRect(render_rect, col_min, col_max, row_min, row_max);
 
 	if (map_cache_dirty_rect.isValid())
 	{
@@ -1553,6 +1571,11 @@ void MapWidget::updateMapTiles()
 	if (!use_antialiasing)
 		options |= RenderConfig::DisableAntialiasing | RenderConfig::ForceMinSize;
 
+	// Ensure renderables are up to date once, not per tile.
+	map->updateObjects();
+
+	int tiles_rendered = 0;
+
 	for (int row = row_min; row <= row_max; ++row)
 	{
 		for (int col = col_min; col <= col_max; ++col)
@@ -1562,38 +1585,48 @@ void MapWidget::updateMapTiles()
 			if (!tile.dirty)
 				continue;
 
-			QPainter painter(&tile.image);
+			if (map_store.hasFallback() && tiles_rendered >= 6)
+			{
+				QTimer::singleShot(0, this, [this]() { update(); });
+				goto done;
+			}
 
-			painter.setCompositionMode(QPainter::CompositionMode_Clear);
-			painter.fillRect(0, 0, ts, ts, Qt::transparent);
-			painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
+			{
+				QPainter painter(&tile.image);
 
-			if (use_antialiasing)
-				painter.setRenderHint(QPainter::Antialiasing);
+				painter.setCompositionMode(QPainter::CompositionMode_Clear);
+				painter.fillRect(0, 0, ts, ts, Qt::transparent);
+				painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
 
-			QRectF tile_vr = map_store.tileViewRect(key);
-			painter.translate(-tile_vr.x(), -tile_vr.y());
-			painter.setWorldTransform(view->worldTransform(), true);
+				if (use_antialiasing)
+					painter.setRenderHint(QPainter::Antialiasing);
 
-			QRectF tile_map_rect = view->calculateViewedRect(tile_vr);
+				QRectF tile_vr = map_store.tileViewRect(key);
+				painter.translate(-tile_vr.x(), -tile_vr.y());
+				painter.setWorldTransform(view->worldTransform(), true);
 
-			RenderConfig config = { *map, tile_map_rect, view->calculateFinalZoomFactor(), options, 1.0 };
+				QRectF tile_map_rect = view->calculateViewedRect(tile_vr);
+
+				RenderConfig config = { *map, tile_map_rect, view->calculateFinalZoomFactor(), options, 1.0 };
 
 #ifndef Q_OS_ANDROID
-			if (view->isOverprintingSimulationEnabled())
-				map->drawOverprintingSimulation(&painter, config);
-			else
+				if (view->isOverprintingSimulationEnabled())
+					map->drawOverprintingSimulation(&painter, config);
+				else
 #endif
-				map->draw(&painter, config);
+					map->draw(&painter, config);
 
-			if (view->isGridVisible())
-				map->drawGrid(&painter, tile_map_rect);
+				if (view->isGridVisible())
+					map->drawGrid(&painter, tile_map_rect);
 
-			painter.end();
+				painter.end();
+			}
 			tile.dirty = false;
+			++tiles_rendered;
 		}
 	}
 
+done:
 	int evict_margin = overscan * 2;
 	map_store.evict(view_rect.adjusted(-evict_margin, -evict_margin, evict_margin, evict_margin));
 }
