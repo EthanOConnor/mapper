@@ -23,12 +23,10 @@
 #define OPENORIENTEERING_MAP_WIDGET_H
 
 #include <functional>
-#include <memory>
 
 #include <Qt>
 #include <QtGlobal>
 #include <QCursor>
-#include <QImage>
 #include <QObject>
 #include <QPoint>
 #include <QPointF>
@@ -45,6 +43,7 @@
 #include "core/map_view.h"
 #include "gui/map/backing_store.h"
 
+class QColor;
 class QContextMenuEvent;
 class QEvent;
 class QFocusEvent;
@@ -55,7 +54,6 @@ class QLabel;
 class QMouseEvent;
 class QPaintEvent;
 class QPainter;
-class QPixmap;
 class QResizeEvent;
 class QWheelEvent;
 
@@ -403,38 +401,28 @@ private:
 	/** Checks if there is any visible template below the map. */
 	bool isBelowTemplateVisible() const;
 	/**
-	 * Redraws the template cache.
-	 * @param cache Reference to pointer to the cache.
-	 * @param dirty_rect Rectangle of the cache to redraw, in viewport coordinates.
+	 * Updates dirty tiles in a template backing store.
+	 * @param store The backing store to update.
+	 * @param dirty_rect Legacy dirty rect; propagated into store then cleared.
 	 * @param first_template Lowest template index to draw.
 	 * @param last_template Highest template index to draw.
-	 * @param use_background If set to true, fills the cache with white before
-	 *     drawing the templates, else makes it transparent.
+	 * @param use_background If true, fills tiles with white; else transparent.
 	 */
-	void updateTemplateCache(QImage& cache, QRect& dirty_rect, int first_template, int last_template, bool use_background);
+	void updateTemplateTiles(BackingStore& store, QRect& dirty_rect, int first_template, int last_template, bool use_background);
 	/**
-	 * Updates dirty tiles in the backing store for the below-template layer.
-	 * Only tiles that intersect the current viewport (plus overscan) are
-	 * rendered. Each dirty tile is cleared and painted via the same
-	 * template-drawing path as the legacy single-image cache.
+	 * Updates dirty tiles in the map backing store.
 	 */
-	void updateBelowTemplateTiles(int first_template, int last_template);
+	void updateMapTiles();
 	/**
 	 * Composites visible backing-store tiles onto the given painter.
-	 * Only tiles that intersect the exposed rect are drawn.
+	 * @param store The backing store to composite from.
+	 * @param painter Target painter (the widget).
+	 * @param clip_rect Viewport area to draw into.
+	 * @param fallback_color Fill color for missing tiles (Qt::white or Qt::transparent).
 	 */
-	void compositeBelowTemplateTiles(QPainter& painter, const QRect& target, const QRect& exposed);
-	/**
-	 * Redraws the map cache in the map cache dirty rect.
-	 * @param use_background If set to true, fills the cache with white before
-	 *     drawing the map, else makes it transparent.
-	 */
-	void updateMapCache(bool use_background);
+	void compositeStoreTiles(const BackingStore& store, QPainter& painter, const QRect& clip_rect, const QColor& fallback_color);
 	/** Redraws all dirty caches. */
 	void updateAllDirtyCaches();
-	/** Shifts the content in the cache by the given amount of pixels. */
-	void shiftCache(int sx, int sy, QImage& cache);
-	void shiftCache(int sx, int sy, QPixmap& cache);
 	
 	/**
 	 * Calculates the bounding box of the given map coordinates rect and
@@ -519,20 +507,17 @@ private:
 	// Panning (operation)
 	QPoint pan_offset;
 	
-	// Template caches
-	/** Tiled backing store for templates below map layer */
+	// Tiled backing stores (view-space anchored tile grids)
+	/** Backing store for templates below map layer */
 	BackingStore below_template_store;
-	/** Legacy dirty rect kept for the tiled store — marks the viewport region
-	 *  that needs tile redraws. When valid, the corresponding backing-store
-	 *  tiles that intersect this rect are marked dirty. */
 	QRect below_template_cache_dirty_rect;
-	
-	/** Cache for templates above map layer */
-	QImage above_template_cache;
+
+	/** Backing store for templates above map layer */
+	BackingStore above_template_store;
 	QRect above_template_cache_dirty_rect;
-	
-	/** Map layer cache  */
-	QImage map_cache;
+
+	/** Backing store for map objects */
+	BackingStore map_store;
 	QRect map_cache_dirty_rect;
 	
 	// Dirty regions for drawings (tools) and activities

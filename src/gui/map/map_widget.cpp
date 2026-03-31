@@ -42,7 +42,6 @@
 #include <QPainter>
 #include <QPaintEvent>
 #include <QPinchGesture>
-#include <QPixmap>
 #include <QPointer>
 #include <QResizeEvent>
 #include <QSizePolicy>
@@ -337,6 +336,8 @@ void MapWidget::viewChanged(MapView::ChangeFlags changes)
 	// (pan_offset != 0, center unchanged), tiles remain valid and the compositor
 	// just shifts which tiles are visible — that is where the pan reuse lives.
 	below_template_store.clear();
+	above_template_store.clear();
+	map_store.clear();
 
 	updateEverything();
 	scheduleRenderContextUpdate();
@@ -386,6 +387,7 @@ void MapWidget::visibilityChanged(MapView::VisibilityFeature feature, bool activ
 	case MapView::VisibilityFeature::GridVisible:
 	case MapView::VisibilityFeature::MapVisible:
 		map_cache_dirty_rect = rect();
+		map_store.dirtyAll();
 		Q_FALLTHROUGH();
 	case MapView::VisibilityFeature::AllTemplatesHidden:
 		update();
@@ -575,8 +577,10 @@ void MapWidget::markTemplateCacheDirty(const QRectF& view_rect, int pixel_border
 		return;
 	}
 
-	// Above-template layer: legacy single-image cache path.
-	QRect& cache_dirty_rect = above_template_cache_dirty_rect;
+	// Above-template layer: dirty the backing-store tiles directly.
+	QRectF padded_above = view_rect.adjusted(-pixel_border, -pixel_border, pixel_border, pixel_border);
+	above_template_store.dirtyViewRect(padded_above);
+
 	QRectF viewport_rect = viewToViewport(view_rect);
 	QRect integer_rect = QRect(viewport_rect.left() - (1+pixel_border), viewport_rect.top() - (1+pixel_border),
 							   viewport_rect.width() + 2*(1+pixel_border), viewport_rect.height() + 2*(1+pixel_border));
@@ -584,20 +588,18 @@ void MapWidget::markTemplateCacheDirty(const QRectF& view_rect, int pixel_border
 	if (!integer_rect.intersects(rect()))
 		return;
 
-	if (cache_dirty_rect.isValid())
-		cache_dirty_rect = cache_dirty_rect.united(integer_rect);
+	if (above_template_cache_dirty_rect.isValid())
+		above_template_cache_dirty_rect = above_template_cache_dirty_rect.united(integer_rect);
 	else
-		cache_dirty_rect = integer_rect;
-
-	// During transient panning, keep shifting the existing above-template cache.
-	if (pan_offset != QPoint())
-		return;
+		above_template_cache_dirty_rect = integer_rect;
 
 	update(integer_rect);
 }
 
 void MapWidget::markObjectAreaDirty(const QRectF& map_rect)
 {
+	QRectF view_rect = view->calculateViewBoundingBox(map_rect);
+	map_store.dirtyViewRect(view_rect);
 	updateMapRect(map_rect, 0, map_cache_dirty_rect);
 }
 
@@ -699,17 +701,22 @@ void MapWidget::updateEverything()
 {
 	map_cache_dirty_rect = rect();
 	below_template_cache_dirty_rect = map_cache_dirty_rect;
-	below_template_store.dirtyAll();
 	above_template_cache_dirty_rect = map_cache_dirty_rect;
+	below_template_store.dirtyAll();
+	above_template_store.dirtyAll();
+	map_store.dirtyAll();
 	update(map_cache_dirty_rect);
 }
 
 void MapWidget::updateEverythingInRect(const QRect& dirty_rect)
 {
+	QRectF dirty_view = viewportToView(dirty_rect);
 	rectIncludeSafe(map_cache_dirty_rect, dirty_rect);
+	map_store.dirtyViewRect(dirty_view);
 	rectIncludeSafe(below_template_cache_dirty_rect, dirty_rect);
-	below_template_store.dirtyViewRect(viewportToView(dirty_rect));
+	below_template_store.dirtyViewRect(dirty_view);
 	rectIncludeSafe(above_template_cache_dirty_rect, dirty_rect);
+	above_template_store.dirtyViewRect(dirty_view);
 	update(dirty_rect);
 }
 
@@ -986,12 +993,14 @@ void MapWidget::paintEvent(QPaintEvent* event)
 		target.translate(pan_offset);
 	}
 	
+	// All three layers composite from tiled backing stores.
+	// The compositors handle pan_offset internally, so we clip to the
+	// widget rect rather than the pan-translated target.
+	QRect composite_clip = rect();
+
 	if (!view->areAllTemplatesHidden() && isBelowTemplateVisible() && !below_template_store.isEmpty() && view->getMap()->getFirstFrontTemplate() > 0)
 	{
-		// The tiled backing store composites into raw viewport coordinates
-		// (accounting for pan_offset internally). Pass the widget rect as
-		// the clip area, not the pan-translated target.
-		compositeBelowTemplateTiles(painter, rect(), exposed);
+		compositeStoreTiles(below_template_store, painter, composite_clip, Qt::white);
 	}
 	else if (show_help && no_contents)
 	{
@@ -1007,20 +1016,20 @@ void MapWidget::paintEvent(QPaintEvent* event)
 	}
 	else
 	{
-		painter.fillRect(target, Qt::white);
+		painter.fillRect(composite_clip, Qt::white);
 	}
-	
+
 	const auto map_visibility = view->effectiveMapVisibility();
-	if (!map_cache.isNull() && map_visibility.visible)
+	if (!map_store.isEmpty() && map_visibility.visible)
 	{
 		qreal saved_opacity = painter.opacity();
 		painter.setOpacity(map_visibility.opacity);
-		painter.drawImage(target, map_cache, exposed);
+		compositeStoreTiles(map_store, painter, composite_clip, Qt::transparent);
 		painter.setOpacity(saved_opacity);
 	}
-	
-	if (!view->areAllTemplatesHidden() && isAboveTemplateVisible() && !above_template_cache.isNull() && view->getMap()->getNumTemplates() - view->getMap()->getFirstFrontTemplate() > 0)
-		painter.drawImage(target, above_template_cache, exposed);
+
+	if (!view->areAllTemplatesHidden() && isAboveTemplateVisible() && !above_template_store.isEmpty() && view->getMap()->getNumTemplates() - view->getMap()->getFirstFrontTemplate() > 0)
+		compositeStoreTiles(above_template_store, painter, composite_clip, Qt::transparent);
 	
 	//painter.setClipRect(exposed);
 	
@@ -1050,18 +1059,12 @@ void MapWidget::paintEvent(QPaintEvent* event)
 
 void MapWidget::resizeEvent(QResizeEvent* event)
 {
+	// Tiled backing stores: existing tiles remain valid (view-space anchored).
+	// New viewport edges will naturally request tiles that are dirty or missing.
+	// Just mark the legacy dirty rects so updateAllDirtyCaches knows to run.
 	map_cache_dirty_rect = rect();
 	below_template_cache_dirty_rect = map_cache_dirty_rect;
-	// Tiled backing store: existing tiles remain valid (view-space anchored).
-	// New viewport edges will naturally request tiles that are dirty or missing.
 	above_template_cache_dirty_rect = map_cache_dirty_rect;
-
-	if (map_cache.width() < map_cache_dirty_rect.width() ||
-	    map_cache.height() < map_cache_dirty_rect.height())
-	{
-		map_cache = QImage();
-		above_template_cache = QImage();
-	}
 	
 	for (QObject* const child : children())
 	{
@@ -1399,193 +1402,73 @@ bool MapWidget::isBelowTemplateVisible() const
 	return containsVisibleTemplate(0, view->getMap()->getFirstFrontTemplate() - 1);
 }
 
-void MapWidget::updateTemplateCache(QImage& cache, QRect& dirty_rect, int first_template, int last_template, bool use_background)
-{
-	Q_ASSERT(containsVisibleTemplate(first_template, last_template));
-	
-	if (cache.isNull())
-	{
-		// Lazy allocation of cache image
-		cache = QImage(size(), QImage::Format_ARGB32_Premultiplied);
-		dirty_rect = rect();
-	}
-	else
-	{
-		// Make sure not to use a bigger draw rect than necessary
-		dirty_rect = dirty_rect.intersected(rect());
-	}
-		
-	// Start drawing
-	QPainter painter(&cache);
-	painter.setClipRect(dirty_rect);
-	
-	// Fill with background color (TODO: make configurable)
-	if (use_background)
-		painter.fillRect(dirty_rect, Qt::white);
-	else
-	{
-		QPainter::CompositionMode mode = painter.compositionMode();
-		painter.setCompositionMode(QPainter::CompositionMode_Clear);
-		painter.fillRect(dirty_rect, Qt::transparent);
-		painter.setCompositionMode(mode);
-	}
-	
-	// Draw templates
-	painter.translate(width() / 2.0, height() / 2.0);
-	painter.setWorldTransform(view->worldTransform(), true);
-	
-	Map* map = view->getMap();
-	QRectF map_view_rect = view->calculateViewedRect(viewportToView(dirty_rect));
-	
-	map->drawTemplates(&painter, map_view_rect, first_template, last_template, view, true);
-	
-	dirty_rect.setWidth(-1); // => !dirty_rect.isValid()
-}
-
-void MapWidget::updateMapCache(bool use_background)
-{
-	if (map_cache.isNull())
-	{
-		// Lazy allocation of cache image
-		map_cache = QImage(size(), QImage::Format_ARGB32_Premultiplied);
-		map_cache_dirty_rect = rect();
-	}
-	else
-	{
-		// Make sure not to use a bigger draw rect than necessary
-		map_cache_dirty_rect = map_cache_dirty_rect.intersected(rect());
-	}
-	
-	// Start drawing
-	QPainter painter;
-	painter.begin(&map_cache);
-	painter.setClipRect(map_cache_dirty_rect);
-	
-	// Fill with background color (TODO: make configurable)
-	if (use_background)
-	{
-		painter.fillRect(map_cache_dirty_rect, Qt::white);
-	}
-	else
-	{
-		QPainter::CompositionMode mode = painter.compositionMode();
-		painter.setCompositionMode(QPainter::CompositionMode_Clear);
-		painter.fillRect(map_cache_dirty_rect, Qt::transparent);
-		painter.setCompositionMode(mode);
-	}
-	
-	RenderConfig::Options options(RenderConfig::Screen | RenderConfig::HelperSymbols);
-	bool use_antialiasing = force_antialiasing || Settings::getInstance().getSettingCached(Settings::MapDisplay_Antialiasing).toBool();
-	if (use_antialiasing)
-		painter.setRenderHint(QPainter::Antialiasing);
-	else
-		options |= RenderConfig::DisableAntialiasing | RenderConfig::ForceMinSize;
-		
-	Map* map = view->getMap();
-	QRectF map_view_rect = view->calculateViewedRect(viewportToView(map_cache_dirty_rect));
-
-	RenderConfig config = { *map, map_view_rect, view->calculateFinalZoomFactor(), options, 1.0 };
-	
-	painter.translate(width() / 2.0, height() / 2.0);
-	painter.setWorldTransform(view->worldTransform(), true);
-#ifndef Q_OS_ANDROID
-	if (view->isOverprintingSimulationEnabled())
-		map->drawOverprintingSimulation(&painter, config);
-	else
-#endif
-		map->draw(&painter, config);
-	
-	if (view->isGridVisible())
-		map->drawGrid(&painter, map_view_rect);
-	
-	// Finish drawing
-	painter.end();
-	
-	map_cache_dirty_rect.setWidth(-1); // => !map_cache_dirty_rect.isValid()
-}
-
 void MapWidget::updateAllDirtyCaches()
 {
-	if (map_cache_dirty_rect.isValid())
-		updateMapCache(false);
+	// All three layers now use tiled backing stores anchored in view space.
+	// Unlike the legacy single-image caches, tiles can be updated during
+	// transient pan without translation artifacts.
+
+	if (map_cache_dirty_rect.isValid() || !map_store.isEmpty())
+		updateMapTiles();
 
 	if (!view->areAllTemplatesHidden())
 	{
-		// Below-templates: use tiled backing store.
-		// Unlike the legacy path, we CAN update tiles during pan — the tiles
-		// are anchored in view space, so panning just changes which tiles are
-		// visible. No translation artifacts.
 		if ((below_template_cache_dirty_rect.isValid() || !below_template_store.isEmpty()) && isBelowTemplateVisible())
-			updateBelowTemplateTiles(0, view->getMap()->getFirstFrontTemplate() - 1);
+			updateTemplateTiles(below_template_store, below_template_cache_dirty_rect, 0, view->getMap()->getFirstFrontTemplate() - 1, true);
 
-		// Above-templates: legacy single-image cache (not yet migrated).
-		if (pan_offset != QPoint())
-			return;
-
-		if (above_template_cache_dirty_rect.isValid() && isAboveTemplateVisible())
-			updateTemplateCache(above_template_cache, above_template_cache_dirty_rect, view->getMap()->getFirstFrontTemplate(), view->getMap()->getNumTemplates() - 1, false);
+		if ((above_template_cache_dirty_rect.isValid() || !above_template_store.isEmpty()) && isAboveTemplateVisible())
+			updateTemplateTiles(above_template_store, above_template_cache_dirty_rect, view->getMap()->getFirstFrontTemplate(), view->getMap()->getNumTemplates() - 1, false);
 	}
 }
 
-void MapWidget::updateBelowTemplateTiles(int first_template, int last_template)
+void MapWidget::updateTemplateTiles(BackingStore& store, QRect& dirty_rect, int first_template, int last_template, bool use_background)
 {
 	Q_ASSERT(containsVisibleTemplate(first_template, last_template));
 
-	// The viewport origin in view space is at (-width/2, -height/2)
-	// when pan_offset is zero. Each tile covers [col*ts, (col+1)*ts) in view space.
-	// viewport_origin is the view-to-viewport offset:
-	//   viewport_x = view_x + width/2 + pan_offset.x
-	QPointF viewport_origin(width() / 2.0 + pan_offset.x(),
-	                        height() / 2.0 + pan_offset.y());
-
-	// Determine which tiles cover the current viewport in view space,
-	// plus one tile of overscan on each side.
 	QRectF view_rect = viewportToView(rect());
-	int overscan = below_template_store.tileSize();
-	QRectF padded_view_rect = view_rect.adjusted(-overscan, -overscan, overscan, overscan);
+	int overscan = store.tileSize();
+	QRectF padded = view_rect.adjusted(-overscan, -overscan, overscan, overscan);
 
 	int col_min, col_max, row_min, row_max;
-	below_template_store.tilesForViewRect(padded_view_rect, col_min, col_max, row_min, row_max);
+	store.tilesForViewRect(padded, col_min, col_max, row_min, row_max);
 
-	// If there was a legacy dirty rect, propagate it into the tile store.
-	if (below_template_cache_dirty_rect.isValid())
+	// Propagate the legacy dirty rect into the tile store.
+	if (dirty_rect.isValid())
 	{
-		QRectF dirty_view = viewportToView(below_template_cache_dirty_rect);
-		below_template_store.dirtyViewRect(dirty_view);
-		below_template_cache_dirty_rect.setWidth(-1);
+		store.dirtyViewRect(viewportToView(dirty_rect));
+		dirty_rect.setWidth(-1);
 	}
 
 	Map* map = view->getMap();
-	int ts = below_template_store.tileSize();
+	int ts = store.tileSize();
 
 	for (int row = row_min; row <= row_max; ++row)
 	{
 		for (int col = col_min; col <= col_max; ++col)
 		{
 			TileKey key{col, row};
-			BackingTile& tile = below_template_store.ensureTile(key);
-
+			BackingTile& tile = store.ensureTile(key);
 			if (!tile.dirty)
 				continue;
 
-			// Paint into this tile's QImage.
-			// The tile covers view rect [col*ts, (col+1)*ts) x [row*ts, (row+1)*ts).
 			QPainter painter(&tile.image);
 
-			// Clear to white (below-templates use white background)
-			painter.fillRect(0, 0, ts, ts, Qt::white);
+			if (use_background)
+			{
+				painter.fillRect(0, 0, ts, ts, Qt::white);
+			}
+			else
+			{
+				painter.setCompositionMode(QPainter::CompositionMode_Clear);
+				painter.fillRect(0, 0, ts, ts, Qt::transparent);
+				painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
+			}
 
-			// Set up the transform so that map drawing lands in the right place.
-			// The tile's origin in view space is (col*ts, row*ts).
-			// painter origin corresponds to that view-space point.
-			// We need: painter maps view(0,0) to pixel(-col*ts, -row*ts)
-			// Then the world transform maps map coords to view coords.
 			painter.translate(-col * ts, -row * ts);
 			painter.setWorldTransform(view->worldTransform(), true);
 
 			QRectF tile_view_rect(col * ts, row * ts, ts, ts);
 			QRectF tile_map_rect = view->calculateViewedRect(tile_view_rect);
-
 			map->drawTemplates(&painter, tile_map_rect, first_template, last_template, view, true);
 
 			painter.end();
@@ -1593,77 +1476,115 @@ void MapWidget::updateBelowTemplateTiles(int first_template, int last_template)
 		}
 	}
 
-	// Evict tiles that are far from the viewport.
 	int evict_margin = overscan * 2;
-	below_template_store.evict(view_rect.adjusted(-evict_margin, -evict_margin, evict_margin, evict_margin));
+	store.evict(view_rect.adjusted(-evict_margin, -evict_margin, evict_margin, evict_margin));
 }
 
 
-void MapWidget::compositeBelowTemplateTiles(QPainter& painter, const QRect& target, const QRect& exposed)
+void MapWidget::updateMapTiles()
 {
-	QPointF viewport_origin(width() / 2.0 + pan_offset.x(),
-	                        height() / 2.0 + pan_offset.y());
-
-	// Determine which tiles cover the exposed viewport area.
-	// Convert exposed rect to view space.
-	QRectF exposed_view = viewportToView(exposed);
+	QRectF view_rect = viewportToView(rect());
+	int overscan = map_store.tileSize();
+	QRectF padded = view_rect.adjusted(-overscan, -overscan, overscan, overscan);
 
 	int col_min, col_max, row_min, row_max;
-	below_template_store.tilesForViewRect(exposed_view, col_min, col_max, row_min, row_max);
+	map_store.tilesForViewRect(padded, col_min, col_max, row_min, row_max);
 
-	int ts = below_template_store.tileSize();
+	if (map_cache_dirty_rect.isValid())
+	{
+		map_store.dirtyViewRect(viewportToView(map_cache_dirty_rect));
+		map_cache_dirty_rect.setWidth(-1);
+	}
+
+	Map* map = view->getMap();
+	int ts = map_store.tileSize();
+
+	RenderConfig::Options options(RenderConfig::Screen | RenderConfig::HelperSymbols);
+	bool use_antialiasing = force_antialiasing || Settings::getInstance().getSettingCached(Settings::MapDisplay_Antialiasing).toBool();
+	if (!use_antialiasing)
+		options |= RenderConfig::DisableAntialiasing | RenderConfig::ForceMinSize;
 
 	for (int row = row_min; row <= row_max; ++row)
 	{
 		for (int col = col_min; col <= col_max; ++col)
 		{
 			TileKey key{col, row};
-			const BackingTile* tile = below_template_store.tile(key);
+			BackingTile& tile = map_store.ensureTile(key);
+			if (!tile.dirty)
+				continue;
 
-			// Where does this tile appear in viewport coordinates?
-			QRect tile_vp = below_template_store.tileViewportRect(key, viewport_origin);
+			QPainter painter(&tile.image);
 
-			// Clip to the exposed region
-			QRect draw_rect = tile_vp.intersected(target);
+			// Map layer uses transparent background.
+			painter.setCompositionMode(QPainter::CompositionMode_Clear);
+			painter.fillRect(0, 0, ts, ts, Qt::transparent);
+			painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
+
+			if (use_antialiasing)
+				painter.setRenderHint(QPainter::Antialiasing);
+
+			painter.translate(-col * ts, -row * ts);
+			painter.setWorldTransform(view->worldTransform(), true);
+
+			QRectF tile_view_rect(col * ts, row * ts, ts, ts);
+			QRectF tile_map_rect = view->calculateViewedRect(tile_view_rect);
+
+			RenderConfig config = { *map, tile_map_rect, view->calculateFinalZoomFactor(), options, 1.0 };
+
+#ifndef Q_OS_ANDROID
+			if (view->isOverprintingSimulationEnabled())
+				map->drawOverprintingSimulation(&painter, config);
+			else
+#endif
+				map->draw(&painter, config);
+
+			if (view->isGridVisible())
+				map->drawGrid(&painter, tile_map_rect);
+
+			painter.end();
+			tile.dirty = false;
+		}
+	}
+
+	int evict_margin = overscan * 2;
+	map_store.evict(view_rect.adjusted(-evict_margin, -evict_margin, evict_margin, evict_margin));
+}
+
+
+void MapWidget::compositeStoreTiles(const BackingStore& store, QPainter& painter, const QRect& clip_rect, const QColor& fallback_color)
+{
+	QPointF viewport_origin(width() / 2.0 + pan_offset.x(),
+	                        height() / 2.0 + pan_offset.y());
+
+	QRectF clip_view = viewportToView(clip_rect);
+
+	int col_min, col_max, row_min, row_max;
+	store.tilesForViewRect(clip_view, col_min, col_max, row_min, row_max);
+
+	for (int row = row_min; row <= row_max; ++row)
+	{
+		for (int col = col_min; col <= col_max; ++col)
+		{
+			TileKey key{col, row};
+			const BackingTile* tile = store.tile(key);
+
+			QRect tile_vp = store.tileViewportRect(key, viewport_origin);
+			QRect draw_rect = tile_vp.intersected(clip_rect);
 			if (draw_rect.isEmpty())
 				continue;
 
 			if (tile && !tile->image.isNull())
 			{
-				// Source rect within the tile image
 				QRect src_rect(draw_rect.x() - tile_vp.x(),
 				               draw_rect.y() - tile_vp.y(),
 				               draw_rect.width(), draw_rect.height());
 				painter.drawImage(draw_rect, tile->image, src_rect);
 			}
-			else
+			else if (fallback_color.alpha() > 0)
 			{
-				// No tile yet — fill with white (below-template background)
-				painter.fillRect(draw_rect, Qt::white);
+				painter.fillRect(draw_rect, fallback_color);
 			}
 		}
-	}
-}
-
-
-void MapWidget::shiftCache(int sx, int sy, QImage& cache)
-{
-	if (!cache.isNull())
-	{
-		QImage new_cache(cache.size(), cache.format());
-		QPainter painter(&new_cache);
-		painter.setCompositionMode(QPainter::CompositionMode_Source);
-		painter.drawImage(sx, sy, cache);
-		painter.end();
-		cache = new_cache;
-	}
-}
-
-void MapWidget::shiftCache(int sx, int sy, QPixmap& cache)
-{
-	if (!cache.isNull())
-	{
-		cache.scroll(sx, sy, cache.rect());
 	}
 }
 
