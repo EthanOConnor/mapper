@@ -990,19 +990,25 @@ void MapWidget::paintEvent(QPaintEvent* event)
 		target.translate(pan_offset);
 	}
 	
-	// Unified scene compositing: one store has all layers combined per tile.
+	// Unified scene compositing.
+	// To avoid jiggle, never mix fallback and fresh tiles in the same
+	// frame — either show ALL fallback or ALL fresh. The switch happens
+	// atomically when all visible tiles are clean.
 	QRect composite_clip = rect();
 
-	// Draw scaled fallback from pre-zoom state as backdrop.
-	if (has_zoom_fallback)
-		compositeFallbackTiles(scene_store, painter, composite_clip);
+	bool all_clean = !has_zoom_fallback || scene_store.allTilesClean(viewportToView(composite_clip));
 
-	// Draw current scene tiles (all clean tiles composite on top of fallback).
-	if (!scene_store.isEmpty())
+	if (has_zoom_fallback && !all_clean)
 	{
+		// Still waiting for fresh tiles — show scaled fallback only.
+		compositeFallbackTiles(scene_store, painter, composite_clip);
+	}
+	else if (!scene_store.isEmpty())
+	{
+		// All fresh tiles ready (or no fallback) — show them.
 		compositeStoreTiles(scene_store, painter, composite_clip, Qt::white);
 	}
-	else if (show_help && no_contents && !has_zoom_fallback)
+	else if (show_help && no_contents)
 	{
 		painter.save();
 		painter.setTransform(transform);
@@ -1014,7 +1020,7 @@ void MapWidget::paintEvent(QPaintEvent* event)
 			showHelpMessage(&painter, tr("Ready to draw!\n\nStart drawing or load a base map.\nTo load a base map, click\nTemplates -> Open template...") + QLatin1String("\n\n") + tr("Hint: Hold the middle mouse button to drag the map,\nzoom using the mouse wheel, if available."));
 		painter.restore();
 	}
-	else if (!has_zoom_fallback)
+	else
 	{
 		painter.fillRect(composite_clip, Qt::white);
 	}
