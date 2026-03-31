@@ -31,22 +31,22 @@ jobs:
             libcups2-dev doxygen graphviz libegl-dev libgl-dev
 
       - name: Configure
-        run: cmake --preset ci-linux -DCMAKE_BUILD_TYPE=Release
+        run: cmake --preset release-linux
 
       - name: Build
-        run: cmake --build --preset ci-linux --parallel
+        run: cmake --build --preset release-linux --parallel
 
       - name: Test
-        run: ctest --preset ci-linux
+        run: ctest --preset release-linux
 
       - name: Package
-        run: cd build/ci-linux && cpack -G DEB
+        run: cd build/release-linux && cpack -G DEB
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: linux-packages
-          path: build/ci-linux/*.deb
+          path: build/release-linux/*.deb
           if-no-files-found: warn
           retention-days: 30
 
@@ -88,22 +88,16 @@ jobs:
             mingw-w64-x86_64-doxygen
 
       - name: Configure
-        run: >
-          cmake --preset ci-windows
-          -DMapper_PACKAGE_QT=ON
-          -DMapper_PACKAGE_PROJ=ON
-          -DMapper_PACKAGE_GDAL=ON
-          -DGDAL_DATA_DIR=/mingw64/share/gdal
-          -DPROJ_DATA_DIR=/mingw64/share/proj
+        run: cmake --preset release-windows
 
       - name: Build
-        run: cmake --build --preset ci-windows --parallel
+        run: cmake --build --preset release-windows --parallel
 
       - name: Test
-        run: ctest --preset ci-windows
+        run: ctest --preset release-windows
 
       - name: Stage install tree
-        run: cmake --install build/ci-windows --prefix "$(pwd)/$DIST_DIR"
+        run: cmake --install build/release-windows --prefix "$(pwd)/$DIST_DIR"
 
       - name: Create ZIP
         shell: powershell
@@ -132,25 +126,22 @@ jobs:
 
       - name: Configure
         run: >
-          cmake --preset ci-macos
+          cmake --preset release-macos
           -DCMAKE_PREFIX_PATH="$(brew --prefix qt@5)"
-          -DMapper_PACKAGE_QT=ON
-          -DMapper_PACKAGE_PROJ=ON
-          -DMapper_PACKAGE_GDAL=ON
 
       - name: Build
-        run: cmake --build --preset ci-macos --parallel
+        run: cmake --build --preset release-macos --parallel
 
       - name: Test
-        run: ctest --preset ci-macos
+        run: ctest --preset release-macos
 
       - name: Package
-        run: cd build/ci-macos && cpack -G DragNDrop
+        run: cd build/release-macos && cpack -G DragNDrop
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: macos-packages
-          path: build/ci-macos/*.dmg
+          path: build/release-macos/*.dmg
           if-no-files-found: warn
           retention-days: 30

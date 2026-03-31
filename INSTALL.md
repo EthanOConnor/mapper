@@ -107,21 +107,21 @@ See `.github/workflows/ci.yml` for PR validation and
 
 ## Packaging
 
-Development presets keep packaging disabled. The release workflow enables
-packaging explicitly.
-
-Linux and macOS packages can be built locally after a Release configure:
+Development presets disable packaging automatically
+(`Mapper_DEVELOPMENT_BUILD` suppresses `Mapper_PACKAGE_*` defaults).
+CI presets disable it explicitly. Dedicated `release-*` presets enable
+dependency bundling for distributable packages:
 
 ```
-cmake --preset ci-linux -DCMAKE_BUILD_TYPE=Release
-cmake --build --preset ci-linux
-cd build/ci-linux && cpack
+cmake --preset release-linux
+cmake --build --preset release-linux
+cd build/release-linux && cpack -G DEB
 ```
 
-Platform-specific outputs in the release workflow are:
-- DEB on Linux via CPack
-- DragNDrop/DMG on macOS via CPack
-- ZIP on Windows by staging the install tree and archiving it
+Platform-specific outputs:
+- DEB on Linux via CPack (system deps, no bundling)
+- DragNDrop/DMG on macOS via CPack (bundles Qt, PROJ, GDAL)
+- ZIP on Windows by staging the install tree (bundles Qt, PROJ, GDAL)
 
 
 ## Binary Packages and Distribution

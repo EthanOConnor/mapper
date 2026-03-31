@@ -77,7 +77,9 @@ option(Mapper_AUTORUN_SYSTEM_TESTS "Run the system tests as part of the Mapper_T
 option(Mapper_AUTORUN_MANUAL_TESTS "Run the system tests as part of the Mapper_Test target" OFF)
 mark_as_advanced(Mapper_AUTORUN_SYSTEM_TESTS Mapper_AUTORUN_MANUAL_TESTS)
 
-if(APPLE OR WIN32)
+if(Mapper_DEVELOPMENT_BUILD)
+	set(mapper_package_default OFF)
+elseif(APPLE OR WIN32)
 	set(mapper_package_default ON)
 else()
 	set(mapper_package_default OFF)

@@ -31,11 +31,7 @@
             "binaryDir": "${sourceDir}/build/dev-macos",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
-                "Mapper_DEVELOPMENT_BUILD": "ON",
-                "Mapper_PACKAGE_QT": "OFF",
-                "Mapper_PACKAGE_PROJ": "OFF",
-                "Mapper_PACKAGE_GDAL": "OFF",
-                "Mapper_PACKAGE_ASSISTANT": "OFF"
+                "Mapper_DEVELOPMENT_BUILD": "ON"
             }
         },
         {
@@ -45,7 +41,16 @@
             "binaryDir": "${sourceDir}/build/dev-windows",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
-                "Mapper_DEVELOPMENT_BUILD": "ON",
+                "Mapper_DEVELOPMENT_BUILD": "ON"
+            }
+        },
+        {
+            "name": "ci-base",
+            "hidden": true,
+            "inherits": "base",
+            "cacheVariables": {
+                "Mapper_DEVELOPMENT_BUILD": "OFF",
+                "Mapper_USE_GDAL": "ON",
                 "Mapper_PACKAGE_QT": "OFF",
                 "Mapper_PACKAGE_PROJ": "OFF",
                 "Mapper_PACKAGE_GDAL": "OFF",
@@ -55,42 +60,61 @@
         {
             "name": "ci-linux",
             "displayName": "Linux CI",
-            "inherits": "base",
+            "inherits": "ci-base",
             "binaryDir": "${sourceDir}/build/ci-linux",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-                "Mapper_DEVELOPMENT_BUILD": "OFF",
-                "Mapper_USE_GDAL": "ON"
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo"
             }
         },
         {
             "name": "ci-macos",
             "displayName": "macOS CI",
-            "inherits": "base",
+            "inherits": "ci-base",
             "binaryDir": "${sourceDir}/build/ci-macos",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Release",
-                "Mapper_DEVELOPMENT_BUILD": "OFF",
-                "Mapper_USE_GDAL": "ON",
-                "Mapper_PACKAGE_QT": "OFF",
-                "Mapper_PACKAGE_PROJ": "OFF",
-                "Mapper_PACKAGE_GDAL": "OFF",
-                "Mapper_PACKAGE_ASSISTANT": "OFF"
+                "CMAKE_BUILD_TYPE": "Release"
             }
         },
         {
             "name": "ci-windows",
             "displayName": "Windows CI (MSYS2 MINGW64)",
-            "inherits": "base",
+            "inherits": "ci-base",
             "binaryDir": "${sourceDir}/build/ci-windows",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Release",
-                "Mapper_DEVELOPMENT_BUILD": "OFF",
-                "Mapper_USE_GDAL": "ON",
-                "Mapper_PACKAGE_QT": "OFF",
-                "Mapper_PACKAGE_PROJ": "OFF",
-                "Mapper_PACKAGE_GDAL": "OFF",
-                "Mapper_PACKAGE_ASSISTANT": "OFF"
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        },
+        {
+            "name": "release-linux",
+            "displayName": "Linux Release",
+            "inherits": "ci-linux",
+            "binaryDir": "${sourceDir}/build/release-linux",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        },
+        {
+            "name": "release-macos",
+            "displayName": "macOS Release",
+            "inherits": "ci-macos",
+            "binaryDir": "${sourceDir}/build/release-macos",
+            "cacheVariables": {
+                "Mapper_PACKAGE_QT": "ON",
+                "Mapper_PACKAGE_PROJ": "ON",
+                "Mapper_PACKAGE_GDAL": "ON"
+            }
+        },
+        {
+            "name": "release-windows",
+            "displayName": "Windows Release (MSYS2 MINGW64)",
+            "inherits": "ci-windows",
+            "binaryDir": "${sourceDir}/build/release-windows",
+            "cacheVariables": {
+                "Mapper_PACKAGE_QT": "ON",
+                "Mapper_PACKAGE_PROJ": "ON",
+                "Mapper_PACKAGE_GDAL": "ON",
+                "GDAL_DATA_DIR": "/mingw64/share/gdal",
+                "PROJ_DATA_DIR": "/mingw64/share/proj"
             }
         }
     ],
@@ -118,6 +142,18 @@
         {
             "name": "ci-windows",
             "configurePreset": "ci-windows"
+        },
+        {
+            "name": "release-linux",
+            "configurePreset": "release-linux"
+        },
+        {
+            "name": "release-macos",
+            "configurePreset": "release-macos"
+        },
+        {
+            "name": "release-windows",
+            "configurePreset": "release-windows"
         }
     ],
     "testPresets": [
@@ -149,6 +185,21 @@
         {
             "name": "ci-windows",
             "configurePreset": "ci-windows",
+            "output": { "outputOnFailure": true }
+        },
+        {
+            "name": "release-linux",
+            "configurePreset": "release-linux",
+            "output": { "outputOnFailure": true }
+        },
+        {
+            "name": "release-macos",
+            "configurePreset": "release-macos",
+            "output": { "outputOnFailure": true }
+        },
+        {
+            "name": "release-windows",
+            "configurePreset": "release-windows",
             "output": { "outputOnFailure": true }
         }
     ]
