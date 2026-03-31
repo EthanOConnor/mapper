@@ -117,11 +117,11 @@ OnlineTemplateDialog::OnlineTemplateDialog(
 	layout->addWidget(coverage_label);
 
 	auto* coverage_layout = new QHBoxLayout();
-	current_view_radio = new QRadioButton(tr("Current View"), this);
 	full_map_radio = new QRadioButton(tr("Full Map"), this);
-	current_view_radio->setChecked(true);
-	coverage_layout->addWidget(current_view_radio);
+	current_view_radio = new QRadioButton(tr("Current View"), this);
+	full_map_radio->setChecked(true);
 	coverage_layout->addWidget(full_map_radio);
+	coverage_layout->addWidget(current_view_radio);
 	coverage_layout->addStretch();
 	layout->addLayout(coverage_layout);
 
