@@ -35,6 +35,7 @@
 #include <QSettings>
 #include <QStackedWidget>
 #include <QStatusBar>
+#include <QTimer>
 #include <QToolBar>
 #include <QVBoxLayout>
 #include <QWhatsThis>
@@ -42,7 +43,6 @@
 #if defined(Q_OS_ANDROID)
 #  include <QtAndroid>
 #  include <QDesktopWidget>
-#  include <QTimer>
 #  include <QUrl>
 #endif
 
@@ -75,6 +75,27 @@
 
 
 namespace OpenOrienteering {
+
+namespace {
+
+void presentWindow(MainWindow* window)
+{
+	Q_ASSERT(window);
+	window->setWindowState((window->windowState() & ~Qt::WindowMinimized) | Qt::WindowActive);
+	window->setVisible(true);
+	window->raise();
+	window->activateWindow();
+	
+	// Native file dialogs can restore focus to the originating window on the
+	// next event-loop turn, which would otherwise leave a just-opened map behind
+	// an existing map window.
+	QTimer::singleShot(0, window, [window]() {
+		window->raise();
+		window->activateWindow();
+	});
+}
+
+}  // namespace
 
 constexpr int MainWindow::max_recent_files;
 
@@ -869,9 +890,7 @@ void MainWindow::showNewMapWizard()
 	new_window->setWindowFilePath(tr("Unsaved file"));
 	new_window->setController(new MapEditorController(MapEditorController::MapEditor, new_map, map_view), QString(), nullptr);
 	
-	new_window->show();
-	new_window->raise();
-	new_window->activateWindow();
+	presentWindow(new_window);
 	num_open_files++;
 }
 
@@ -903,9 +922,7 @@ bool MainWindow::openPath(const QString& path, const FileFormat* format)
 	MainWindow* const existing = findMainWindow(path);
 	if (existing)
 	{
-		existing->show();
-		existing->raise();
-		existing->activateWindow();
+		presentWindow(existing);
 		return true;
 	}
 #endif
@@ -985,8 +1002,7 @@ bool MainWindow::openPath(const QString& path, const FileFormat* format)
 	open_window->setHasAutosaveConflict(new_autosave_conflict);
 	open_window->setHasUnsavedChanges(false);
 	
-	open_window->setVisible(true); // Respect the window flags set by new_controller.
-	open_window->raise();
+	presentWindow(open_window); // Respect the window flags set by new_controller.
 	num_open_files++;
 	settings.remove(reopen_blocker);
 	setMostRecentlyUsedFile(path);
@@ -1005,8 +1021,6 @@ bool MainWindow::openPath(const QString& path, const FileFormat* format)
 		connect(open_window, &MainWindow::autosaveConflictResolved, autosave_dialog, &AutosaveDialog::autosaveConflictResolved);
 	}
 #endif
-	
-	open_window->activateWindow();
 	
 	return true;
 }

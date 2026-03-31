@@ -444,15 +444,31 @@ void AreaSymbol::FillPattern::createRenderables(const AreaRenderable& outline, q
 	{
 	case LinePattern:
 		{
-			LineSymbol line;
-			line.setColor(line_color);
-			
-			auto line_width_f = 0.001*line_width;
-			line.setLineWidth(line_width_f);
-			
+			auto line_width_f = 0.001 * line_width;
+
+			// Compute the offset, mirroring the logic in
+			// createRenderables<LinePattern> (lines 287-304).
+			qreal delta_line_offset = 0;
+			if (rotatable())
+			{
+				MapCoordF line_normal(0, -1);
+				line_normal.rotate(rotation);
+				line_normal.setY(-line_normal.y());
+				delta_line_offset = MapCoordF::dotProduct(line_normal, MapCoordF(pattern_origin));
+			}
+			auto computed_offset = 0.001 * line_offset + delta_line_offset;
+
+			// Canvas extent: outline extent expanded by half line width
 			auto margin = line_width_f / 2;
-			auto point_extent = QRectF{-margin, -margin, line_width_f, line_width_f};
-			createRenderables<LinePattern>(outline, delta_rotation, pattern_origin, point_extent, &line, rotation, output);
+			auto canvas = outline.getExtent();
+			canvas.adjust(-margin, -margin, margin, margin);
+
+			auto* hatch = new HatchFillRenderable(
+			    line_color, *outline.painterPath(),
+			    rotation, 0.001 * line_spacing,
+			    computed_offset,
+			    line_width_f, canvas);
+			output.insertRenderable(hatch);
 		}
 		break;
 	case PointPattern:

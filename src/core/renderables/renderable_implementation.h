@@ -105,6 +105,30 @@ protected:
 	QPainterPath path;
 };
 
+/** Renderable for displaying a hatch fill pattern procedurally.
+ *
+ * Instead of pre-expanding thousands of LineRenderables for parallel
+ * hatch lines, this renderable stores the pattern parameters and draws
+ * lines procedurally at render time, clipped to the area outline.
+ * This dramatically reduces renderable count and memory for filled areas.
+ */
+class HatchFillRenderable : public Renderable
+{
+public:
+	HatchFillRenderable(const MapColor* color, const QPainterPath& outline,
+	                    qreal angle, qreal spacing, qreal offset,
+	                    qreal line_width, const QRectF& extent);
+	void render(QPainter& painter, const RenderConfig& config) const override;
+	PainterConfig getPainterConfig(const QPainterPath* clip_path = nullptr) const override;
+
+private:
+	QPainterPath outline;
+	qreal angle;
+	qreal spacing;
+	qreal offset;
+	qreal line_width;
+};
+
 /** Renderable for displaying text. */
 class TextRenderable : public Renderable
 {

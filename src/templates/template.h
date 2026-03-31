@@ -30,6 +30,7 @@
 #include <QFlags>
 #include <QObject>
 #include <QPointF>
+#include <QRectF>
 #include <QString>
 #include <QStringRef>
 
@@ -54,6 +55,19 @@ namespace OpenOrienteering {
 class Map;
 class MapView;
 class Object;
+
+
+/**
+ * Shared view render context for template rendering and related async work.
+ *
+ * This captures view-level state and intentionally excludes template-specific
+ * concerns such as visibility, opacity, or combined template scale.
+ */
+struct ViewRenderContext
+{
+	QRectF visible_map_rect;
+	double view_zoom = 1.0;
+};
 
 
 /**
@@ -368,6 +382,15 @@ public:
 	 * Must not be called if the template file is already unloaded, or invalid.
 	 */
 	void unloadTemplateFile();
+	
+	/**
+	 * Updates the template's internal render context.
+	 *
+	 * This hook is called with the current shared view render context.
+	 * Implementations may use it to update internal render-state or async
+	 * loading goals for future draws.
+	 */
+	virtual void updateRenderContext(const ViewRenderContext& context);
 	
 	/** 
 	 * Draws the template using the given painter with the given opacity.

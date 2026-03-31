@@ -25,6 +25,7 @@ set(CMAKE_AUTOMOC ON)
 # Extra header to be shown in the IDE or to be translated
 set(MAPPER_GDAL_HEADERS
   ogr_file_format_p.h
+  online_imagery_source.h
 )
 	
 set(MAPPER_GDAL_SOURCES
@@ -34,6 +35,7 @@ set(MAPPER_GDAL_SOURCES
   gdal_settings_page.cpp
   gdal_template.cpp
   kmz_groundoverlay_export.cpp
+  online_imagery_template_builder.cpp
   ogr_file_format.cpp
   ogr_template.cpp
   mapper-osmconf.ini
@@ -73,4 +75,3 @@ add_custom_command(OUTPUT "${PROJECT_BINARY_DIR}/gdal/mapper-osmconf.ini"
 add_executable(mapper-gdal-info mapper_gdal_info.cpp)
 target_include_directories(mapper-gdal-info SYSTEM PRIVATE ${GDAL_INCLUDE_DIRS})
 target_link_libraries(mapper-gdal-info ${GDAL_LIBRARIES})
-

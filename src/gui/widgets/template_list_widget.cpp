@@ -98,6 +98,10 @@
 #include "tools/tool.h"
 #include "util/item_delegates.h"
 
+#ifdef MAPPER_USE_GDAL
+#include "gui/widgets/online_template_dialog.h"
+#endif
+
 
 #ifdef __clang_analyzer__
 #define singleShot(A, B, C) singleShot(A, B, #C) // NOLINT 
@@ -127,6 +131,16 @@ QVariant makeCheckBoxDecorator(QStyle* style, const QSize& size)
 QToolButton* createToolButton(const QIcon& icon, const QString& text)
 {
 	return Util::ToolButton::create(icon, text, "templates.html#setup");
+}
+
+QRectF currentViewExtent(MapEditorController& controller)
+{
+	auto* widget = controller.getMainWidget();
+	auto* view = widget ? widget->getMapView() : nullptr;
+	if (!widget || !view)
+		return {};
+
+	return view->calculateViewedRect(widget->viewportToView(widget->rect()));
 }
 
 }  // anonymous namespace
@@ -238,6 +252,9 @@ TemplateListWidget::TemplateListWidget(Map& map, MapView& main_view, MapEditorCo
 	if (!mobile_mode)
 	{
 		new_button_menu->addAction(QIcon(QString::fromLatin1(":/images/open.png")), tr("Open..."), this, &TemplateListWidget::openTemplate);
+#ifdef MAPPER_USE_GDAL
+		new_button_menu->addAction(tr("Online imagery..."), this, &TemplateListWidget::openOnlineTemplate);
+#endif
 		new_button_menu->addAction(controller.getAction("reopentemplate"));
 	}
 	duplicate_action = new_button_menu->addAction(QIcon(QString::fromLatin1(":/images/tool-duplicate.png")), tr("Duplicate"), this, &TemplateListWidget::duplicateTemplate);
@@ -673,6 +690,52 @@ std::unique_ptr<Template> TemplateListWidget::showOpenTemplateDialog(QWidget* di
 }
 
 
+std::unique_ptr<Template> TemplateListWidget::showOnlineImageryDialog(QWidget* dialog_parent, MapEditorController& controller)
+{
+#ifdef MAPPER_USE_GDAL
+	auto* map = controller.getMap();
+	auto* main_widget = controller.getMainWidget();
+	if (!map || !main_widget)
+		return {};
+
+	auto map_path = controller.getWindow() ? controller.getWindow()->currentPath() : QString{};
+	OnlineTemplateDialog dialog(*map, map_path, currentViewExtent(controller), dialog_parent);
+	dialog.setWindowModality(Qt::WindowModal);
+	if (dialog.exec() != QDialog::Accepted)
+		return {};
+
+	auto path = dialog.generatedPath();
+	if (path.isEmpty())
+		return {};
+
+	QString error;
+	auto new_temp = Template::templateForPath(path, map);
+	if (!new_temp)
+	{
+		error = tr("Could not open the generated imagery file.");
+	}
+	// The generated GDAL XML already contains the georeferencing we need, so
+	// the normal load path is simpler and less fragile than a manual state fixup.
+	else if (!new_temp->setupAndLoad(dialog_parent, main_widget->getMapView()))
+	{
+		error = new_temp->errorString();
+		if (new_temp->getTemplateState() == Template::Invalid && error.isEmpty())
+			error = tr("Failed to load template. Does the file exist and is it valid?");
+		new_temp.reset();
+	}
+
+	if (!error.isEmpty())
+		QMessageBox::warning(dialog_parent, tr("Error"), error);
+
+	return new_temp;
+#else
+	Q_UNUSED(dialog_parent)
+	Q_UNUSED(controller)
+	return {};
+#endif
+}
+
+
 #if 0
 void TemplateListWidget::newTemplate(QAction* action)
 {
@@ -697,6 +760,20 @@ void TemplateListWidget::openTemplate()
 		if (row >= 0)
 			pos = posFromRow(row);
 		
+		map.addTemplate(pos, std::move(new_template));
+	}
+}
+
+void TemplateListWidget::openOnlineTemplate()
+{
+	auto new_template = showOnlineImageryDialog(window(), controller);
+	if (new_template)
+	{
+		int pos = -1;
+		int row = currentRow();
+		if (row >= 0)
+			pos = posFromRow(row);
+
 		map.addTemplate(pos, std::move(new_template));
 	}
 }

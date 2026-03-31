@@ -21,7 +21,9 @@
 #include "renderable.h"
 
 #include <algorithm>
+#include <cmath>
 #include <iterator>
+#include <unordered_set>
 #include <utility>
 
 #include <Qt>
@@ -221,6 +223,89 @@ void ObjectRenderables::deleteRenderables()
 
 
 
+// ### SpatialIndex ###
+
+SpatialIndex::SpatialIndex(qreal cell_size)
+ : cell_size(cell_size)
+{
+	// nothing
+}
+
+void SpatialIndex::clear()
+{
+	cells.clear();
+	dirty = true;
+}
+
+void SpatialIndex::rebuild(const std::map<int, ObjectRenderablesMap>& data)
+{
+	cells.clear();
+
+	// Collect unique objects across all color buckets
+	std::unordered_set<const Object*> seen;
+	for (const auto& color_bucket : data)
+	{
+		for (const auto& obj_entry : color_bucket.second)
+		{
+			if (seen.insert(obj_entry.first).second)
+			{
+				const QRectF& ext = obj_entry.first->getExtent();
+				if (!ext.isValid())
+					continue;
+
+				int col_min = static_cast<int>(std::floor(ext.left()   / cell_size));
+				int col_max = static_cast<int>(std::floor(ext.right()  / cell_size));
+				int row_min = static_cast<int>(std::floor(ext.top()    / cell_size));
+				int row_max = static_cast<int>(std::floor(ext.bottom() / cell_size));
+
+				for (int r = row_min; r <= row_max; ++r)
+					for (int c = col_min; c <= col_max; ++c)
+						cells[{c, r}].push_back(obj_entry.first);
+			}
+		}
+	}
+	dirty = false;
+}
+
+void SpatialIndex::ensureBuilt(const std::map<int, ObjectRenderablesMap>& data)
+{
+	if (dirty)
+		rebuild(data);
+}
+
+void SpatialIndex::queryObjects(const QRectF& map_rect, std::vector<const Object*>& results) const
+{
+	results.clear();
+
+	if (map_rect.isEmpty())
+		return;
+
+	int col_min = static_cast<int>(std::floor(map_rect.left()   / cell_size));
+	int col_max = static_cast<int>(std::floor(map_rect.right()  / cell_size));
+	int row_min = static_cast<int>(std::floor(map_rect.top()    / cell_size));
+	int row_max = static_cast<int>(std::floor(map_rect.bottom() / cell_size));
+
+	// Use a set to deduplicate (objects can span multiple cells)
+	std::unordered_set<const Object*> seen;
+	for (int r = row_min; r <= row_max; ++r)
+	{
+		for (int c = col_min; c <= col_max; ++c)
+		{
+			auto it = cells.find({c, r});
+			if (it != cells.end())
+			{
+				for (const Object* obj : it->second)
+				{
+					if (seen.insert(obj).second)
+						results.push_back(obj);
+				}
+			}
+		}
+	}
+}
+
+
+
 // ### MapRenderables ###
 
 void MapRenderables::ObjectDeleter::operator()(Object* object) const
@@ -235,17 +320,30 @@ MapRenderables::MapRenderables(Map* map)
 	; // nothing
 }
 
+void MapRenderables::prepareDraw() const
+{
+	if (spatial_index.isDirty())
+		spatial_index.rebuild(*this);
+}
+
+
 void MapRenderables::draw(QPainter *painter, const RenderConfig &config) const
 {
-	// TODO: improve performance by using some spatial acceleration structure?
-	
 #ifdef Q_OS_ANDROID
 	const qreal min_dimension = 1.0/config.scaling;
 #endif
-	
+
+	// Rebuild the spatial index lazily if it has been invalidated.
+	if (spatial_index.isDirty())
+		spatial_index.rebuild(*this);
+
+	// Query the spatial index for objects overlapping the visible area.
+	std::vector<const Object*> candidates;
+	spatial_index.queryObjects(config.bounding_box, candidates);
+
 	QPainterPath initial_clip = painter->clipPath();
 	const QPainterPath* current_clip = nullptr;
-	
+
 	painter->save();
 	auto end_of_colors = rend();
 	auto color = rbegin();
@@ -260,19 +358,25 @@ void MapRenderables::draw(QPainter *painter, const RenderConfig &config) const
 		{
 			continue;
 		}
-		
-		for (const auto& object : color->second)
+
+		for (const Object* obj_ptr : candidates)
 		{
+			auto obj_it = color->second.find(obj_ptr);
+			if (obj_it == color->second.end())
+				continue;  // object not in this color bucket
+
+			const auto& object = *obj_it;
+
 			// Settings check
 			const Symbol* symbol = object.first->getSymbol();
 			if (!config.testFlag(RenderConfig::HelperSymbols) && symbol->isHelperSymbol())
 				continue;
 			if (symbol->isHidden())
 				continue;
-			
+
 			if (!object.first->getExtent().intersects(config.bounding_box))
 				continue;
-			
+
 			for (const auto& renderables : *object.second)
 			{
 				// Render the renderables
@@ -288,7 +392,7 @@ void MapRenderables::draw(QPainter *painter, const RenderConfig &config) const
 					color.setAlphaF(map_color->getOpacity());
 				if (!state.activate(painter, current_clip, config, color, initial_clip))
 				    continue;
-				
+
 				for (const auto* renderable : renderables.second)
 				{
 #ifdef Q_OS_ANDROID
@@ -301,13 +405,13 @@ void MapRenderables::draw(QPainter *painter, const RenderConfig &config) const
 						renderable->render(*painter, config);
 					}
 				}
-				
+
 			} // each common render attributes
-			
-		} // each object
-		
+
+		} // each object (from spatial index candidates)
+
 	} // each map color
-	
+
 	painter->restore();
 }
 
@@ -425,7 +529,15 @@ void MapRenderables::drawColorSeparation(QPainter* painter, const RenderConfig& 
 	// As soon as the spot color is actually used for drawing (i.e. drawing_started = true),
 	// we need to take care of knockouts.
 	bool drawing_started = false;
-	
+
+	// Rebuild the spatial index lazily if it has been invalidated.
+	if (spatial_index.isDirty())
+		spatial_index.rebuild(*this);
+
+	// Query the spatial index for objects overlapping the visible area.
+	std::vector<const Object*> sep_candidates;
+	spatial_index.queryObjects(config.bounding_box, sep_candidates);
+
 	// For each pair of color priority and its renderables collection...
 	auto end_of_colors = rend();
 	auto color = rbegin();
@@ -526,23 +638,30 @@ void MapRenderables::drawColorSeparation(QPainter* painter, const RenderConfig& 
 		}
 		
 		// For each pair of object and its renderables [states] for a particular map color...
-		for (const auto& object : color->second)
+		// Use the spatial index to iterate only candidate objects.
+		for (const Object* obj_ptr : sep_candidates)
 		{
+			auto obj_it = color->second.find(obj_ptr);
+			if (obj_it == color->second.end())
+				continue;
+
+			const auto& object = *obj_it;
+
 			// Check whether the symbol and object is to be drawn at all.
 			const Symbol* symbol = object.first->getSymbol();
 			if (!config.testFlag(RenderConfig::HelperSymbols) && symbol->isHelperSymbol())
 				continue;
 			if (symbol->isHidden())
 				continue;
-			
+
 			if (!object.first->getExtent().intersects(config.bounding_box))
 				continue;
-			
+
 			// For each pair of common rendering attributes and collection of renderables...
 			for (const auto& renderables : *object.second)
 			{
 				const PainterConfig& state = renderables.first;
-				
+
 				QColor color = *drawing_color.spot_color;
 				bool drawing = (drawing_color.factor >= 0.0005f);
 				if (!drawing)
@@ -561,10 +680,10 @@ void MapRenderables::drawColorSeparation(QPainter* painter, const RenderConfig& 
 				{
 					color.setCmykF(0.0, 0.0, 0.0, drawing_color.factor, 1.0);
 				}
-				
+
 				if (!state.activate(painter, current_clip, config, color, initial_clip))
 					continue;
-				
+
 				// For each renderable that uses the current painter configuration...
 				// Render the renderable
 				for (const auto* renderable : renderables.second)
@@ -575,11 +694,11 @@ void MapRenderables::drawColorSeparation(QPainter* painter, const RenderConfig& 
 						drawing_started |= drawing;
 					}
 				}
-				
+
 			} // each common render attributes
-			
-		} // each object
-		
+
+		} // each object (from spatial index candidates)
+
 	} // each map color
 	
 	painter->restore();
@@ -593,6 +712,7 @@ void MapRenderables::insertRenderablesOfObject(const Object* object)
 	{
 		operator[](color->first)[object] = color->second;
 	}
+	spatial_index.markDirty();
 }
 
 void MapRenderables::removeRenderablesOfObject(const Object* object, bool mark_area_as_dirty)
@@ -619,10 +739,11 @@ void MapRenderables::removeRenderablesOfObject(const Object* object, bool mark_a
 				}
 				map->setObjectAreaDirty(extent);
 			}
-			
+
 			color.second.erase(obj);
 		}
 	}
+	spatial_index.markDirty();
 }
 
 void MapRenderables::clear(bool mark_area_as_dirty)
@@ -644,6 +765,7 @@ void MapRenderables::clear(bool mark_area_as_dirty)
 		}
 	}
 	std::map<int, ObjectRenderablesMap>::clear();
+	spatial_index.clear();
 }
 
 // ### PainterConfig ###

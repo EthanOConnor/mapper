@@ -172,7 +172,9 @@ set(Mapper_Common_SRCS
   gui/map/map_find_feature.cpp
   gui/map/map_information_dialog.cpp
   gui/map/map_notes.cpp
+  gui/map/backing_store.cpp
   gui/map/map_widget.cpp
+  gui/map/tile_render_scheduler.cpp
   gui/map/rotate_map_dialog.cpp
   gui/map/stretch_map_dialog.cpp
   
@@ -202,6 +204,7 @@ set(Mapper_Common_SRCS
   gui/widgets/key_button_bar.cpp
   gui/widgets/mapper_proxystyle.cpp
   gui/widgets/measure_widget.cpp
+  gui/widgets/online_template_dialog.cpp
   gui/widgets/paint_on_template_settings_page.cpp
   gui/widgets/pie_menu.cpp
   gui/widgets/segmented_button_layout.cpp

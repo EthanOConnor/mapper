@@ -27,7 +27,6 @@
 #include <Qt>
 #include <QtGlobal>
 #include <QCursor>
-#include <QImage>
 #include <QObject>
 #include <QPoint>
 #include <QPointF>
@@ -40,9 +39,14 @@
 #include <QVariant>
 #include <QWidget>
 
+#include <QTransform>
+
 #include "core/map_coord.h"
 #include "core/map_view.h"
+#include "gui/map/backing_store.h"
+#include "gui/map/tile_render_scheduler.h"
 
+class QColor;
 class QContextMenuEvent;
 class QEvent;
 class QFocusEvent;
@@ -53,7 +57,6 @@ class QLabel;
 class QMouseEvent;
 class QPaintEvent;
 class QPainter;
-class QPixmap;
 class QResizeEvent;
 class QWheelEvent;
 
@@ -66,6 +69,7 @@ class MapEditorTool;
 class PieMenu;
 class Template;
 class TouchCursor;
+struct ViewRenderContext;
 
 
 /**
@@ -400,26 +404,33 @@ private:
 	/** Checks if there is any visible template below the map. */
 	bool isBelowTemplateVisible() const;
 	/**
-	 * Redraws the template cache.
-	 * @param cache Reference to pointer to the cache.
-	 * @param dirty_rect Rectangle of the cache to redraw, in viewport coordinates.
-	 * @param first_template Lowest template index to draw.
-	 * @param last_template Highest template index to draw.
-	 * @param use_background If set to true, fills the cache with white before
-	 *     drawing the templates, else makes it transparent.
+	 * Dispatches dirty scene tiles to the background thread pool.
+	 * Each tile renders all visible layers (below-templates, map,
+	 * above-templates) in a single pass so they're always consistent.
 	 */
-	void updateTemplateCache(QImage& cache, QRect& dirty_rect, int first_template, int last_template, bool use_background);
+	void updateSceneTiles();
 	/**
-	 * Redraws the map cache in the map cache dirty rect.
-	 * @param use_background If set to true, fills the cache with white before
-	 *     drawing the map, else makes it transparent.
+	 * Composites visible backing-store tiles onto the given painter.
+	 * @param store The backing store to composite from.
+	 * @param painter Target painter (the widget).
+	 * @param clip_rect Viewport area to draw into.
+	 * @param fallback_color Fill color for missing tiles (Qt::white or Qt::transparent).
 	 */
-	void updateMapCache(bool use_background);
+	void compositeStoreTiles(const BackingStore& store, QPainter& painter, const QRect& clip_rect, const QColor& fallback_color);
+	/**
+	 * Composites fallback (stale zoom) tiles from a backing store,
+	 * scaled to match the current view transform.
+	 */
+	void compositeFallbackTiles(const BackingStore& store, QPainter& painter, const QRect& clip_rect);
+	/**
+	 * Adjusts grid offsets on all three backing stores by the given
+	 * pixel delta. Used to retain tiles across pan completion.
+	 */
+	void adjustAllGridOffsets(QPointF delta);
+	/** Installs completed scene tiles from background workers. */
+	void installSceneTileResults();
 	/** Redraws all dirty caches. */
 	void updateAllDirtyCaches();
-	/** Shifts the content in the cache by the given amount of pixels. */
-	void shiftCache(int sx, int sy, QImage& cache);
-	void shiftCache(int sx, int sy, QPixmap& cache);
 	
 	/**
 	 * Calculates the bounding box of the given map coordinates rect and
@@ -458,6 +469,13 @@ private:
 	
 	/** Draws a help message at the center of the MapWidget. */
 	void showHelpMessage(QPainter* painter, const QString& text) const;
+
+	/** Schedules publication of the current view render context. */
+	void scheduleRenderContextUpdate();
+	/** Publishes the latest view render context to visible loaded templates. */
+	void publishRenderContext();
+	/** Builds the current shared view render context snapshot. */
+	ViewRenderContext currentViewRenderContext() const;
 	
 	/**
 	 * Updates the content of the zoom display.
@@ -492,22 +510,28 @@ private:
 	bool pinching;
 	qreal pinching_factor;
 	QPoint pinching_center;
+	bool render_context_update_scheduled;
 	
 	// Panning (operation)
 	QPoint pan_offset;
 	
-	// Template caches
-	/** Cache for templates below map layer */
-	QImage below_template_cache;
-	QRect below_template_cache_dirty_rect;
-	
-	/** Cache for templates above map layer */
-	QImage above_template_cache;
-	QRect above_template_cache_dirty_rect;
-	
-	/** Map layer cache  */
-	QImage map_cache;
-	QRect map_cache_dirty_rect;
+	// Unified tiled backing store — all layers rendered together per tile
+	BackingStore scene_store;
+	QRect scene_dirty_rect;
+
+	// Zoom fallback state
+	/** World transform at the time the current (non-fallback) tiles were rendered. */
+	QTransform last_rendered_transform;
+	/** World transform from the previous zoom level, used to scale fallback tiles. */
+	QTransform fallback_transform;
+	/** True when backing stores hold fallback tiles from a previous zoom level. */
+	bool has_zoom_fallback = false;
+	/** True when finishDragging has adjusted grid offsets and the upcoming
+	 *  CenterChange from viewChanged should NOT clear the stores. */
+	bool pan_adjusted = false;
+
+	/** Background tile renderer for the scene. */
+	TileRenderScheduler* tile_scheduler = nullptr;
 	
 	// Dirty regions for drawings (tools) and activities
 	/** Dirty rect for the current tool, in viewport coordinates (pixels). */

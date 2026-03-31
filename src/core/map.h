@@ -308,6 +308,12 @@ public:
 	 * This is automatically called by draw(), you normally do not need to call it directly.
 	 */
 	void updateObjects();
+
+	/**
+	 * Returns the map renderables for direct read-only access.
+	 * Used by background tile rendering to call draw() without updateObjects().
+	 */
+	const MapRenderables& mapRenderables() const;
 	
 	/** 
 	 * Calculates the extent of all map elements. 
