@@ -101,7 +101,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          brew install qt@5 proj gdal ninja ccache
+          brew install qt@5 proj gdal ninja ccache doxygen
           echo "$(brew --prefix qt@5)/bin" >> "$GITHUB_PATH"
 
       - name: Set up ccache

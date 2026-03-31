@@ -127,7 +127,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          brew install qt@5 proj gdal ninja
+          brew install qt@5 proj gdal ninja doxygen
           echo "$(brew --prefix qt@5)/bin" >> "$GITHUB_PATH"
 
       - name: Configure
