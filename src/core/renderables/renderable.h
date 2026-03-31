@@ -21,7 +21,10 @@
 #ifndef OPENORIENTEERING_RENDERABLE_H
 #define OPENORIENTEERING_RENDERABLE_H
 
+#include <cstddef>
+#include <functional>
 #include <map>
+#include <unordered_map>
 #include <vector>
 
 #include <QtGlobal>
@@ -295,7 +298,7 @@ private:
 /**
  * A low-level container for renderables of multiple objects
  * grouped by object and common render attributes.
- * 
+ *
  * This container uses a smart pointer to the renderable collection
  * of each single object.
  */
@@ -303,10 +306,68 @@ typedef std::map<const Object*, SharedRenderables::Pointer> ObjectRenderablesMap
 
 
 
-/** 
+/**
+ * A uniform-grid spatial index for fast bounding-box queries.
+ *
+ * Objects are inserted into every grid cell their extent overlaps.
+ * Querying a map-coordinate rectangle returns all objects whose extents
+ * overlap at least one cell covered by that rectangle.
+ *
+ * The index is rebuilt lazily: it is marked dirty on insert/remove and
+ * rebuilt on the first query after that.
+ */
+class SpatialIndex
+{
+public:
+	/**
+	 * Construct a spatial index with the given cell size.
+	 * @param cell_size  Grid cell size in map coordinates (mm). Default 50mm.
+	 */
+	explicit SpatialIndex(qreal cell_size = 50.0);
+
+	void clear();
+	void markDirty() { dirty = true; }
+	bool isDirty() const { return dirty; }
+
+	/**
+	 * Rebuild the index from the given MapRenderables data.
+	 */
+	void rebuild(const std::map<int, ObjectRenderablesMap>& data);
+
+	/**
+	 * Query objects whose extents overlap the given map-coord rect.
+	 * Results are appended after clearing the output vector.
+	 */
+	void queryObjects(const QRectF& map_rect,
+	                  std::vector<const Object*>& results) const;
+
+private:
+	struct CellKey
+	{
+		int col;
+		int row;
+		bool operator==(CellKey o) const { return col == o.col && row == o.row; }
+	};
+
+	struct CellKeyHash
+	{
+		std::size_t operator()(CellKey k) const noexcept
+		{
+			return std::hash<int>{}(k.col) ^ (std::hash<int>{}(k.row) * 2654435761u);
+		}
+	};
+
+	qreal cell_size;
+	bool dirty = true;
+	std::unordered_map<CellKey, std::vector<const Object*>, CellKeyHash> cells;
+};
+
+
+
+/**
  * A high-level container for renderables of multiple objects
  * grouped by color priority, object and common render attributes.
- * 
+ *
  * This container is able to draw the renderables.
  */
 class MapRenderables : protected std::map<int, ObjectRenderablesMap>
@@ -370,6 +431,7 @@ public:
 	
 private:
 	Map* const map;
+	mutable SpatialIndex spatial_index;  // mutable: rebuild happens in const draw()
 };
 
 
