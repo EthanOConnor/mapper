@@ -343,22 +343,21 @@ void MapWidget::viewChanged(MapView::ChangeFlags changes)
 		map_store.resetInFlight();
 		if (!has_zoom_fallback)
 		{
-			// Only promote on the first zoom step. Subsequent steps
-			// keep scaling from the original pre-zoom tiles.
+			// Promote map tiles to fallback — they'll be drawn scaled
+			// while background workers render at the new zoom.
 			fallback_transform = last_rendered_transform;
-			below_template_store.promoteToFallback();
-			above_template_store.promoteToFallback();
 			map_store.promoteToFallback();
 			has_zoom_fallback = true;
 		}
 		else
 		{
-			// Additional zoom steps: just clear current (partial) tiles.
+			// Additional zoom steps: clear partial map tiles.
 			// The fallback from the first step is still valid.
-			below_template_store.clear();
-			above_template_store.clear();
 			map_store.clear();
 		}
+		// Template layers render synchronously — just clear and re-render.
+		below_template_store.clear();
+		above_template_store.clear();
 
 		pan_adjusted = false;
 	}
@@ -1042,46 +1041,47 @@ void MapWidget::paintEvent(QPaintEvent* event)
 		target.translate(pan_offset);
 	}
 	
-	// Each layer draws its fallback (scaled) then its current tiles on top.
-	// This ensures the map fallback paints OVER below-template current tiles,
-	// not underneath them (which would cause the map to flicker out when
-	// below-template tiles render before async map tiles arrive).
+	// Compositing order:
+	// 1. Below-template layer (sync — always fully rendered, no fallback needed)
+	// 2. Map layer (async — uses fallback during zoom while workers render)
+	// 3. Above-template layer (sync — no fallback needed)
+	//
+	// Below-templates and above-templates render synchronously in
+	// updateAllDirtyCaches(), so they're always complete. Only the map
+	// layer renders on background threads and needs fallback coverage.
 	QRect composite_clip = rect();
 
-	// --- Below-template layer ---
+	// --- Below-template layer (always renders a solid background) ---
 	bool below_has_content = !view->areAllTemplatesHidden() && isBelowTemplateVisible() && view->getMap()->getFirstFrontTemplate() > 0;
-	if (has_zoom_fallback)
-		compositeFallbackTiles(below_template_store, painter, composite_clip);
 	if (below_has_content && !below_template_store.isEmpty())
 	{
 		compositeStoreTiles(below_template_store, painter, composite_clip, Qt::white);
 	}
-	else if (!has_zoom_fallback)
+	else if (show_help && no_contents)
 	{
-		if (show_help && no_contents)
-		{
-			painter.save();
-			painter.setTransform(transform);
-			if (view->getMap()->getNumColors() == 0)
-				showHelpMessage(&painter, tr("Empty map!\n\nStart by defining some colors:\nSelect Symbols -> Color window to\nopen the color dialog and\ndefine the colors there."));
-			else if (view->getMap()->getNumSymbols() == 0)
-				showHelpMessage(&painter, tr("No symbols!\n\nNow define some symbols:\nRight-click in the symbol bar\nand select \"New symbol\"\nto create one."));
-			else
-				showHelpMessage(&painter, tr("Ready to draw!\n\nStart drawing or load a base map.\nTo load a base map, click\nTemplates -> Open template...") + QLatin1String("\n\n") + tr("Hint: Hold the middle mouse button to drag the map,\nzoom using the mouse wheel, if available."));
-			painter.restore();
-		}
-		else if (!below_has_content)
-		{
-			painter.fillRect(composite_clip, Qt::white);
-		}
+		painter.save();
+		painter.setTransform(transform);
+		if (view->getMap()->getNumColors() == 0)
+			showHelpMessage(&painter, tr("Empty map!\n\nStart by defining some colors:\nSelect Symbols -> Color window to\nopen the color dialog and\ndefine the colors there."));
+		else if (view->getMap()->getNumSymbols() == 0)
+			showHelpMessage(&painter, tr("No symbols!\n\nNow define some symbols:\nRight-click in the symbol bar\nand select \"New symbol\"\nto create one."));
+		else
+			showHelpMessage(&painter, tr("Ready to draw!\n\nStart drawing or load a base map.\nTo load a base map, click\nTemplates -> Open template...") + QLatin1String("\n\n") + tr("Hint: Hold the middle mouse button to drag the map,\nzoom using the mouse wheel, if available."));
+		painter.restore();
+	}
+	else
+	{
+		painter.fillRect(composite_clip, Qt::white);
 	}
 
-	// --- Map layer ---
+	// --- Map layer (async with zoom fallback) ---
 	const auto map_visibility = view->effectiveMapVisibility();
 	if (map_visibility.visible)
 	{
 		qreal saved_opacity = painter.opacity();
 		painter.setOpacity(map_visibility.opacity);
+		// Draw scaled fallback from pre-zoom state, then current tiles on top.
+		// Current clean tiles overwrite fallback; InFlight/Dirty areas show fallback.
 		if (has_zoom_fallback)
 			compositeFallbackTiles(map_store, painter, composite_clip);
 		if (!map_store.isEmpty())
@@ -1089,9 +1089,7 @@ void MapWidget::paintEvent(QPaintEvent* event)
 		painter.setOpacity(saved_opacity);
 	}
 
-	// --- Above-template layer ---
-	if (has_zoom_fallback)
-		compositeFallbackTiles(above_template_store, painter, composite_clip);
+	// --- Above-template layer (sync) ---
 	if (!view->areAllTemplatesHidden() && isAboveTemplateVisible() && !above_template_store.isEmpty() && view->getMap()->getNumTemplates() - view->getMap()->getFirstFrontTemplate() > 0)
 		compositeStoreTiles(above_template_store, painter, composite_clip, Qt::transparent);
 	
@@ -1482,16 +1480,12 @@ void MapWidget::updateAllDirtyCaches()
 			updateTemplateTiles(above_template_store, above_template_cache_dirty_rect, view->getMap()->getFirstFrontTemplate(), view->getMap()->getNumTemplates() - 1, false);
 	}
 
-	// Discard fallback once all visible current tiles are fully rendered.
+	// Discard map fallback once all visible map tiles are fully rendered.
 	if (has_zoom_fallback)
 	{
 		QRectF vr = viewportToView(rect());
-		if (below_template_store.allTilesClean(vr)
-		    && map_store.allTilesClean(vr)
-		    && above_template_store.allTilesClean(vr))
+		if (map_store.allTilesClean(vr))
 		{
-			below_template_store.clearFallback();
-			above_template_store.clearFallback();
 			map_store.clearFallback();
 			has_zoom_fallback = false;
 		}
