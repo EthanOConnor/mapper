@@ -16,7 +16,6 @@ codespell -q 7 \
   'INSTALL.md' \
   'README.md' \
   '3rd-party/cove' \
-  'android' \
   'doc/api' \
   'doc/licensing' \
   'doc/man' \
