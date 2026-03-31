@@ -23,6 +23,7 @@
 #define OPENORIENTEERING_MAP_WIDGET_H
 
 #include <functional>
+#include <memory>
 
 #include <Qt>
 #include <QtGlobal>
@@ -42,6 +43,7 @@
 
 #include "core/map_coord.h"
 #include "core/map_view.h"
+#include "gui/map/backing_store.h"
 
 class QContextMenuEvent;
 class QEvent;
@@ -411,6 +413,18 @@ private:
 	 */
 	void updateTemplateCache(QImage& cache, QRect& dirty_rect, int first_template, int last_template, bool use_background);
 	/**
+	 * Updates dirty tiles in the backing store for the below-template layer.
+	 * Only tiles that intersect the current viewport (plus overscan) are
+	 * rendered. Each dirty tile is cleared and painted via the same
+	 * template-drawing path as the legacy single-image cache.
+	 */
+	void updateBelowTemplateTiles(int first_template, int last_template);
+	/**
+	 * Composites visible backing-store tiles onto the given painter.
+	 * Only tiles that intersect the exposed rect are drawn.
+	 */
+	void compositeBelowTemplateTiles(QPainter& painter, const QRect& target, const QRect& exposed);
+	/**
 	 * Redraws the map cache in the map cache dirty rect.
 	 * @param use_background If set to true, fills the cache with white before
 	 *     drawing the map, else makes it transparent.
@@ -506,8 +520,11 @@ private:
 	QPoint pan_offset;
 	
 	// Template caches
-	/** Cache for templates below map layer */
-	QImage below_template_cache;
+	/** Tiled backing store for templates below map layer */
+	BackingStore below_template_store;
+	/** Legacy dirty rect kept for the tiled store — marks the viewport region
+	 *  that needs tile redraws. When valid, the corresponding backing-store
+	 *  tiles that intersect this rect are marked dirty. */
 	QRect below_template_cache_dirty_rect;
 	
 	/** Cache for templates above map layer */
