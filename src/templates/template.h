@@ -32,7 +32,7 @@
 #include <QPointF>
 #include <QRectF>
 #include <QString>
-#include <QStringRef>
+#include <QStringView>
 
 #include "core/map_coord.h"
 #include "util/matrix.h"
@@ -668,7 +668,7 @@ public:
 	 * In addition, this function respects the user setting for assigning
 	 * some TemplateTrack extensions (GPX) explicitly to GDAL (OgrTemplate).
 	 */
-	static std::unique_ptr<Template> templateForType(const QStringRef& type, const QString& path, Map* map);
+	static std::unique_ptr<Template> templateForType(QStringView type, const QString& path, Map* map);
 	
 	/**
 	 * A flag which disables the writing of absolute paths for template files.

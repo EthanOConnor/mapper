@@ -26,6 +26,10 @@
 #include <QObject>
 #include <QString>
 
+#if defined(QT_POSITIONING_LIB)
+#  include <QGeoPositionInfoSource>
+#endif
+
 #include "core/map_coord.h"
 
 class QGeoPositionInfo;
@@ -120,8 +124,9 @@ signals:
 	
 private slots:
     void positionUpdated(const QGeoPositionInfo& info);
-	void error();
-	void updateTimeout();
+#if defined(QT_POSITIONING_LIB)
+	void errorOccurred(QGeoPositionInfoSource::Error positioningError);
+#endif
 	
 private:
 	MapCoordF calcLatestGPSCoord(bool& ok);

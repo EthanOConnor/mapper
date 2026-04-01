@@ -21,35 +21,35 @@ message(STATUS "Configuring ${PROJECT_NAME} packaging")
 option(Mapper_PACKAGE_QT_ALL_TRANSLATIONS "Add all Qt translations to the packages" OFF)
 
 function(cache_qt_translations_dir)
-	if(Qt5Translations_DIR AND EXISTS "${Qt5Translations_DIR}")
+	if(QtTranslations_DIR AND EXISTS "${QtTranslations_DIR}")
 		return()
 	endif()
 
-	find_package(Qt5Core REQUIRED QUIET)
-	find_package(Qt5LinguistTools REQUIRED QUIET) # for Qt5::lconvert
+	find_package(Qt6 REQUIRED QUIET COMPONENTS Core)
+	find_package(Qt6 REQUIRED QUIET COMPONENTS LinguistTools)
 
 	set(_qt_translation_roots
 	  "${QT_LIBRARY_DIR}"
-	  "${Qt5Core_DIR}"
-	  "${Qt5LinguistTools_DIR}"
+	  "${Qt6Core_DIR}"
+	  "${Qt6LinguistTools_DIR}"
 	)
 
-	get_target_property(_qt5core_lib Qt5::Core IMPORTED_LOCATION_RELEASE)
-	if(NOT _qt5core_lib)
-		get_target_property(_qt5core_lib Qt5::Core IMPORTED_LOCATION)
+	get_target_property(_qt6core_lib Qt6::Core IMPORTED_LOCATION_RELEASE)
+	if(NOT _qt6core_lib)
+		get_target_property(_qt6core_lib Qt6::Core IMPORTED_LOCATION)
 	endif()
-	if(_qt5core_lib)
-		get_filename_component(_qt5core_dir "${_qt5core_lib}" DIRECTORY)
-		list(APPEND _qt_translation_roots "${_qt5core_dir}")
+	if(_qt6core_lib)
+		get_filename_component(_qt6core_dir "${_qt6core_lib}" DIRECTORY)
+		list(APPEND _qt_translation_roots "${_qt6core_dir}")
 	endif()
 
-	get_target_property(_qt5lconvert Qt5::lconvert IMPORTED_LOCATION_RELEASE)
-	if(NOT _qt5lconvert)
-		get_target_property(_qt5lconvert Qt5::lconvert IMPORTED_LOCATION)
+	get_target_property(_qt6lconvert Qt6::lconvert IMPORTED_LOCATION_RELEASE)
+	if(NOT _qt6lconvert)
+		get_target_property(_qt6lconvert Qt6::lconvert IMPORTED_LOCATION)
 	endif()
-	if(_qt5lconvert)
-		get_filename_component(_qt5lconvert_dir "${_qt5lconvert}" DIRECTORY)
-		list(APPEND _qt_translation_roots "${_qt5lconvert_dir}")
+	if(_qt6lconvert)
+		get_filename_component(_qt6lconvert_dir "${_qt6lconvert}" DIRECTORY)
+		list(APPEND _qt_translation_roots "${_qt6lconvert_dir}")
 	endif()
 
 	unset(_qt_translation_hints)
@@ -72,58 +72,59 @@ function(cache_qt_translations_dir)
 	  HINTS ${_qt_translation_hints}
 	  PATH_SUFFIXES
 	    translations
-	    share/qt5/translations
+	    share/qt6/translations
+	    share/qt/translations
 	    share/translations
 	  NO_DEFAULT_PATH
 	)
 
 	if(NOT _mapper_qt_translations_dir)
-		set(_mapper_qt_translations_dir "Qt5Translations_DIR-NOTFOUND")
+		set(_mapper_qt_translations_dir "QtTranslations_DIR-NOTFOUND")
 	endif()
 
-	set(Qt5Translations_DIR "${_mapper_qt_translations_dir}" CACHE PATH
-	  "The Qt5 translations directory"
+	set(QtTranslations_DIR "${_mapper_qt_translations_dir}" CACHE PATH
+	  "The Qt translations directory"
 	)
 endfunction(cache_qt_translations_dir)
 
 function(deploy_qt_translations basename)
-	find_package(Qt5LinguistTools REQUIRED QUIET) # for Qt5::lconvert
-	
-	if(NOT Qt5Translations_DIR)
+	find_package(Qt6 REQUIRED QUIET COMPONENTS LinguistTools)
+
+	if(NOT QtTranslations_DIR)
 		cache_qt_translations_dir()
 	endif()
-	
+
 	if(Mapper_PACKAGE_QT_ALL_TRANSLATIONS)
-		file(GLOB basename_files RELATIVE "${Qt5Translations_DIR}" "${Qt5Translations_DIR}/${basename}_??.qm")
+		file(GLOB basename_files RELATIVE "${QtTranslations_DIR}" "${QtTranslations_DIR}/${basename}_??.qm")
 	else()
 		unset(basename_files)
 		foreach(_mapper_trans ${Mapper_translations})
 			get_filename_component(basename_file ${_mapper_trans} NAME_WE)
 			string(REPLACE OpenOrienteering ${basename} basename_file ${basename_file})
 			string(REGEX REPLACE "(_..)_..$" "\\1" basename_file ${basename_file})
-			file(GLOB translation_files RELATIVE "${Qt5Translations_DIR}" "${Qt5Translations_DIR}/${basename_file}*.qm")
+			file(GLOB translation_files RELATIVE "${QtTranslations_DIR}" "${QtTranslations_DIR}/${basename_file}*.qm")
 			list(APPEND basename_files ${translation_files})
 		endforeach()
 	endif()
-	
+
 	# Build the translation bundle from the top-level build tree. Single-config
 	# generators such as Ninja do not emit a build graph in subdirectories.
-	install(CODE 
+	install(CODE
 	  "execute_process(COMMAND \"${CMAKE_COMMAND}\" --build \"${PROJECT_BINARY_DIR}\" --target \"${basename}-translations\")"
 	)
-	
+
 	set(generated_translations )
 	foreach(basename_file ${basename_files})
-		set(input_files "${Qt5Translations_DIR}/${basename_file}")
+		set(input_files "${QtTranslations_DIR}/${basename_file}")
 		foreach(arg ${ARGN})
 			string(REPLACE ${basename} ${arg} extra_file ${basename_file})
-			if(EXISTS "${Qt5Translations_DIR}/${extra_file}")
-				list(INSERT input_files 0 "${Qt5Translations_DIR}/${extra_file}")
+			if(EXISTS "${QtTranslations_DIR}/${extra_file}")
+				list(INSERT input_files 0 "${QtTranslations_DIR}/${extra_file}")
 			endif()
 		endforeach()
 		add_custom_command(OUTPUT "${basename_file}"
-		  COMMAND Qt5::lconvert -o "${basename_file}" ${input_files}
-		  DEPENDS Qt5::lconvert ${input_files}
+		  COMMAND Qt6::lconvert -o "${basename_file}" ${input_files}
+		  DEPENDS Qt6::lconvert ${input_files}
 		)
 		list(APPEND generated_translations "${basename_file}")
 		install(FILES "${CMAKE_CURRENT_BINARY_DIR}/${basename_file}" DESTINATION "${MAPPER_DATA_DESTINATION}/translations")
@@ -133,10 +134,10 @@ endfunction(deploy_qt_translations)
 
 
 
-find_package(Qt5Core REQUIRED QUIET)
+find_package(Qt6 REQUIRED QUIET COMPONENTS Core)
 if(NOT QT_LIBRARY_DIR)
-	get_target_property(_qt5core_lib Qt5::Core IMPORTED_LOCATION_RELEASE)
-	get_filename_component(QT_LIBRARY_DIR ${_qt5core_lib} PATH)
+	get_target_property(_qt6core_lib Qt6::Core IMPORTED_LOCATION_RELEASE)
+	get_filename_component(QT_LIBRARY_DIR ${_qt6core_lib} PATH)
 	string(REGEX REPLACE "/[^/]*\\.framework" "" QT_LIBRARY_DIR "${QT_LIBRARY_DIR}")
 endif()
 
@@ -372,17 +373,17 @@ if(Mapper_PACKAGE_QT)
 	  Widgets
 	)
 
-	find_package(Qt5Positioning QUIET)
-	if(TARGET Qt5::Positioning)
+	find_package(Qt6 COMPONENTS Positioning QUIET)
+	if(TARGET Qt6::Positioning)
 		list(APPEND MAPPER_QT_MODULES SerialPort) # Always with serialport NMEA
 	endif()
-	
+
 	set(QT_PLUGIN_TARGETS )
 	foreach(module ${MAPPER_QT_MODULES})
-		find_package(Qt5${module} QUIET)
-		list(APPEND QT_PLUGIN_TARGETS ${Qt5${module}_PLUGINS})
+		find_package(Qt6 COMPONENTS ${module} QUIET)
+		list(APPEND QT_PLUGIN_TARGETS ${Qt6${module}_PLUGINS})
 	endforeach()
-	# Cf. Qt5's qt_de.ts for dependencies - qt_de.ts would not load without them.
+	# Cf. Qt's qt_de.ts for dependencies - qt_de.ts would not load without them.
 	deploy_qt_translations(qt qtbase)
 endif()
 
@@ -391,24 +392,24 @@ if(Mapper_PACKAGE_ASSISTANT)
 	if(CMAKE_FIND_ROOT_PATH)
 		set(assistant_find_options ONLY_CMAKE_FIND_ROOT_PATH)
 	endif()
-	find_program(Qt5Help_ASSISTANT_EXECUTABLE
+	find_program(QtHelp_ASSISTANT_EXECUTABLE
 	  NAMES assistant Assistant assistant.exe
 #	  HINTS bin
 	  ${assistant_find_options}
 	)
-	if(NOT Qt5Help_ASSISTANT_EXECUTABLE)
-		message(FATAL_ERROR "Qt5Help_ASSISTANT_EXECUTABLE: not found, "
+	if(NOT QtHelp_ASSISTANT_EXECUTABLE)
+		message(FATAL_ERROR "QtHelp_ASSISTANT_EXECUTABLE: not found, "
 		  "but required by option Mapper_PACKAGE_ASSISTANT="
 		  ${Mapper_PACKAGE_ASSISTANT})
 	endif()
 	message(STATUS "Qt Assistant - found")
 	if(WIN32 OR APPLE)
 		install(
-		  PROGRAMS ${Qt5Help_ASSISTANT_EXECUTABLE}
+		  PROGRAMS ${QtHelp_ASSISTANT_EXECUTABLE}
 		  DESTINATION "${MAPPER_RUNTIME_DESTINATION}${MAPPER_MACOS_SUBDIR}")
 	else()
 		install(
-		  PROGRAMS ${Qt5Help_ASSISTANT_EXECUTABLE}
+		  PROGRAMS ${QtHelp_ASSISTANT_EXECUTABLE}
 		  DESTINATION "${MAPPER_LIBRARY_DESTINATION}/bin")
 	endif()
 	list(APPEND MAPPER_QT_PLUGINS

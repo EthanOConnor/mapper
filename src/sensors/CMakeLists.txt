@@ -16,11 +16,8 @@
 #    You should have received a copy of the GNU General Public License
 #    along with OpenOrienteering.  If not, see <http://www.gnu.org/licenses/>.
 
-find_package(Qt5Core 5.15 REQUIRED)
-find_package(Qt5Widgets REQUIRED)
-find_package(Qt5Sensors)
-find_package(Qt5Positioning)
-find_package(Qt5SerialPort)
+find_package(Qt6 REQUIRED COMPONENTS Core Widgets)
+find_package(Qt6 COMPONENTS Sensors Positioning SerialPort)
 
 set(CMAKE_AUTOMOC ON)
 
@@ -36,7 +33,7 @@ set(FAKE_POSITION_DEFINITIONS
 )
 set(FAKE_POSITION_SOURCES )
 set(FAKE_POSITION_LINK_LIBRARIES )
-if(TARGET Qt5::Positioning)
+if(TARGET Qt6::Positioning)
 	list(APPEND FAKE_POSITION_DEFINITIONS
 	  PUBLIC MAPPER_USE_FAKE_POSITION_PLUGIN
 	)
@@ -46,7 +43,7 @@ if(TARGET Qt5::Positioning)
 	  fake_position_source.cpp
 	)
 	list(APPEND FAKE_POSITION_LINK_LIBRARIES
-	  PRIVATE Qt5::Gui Qt5::Positioning
+	  PRIVATE Qt6::Gui Qt6::Positioning
 	)
 endif()
 
@@ -70,7 +67,7 @@ set(NMEA_POSITION_DEFINITIONS
 )
 set(NMEA_POSITION_SOURCES )
 set(NMEA_POSITION_LINK_LIBRARIES )
-if(TARGET Qt5::Positioning)
+if(TARGET Qt6::Positioning)
 	list(APPEND NMEA_POSITION_DEFINITIONS
 	  PUBLIC MAPPER_USE_NMEA_POSITION_PLUGIN
 	)
@@ -80,11 +77,11 @@ if(TARGET Qt5::Positioning)
 	  #nmea_position_source.cpp
 	)
 	list(APPEND NMEA_POSITION_LINK_LIBRARIES
-	  PRIVATE Qt5::Positioning
+	  PRIVATE Qt6::Positioning
 	)
-	if(TARGET Qt5::SerialPort)
+	if(TARGET Qt6::SerialPort)
 		list(APPEND NMEA_POSITION_LINK_LIBRARIES
-		  PRIVATE Qt5::SerialPort
+		  PRIVATE Qt6::SerialPort
 		)
 	endif()
 endif()
@@ -108,7 +105,7 @@ set(POWERSHELL_POSITION_DEFINITIONS
 )
 set(POWERSHELL_POSITION_SOURCES )
 set(POWERSHELL_POSITION_LINK_LIBRARIES )
-if(TARGET Qt5::Positioning)
+if(TARGET Qt6::Positioning)
 	list(APPEND POWERSHELL_POSITION_DEFINITIONS
 	  PUBLIC MAPPER_USE_POWERSHELL_POSITION_PLUGIN
 	)
@@ -117,11 +114,11 @@ if(TARGET Qt5::Positioning)
 	  powershell_position_plugin.json
 	  powershell_position_source.cpp
 	)
-	qt5_add_resources(POWERSHELL_POSITION_SOURCES
+	qt_add_resources(POWERSHELL_POSITION_SOURCES
 	  "${CMAKE_CURRENT_SOURCE_DIR}/powershell_position_source.qrc"
 	)
 	list(APPEND POWERSHELL_POSITION_LINK_LIBRARIES
-	  PRIVATE Qt5::Positioning
+	  PRIVATE Qt6::Positioning
 	)
 endif()
 
@@ -147,7 +144,7 @@ set(MAPPER_SENSORS_DEFINITIONS
     QT_USE_QSTRINGBUILDER
 )
 
-if(TARGET Qt5::Positioning OR TARGET Qt5::Sensors)
+if(TARGET Qt6::Positioning OR TARGET Qt6::Sensors)
 	list(APPEND MAPPER_SENSORS_DEFINITIONS  PUBLIC MAPPER_USE_SENSORS)
 endif()
 
@@ -158,11 +155,11 @@ target_link_libraries(mapper-sensors
   PUBLIC
     nmea_position_source
     powershell_position_source
-    Qt5::Core
-    Qt5::Gui
-    Qt5::Widgets
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
 )
-foreach(lib Qt5::Positioning Qt5::Sensors Qt5::SerialPort)
+foreach(lib Qt6::Positioning Qt6::Sensors Qt6::SerialPort)
 	if(TARGET ${lib})
 		target_link_libraries(mapper-sensors  PRIVATE ${lib})
 	endif()

@@ -66,9 +66,11 @@ public:
 	
 	QString key() const override;
 	
-	QList<QSize> availableSizes(QIcon::Mode mode, QIcon::State state) const override;
-	
-	QString iconName() const override;
+	QList<QSize> availableSizes(QIcon::Mode mode, QIcon::State state) override;
+
+	QString iconName() override;
+
+	bool isNull() override;
 	
 private:
 	QIcon icon;

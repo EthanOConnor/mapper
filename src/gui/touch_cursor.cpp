@@ -21,6 +21,8 @@
 
 #include "touch_cursor.h"
 
+#include <new>
+
 #include <Qt>
 #include <QEvent>
 #include <QMouseEvent>
@@ -68,16 +70,21 @@ void TouchCursor::mousePressEvent(QMouseEvent* event)
 		
 		updateMapWidget(false);
 		
-		*event = QMouseEvent(
-			QEvent::MouseMove, cursor_pos,
+		auto globalPos = map_widget->mapToGlobal(cursor_pos);
+		new (event) QMouseEvent(
+			QEvent::MouseMove, cursor_pos, QPointF(globalPos),
 			Qt::NoButton, event->buttons() & ~Qt::LeftButton, event->modifiers());
 		last_pressed_button = NoButton;
 	}
 	else if (control_id == LeftButton)
 	{
-		*event = QMouseEvent(
-			QEvent::MouseButtonPress, map_widget->mapToViewport(cursor_coord),
+		{
+		auto localPos = map_widget->mapToViewport(cursor_coord);
+		auto globalPos = map_widget->mapToGlobal(localPos.toPoint());
+		new (event) QMouseEvent(
+			QEvent::MouseButtonPress, localPos, QPointF(globalPos),
 			event->button(), event->buttons(), event->modifiers());
+		}
 		left_button_pressed = true;
 		last_pressed_button = LeftButton;
 		
@@ -108,11 +115,14 @@ bool TouchCursor::mouseMoveEvent(QMouseEvent* event)
 	last_cursor_pos = cursor_pos;
 	cursor_coord = map_widget->viewportToMapF(cursor_pos);
 		
-	*event = QMouseEvent(
-		QEvent::MouseMove, cursor_pos,
+	{
+	auto globalPos = map_widget->mapToGlobal(cursor_pos.toPoint());
+	new (event) QMouseEvent(
+		QEvent::MouseMove, cursor_pos, QPointF(globalPos),
 		left_button_pressed ? event->button() : Qt::NoButton,
 		left_button_pressed ? event->buttons() : (event->buttons() & ~Qt::LeftButton),
 		event->modifiers());
+	}
 	
 	updateMapWidget(true);
 	return true;
@@ -125,9 +135,13 @@ bool TouchCursor::mouseReleaseEvent(QMouseEvent* event)
 	
 	if (left_button_pressed)
 	{
-		*event = QMouseEvent(
-			QEvent::MouseButtonRelease, map_widget->mapToViewport(cursor_coord),
+		{
+		auto localPos = map_widget->mapToViewport(cursor_coord);
+		auto globalPos = map_widget->mapToGlobal(localPos.toPoint());
+		new (event) QMouseEvent(
+			QEvent::MouseButtonRelease, localPos, QPointF(globalPos),
 			event->button(), event->buttons(), event->modifiers());
+		}
 		left_button_pressed = false;
 		return true;
 	}
@@ -139,9 +153,13 @@ bool TouchCursor::mouseDoubleClickEvent(QMouseEvent* event)
 {
 	if (last_pressed_button == LeftButton)
 	{
-		*event = QMouseEvent(
-			QEvent::MouseButtonDblClick, map_widget->mapToViewport(cursor_coord),
+		{
+		auto localPos = map_widget->mapToViewport(cursor_coord);
+		auto globalPos = map_widget->mapToGlobal(localPos.toPoint());
+		new (event) QMouseEvent(
+			QEvent::MouseButtonDblClick, localPos, QPointF(globalPos),
 			event->button(), event->buttons(), event->modifiers());
+		}
 		return true;
 	}
 	else

@@ -28,13 +28,13 @@
 #include <QtGlobal>
 #include <QObject>
 #include <QString>
+#include <QStringList>
 
 #include "templates/template.h"
 
 class QByteArray;
 class QPainter;
 class QRectF;
-class QStringList;
 class QTransform;
 class QWidget;
 

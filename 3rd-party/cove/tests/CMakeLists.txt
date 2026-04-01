@@ -1,6 +1,4 @@
-find_package(Qt5Core ${Qt5Core_VERSION} REQUIRED)
-find_package(Qt5Gui ${Qt5Core_VERSION} REQUIRED)
-find_package(Qt5Test ${Qt5Core_VERSION} REQUIRED)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Test)
 
 set(CMAKE_AUTOMOC ON)
 
@@ -45,8 +43,8 @@ foreach(target
 	target_link_libraries(${target}
 	  PRIVATE
 	    cove-vectorizer
-	    Qt5::Test
-	    Qt5::Gui
+	    Qt6::Test
+	    Qt6::Gui
 	)
 endforeach()
 

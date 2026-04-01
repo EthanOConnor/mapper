@@ -37,7 +37,7 @@
 #include <QPoint>
 #include <QPointF>
 #include <QScopedPointer>
-#include <QStringRef>
+#include <QStringView>
 #include <QTransform>
 #include <QXmlStreamReader>
 #include <QXmlStreamWriter>

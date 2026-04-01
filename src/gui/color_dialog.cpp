@@ -334,7 +334,7 @@ ColorDialog::ColorDialog(const Map& map, const MapColor& source_color, QWidget* 
 	connect(name_edit_button, &QPushButton::clicked, this, &ColorDialog::editClicked);
 	connect(mc_name_edit, &QLineEdit::textChanged, this, &ColorDialog::mapColorNameChanged);
 	
-	connect(spot_color_options, QOverload<int>::of(&QButtonGroup::buttonClicked), this, &ColorDialog::spotColorTypeChanged);
+	connect(spot_color_options, &QButtonGroup::idClicked, this, &ColorDialog::spotColorTypeChanged);
 	connect(sc_name_edit, &QLineEdit::textChanged, this, &ColorDialog::spotColorNameChanged);
 	connect(sc_frequency_edit, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &ColorDialog::spotColorScreenChanged);
 	connect(sc_angle_edit, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &ColorDialog::spotColorScreenChanged);
@@ -345,13 +345,13 @@ ColorDialog::ColorDialog(const Map& map, const MapColor& source_color, QWidget* 
 	}
 	connect(knockout_option, &QAbstractButton::clicked, this, &ColorDialog::knockoutChanged);
 	
-	connect(cmyk_color_options, QOverload<int>::of(&QButtonGroup::buttonClicked), this, &ColorDialog::cmykColorTypeChanged);
+	connect(cmyk_color_options, &QButtonGroup::idClicked, this, &ColorDialog::cmykColorTypeChanged);
 	connect(c_edit, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &ColorDialog::cmykValueChanged);
 	connect(m_edit, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &ColorDialog::cmykValueChanged);
 	connect(y_edit, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &ColorDialog::cmykValueChanged);
 	connect(k_edit, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &ColorDialog::cmykValueChanged);
 	
-	connect(rgb_color_options, QOverload<int>::of(&QButtonGroup::buttonClicked), this, &ColorDialog::rgbColorTypeChanged);
+	connect(rgb_color_options, &QButtonGroup::idClicked, this, &ColorDialog::rgbColorTypeChanged);
 	connect(r_edit, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &ColorDialog::rgbValueChanged);
 	connect(g_edit, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &ColorDialog::rgbValueChanged);
 	connect(b_edit, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &ColorDialog::rgbValueChanged);

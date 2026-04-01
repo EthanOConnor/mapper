@@ -17,9 +17,7 @@
 #    along with OpenOrienteering.  If not, see <http://www.gnu.org/licenses/>.
 
 find_package(GDAL REQUIRED)
-find_package(Qt5Core REQUIRED)
-find_package(Qt5Gui REQUIRED)
-find_package(Qt5Widgets REQUIRED)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)
 set(CMAKE_AUTOMOC ON)
  
 # Extra header to be shown in the IDE or to be translated
@@ -55,7 +53,7 @@ target_compile_definitions(mapper-gdal INTERFACE MAPPER_USE_GDAL)
 
 target_include_directories(mapper-gdal PRIVATE "${PROJECT_SOURCE_DIR}/src")
 
-target_link_libraries(mapper-gdal GDAL::GDAL Qt5::Core Qt5::Gui Qt5::Widgets Mapper_Common)
+target_link_libraries(mapper-gdal GDAL::GDAL Qt6::Core Qt6::Gui Qt6::Widgets Mapper_Common)
 
 set_target_properties(mapper-gdal PROPERTIES PREFIX "")
 

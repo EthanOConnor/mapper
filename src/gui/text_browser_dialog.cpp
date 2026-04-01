@@ -83,7 +83,7 @@ TextBrowserDialog::TextBrowserDialog(QWidget* parent)
 	connect(text_browser, &QTextBrowser::sourceChanged, this, &TextBrowserDialog::sourceChanged);
 	connect(text_browser, &QTextBrowser::textChanged, this, &TextBrowserDialog::updateWindowTitle);
 	connect(text_browser, &QTextBrowser::backwardAvailable, back_button, &TextBrowserDialog::setEnabled);
-	connect(text_browser, QOverload<const QString&>::of(&QTextBrowser::highlighted), this, &TextBrowserDialog::highlighted);
+	connect(text_browser, &QTextBrowser::highlighted, this, [this](const QUrl& url) { highlighted(url.toString()); });
 	connect(back_button,  &QPushButton::clicked, text_browser, &QTextBrowser::backward);
 	connect(close_button, &QPushButton::clicked, this, &TextBrowserDialog::accept);
 	

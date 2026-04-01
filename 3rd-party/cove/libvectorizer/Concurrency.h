@@ -139,7 +139,9 @@ template <typename ResultType, typename FunctorType, typename ... Input>
 Job<ResultType> run(const FunctorType& functor, Input&& ... args)
 {
 	Progress progress;
-	auto future = QtConcurrent::run(functor, &FunctorType::operator(), std::forward<Input>(args)..., progress);
+	auto future = QtConcurrent::run([functor, ...bound_args = std::forward<Input>(args), progress]() mutable -> ResultType {
+		return functor(bound_args..., progress);
+	});
 	return {std::move(future), progress};
 }
 

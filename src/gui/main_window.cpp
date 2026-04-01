@@ -42,7 +42,7 @@
 
 #if defined(Q_OS_ANDROID)
 #  include <QtAndroid>
-#  include <QDesktopWidget>
+#  include <QScreen>
 #  include <QUrl>
 #endif
 
@@ -786,7 +786,8 @@ void MainWindow::loadWindowSettings()
 {
 #if defined(Q_OS_ANDROID)
 	// Always show the window on the whole available area on Android
-	resize(QApplication::desktop()->availableGeometry().size());
+	if (auto* screen = QGuiApplication::primaryScreen())
+		resize(screen->availableGeometry().size());
 #else
 	QSettings settings;
 	
@@ -1382,7 +1383,7 @@ void MainWindow::linkClicked(const QString &link)
 	else if (link.compare(QLatin1String("about:"), Qt::CaseInsensitive) == 0)
 		showAbout();
 	else if (link.startsWith(QLatin1String("examples:"), Qt::CaseInsensitive))
-		openPathLater(QLatin1String("data:/examples/") + link.midRef(9));
+		openPathLater(QLatin1String("data:/examples/") + link.mid(9));
 	else
 		QDesktopServices::openUrl(link);
 }

@@ -126,7 +126,7 @@ const FileFormat *FileFormatRegistry::findFormatByFilter(const QString& filter, 
 		auto const label_len_filter = filter.lastIndexOf(QLatin1String(" ("));
 		auto const label_len_format = format->filter().lastIndexOf(QLatin1String(" ("));
 		return (format->*predicate)()
-		       && filter.leftRef(label_len_filter) == format->filter().leftRef(label_len_format);
+		       && filter.left(label_len_filter) == format->filter().left(label_len_format);
 	});
 }
 

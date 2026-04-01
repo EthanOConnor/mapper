@@ -247,7 +247,7 @@ void AutosaveTest::autosaveStopTest()
  * We don't need a real GUI window.
  */
 namespace {
-	auto Q_DECL_UNUSED qpa_selected = qputenv("QT_QPA_PLATFORM", "offscreen");  // clazy:exclude=non-pod-global-static
+	[[maybe_unused]] auto qpa_selected = qputenv("QT_QPA_PLATFORM", "offscreen");  // clazy:exclude=non-pod-global-static
 }
 
 

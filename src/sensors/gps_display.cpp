@@ -28,10 +28,6 @@
 #  include <QGeoCoordinate>
 #  include <QGeoPositionInfo>
 #  include <QGeoPositionInfoSource>  // IWYU pragma: keep
-#if QT_VERSION < QT_VERSION_CHECK(5, 11, 0)
-#  include <QMetaType>
-Q_DECLARE_METATYPE(QGeoPositionInfo)  // QTBUG-65937
-#endif
 #endif
 
 #include <algorithm>
@@ -150,8 +146,7 @@ GPSDisplay::GPSDisplay(MapWidget* widget, const Georeferencing& georeferencing, 
 	source->setPreferredPositioningMethods(QGeoPositionInfoSource::SatellitePositioningMethods);
 	source->setUpdateInterval(1000);
 	connect(source, &QGeoPositionInfoSource::positionUpdated, this, &GPSDisplay::positionUpdated, Qt::QueuedConnection);
-	connect(source, QOverload<QGeoPositionInfoSource::Error>::of(&QGeoPositionInfoSource::error), this, &GPSDisplay::error);
-	connect(source, &QGeoPositionInfoSource::updateTimeout, this, &GPSDisplay::updateTimeout);
+	connect(source, &QGeoPositionInfoSource::errorOccurred, this, &GPSDisplay::errorOccurred);
 #endif
 
 	widget->setGPSDisplay(this);
@@ -398,9 +393,9 @@ void GPSDisplay::positionUpdated(const QGeoPositionInfo& info)
 #endif
 }
 
-void GPSDisplay::error()
+void GPSDisplay::errorOccurred(QGeoPositionInfoSource::Error positioningError)
 {
-#if defined(QT_POSITIONING_LIB)
+	Q_UNUSED(positioningError)
 	if (source->error() != QGeoPositionInfoSource::NoError)
 	{
 		if (!tracking_lost)
@@ -409,18 +404,6 @@ void GPSDisplay::error()
 			emit positionUpdatesInterrupted();
 			updateMapWidget();
 		}
-	}
-#endif
-}
-
-void GPSDisplay::updateTimeout()
-{
-	// Lost satellite fix
-	if (!tracking_lost)
-	{
-		tracking_lost = true;
-		emit positionUpdatesInterrupted();
-		updateMapWidget();
 	}
 }
 

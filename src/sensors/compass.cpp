@@ -260,7 +260,7 @@ public:
 		magnetometer.setReturnGeoValues(true);
 		
 		// Check if a gyroscope is available
-		gyro_available = ! QSensor::sensorsForType(QGyroscope::type).empty();
+		gyro_available = ! QSensor::sensorsForType(QGyroscope::sensorType).empty();
 		if (gyro_available)
 			gyroscope.addFilter(this);
 		
@@ -535,6 +535,8 @@ class CompassPrivate
 
 
 // Emit vtable once, in this translation unit
+void CompassPrivateDeleter::operator()(CompassPrivate* p) const { delete p; }
+
 Compass::~Compass() = default;
 
 Compass& Compass::getInstance()

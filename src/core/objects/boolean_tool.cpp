@@ -83,7 +83,7 @@ namespace {
 using PathObjects = BooleanTool::PathObjects;
 
 using PathCoordInfo = std::pair<const PathPart*, const PathCoord*>;
-using PolyMap = QHash<ClipperLib::IntPoint, PathCoordInfo>;
+using PolyMap = QMultiHash<ClipperLib::IntPoint, PathCoordInfo>;
 
 /**
  * Converts a ClipperLib::PolyTree to PathObjects.
@@ -596,7 +596,7 @@ void pathObjectToPolygons(
 				auto point = MapCoord { path_coord.pos };
 				polygon.push_back(ClipperLib::IntPoint(point.nativeX(), point.nativeY()));
 			}
-			polymap.insertMulti(polygon.back(), std::make_pair(&part, &path_coord));
+			polymap.insert(polygon.back(), std::make_pair(&part, &path_coord));
 		}
 		
 		bool orientation = Orientation(polygon);

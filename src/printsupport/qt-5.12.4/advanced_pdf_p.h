@@ -42,7 +42,7 @@
 
 #ifndef QT_NO_PDF
 
-#include "QtGui/qmatrix.h"
+#include "QtGui/qtransform.h"
 #include "QtCore/qstring.h"
 #include "QtCore/qvector.h"
 #include <private/qstroker_p.h>
@@ -72,6 +72,10 @@ namespace AdvancedPdf {
         ByteStream &operator <<(const ByteStream &src);
         ByteStream &operator <<(qreal val);
         ByteStream &operator <<(int val);
+#if QT_POINTER_SIZE > 4 // qsizetype != int on 64-bit
+        ByteStream &operator <<(qsizetype val);
+#endif
+        ByteStream &operator <<(uint val);
         ByteStream &operator <<(const QPointF &p);
         // Note that the stream may be invalidated by calls that insert data.
         QIODevice *stream();

@@ -303,8 +303,8 @@ MapEditorController::MapEditorController(OperatingMode mode, Map* map, MapView* 
 	
 	actionsById[""] = new QAction(this); // dummy action
 	
-	connect(mappart_merge_mapper, QOverload<int>::of(&QSignalMapper::mapped), this, &MapEditorController::mergeCurrentMapPartTo);
-	connect(mappart_move_mapper, QOverload<int>::of(&QSignalMapper::mapped), this, &MapEditorController::reassignObjectsToMapPart);
+	connect(mappart_merge_mapper, &QSignalMapper::mappedInt, this, &MapEditorController::mergeCurrentMapPartTo);
+	connect(mappart_move_mapper, &QSignalMapper::mappedInt, this, &MapEditorController::reassignObjectsToMapPart);
 }
 
 MapEditorController::~MapEditorController()
@@ -677,13 +677,27 @@ bool MapEditorController::loadFrom(const QString& path, const FileFormat& format
 	}
 	
 	map->loadTemplateFilesAsync(*main_view, [controller = QPointer<MapEditorController>(this)](const QString& message) {
-		auto* window = controller ? controller->getWindow() : nullptr;
+		if (!controller)
+			return;
+		auto* window = controller->getWindow();
+		auto* widget = controller->getMainWidget();
 		if (!window)
 			return;
 		if (message.isEmpty())
+		{
+			// Template finished loading — resume rendering.
+			if (widget)
+				widget->resumeTileRendering();
 			window->clearStatusBarMessage();
+		}
 		else
+		{
+			// About to load a template — suspend rendering so workers
+			// don't read template data while it's being modified.
+			if (widget)
+				widget->suspendTileRendering();
 			window->showStatusBarMessageImmediately(message);
+		}
 	});
 	setMapAndView(map, main_view);
 	map->setHasUnsavedChanges(false);
@@ -757,7 +771,7 @@ void MapEditorController::attach(MainWindow* window)
 		statusbar_zoom_frame->setFrameStyle(QFrame::StyledPanel | QFrame::Sunken);
 #endif
 		auto* statusbar_zoom_frame_layout = new QHBoxLayout();
-		statusbar_zoom_frame_layout->setMargin(0);
+		statusbar_zoom_frame_layout->setContentsMargins(0, 0, 0, 0);
 		statusbar_zoom_frame_layout->setSpacing(0);
 		statusbar_zoom_frame_layout->addSpacing(1);
 		statusbar_zoom_frame_layout->addWidget(statusbar_zoom_icon);
@@ -913,17 +927,17 @@ void MapEditorController::assignKeyboardShortcuts()
 	findAction("invert-selection")->setShortcut(QKeySequence(tr("Ctrl+I")));
 	
 	findAction("showgrid")->setShortcut(QKeySequence(tr("G")));
-	findAction("zoomin")->setShortcuts(QList<QKeySequence>() << QKeySequence(Qt::Key_F7) << QKeySequence(Qt::Key_Plus) << QKeySequence(Qt::KeypadModifier + Qt::Key_Plus));
-	findAction("zoomout")->setShortcuts(QList<QKeySequence>() << QKeySequence(Qt::Key_F8) << QKeySequence(Qt::Key_Minus) << QKeySequence(Qt::KeypadModifier + Qt::Key_Minus));
+	findAction("zoomin")->setShortcuts(QList<QKeySequence>() << QKeySequence(Qt::Key_F7) << QKeySequence(Qt::Key_Plus) << QKeySequence(Qt::KeypadModifier | Qt::Key_Plus));
+	findAction("zoomout")->setShortcuts(QList<QKeySequence>() << QKeySequence(Qt::Key_F8) << QKeySequence(Qt::Key_Minus) << QKeySequence(Qt::KeypadModifier | Qt::Key_Minus));
 	findAction("hatchareasview")->setShortcut(QKeySequence(Qt::Key_F2));
 	findAction("baselineview")->setShortcut(QKeySequence(Qt::Key_F3));
 	findAction("hidealltemplates")->setShortcut(QKeySequence(Qt::Key_F10));
 	findAction("overprintsimulation")->setShortcut(QKeySequence(Qt::Key_F4));
 	findAction("fullscreen")->setShortcut(QKeySequence(Qt::Key_F11));
-	tags_window_act->setShortcut(QKeySequence(Qt::CTRL + Qt::SHIFT + Qt::Key_6));
-	color_window_act->setShortcut(QKeySequence(Qt::CTRL + Qt::SHIFT + Qt::Key_7));
-	symbol_window_act->setShortcut(QKeySequence(Qt::CTRL + Qt::SHIFT + Qt::Key_8));
-	template_window_act->setShortcut(QKeySequence(Qt::CTRL + Qt::SHIFT + Qt::Key_9));
+	tags_window_act->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_6));
+	color_window_act->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_7));
+	symbol_window_act->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_8));
+	template_window_act->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_9));
 	
 	findAction("editobjects")->setShortcut(QKeySequence(tr("E")));
 	findAction("editlines")->setShortcut(QKeySequence(tr("L")));
@@ -955,7 +969,7 @@ void MapEditorController::createActions()
 	// Define all the actions, saving them into variables as necessary. Can also get them by ID.
 #ifdef QT_PRINTSUPPORT_LIB
 	auto* print_act_mapper = new QSignalMapper(this);
-	connect(print_act_mapper, QOverload<int>::of(&QSignalMapper::mapped), this, QOverload<int>::of(&MapEditorController::printClicked));
+	connect(print_act_mapper, &QSignalMapper::mappedInt, this, &MapEditorController::printClicked);
 	print_act = newAction("print", tr("Print..."), print_act_mapper, SLOT(map()), "print.png", QString{}, "file_menu.html");
 	print_act_mapper->setMapping(print_act, PrintWidget::PRINT_TASK);
 	export_image_act = newAction("export-image", tr("&Image"), print_act_mapper, SLOT(map()), nullptr, QString{}, "file_menu.html");
@@ -989,7 +1003,7 @@ void MapEditorController::createActions()
 	copy_act = newAction("copy", tr("C&opy"), this, SLOT(copy()), "copy.png", QString{}, "edit_menu.html");
 	copy_act->setMenuRole(QAction::TextHeuristicRole);
 	auto* paste_act_mapper = new QSignalMapper(this);
-	connect(paste_act_mapper, QOverload<int>::of(&QSignalMapper::mapped), this, QOverload<int>::of(&MapEditorController::paste));
+	connect(paste_act_mapper, &QSignalMapper::mappedInt, this, &MapEditorController::paste);
 	paste_act = newAction("paste", tr("&Paste"), paste_act_mapper, SLOT(map()), "paste", QString{}, "edit_menu.html");
 	paste_act->setMenuRole(QAction::TextHeuristicRole);
 	paste_act_mapper->setMapping(paste_act, 1);
@@ -1653,7 +1667,7 @@ void MapEditorController::createMobileGUI()
 	
 	auto* container_widget = new QWidget();
 	auto* layout = new QVBoxLayout();
-	layout->setMargin(0);
+	layout->setContentsMargins(0, 0, 0, 0);
 	layout->setSpacing(0);
 	layout->addWidget(map_widget, 1);
 	layout->addWidget(bottom_action_bar);

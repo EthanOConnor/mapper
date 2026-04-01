@@ -19,7 +19,7 @@
  
 message(STATUS "Configuring ${PROJECT_NAME} translations")
 
-find_package(Qt5LinguistTools REQUIRED)
+find_package(Qt6 REQUIRED COMPONENTS LinguistTools)
 
 # Translation files which are updated by lupdate.
 set(Mapper_translations
@@ -163,7 +163,7 @@ add_custom_command(OUTPUT "${hu_ts}"
   WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
 )
 
-qt5_add_translation(translations_qm ${Mapper_translations_for_qt} ${map_symbols_translations} ${qt_translations})
+qt_add_translation(translations_qm ${Mapper_translations_for_qt} ${map_symbols_translations} ${qt_translations})
 
 # A target which builds all translations.
 add_custom_target(Mapper_translations ALL
@@ -197,8 +197,9 @@ add_dependencies(Mapper_translations Mapper_prerequisites)
 
 
 
-if(TARGET ${Qt5_LUPDATE_EXECUTABLE})
-	get_property(Qt5_LUPDATE_EXECUTABLE TARGET ${Qt5_LUPDATE_EXECUTABLE} PROPERTY IMPORTED_LOCATION)
+set(Qt6_LUPDATE_EXECUTABLE Qt6::lupdate)
+if(TARGET ${Qt6_LUPDATE_EXECUTABLE})
+	get_property(Qt6_LUPDATE_EXECUTABLE TARGET ${Qt6_LUPDATE_EXECUTABLE} PROPERTY IMPORTED_LOCATION)
 endif()
 
 # A target which updates all translations.
@@ -248,7 +249,7 @@ foreach(translation ${Mapper_translations} ${Mapper_translations_template})
 
 	add_custom_target(Mapper_${ts_filename}_update
 	  ${pre_lupdate}
-	  COMMAND "${Qt5_LUPDATE_EXECUTABLE}" ${lupdate_options} "@${listfile}" -ts "${CMAKE_CURRENT_SOURCE_DIR}/${translation}"
+	  COMMAND "${Qt6_LUPDATE_EXECUTABLE}" ${lupdate_options} "@${listfile}" -ts "${CMAKE_CURRENT_SOURCE_DIR}/${translation}"
 	  COMMAND sed -e "/<context>/N;/<name>Q[A-Z]/,/<.context>/d" -i -- "${CMAKE_CURRENT_SOURCE_DIR}/${translation}"
 	  ${post_lupdate}
 	  COMMAND rm -f "${CMAKE_CURRENT_SOURCE_DIR}/${translation}--"

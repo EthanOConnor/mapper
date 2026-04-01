@@ -32,6 +32,7 @@ class QMetaMethod;
 namespace OpenOrienteering {
 
 class CompassPrivate;
+struct CompassPrivateDeleter { void operator()(CompassPrivate* p) const; };
 
 
 /** Provides access to the device's compass. Singleton class. */
@@ -76,7 +77,7 @@ protected:
 private:
 	void emitAzimuthChanged(float value);
 	
-	std::unique_ptr<CompassPrivate> p;
+	std::unique_ptr<CompassPrivate, CompassPrivateDeleter> p;
 	int reference_counter = 0;
 };
 

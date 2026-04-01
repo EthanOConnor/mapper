@@ -61,6 +61,14 @@ void TileRenderScheduler::cancelPending()
 		work_queue.swap(empty);
 	}
 
+	// Wait for any in-progress renders to complete.  Workers hold
+	// a shared lock on render_data_mutex while executing render_func.
+	// Taking a unique lock here blocks until all workers finish,
+	// guaranteeing no worker is reading map data when we return.
+	{
+		std::unique_lock lock(render_data_mutex);
+	}
+
 	// Drain stale results.
 	{
 		std::lock_guard<std::mutex> lock(result_mutex);
@@ -69,10 +77,23 @@ void TileRenderScheduler::cancelPending()
 }
 
 
+void TileRenderScheduler::suspend()
+{
+	suspended = true;
+	cancelPending();
+}
+
+
+void TileRenderScheduler::resume()
+{
+	suspended = false;
+}
+
+
 void TileRenderScheduler::submit(std::vector<TileRenderJob> jobs,
                                   TileRenderSnapshot snapshot)
 {
-	if (jobs.empty())
+	if (jobs.empty() || suspended)
 		return;
 
 	auto shared = std::make_shared<const TileRenderSnapshot>(std::move(snapshot));
@@ -137,8 +158,22 @@ void TileRenderScheduler::workerLoop()
 		}
 
 		// Render the tile.
+		// Hold a shared (read) lock on the rendering data for the
+		// duration of the render.  This prevents the main thread from
+		// mutating objects/renderables/templates while we read them.
 		if (snapshot.render_func)
 		{
+			std::shared_lock lock(render_data_mutex);
+
+			// Re-check generation under lock — the main thread may
+			// have cancelled while we waited.
+			if (job.generation != gen.load(std::memory_order_relaxed))
+			{
+				lock.unlock();
+				in_flight.fetch_sub(1, std::memory_order_relaxed);
+				continue;
+			}
+
 			QPainter painter(&job.image);
 
 			// Clear to transparent.

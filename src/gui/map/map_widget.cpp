@@ -22,6 +22,7 @@
 #include "map_widget.h"
 
 #include <cmath>
+#include <shared_mutex>
 #include <stdexcept>
 
 #include <QApplication>
@@ -183,6 +184,18 @@ void MapWidget::setTool(MapEditorTool* tool)
 		unsetCursor();
 	if (redrawTouchCursor)
 		touch_cursor->updateMapWidget(false);
+}
+
+void MapWidget::suspendTileRendering()
+{
+	if (tile_scheduler)
+		tile_scheduler->suspend();
+}
+
+void MapWidget::resumeTileRendering()
+{
+	if (tile_scheduler)
+		tile_scheduler->resume();
 }
 
 void MapWidget::setActivity(MapEditorActivity* activity)
@@ -887,7 +900,7 @@ bool MapWidget::event(QEvent* event)
 	case QEvent::TouchUpdate:
 	case QEvent::TouchEnd:
 	case QEvent::TouchCancel:
-		if (static_cast<QTouchEvent*>(event)->touchPoints().count() >= 2)
+		if (static_cast<QTouchEvent*>(event)->points().count() >= 2)
 			return true;
 		break;
 		
@@ -1113,7 +1126,7 @@ void MapWidget::_mousePressEvent(QMouseEvent* event)
 	else if (event->button() == Qt::RightButton)
 	{
 		if (!context_menu->isEmpty())
-			context_menu->popup(event->globalPos());
+			context_menu->popup(event->globalPosition().toPoint());
 	}
 }
 
@@ -1202,13 +1215,14 @@ void MapWidget::_mouseDoubleClickEvent(QMouseEvent* event)
 
 void MapWidget::wheelEvent(QWheelEvent* event)
 {
-	if (event->orientation() == Qt::Vertical)
+	auto delta_y = event->angleDelta().y();
+	if (delta_y != 0)
 	{
 		if (view)
 		{
-			auto degrees = event->delta() / 8.0;
+			auto degrees = delta_y / 8.0;
 			auto num_steps = degrees / 15.0;
-			auto cursor_pos_view = viewportToView(event->pos());
+			auto cursor_pos_view = viewportToView(event->position().toPoint());
 			bool preserve_cursor_pos = (event->modifiers() & Qt::ControlModifier) == 0;
 			if (num_steps < 0 && !Settings::getInstance().getSettingCached(Settings::MapEditor_ZoomOutAwayFromCursor).toBool())
 				preserve_cursor_pos = !preserve_cursor_pos;
@@ -1221,15 +1235,15 @@ void MapWidget::wheelEvent(QWheelEvent* event)
 				view->zoomSteps(num_steps);
 				updateCursorposLabel(view->viewToMapF(cursor_pos_view));
 			}
-			
+
 			// Send a mouse move event to the current tool as zooming out can move the mouse position on the map
 			if (tool)
 			{
-				QMouseEvent mouse_event{ QEvent::HoverMove, event->pos(), Qt::NoButton, QApplication::mouseButtons(), Qt::NoModifier };
+				QMouseEvent mouse_event{ QEvent::HoverMove, event->position().toPoint(), Qt::NoButton, QApplication::mouseButtons(), Qt::NoModifier };
 				tool->mouseMoveEvent(&mouse_event, view->viewToMapF(cursor_pos_view), this);
 			}
 		}
-		
+
 		event->accept();
 	}
 	else
@@ -1429,10 +1443,16 @@ void MapWidget::updateSceneTiles()
 
 	bool use_antialiasing = force_antialiasing || Settings::getInstance().getSettingCached(Settings::MapDisplay_Antialiasing).toBool();
 
-	// Ensure renderables and spatial index are up to date on the main thread
-	// before dispatching to workers. Workers only read — no mutations allowed.
-	map->updateObjects();
-	map->mapRenderables().prepareDraw();
+	// Take an exclusive lock on the rendering data.  This waits for any
+	// in-progress worker renders to finish before we mutate objects,
+	// renderables, and the spatial index.  Workers hold a shared (read)
+	// lock during their render, so multiple workers can render
+	// concurrently, but mutations are always conflict-free.
+	{
+		std::unique_lock lock(tile_scheduler->renderDataMutex());
+		map->updateObjects();
+		map->mapRenderables().prepareDraw();
+	}
 
 	// Capture template visibility state for the render function.
 	bool templates_hidden = view->areAllTemplatesHidden();

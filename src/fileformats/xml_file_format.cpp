@@ -41,7 +41,7 @@
 #include <QRectF>
 #include <QScopedValueRollback>
 #include <QString>
-#include <QStringRef>
+#include <QStringView>
 #include <QVariant>
 #include <QXmlStreamReader>
 #include <QXmlStreamWriter>
@@ -607,7 +607,7 @@ void XMLFileImporter::importElements()
 {
 	while (xml.readNextStartElement())
 	{
-		const QStringRef name(xml.name());
+		const auto name(xml.name());
 		
 		if (name == literal::colors)
 			importColors();
@@ -666,7 +666,7 @@ void XMLFileImporter::handleBarrier(const std::function<void ()>& reader)
 			required_version = tr("unknown");
 		addWarning(tr("Parts of this file cannot be read by this version of Mapper. Minimum required version: %1").arg(required_version));
 		
-		if (barrier.attribute<QStringRef>(literal::action) != literal::skip)
+		if (barrier.attribute<QStringView>(literal::action) != literal::skip)
 			return;
 	}
 	

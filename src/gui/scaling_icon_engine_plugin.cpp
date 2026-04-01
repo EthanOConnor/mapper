@@ -34,7 +34,16 @@ ScalingIconEnginePlugin::ScalingIconEnginePlugin(QObject* parent)
 
 QIconEngine* ScalingIconEnginePlugin::create(const QString& filename)
 {
-	return new ScalingIconEngine(filename);
+	// Guard against infinite recursion: the ScalingIconEngine constructor
+	// creates a QIcon internally, which in Qt6 re-enters this plugin.
+	// Return nullptr to let Qt use the default engine for the inner icon.
+	static thread_local bool creating = false;
+	if (creating)
+		return nullptr;
+	creating = true;
+	auto* engine = new ScalingIconEngine(filename);
+	creating = false;
+	return engine;
 }
 
 

@@ -36,6 +36,15 @@
 
 QT_BEGIN_NAMESPACE
 
+#ifndef MAKE_TAG
+#define MAKE_TAG(ch1, ch2, ch3, ch4) (\
+    (((quint32)(ch1)) << 24) | \
+    (((quint32)(ch2)) << 16) | \
+    (((quint32)(ch3)) << 8) | \
+    ((quint32)(ch4)) \
+)
+#endif
+
 #ifndef QT_NO_PDF
 
 // This map is used for symbol fonts to get the correct glyph names for the latin range
@@ -287,9 +296,9 @@ QByteArray QFontSubset::createToUnicodeMap() const
     return touc;
 }
 
-int QFontSubset::addGlyph(int index)
+qsizetype QFontSubset::addGlyph(uint index)
 {
-    int idx = glyph_indices.indexOf(index);
+    auto idx = glyph_indices.indexOf(index);
     if (idx < 0) {
         idx = glyph_indices.size();
         glyph_indices.append(index);
@@ -1242,7 +1251,7 @@ QByteArray QFontSubset::toTruetype() const
             name.copyright = QLatin1String("Fake font");
         else
             name.copyright = QLatin1String(properties.copyright);
-        name.family = fontEngine->fontDef.family;
+        name.family = fontEngine->fontDef.families.value(0);
         name.subfamily = QLatin1String("Regular"); // ######
         name.postscript_name = QLatin1String(properties.postscriptName);
         name_table = generateName(name);

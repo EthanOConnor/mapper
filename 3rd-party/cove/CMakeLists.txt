@@ -1,8 +1,6 @@
 project(Cove)
 
-find_package(Qt5Core ${Qt5Core_VERSION} REQUIRED)
-find_package(Qt5Widgets ${Qt5Core_VERSION} REQUIRED)
-find_package(Qt5Concurrent ${Qt5Core_VERSION} REQUIRED)
+find_package(Qt6 REQUIRED COMPONENTS Core Widgets Concurrent)
 
 add_library(cove-potrace STATIC
     potrace/curve.c
@@ -32,7 +30,7 @@ target_include_directories(cove-vectorizer
     "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 target_link_libraries(cove-vectorizer PRIVATE cove-potrace)
-target_link_libraries(cove-vectorizer PUBLIC Qt5::Gui Qt5::Concurrent)
+target_link_libraries(cove-vectorizer PUBLIC Qt6::Gui Qt6::Concurrent)
 
 set(Cove_SRCS
     app/classificationconfigform.cpp
@@ -55,7 +53,7 @@ target_include_directories(cove
   INTERFACE
     "${CMAKE_CURRENT_SOURCE_DIR}"
 )
-target_link_libraries(cove cove-vectorizer Qt5::Widgets)
+target_link_libraries(cove cove-vectorizer Qt6::Widgets)
 set_target_properties(cove
   PROPERTIES
     AUTOMOC ON

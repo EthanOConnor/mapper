@@ -68,7 +68,7 @@ public:
 
     static QByteArray glyphName(unsigned short unicode, bool symbol);
 
-    int addGlyph(int index);
+    qsizetype addGlyph(uint index);
 #endif
     const int object_id;
     bool noEmbed;

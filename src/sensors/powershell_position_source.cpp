@@ -63,7 +63,7 @@ private:
 public:
 	CsvFieldReader(const QByteArray& line, int pos = 0)
 	: line(line)
-	, pos(std::max(0, std::min(pos, line.size())))
+	, pos(int(std::max(qsizetype(0), std::min(qsizetype(pos), line.size()))))
 	{}
 	
 	bool atEnd() const
@@ -189,12 +189,12 @@ void PowershellPositionSource::setError(QGeoPositionInfoSource::Error value)
 	case NoError:
 		break;
 	case AccessError:
-		emit this->QGeoPositionInfoSource::error(value);
+		emit this->QGeoPositionInfoSource::errorOccurred(value);
 		// Exit gracefully
 		powershell.write(stop_script);
 		break;
 	default:
-		emit this->QGeoPositionInfoSource::error(value);
+		emit this->QGeoPositionInfoSource::errorOccurred(value);
 		break;
 	}
 }
@@ -258,7 +258,7 @@ void PowershellPositionSource::requestUpdate(int timeout)
 	}
 	else if (timeout < minimumUpdateInterval())
 	{
-		emit updateTimeout();
+		emit errorOccurred(QGeoPositionInfoSource::UpdateTimeoutError);
 		return;
 	}
 	
@@ -443,7 +443,7 @@ void PowershellPositionSource::periodicUpdateTimeout()
 
 void PowershellPositionSource::singleUpdateTimeout()
 {
-	emit updateTimeout();
+	emit errorOccurred(QGeoPositionInfoSource::UpdateTimeoutError);
 }
 
 }  // namespace OpenOrienteering

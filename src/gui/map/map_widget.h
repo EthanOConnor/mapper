@@ -126,6 +126,19 @@ public:
 	
 	/** Destructs the MapWidget. */
 	~MapWidget() override;
+
+	/**
+	 * Suspends tile rendering: cancels queued work, waits for in-flight
+	 * renders to finish, and prevents new work from being submitted.
+	 *
+	 * Call this before any operation that modifies rendering-visible data
+	 * outside the normal paint path (file loading, undo, etc.).
+	 * Call resumeTileRendering() when done.
+	 */
+	void suspendTileRendering();
+
+	/** Resumes tile rendering after suspendTileRendering(). */
+	void resumeTileRendering();
 	
 	/** Sets the map view to use for display. Does not take ownership of the view. */
 	void setMapView(MapView* view);

@@ -142,7 +142,7 @@ public:
 		return position_error;
 	}
 	
-	using QGeoPositionInfoSource::error;  // the signal
+	using QGeoPositionInfoSource::errorOccurred;  // the signal
 
 protected:
 	/**
@@ -159,7 +159,7 @@ protected:
 		case NoError:
 			break;
 		default:
-			emit this->QGeoPositionInfoSource::error(value);
+			emit this->QGeoPositionInfoSource::errorOccurred(value);
 			break;
 		}
 	}
@@ -180,19 +180,19 @@ NmeaPositionPlugin::NmeaPositionPlugin(QObject* parent)
 
 
 // virtual
-QGeoAreaMonitorSource* NmeaPositionPlugin::areaMonitor(QObject* /* parent */)
+QGeoAreaMonitorSource* NmeaPositionPlugin::areaMonitor(QObject* /* parent */, const QVariantMap& /* parameters */)
 {
 	return nullptr;
 }
 
 // virtual
-QGeoPositionInfoSource* NmeaPositionPlugin::positionInfoSource(QObject* parent)
+QGeoPositionInfoSource* NmeaPositionPlugin::positionInfoSource(QObject* parent, const QVariantMap& /* parameters */)
 {
 	return new NmeaPositionSource(parent);
 }
 
 // virtual
-QGeoSatelliteInfoSource* NmeaPositionPlugin::satelliteInfoSource(QObject* /* parent */)
+QGeoSatelliteInfoSource* NmeaPositionPlugin::satelliteInfoSource(QObject* /* parent */, const QVariantMap& /* parameters */)
 {
 	return nullptr;
 }

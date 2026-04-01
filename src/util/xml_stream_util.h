@@ -25,7 +25,7 @@
 #include <QRectF>
 #include <QSizeF>
 #include <QString>
-#include <QStringRef>
+#include <QStringView>
 #include <QXmlStreamAttributes>
 #include <QXmlStreamReader>
 #include <QXmlStreamWriter>
@@ -376,7 +376,7 @@ private:
  * It's current main use is in connection with XMLFileFormat.
  * XMLFileFormat is built on \c QXmlStreamReader/\c QXmlStreamWriter which
  * expect \c QLatin1String arguments in many places.
- * In addition, a \c QLatin1String can be compared to a \c QStringRef without
+ * In addition, a \c QLatin1String can be compared to a \c QStringView without
  * implicit conversion.
  * 
  * The namespace \c literal cannot be used directly in header files because it
@@ -606,9 +606,9 @@ inline
 qint64 XmlElementReader::attribute(const QLatin1String& qualifiedName) const
 {
 	qint64 value = 0;
-	const QStringRef ref = attributes.value(qualifiedName);
+	const QStringView ref = attributes.value(qualifiedName);
 	if (ref.size())
-		value = QString::fromRawData(ref.data(), ref.size()).toLongLong();
+		value = ref.toLongLong();
 	return value;
 }
 
@@ -617,9 +617,9 @@ inline
 int XmlElementReader::attribute(const QLatin1String& qualifiedName) const
 {
 	int value = 0;
-	const QStringRef ref = attributes.value(qualifiedName);
+	const QStringView ref = attributes.value(qualifiedName);
 	if (ref.size())
-		value = QString::fromRawData(ref.data(), ref.size()).toInt();
+		value = ref.toInt();
 	return value;
 }
 
@@ -628,9 +628,9 @@ inline
 unsigned int XmlElementReader::attribute(const QLatin1String& qualifiedName) const
 {
 	unsigned int value = 0;
-	const QStringRef ref = attributes.value(qualifiedName);
+	const QStringView ref = attributes.value(qualifiedName);
 	if (ref.size())
-		value = QString::fromRawData(ref.data(), ref.size()).toUInt();
+		value = ref.toUInt();
 	return value;
 }
 
@@ -639,9 +639,9 @@ inline
 long unsigned int XmlElementReader::attribute(const QLatin1String& qualifiedName) const
 {
 	unsigned int value = 0;
-	const QStringRef ref = attributes.value(qualifiedName);
+	const QStringView ref = attributes.value(qualifiedName);
 	if (ref.size())
-		value = QString::fromRawData(ref.data(), ref.size()).toUInt();
+		value = ref.toUInt();
 	return value;
 }
 
@@ -650,9 +650,9 @@ inline
 double XmlElementReader::attribute(const QLatin1String& qualifiedName) const
 {
 	double value = 0;
-	const QStringRef ref = attributes.value(qualifiedName);
+	const QStringView ref = attributes.value(qualifiedName);
 	if (ref.size())
-		value = QString::fromRawData(ref.data(), ref.size()).toDouble();
+		value = ref.toDouble();
 	return value;
 }
 
@@ -661,9 +661,9 @@ inline
 float XmlElementReader::attribute(const QLatin1String& qualifiedName) const
 {
 	float value = 0;
-	const QStringRef ref = attributes.value(qualifiedName);
+	const QStringView ref = attributes.value(qualifiedName);
 	if (ref.size())
-		value = QString::fromRawData(ref.data(), ref.size()).toFloat();
+		value = ref.toFloat();
 	return value;
 }
 
@@ -679,7 +679,7 @@ bool XmlElementReader::attribute(const QLatin1String& qualifiedName) const
 
 template<  >
 inline
-QStringRef XmlElementReader::attribute(const QLatin1String& qualifiedName) const
+QStringView XmlElementReader::attribute(const QLatin1String& qualifiedName) const
 {
 	return attributes.value(qualifiedName);
 }
@@ -689,9 +689,9 @@ inline
 T XmlElementReader::attribute(const QLatin1String& qualifiedName) const
 {
 	T value = static_cast<T>(0);
-	const QStringRef ref = attributes.value(qualifiedName);
+	const QStringView ref = attributes.value(qualifiedName);
 	if (ref.size())
-		value = static_cast<T>(QString::fromRawData(ref.data(), ref.size()).toInt());
+		value = static_cast<T>(ref.toInt());
 	return value;
 }
 
@@ -699,26 +699,26 @@ inline
 void XmlElementReader::read(QRectF& area)
 {
 	namespace literal = XmlStreamLiteral;
-	
-	QStringRef ref = attributes.value(literal::left);
-	area.setLeft(QString::fromRawData(ref.data(), ref.size()).toDouble());
+
+	QStringView ref = attributes.value(literal::left);
+	area.setLeft(ref.toDouble());
 	ref = attributes.value(literal::top);
-	area.setTop(QString::fromRawData(ref.data(), ref.size()).toDouble());
+	area.setTop(ref.toDouble());
 	ref = attributes.value(literal::width);
-	area.setWidth(QString::fromRawData(ref.data(), ref.size()).toDouble());
+	area.setWidth(ref.toDouble());
 	ref = attributes.value(literal::height);
-	area.setHeight(QString::fromRawData(ref.data(), ref.size()).toDouble());
+	area.setHeight(ref.toDouble());
 }
 
 inline
 void XmlElementReader::read(QSizeF& size)
 {
 	namespace literal = XmlStreamLiteral;
-	
-	QStringRef ref = attributes.value(literal::width);
-	size.setWidth(QString::fromRawData(ref.data(), ref.size()).toDouble());
+
+	QStringView ref = attributes.value(literal::width);
+	size.setWidth(ref.toDouble());
 	ref = attributes.value(literal::height);
-	size.setHeight(QString::fromRawData(ref.data(), ref.size()).toDouble());
+	size.setHeight(ref.toDouble());
 }
 
 

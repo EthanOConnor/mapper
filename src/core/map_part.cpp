@@ -27,7 +27,7 @@
 #include <QtGlobal>
 #include <QLatin1String>
 #include <QObject>
-#include <QStringRef>
+#include <QStringView>
 #include <QTransform>
 #include <QXmlStreamReader>
 

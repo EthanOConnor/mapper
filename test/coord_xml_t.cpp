@@ -527,7 +527,7 @@ void CoordXmlTest::readHumanReadableStream()
 			
 			if (token == QXmlStreamReader::Characters && !xml.isWhitespace())
 			{
-				QStringRef text = xml.text();
+				QStringView text = xml.text();
 				QString data = QString::fromRawData(text.constData(), text.length());
 				QTextStream stream(&data, QIODevice::ReadOnly);
 				stream.setIntegerBase(10);
@@ -640,7 +640,7 @@ void CoordXmlTest::readHumanReadableStringRef()
 			
 			if (token == QXmlStreamReader::Characters && !xml.isWhitespace())
 			{
-				QStringRef text = xml.text();
+				QStringView text = xml.text();
 				auto data = text.constData();
 				while (text.length() > 0)
 				{
@@ -830,7 +830,7 @@ void CoordXmlTest::readCompressed()
 			
 			if (token == QXmlStreamReader::Characters && !xml.isWhitespace())
 			{
-				QStringRef text = xml.text();
+				QStringView text = xml.text();
 				QByteArray data = QString::fromRawData(text.constData(), text.length()).toLatin1();
 				int pos = 0;
 				int len = data.length();

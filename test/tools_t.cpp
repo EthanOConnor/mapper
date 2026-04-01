@@ -291,7 +291,7 @@ void ToolsTest::testFindObjects()
  * We select a non-standard QPA because we don't need a real GUI window.
  */
 namespace  {
-	auto const Q_DECL_UNUSED qpa_selected = qputenv("QT_QPA_PLATFORM", "offscreen");  // clazy:exclude=non-pod-global-static
+	[[maybe_unused]] auto const qpa_selected = qputenv("QT_QPA_PLATFORM", "offscreen");  // clazy:exclude=non-pod-global-static
 }
 
 

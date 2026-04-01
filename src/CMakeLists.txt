@@ -17,11 +17,7 @@
 #    You should have received a copy of the GNU General Public License
 #    along with OpenOrienteering.  If not, see <http://www.gnu.org/licenses/>.
 
-find_package(Qt5Core REQUIRED)
-find_package(Qt5Widgets REQUIRED)
-
-find_package(Qt5Network REQUIRED)
-find_package(Qt5PrintSupport REQUIRED)
+find_package(Qt6 REQUIRED COMPONENTS Core Core5Compat Widgets Network PrintSupport)
 
 set(CMAKE_AUTOMOC ON)
 
@@ -61,7 +57,7 @@ set(SCALING_ICON_ENGINE_DEFINITIONS
 )
 set(SCALING_ICON_ENGINE_LINK_LIBRARIES
   PUBLIC
-    Qt5::Gui
+    Qt6::Gui
 )
 
 add_library(scaling-icon-engine STATIC  ${SCALING_ICON_ENGINE_SOURCES})
@@ -73,7 +69,7 @@ target_link_libraries(scaling-icon-engine  ${SCALING_ICON_ENGINE_LINK_LIBRARIES}
 # Resources (from project root)
 
 list(APPEND Mapper_RESOURCES "${PROJECT_SOURCE_DIR}/resources.qrc")
-qt5_add_resources(Mapper_RESOURCES_RCC ${Mapper_RESOURCES} OPTIONS -no-compress)
+qt_add_resources(Mapper_RESOURCES_RCC ${Mapper_RESOURCES} OPTIONS -no-compress)
 
 
 # Mapper common: static library of full runtime 
@@ -312,9 +308,11 @@ add_dependencies(Mapper_Common
 )
 target_include_directories(Mapper_Common PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(Mapper_Common
-  Polyclipping::Polyclipping
-  PROJ::proj
-  Qt5::Widgets
+  PUBLIC
+    Polyclipping::Polyclipping
+    PROJ::proj
+    Qt6::Core5Compat
+    Qt6::Widgets
 )
 foreach(lib
   cove
@@ -323,10 +321,10 @@ foreach(lib
   mapper-sensors
   printsupport
   scaling-icon-engine
-  Qt5::Network
+  Qt6::Network
 )
 	if(TARGET ${lib})
-		target_link_libraries(Mapper_Common ${lib})
+		target_link_libraries(Mapper_Common PUBLIC ${lib})
 	endif()
 endforeach()
 target_compile_definitions(Mapper_Common PRIVATE
@@ -383,24 +381,27 @@ install(TARGETS Mapper
 )
 
 
-include(Qt5PrivateIncludes)
-set(_private_modules Core Gui)
+find_package(Qt6 REQUIRED COMPONENTS CorePrivate GuiPrivate)
 if(WIN32)
-	list(APPEND _private_modules PrintSupport)
+	find_package(Qt6 REQUIRED COMPONENTS PrintSupportPrivate)
 endif()
-target_qt5_private_includes(Mapper_Common ${_private_modules})
+set(_private_targets Qt6::CorePrivate Qt6::GuiPrivate)
+if(WIN32)
+	list(APPEND _private_targets Qt6::PrintSupportPrivate)
+endif()
+target_link_libraries(Mapper_Common PRIVATE ${_private_targets})
 
 
 # Workaround for "assistant" not being in PATH.
 # https://github.com/OpenOrienteering/mapper/issues/2446
 
 if(NOT CMAKE_CROSSCOMPILING AND NOT WIN32 AND NOT APPLE AND NOT ANDROID)
-	find_package(Qt5Help)
-	if(TARGET Qt5::qhelpgenerator)
-		get_target_property(help_program Qt5::qhelpgenerator IMPORTED_LOCATION)
+	find_package(Qt6 COMPONENTS Help)
+	if(TARGET Qt6::qhelpgenerator)
+		get_target_property(help_program Qt6::qhelpgenerator IMPORTED_LOCATION)
 		if(help_program)
-			get_filename_component(qt5_bin_dir "${help_program}" DIRECTORY)
-			set_source_files_properties("gui/util_gui.cpp" PROPERTIES COMPILE_DEFINITIONS "ASSISTANT_DIR=\"${qt5_bin_dir}\"")
+			get_filename_component(qt6_bin_dir "${help_program}" DIRECTORY)
+			set_source_files_properties("gui/util_gui.cpp" PROPERTIES COMPILE_DEFINITIONS "ASSISTANT_DIR=\"${qt6_bin_dir}\"")
 		endif()
 	endif()
 endif()

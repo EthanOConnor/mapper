@@ -758,7 +758,7 @@ private slots:
  */
 #ifndef Q_OS_MACOS
 namespace  {
-	auto Q_DECL_UNUSED qpa_selected = qputenv("QT_QPA_PLATFORM", "offscreen");  // clazy:exclude=non-pod-global-static
+	[[maybe_unused]] auto qpa_selected = qputenv("QT_QPA_PLATFORM", "offscreen");  // clazy:exclude=non-pod-global-static
 }
 #endif
 

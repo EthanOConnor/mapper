@@ -22,13 +22,13 @@
 #include "tool_base.h"
 
 #include <algorithm>
-#include <cstdlib>  // IWYU pragma: keep
 #include <iterator>
 #include <type_traits>
 
 #include <QtGlobal>
 #include <QCoreApplication>  // IWYU pragma: keep
 #include <QMouseEvent>
+#include <QRandomGenerator>
 #include <QTimer>
 #include <QEvent>
 #include <QKeyEvent>
@@ -660,8 +660,8 @@ void MapEditorToolBase::updateConstrainedPositions()
 
 void MapEditorToolBase::generateNextSimulatedEvent()
 {
-	auto next_pos = cur_pos + QPoint{qRound(10.0 - 20.0 * qrand() / RAND_MAX),
-	                                 qRound(10.0 - 20.0 * qrand() / RAND_MAX)};
+	auto next_pos = cur_pos + QPoint{qRound(10.0 - 20.0 * QRandomGenerator::global()->generateDouble()),
+	                                 qRound(10.0 - 20.0 * QRandomGenerator::global()->generateDouble())};
 	switch (simulation_state)
 	{
 	case 1:

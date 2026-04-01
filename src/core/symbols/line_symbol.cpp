@@ -31,7 +31,7 @@
 #include <QtNumeric>
 #include <QCoreApplication>
 #include <QLatin1String>
-#include <QStringRef>
+#include <QStringView>
 #include <QXmlStreamAttributes>
 #include <QXmlStreamReader>
 #include <QXmlStreamWriter>

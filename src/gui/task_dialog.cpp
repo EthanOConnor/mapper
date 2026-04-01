@@ -54,7 +54,7 @@ TaskDialog::TaskDialog(QWidget* parent, const QString& title, const QString& tex
 	setLayout(layout);
 	
 	signal_mapper = new QSignalMapper(this);
-	connect(signal_mapper, QOverload<QWidget*>::of(&QSignalMapper::mapped), this, QOverload<QWidget*>::of(&TaskDialog::buttonClicked));
+	connect(signal_mapper, &QSignalMapper::mappedObject, this, [this](QObject* obj) { buttonClicked(qobject_cast<QWidget*>(obj)); });
 	connect(button_box, &QDialogButtonBox::clicked, this, QOverload<QWidget*>::of(&TaskDialog::buttonClicked));
 }
 

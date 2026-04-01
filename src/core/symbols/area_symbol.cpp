@@ -28,7 +28,7 @@
 
 #include <QtMath>
 #include <QLatin1String>
-#include <QStringRef>
+#include <QStringView>
 #include <QXmlStreamReader> // IWYU pragma: keep
 
 #include "core/map.h"

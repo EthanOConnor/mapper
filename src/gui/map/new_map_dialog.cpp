@@ -41,7 +41,7 @@
 #include <QListWidget>
 #include <QListWidgetItem>
 #include <QPushButton>
-#include <QRegExp>
+#include <QRegularExpression>
 #include <QSettings>
 #include <QSpacerItem>
 #include <QStringList>
@@ -303,7 +303,7 @@ void NewMapDialog::loadSymbolSetDir(const QDir& symbol_set_dir)
 		for (auto format : FileFormats.formats())
 		{
 			if (format->supportsFileOpen())
-				symbol_set_filters << QStringList(format->fileExtensions()).replaceInStrings(QRegExp(QString(QLatin1Char{'^'})), QString::fromLatin1("*."));
+				symbol_set_filters << QStringList(format->fileExtensions()).replaceInStrings(QRegularExpression(QString(QLatin1Char{'^'})), QString::fromLatin1("*."));
 		}
 		subdir.setNameFilters(symbol_set_filters);
 		

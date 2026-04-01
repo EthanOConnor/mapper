@@ -51,7 +51,7 @@
 #include <QSpacerItem>
 #include <QString>
 #include <QStringList>
-#include <QStringRef>
+#include <QStringView>
 #include <QTimer>
 #include <QUrl>
 #include <QUrlQuery>

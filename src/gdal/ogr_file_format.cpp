@@ -55,7 +55,7 @@
 #include <QScopedValueRollback>
 #include <QString>
 #include <QStringList>
-#include <QStringRef>
+#include <QStringView>
 #include <QVariant>
 
 #include "core/georeferencing.h"
@@ -156,9 +156,9 @@ namespace {
 			double length_0{}, length_1{};
 			bool ok = match.hasMatch();
 			if (ok)
-				length_0 = match.capturedRef(1).toDouble(&ok);
+				length_0 = match.capturedView(1).toDouble(&ok);
 			if (ok)
-				length_1 = match.capturedRef(3).toDouble(&ok);
+				length_1 = match.capturedView(3).toDouble(&ok);
 			if (ok)
 			{
 				/// \todo Apply units from capture 2 and 4
@@ -182,10 +182,10 @@ namespace {
 		double font_size;
 		bool ok = match.hasMatch();
 		if (ok)
-			font_size = match.capturedRef(1).toDouble(&ok);
+			font_size = match.capturedView(1).toDouble(&ok);
 		if (ok)
 		{
-			auto unit = match.capturedRef(2).toUtf8();
+			auto unit = match.capturedView(2).toUtf8();
 			if (!unit.isEmpty())
 			{
 				if (unit == "pt")
@@ -1202,13 +1202,13 @@ Object* OgrFileImport::importPointGeometry(OGRFeatureH feature, OGRGeometryH geo
 			object->setText(label);
 			
 			bool ok;
-			auto anchor = QStringRef(&description, 1, 2).toInt(&ok);
+			auto anchor = QStringView{description}.mid(1, 2).toInt(&ok);
 			if (ok)
 			{
 				applyLabelAnchor(anchor, object);
 			}
 				
-			auto angle = QStringRef(&description, 3, split-3).toDouble(&ok);
+			auto angle = QStringView{description}.mid(3, split-3).toDouble(&ok);
 			if (ok)
 			{
 				object->setRotation(qDegreesToRadians(angle));
@@ -2219,7 +2219,7 @@ void OgrFileExport::addTextToLayer(OGRLayerH layer, const std::function<bool (co
 			// This may overwrite the symbol name, and
 			// it may be too short for the full text.
 			auto index = OGR_F_GetFieldIndex(po_feature.get(), OGR_Fld_GetNameRef(o_name_field.get()));
-			OGR_F_SetFieldString(po_feature.get(), index, text.leftRef(32).toUtf8().constData());
+			OGR_F_SetFieldString(po_feature.get(), index, text.left(32).toUtf8().constData());
 		}
 
 		auto pt = ogr::unique_geometry(OGR_G_CreateGeometry(wkbPoint));

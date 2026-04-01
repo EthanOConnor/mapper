@@ -32,17 +32,17 @@ PowershellPositionPlugin::PowershellPositionPlugin(QObject* parent)
 PowershellPositionPlugin::~PowershellPositionPlugin() = default;
 
 
-QGeoAreaMonitorSource* PowershellPositionPlugin::areaMonitor(QObject* /* parent */)
+QGeoAreaMonitorSource* PowershellPositionPlugin::areaMonitor(QObject* /* parent */, const QVariantMap& /* parameters */)
 {
 	return nullptr;
 }
 
-QGeoPositionInfoSource* PowershellPositionPlugin::positionInfoSource(QObject* parent)
+QGeoPositionInfoSource* PowershellPositionPlugin::positionInfoSource(QObject* parent, const QVariantMap& /* parameters */)
 {
 	return new PowershellPositionSource(parent);
 }
 
-QGeoSatelliteInfoSource* PowershellPositionPlugin::satelliteInfoSource(QObject* /* parent */)
+QGeoSatelliteInfoSource* PowershellPositionPlugin::satelliteInfoSource(QObject* /* parent */, const QVariantMap& /* parameters */)
 {
 	return nullptr;
 }

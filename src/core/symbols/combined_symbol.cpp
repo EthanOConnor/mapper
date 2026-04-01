@@ -32,7 +32,7 @@
 #include <QFlags>
 #include <QLatin1String>
 #include <QString>
-#include <QStringRef>
+#include <QStringView>
 #include <QXmlStreamAttributes>
 #include <QXmlStreamReader>
 #include <QXmlStreamWriter>

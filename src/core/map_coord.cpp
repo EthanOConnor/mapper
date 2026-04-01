@@ -30,7 +30,7 @@
 #include <QLatin1Char>
 #include <QLatin1String>
 #include <QLineF>
-#include <QStringRef>
+#include <QStringView>
 
 #include "util/xml_stream_util.h"
 
@@ -391,7 +391,7 @@ QByteArray MapCoord::toUtf8(MapCoord::StringBuffer<char>& buffer) const
 	return QByteArray::fromRawData(&*(first+1), int(std::distance(first, last)));
 }
 
-MapCoord::MapCoord(QStringRef& text)
+MapCoord::MapCoord(QStringView& text)
 : MapCoord{}
 {
 	const int len = text.length();

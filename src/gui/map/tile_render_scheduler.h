@@ -26,6 +26,7 @@
 #include <functional>
 #include <mutex>
 #include <queue>
+#include <shared_mutex>
 #include <thread>
 #include <vector>
 
@@ -131,6 +132,32 @@ public:
 	/** Returns true if there are jobs in flight or results pending. */
 	bool hasPendingWork() const;
 
+	/**
+	 * Suspends tile rendering.  Cancels all pending work, waits for
+	 * in-flight renders to complete, and prevents submit() from
+	 * accepting new jobs until resume() is called.
+	 *
+	 * Use this before major map mutations (file loading, undo) that
+	 * happen outside the normal paint → updateSceneTiles path.
+	 */
+	void suspend();
+
+	/** Resumes tile rendering after suspend(). */
+	void resume();
+
+	/**
+	 * Returns the mutex that protects rendering data.
+	 *
+	 * Workers hold a shared (read) lock while executing the render
+	 * function.  The main thread must hold a unique (write) lock
+	 * before mutating any data visible to workers (objects, renderables,
+	 * templates).  This ensures workers never see partially-updated state.
+	 *
+	 * The unique lock naturally waits for active renders to finish,
+	 * so the main thread's mutation phase is always conflict-free.
+	 */
+	std::shared_mutex& renderDataMutex() { return render_data_mutex; }
+
 signals:
 	/** Emitted (via queued connection) when results are available. */
 	void resultsReady();
@@ -149,6 +176,12 @@ private:
 
 	// Generation counter for cancellation
 	std::atomic<int> gen{0};
+
+	// Rendering data lock — shared by workers (read), exclusive for main thread (write).
+	std::shared_mutex render_data_mutex;
+
+	// Suspend flag — when true, submit() is a no-op.
+	bool suspended = false;
 
 	// Worker threads
 	std::vector<std::thread> workers;

@@ -110,7 +110,7 @@ QWidget* SpinBoxDelegate::createEditor(QWidget* parent, const QStyleOptionViewIt
 	QSignalMapper* signal_mapper = new QSignalMapper(spinbox);
 	signal_mapper->setMapping(spinbox, spinbox);
 	connect(spinbox, QOverload<int>::of(&QSpinBox::valueChanged), signal_mapper, QOverload<>::of(&QSignalMapper::map), Qt::QueuedConnection);
-	connect(signal_mapper, QOverload<QWidget*>::of(&QSignalMapper::mapped), this, &QItemDelegate::commitData);
+	connect(signal_mapper, &QSignalMapper::mappedObject, const_cast<SpinBoxDelegate*>(this), [this](QObject* obj) { const_cast<SpinBoxDelegate*>(this)->commitData(qobject_cast<QWidget*>(obj)); });
 	
 	return spinbox;
 }

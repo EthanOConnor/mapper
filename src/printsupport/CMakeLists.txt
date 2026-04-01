@@ -16,8 +16,8 @@
 #    You should have received a copy of the GNU General Public License
 #    along with OpenOrienteering.  If not, see <http://www.gnu.org/licenses/>.
 
-find_package(Qt5Gui REQUIRED COMPONENTS Private)
-find_package(Qt5PrintSupport REQUIRED COMPONENTS Private)
+find_package(Qt6 REQUIRED COMPONENTS Gui PrintSupport)
+find_package(Qt6 REQUIRED COMPONENTS CorePrivate GuiPrivate PrintSupportPrivate)
 find_package(ZLIB REQUIRED)
 
 set(CMAKE_CXX_CLANG_TIDY "")
@@ -54,9 +54,8 @@ target_include_directories(printsupport
 )
 
 target_link_libraries(printsupport
-  Qt5::PrintSupport
-  Qt5::Gui
-  ZLIB::ZLIB
+  PUBLIC Qt6::PrintSupport Qt6::Gui
+  PRIVATE ZLIB::ZLIB Qt6::CorePrivate Qt6::GuiPrivate Qt6::PrintSupportPrivate
 )
 
 # Suppress warnings from Qt code
@@ -68,7 +67,3 @@ foreach(flag IN ITEMS "-Wno-stringop-overflow")
         target_compile_options(printsupport PRIVATE "${flag}")
     endif()
 endforeach()
-
-
-include(Qt5PrivateIncludes)
-target_qt5_private_includes(printsupport Core Gui PrintSupport)

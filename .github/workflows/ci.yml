@@ -25,9 +25,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential ninja-build ccache \
-            qtbase5-dev qtbase5-private-dev qttools5-dev qttools5-dev-tools \
-            libqt5sensors5-dev libqt5serialport5-dev libqt5sql5-sqlite \
-            qtpositioning5-dev qt5-image-formats-plugins \
+            qt6-base-dev qt6-base-private-dev qt6-tools-dev qt6-tools-dev-tools \
+            qt6-l10n-tools qt6-sensors-dev qt6-serialport-dev \
+            qt6-positioning-dev qt6-image-formats-plugins qt6-5compat-dev \
             libproj-dev libgdal-dev libpolyclipping-dev zlib1g-dev \
             libcups2-dev doxygen graphviz libegl-dev libgl-dev
 
@@ -75,13 +75,14 @@ jobs:
             mingw-w64-x86_64-ccache
             mingw-w64-x86_64-gdal
             mingw-w64-x86_64-proj
-            mingw-w64-x86_64-qt5-base
-            mingw-w64-x86_64-qt5-imageformats
-            mingw-w64-x86_64-qt5-location
-            mingw-w64-x86_64-qt5-sensors
-            mingw-w64-x86_64-qt5-serialport
-            mingw-w64-x86_64-qt5-tools
-            mingw-w64-x86_64-qt5-translations
+            mingw-w64-x86_64-qt6-base
+            mingw-w64-x86_64-qt6-imageformats
+            mingw-w64-x86_64-qt6-positioning
+            mingw-w64-x86_64-qt6-sensors
+            mingw-w64-x86_64-qt6-serialport
+            mingw-w64-x86_64-qt6-tools
+            mingw-w64-x86_64-qt6-translations
+            mingw-w64-x86_64-qt6-5compat
             mingw-w64-x86_64-doxygen
 
       - name: Set up ccache
@@ -109,8 +110,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          brew install qt@5 proj gdal ninja ccache doxygen
-          echo "$(brew --prefix qt@5)/bin" >> "$GITHUB_PATH"
+          brew install qt proj gdal ninja ccache doxygen
+          echo "$(brew --prefix qt)/bin" >> "$GITHUB_PATH"
 
       - name: Set up ccache
         uses: hendrikmuhs/ccache-action@v1.2.22
@@ -120,7 +121,7 @@ jobs:
       - name: Configure
         run: >
           cmake --preset ci-macos
-          -DCMAKE_PREFIX_PATH="$(brew --prefix qt@5)"
+          -DCMAKE_PREFIX_PATH="$(brew --prefix qt)"
           -DCMAKE_C_COMPILER_LAUNCHER=ccache
           -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 

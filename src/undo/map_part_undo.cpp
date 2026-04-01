@@ -21,7 +21,7 @@
 
 #include <QtGlobal>
 #include <QLatin1String>
-#include <QStringRef>
+#include <QStringView>
 #include <QXmlStreamReader>
 
 #include "core/map.h"

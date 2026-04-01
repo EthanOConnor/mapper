@@ -40,7 +40,7 @@
 #include <QRect>
 #include <QRgb>
 #include <QSize>
-#include <QStringRef>
+#include <QStringView>
 #include <QTransform>
 #include <QXmlStreamReader>
 
@@ -124,9 +124,9 @@ MapPrinterPageFormat::MapPrinterPageFormat(QSizeF page_rect_size, qreal margin, 
 
 MapPrinterPageFormat::MapPrinterPageFormat(const QPrinter& printer, qreal overlap)
  : page_size(printer.pageLayout().pageSize().id())
- , orientation((printer.orientation() == QPrinter::Portrait) ? MapPrinterPageFormat::Portrait : MapPrinterPageFormat::Landscape)
- , page_rect(printer.pageRect(QPrinter::Millimeter))
- , paper_dimensions(printer.paperSize(QPrinter::Millimeter))
+ , orientation((printer.pageLayout().orientation() == QPageLayout::Portrait) ? MapPrinterPageFormat::Portrait : MapPrinterPageFormat::Landscape)
+ , page_rect(printer.pageLayout().paintRect(QPageLayout::Millimeter))
+ , paper_dimensions(printer.pageLayout().fullRect(QPageLayout::Millimeter).size())
  , h_overlap(overlap)
  , v_overlap(overlap)
 {
@@ -215,7 +215,7 @@ MapPrinterConfig::MapPrinterConfig(const Map& map, QXmlStreamReader& xml)
 	options.show_templates = printer_config_element.attribute<bool>(literal::templates_visible);
 	options.show_grid = printer_config_element.attribute<bool>(literal::grid_visible);
 	options.simulate_overprinting = printer_config_element.attribute<bool>(literal::simulate_overprinting);
-	QStringRef mode = printer_config_element.attribute<QStringRef>(literal::mode);
+	QStringView mode = printer_config_element.attribute<QStringView>(literal::mode);
 	if (!mode.isEmpty())
 	{
 		if (mode == literal::vector)
@@ -227,7 +227,7 @@ MapPrinterConfig::MapPrinterConfig(const Map& map, QXmlStreamReader& xml)
 		else
 			qDebug("Unsupported map printing mode: %s", mode.toUtf8().constData());
 	}
-	QStringRef color_mode = printer_config_element.attribute<QStringRef>(literal::color_mode);
+	QStringView color_mode = printer_config_element.attribute<QStringView>(literal::color_mode);
 	if (!color_mode.isEmpty())
 	{
 		if (color_mode == literal::default_color_mode)
@@ -416,21 +416,21 @@ const QHash< int, const char* >& MapPrinter::paperSizeNames()
 	static QHash< int, const char* > names;
 	if (names.empty())
 	{
-		names[QPrinter::B0]        = "B0";
-		names[QPrinter::B1]        = "B1";
-		names[QPrinter::B2]        = "B2";
-		names[QPrinter::B3]        = "B3";
-		names[QPrinter::B4]        = "B4";
-		names[QPrinter::B5]        = "B5";
-		names[QPrinter::B6]        = "B6";
-		names[QPrinter::B7]        = "B7";
-		names[QPrinter::B8]        = "B8";
-		names[QPrinter::B9]        = "B9";
-		names[QPrinter::B10]       = "B10";
-		names[QPrinter::C5E]       = "C5E";
-		names[QPrinter::DLE]       = "DLE";
-		names[QPrinter::Executive] = "Executive";
-		names[QPrinter::Comm10E]   = "US Common #10 Envelope";
+		names[QPageSize::B0]        = "B0";
+		names[QPageSize::B1]        = "B1";
+		names[QPageSize::B2]        = "B2";
+		names[QPageSize::B3]        = "B3";
+		names[QPageSize::B4]        = "B4";
+		names[QPageSize::B5]        = "B5";
+		names[QPageSize::B6]        = "B6";
+		names[QPageSize::B7]        = "B7";
+		names[QPageSize::B8]        = "B8";
+		names[QPageSize::B9]        = "B9";
+		names[QPageSize::B10]       = "B10";
+		names[QPageSize::C5E]       = "C5E";
+		names[QPageSize::DLE]       = "DLE";
+		names[QPageSize::Executive] = "Executive";
+		names[QPageSize::Comm10E]   = "US Common #10 Envelope";
 	}
 	return names;
 }
@@ -530,19 +530,19 @@ std::unique_ptr<QPrinter> MapPrinter::makePrinter() const
 	printer->setFullPage(true);
 	if (page_format.page_size == QPageSize::Custom)
 	{
-		printer->setPaperSize(page_format.paper_dimensions, QPrinter::Millimeter);
-		printer->setOrientation(QPrinter::Portrait);
+		printer->setPageSize(QPageSize(page_format.paper_dimensions, QPageSize::Millimeter));
+		printer->setPageOrientation(QPageLayout::Portrait);
 	}
 	else
 	{
 		printer->setPageSize(QPageSize{page_format.page_size});
-		printer->setOrientation((page_format.orientation == MapPrinterPageFormat::Portrait) ? QPrinter::Portrait : QPrinter::Landscape);
+		printer->setPageOrientation((page_format.orientation == MapPrinterPageFormat::Portrait) ? QPageLayout::Portrait : QPageLayout::Landscape);
 	}
 	printer->setResolution(options.resolution);
-	
+
 	if (page_format.page_size == QPageSize::Custom || !isPrinter())
 	{
-		printer->setPageMargins(0.0, 0.0, 0.0, 0.0, QPrinter::Millimeter);
+		printer->setPageMargins(QMarginsF(0.0, 0.0, 0.0, 0.0), QPageLayout::Millimeter);
 	}
 	
 	return printer;
@@ -666,23 +666,23 @@ void MapPrinter::updatePaperDimensions()
 	  
 	if (page_format.page_size == QPageSize::Custom)
 	{
-		printer->setPaperSize(page_format.paper_dimensions, QPrinter::Millimeter);
-		page_format.orientation = (printer->orientation() == QPrinter::Portrait) ? MapPrinterPageFormat::Portrait : MapPrinterPageFormat::Landscape; 
+		printer->setPageSize(QPageSize(page_format.paper_dimensions, QPageSize::Millimeter));
+		page_format.orientation = (printer->pageLayout().orientation() == QPageLayout::Portrait) ? MapPrinterPageFormat::Portrait : MapPrinterPageFormat::Landscape;
 	}
 	else
 	{
-		printer->setPageSize(static_cast<QPagedPaintDevice::PageSize>(page_format.page_size));
-		printer->setOrientation((page_format.orientation == MapPrinterPageFormat::Portrait) ? QPrinter::Portrait : QPrinter::Landscape);
+		printer->setPageSize(QPageSize(static_cast<QPageSize::PageSizeId>(page_format.page_size)));
+		printer->setPageOrientation((page_format.orientation == MapPrinterPageFormat::Portrait) ? QPageLayout::Portrait : QPageLayout::Landscape);
 	}
-	
+
 	printer->setFullPage(true);
-	page_format.page_rect = printer->paperRect(QPrinter::Millimeter);
+	page_format.page_rect = printer->pageLayout().fullRect(QPageLayout::Millimeter);
 	page_format.paper_dimensions = page_format.page_rect.size();
 	
 	if ( target != imageTarget() && target != kmzTarget() && target != pdfTarget() &&
 		 page_format.page_size != QPageSize::Custom )
 	{
-		page_format.page_rect = printer->pageRect(QPrinter::Millimeter);
+		page_format.page_rect = printer->pageLayout().paintRect(QPageLayout::Millimeter);
 	}
 	page_format.h_overlap = qMax(qreal(0), qMin(page_format.h_overlap, page_format.page_rect.width()));
 	page_format.v_overlap = qMax(qreal(0), qMin(page_format.v_overlap, page_format.page_rect.height()));

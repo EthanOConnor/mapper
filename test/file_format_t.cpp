@@ -37,7 +37,6 @@
 #include <QtTest>
 #include <QBuffer>
 #include <QByteArray>
-#include <QByteRef>
 #include <QChar>
 #include <QCoreApplication>
 #include <QDir>
@@ -57,7 +56,7 @@
 #include <QSizeF>
 #include <QString>
 #include <QStringList>
-#include <QStringRef>
+#include <QStringView>
 #include <QTemporaryDir>
 #include <QVariant>
 
@@ -177,7 +176,7 @@ namespace
 			  .arg((symbol).getNumberAndPlainTextName(), \
 			       QString::fromUtf8(#a), fill_a, \
 			       QString::fromUtf8(#b), fill_b) \
-			  .arg(a).arg(b) \
+			  .arg(int(a)).arg(int(b)) \
 			  .toUtf8()); \
 		} \
 	}
@@ -648,7 +647,7 @@ void FileFormatTest::mapCoordFromString()
 	QFETCH(flags_type, flags);
 	
 	bool no_exception = true;
-	auto ref = QStringRef{&input};
+	auto ref = QStringView{input};
 	MapCoord coord;
 	try {
 		coord = MapCoord(ref);
@@ -1172,7 +1171,7 @@ void FileFormatTest::iofCourseExportTest()
 	QVERIFY(!exported.data().isEmpty());
 	
 	QString const expected_filepath = QStringLiteral("testdata:/export/iof-3.0-course.xml");
-	QFile expected_file = {expected_filepath};
+	QFile expected_file(expected_filepath);
 	expected_file.open(QIODevice::ReadOnly | QIODevice::Text);
 	auto const expected_data = expected_file.readAll();
 	QVERIFY(!expected_data.isEmpty());
@@ -1321,7 +1320,7 @@ void FileFormatTest::ocdTextImportTest()
 		
 		// Must not read behind the reserved space.
 		auto num_reserved = int(ocd_object.num_text * sizeof(Ocd::OcdPoint32) / sizeof(QChar));
-		std::fill(tail, first + std::max(num_reserved, string.length()) + 1, QChar::Space);
+		std::fill(tail, first + std::max(qsizetype(num_reserved), string.length()) + 1, QChar::Space);
 		QVERIFY(ocd_v8_import.getObjectText(ocd_object).length() <= num_reserved);
 		
 		// With zero at the end of the reserved space, the output must begin with the expected text.
@@ -1345,7 +1344,7 @@ void FileFormatTest::ocdTextImportTest()
 		
 		// Must not read behind the reserved space.
 		auto num_reserved = int(ocd_object.num_text * sizeof(Ocd::OcdPoint32) / sizeof(QChar));
-		std::fill(tail, first + std::max(num_reserved, string.length()) + 1, QChar::Space);
+		std::fill(tail, first + std::max(qsizetype(num_reserved), string.length()) + 1, QChar::Space);
 		QVERIFY(ocd_v12_import.getObjectText(ocd_object).length() <= num_reserved);
 		
 		// With zero at the end of the reserved space, the output must begin with the expected text.
@@ -2055,7 +2054,7 @@ void FileFormatTest::shpExportTest()
  */
 #ifndef Q_OS_MACOS
 namespace  {
-	auto const Q_DECL_UNUSED qpa_selected = qputenv("QT_QPA_PLATFORM", "offscreen");  // clazy:exclude=non-pod-global-static
+	[[maybe_unused]] auto const qpa_selected = qputenv("QT_QPA_PLATFORM", "offscreen");  // clazy:exclude=non-pod-global-static
 }
 #endif
 

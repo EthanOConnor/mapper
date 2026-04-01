@@ -25,7 +25,7 @@
 
 class QByteArray;
 class QString;
-class QStringList;
+#include <QStringList>
 
 
 namespace OpenOrienteering {
