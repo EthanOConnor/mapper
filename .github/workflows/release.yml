@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install dependencies
         run: |
@@ -43,7 +43,7 @@ jobs:
         run: cd build/release-linux && cpack -G DEB
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: linux-packages
           path: build/release-linux/*.deb
@@ -63,7 +63,7 @@ jobs:
         shell: powershell
         run: git config --global core.autocrlf input
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up MSYS2
         uses: msys2/setup-msys2@v2
@@ -106,7 +106,7 @@ jobs:
             -DestinationPath dist/OpenOrienteering-Mapper-windows-x64.zip
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: windows-packages
           path: dist/OpenOrienteering-Mapper-windows-x64.zip
@@ -117,7 +117,7 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install dependencies
         run: |
@@ -139,7 +139,7 @@ jobs:
         run: cd build/release-macos && cpack -G DragNDrop
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: macos-packages
           path: build/release-macos/*.dmg
