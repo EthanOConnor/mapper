@@ -131,6 +131,95 @@ jobs:
       - name: Test
         run: ctest --preset ci-macos
 
+  android:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      ANDROID_NDK_VERSION: "27.2.12479018"
+      QT_VERSION: "6.10.2"
+      PROJ_VERSION: "9.6.2"
+      SQLITE_VERSION: "3.51.3"
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install NDK
+        run: |
+          echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
+            "ndk;$ANDROID_NDK_VERSION" >/dev/null 2>&1
+          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION" >> "$GITHUB_ENV"
+
+      - name: Install host Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          cache: true
+
+      - name: Save host Qt path
+        run: echo "QT_HOST_PATH=$QT_ROOT_DIR" >> "$GITHUB_ENV"
+
+      - name: Install Qt for Android
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          target: android
+          arch: android_arm64_v8a
+          modules: qt5compat qtsensors qtpositioning
+          cache: true
+
+      - name: Set up ccache
+        uses: hendrikmuhs/ccache-action@v1.2.22
+        with:
+          key: android
+
+      - name: Cache mobile dependencies
+        id: cache-deps
+        uses: actions/cache@v4
+        with:
+          path: build/android-deps-arm64/install
+          key: android-deps-proj${{ env.PROJ_VERSION }}-sqlite${{ env.SQLITE_VERSION }}
+
+      - name: Cross-compile dependencies
+        if: steps.cache-deps.outputs.cache-hit != 'true'
+        run: |
+          ./scripts/build-mobile-deps.sh \
+            --target android-arm64 \
+            --prefix build/android-deps-arm64/install \
+            --ndk "$ANDROID_NDK_ROOT" \
+            --no-gdal
+
+      - name: Configure
+        run: >
+          cmake --preset android-arm64
+          -DCMAKE_PREFIX_PATH="${QT_ROOT_DIR};${{ github.workspace }}/build/android-deps-arm64/install"
+          -DCMAKE_FIND_ROOT_PATH="${QT_ROOT_DIR};${{ github.workspace }}/build/android-deps-arm64/install"
+          -DANDROID_SDK_ROOT="$ANDROID_HOME"
+          -DANDROID_STL=c++_shared
+          -DMapper_USE_GDAL=OFF
+          -DMapper_WITH_COVE=OFF
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      - name: Build
+        run: cmake --build build/android-arm64 --parallel
+
+      - name: Build APK
+        run: cmake --build build/android-arm64 --target Mapper_make_apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-arm64-apk
+          path: build/android-arm64/src/android-build/Mapper.apk
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
   codespell:
     runs-on: ubuntu-24.04
     timeout-minutes: 5

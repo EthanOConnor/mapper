@@ -25,9 +25,9 @@ set -euo pipefail
 # Defaults
 # ---------------------------------------------------------------------------
 
-SQLITE_VERSION="${SQLITE_VERSION:-3.48.0}"
+SQLITE_VERSION="${SQLITE_VERSION:-3.51.3}"
 TIFF_VERSION="${TIFF_VERSION:-4.7.0}"
-PROJ_VERSION="${PROJ_VERSION:-9.6.0}"
+PROJ_VERSION="${PROJ_VERSION:-9.6.2}"
 GDAL_VERSION="${GDAL_VERSION:-3.11.0}"
 
 # SQLite version encoding: 3.48.0 -> 3480000
@@ -37,9 +37,9 @@ sqlite_version_encoded() {
     printf "%d%02d%02d00" "${parts[0]}" "${parts[1]}" "${parts[2]}"
 }
 
-SQLITE_SHA256="${SQLITE_SHA256:-020d668280e1e04749ba47eb1e7f164081709688b8e498fd42d26e44a0816b0b}"
+SQLITE_SHA256="${SQLITE_SHA256:-acb1e6f5d832484bf6d32b681e858c38add8b2acdfd42ac5df24b8afb46552b4}"
 TIFF_SHA256="${TIFF_SHA256:-67160e3457365ab96c5b3286a0903aa6e78bdc44c4bc737d2e486bcecb6ba976}"
-PROJ_SHA256="${PROJ_SHA256:-d3ae3beedd53250ed22dff2a3654ef72b3a01a3b2c3fbb20aa8393a4e3e07c91}"
+PROJ_SHA256="${PROJ_SHA256:-53d0cafaee3bb2390264a38668ed31d90787de05e71378ad7a8f35bb34c575d1}"
 GDAL_SHA256="${GDAL_SHA256:-758d9c2e83e98da2bec3bdfb3666588e1e98d231d8c02ebac359e36af2caa7a7}"
 
 TARGET=""
@@ -47,6 +47,7 @@ PREFIX=""
 NDK="${ANDROID_NDK_ROOT:-}"
 JOBS=""
 CLEAN=0
+WITH_GDAL=1
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOWNLOAD_DIR="${SCRIPT_DIR}/../downloads"
@@ -93,6 +94,7 @@ Options:
   --ndk PATH          Android NDK path (default: $ANDROID_NDK_ROOT)
   --jobs N            Parallel build jobs (default: auto-detect)
   --clean             Remove build dirs before building
+  --no-gdal           Skip libtiff and GDAL (build only SQLite + PROJ)
   -h, --help          Show this help
 EOF
     exit 0
@@ -109,6 +111,7 @@ while [[ $# -gt 0 ]]; do
         --ndk)     NDK="$2";    shift 2 ;;
         --jobs)    JOBS="$2";   shift 2 ;;
         --clean)   CLEAN=1;     shift ;;
+        --no-gdal) WITH_GDAL=0; shift ;;
         -h|--help) usage ;;
         *) die "Unknown option: $1" ;;
     esac
@@ -241,7 +244,7 @@ build_sqlite() {
     local encoded
     encoded="$(sqlite_version_encoded "$SQLITE_VERSION")"
     local tarball="sqlite-amalgamation-${encoded}.zip"
-    local url="https://www.sqlite.org/2025/${tarball}"
+    local url="https://www.sqlite.org/2026/${tarball}"
 
     download "$url" "$DOWNLOAD_DIR/$tarball" "$SQLITE_SHA256"
 
@@ -296,6 +299,10 @@ include("${CMAKE_CURRENT_LIST_DIR}/SQLite3Targets.cmake")
 set(SQLite3_FOUND TRUE)
 set(SQLite3_INCLUDE_DIRS "${PACKAGE_PREFIX_DIR}/include")
 set(SQLite3_LIBRARIES SQLite3::sqlite3)
+# PROJ's installed config references SQLite::SQLite3 (CMake's FindSQLite3 target name)
+if(NOT TARGET SQLite::SQLite3)
+    add_library(SQLite::SQLite3 ALIAS SQLite3::sqlite3)
+endif()
 CONFIG_EOF
 
     cmake_build "$amalg_dir"
@@ -352,6 +359,16 @@ build_proj() {
     mkdir -p "$src"
     tar -xzf "$DOWNLOAD_DIR/$tarball" -C "$src" --strip-components=1
 
+    local tiff_args=()
+    if [[ "$WITH_GDAL" -eq 1 ]]; then
+        tiff_args=(
+            "-DTIFF_INCLUDE_DIR=$PREFIX/include"
+            "-DTIFF_LIBRARY=$PREFIX/lib/libtiff.a"
+        )
+    else
+        tiff_args=("-DENABLE_TIFF=OFF")
+    fi
+
     cmake_build "$src" \
         -DBUILD_SHARED_LIBS=OFF \
         -DBUILD_TESTING=OFF \
@@ -361,8 +378,7 @@ build_proj() {
         -DUSE_ONLY_EMBEDDED_RESOURCE_FILES=ON \
         -DSQLITE3_INCLUDE_DIR="$PREFIX/include" \
         -DSQLITE3_LIBRARY="$PREFIX/lib/libsqlite3.a" \
-        -DTIFF_INCLUDE_DIR="$PREFIX/include" \
-        -DTIFF_LIBRARY="$PREFIX/lib/libtiff.a" \
+        "${tiff_args[@]}" \
         -DENABLE_CURL=OFF
 
     info "PROJ installed to $PREFIX"
@@ -443,9 +459,13 @@ build_gdal() {
 # ---------------------------------------------------------------------------
 
 build_sqlite
-build_tiff
+if [[ "$WITH_GDAL" -eq 1 ]]; then
+    build_tiff
+fi
 build_proj
-build_gdal
+if [[ "$WITH_GDAL" -eq 1 ]]; then
+    build_gdal
+fi
 
 header "All dependencies built successfully"
 info "Install prefix: $PREFIX"

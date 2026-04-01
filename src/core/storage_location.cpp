@@ -33,7 +33,8 @@
 #include <QCoreApplication>
 #include <QJniEnvironment>
 #include <QJniObject>
-#include <QNativeInterface>
+#include <QtCore/qnativeinterface.h>
+#include <QtCore/qcoreapplication_platform.h>
 #include <QDir>
 #include <QFileInfo>
 #include <QProcessEnvironment>

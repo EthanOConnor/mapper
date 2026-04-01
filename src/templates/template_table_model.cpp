@@ -217,7 +217,7 @@ QVariant TemplateTableModel::mapData(const QModelIndex &index, int role) const
 	if (role == Qt::BackgroundRole)
 	{
 #ifdef Q_OS_ANDROID
-		auto background_color = paletteColor(view, QPalette::Background);
+		auto background_color = paletteColor(view, QPalette::Window);
 		auto r = (128 + 5 * background_color.red()) / 6;
 		auto g = (128 + 5 * background_color.green()) / 6;
 		auto b = (128 + 5 * background_color.blue()) / 6;
@@ -264,7 +264,7 @@ QVariant TemplateTableModel::templateData(Template* temp, const QModelIndex &ind
 	if (role == Qt::BackgroundRole)
 	{
 #ifdef Q_OS_ANDROID
-		return QBrush(paletteColor(view, QPalette::Background));
+		return QBrush(paletteColor(view, QPalette::Window));
 #else
 		return QBrush(paletteColor(view, QPalette::Base));
 #endif

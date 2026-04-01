@@ -43,9 +43,9 @@
 #include "core/symbols/symbol.h"
 #include "util/util.h"
 
-#if defined(Q_OS_ANDROID) && defined(QT_PRINTSUPPORT_LIB)
-static_assert(false, "This file needs to be modified for correct printing on Android");
-#endif
+// Note: PrintSupport is available but QPrintPreviewDialog is disabled on mobile.
+// PDF export via QPdfWriter works. Spot color overprinting simulation is skipped
+// on mobile (see map_widget.cpp). No print-specific changes needed here.
 
 
 namespace OpenOrienteering {

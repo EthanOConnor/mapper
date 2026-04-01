@@ -42,7 +42,8 @@
 
 #if defined(Q_OS_ANDROID)
 #  include <QJniObject>
-#  include <QNativeInterface>
+#  include <QtCore/qnativeinterface.h>
+#  include <QtCore/qcoreapplication_platform.h>
 #  include <QScreen>
 #  include <QUrl>
 #endif

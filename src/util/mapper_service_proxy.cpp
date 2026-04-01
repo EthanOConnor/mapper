@@ -25,7 +25,8 @@
 #ifdef Q_OS_ANDROID
 #include <QCoreApplication>
 #include <QJniObject>
-#include <QNativeInterface>
+#include <QtCore/qnativeinterface.h>
+#include <QtCore/qcoreapplication_platform.h>
 #include <QPermission>
 #endif
 
@@ -33,12 +34,6 @@
 
 
 namespace OpenOrienteering {
-
-#ifdef Q_OS_ANDROID
-
-}
-
-#endif
 
 
 MapperServiceProxy::~MapperServiceProxy()

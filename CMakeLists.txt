@@ -105,12 +105,7 @@ set(Mapper_PACKAGE_NAME "openorienteering-mapper" CACHE STRING
 
 # These value are used for the DESTINATION parameter of the install command
 # and must not be empty.
-if(ANDROID)
-	set(MAPPER_RUNTIME_DESTINATION .)
-	set(MAPPER_LIBRARY_DESTINATION .)
-	set(MAPPER_DATA_DESTINATION    .)
-	set(MAPPER_ABOUT_DESTINATION   "doc")
-elseif(IOS)
+if(ANDROID OR IOS)
 	set(MAPPER_RUNTIME_DESTINATION .)
 	set(MAPPER_LIBRARY_DESTINATION .)
 	set(MAPPER_DATA_DESTINATION    .)
@@ -253,6 +248,7 @@ if (Mapper_USE_GDAL)
 	add_subdirectory("src/gdal")
 endif()
 add_subdirectory("src/printsupport")
+add_subdirectory("src/gnss")
 add_subdirectory("src/sensors")
 add_subdirectory("src")
 add_subdirectory("packaging")
