@@ -197,74 +197,65 @@ add_dependencies(Mapper_translations Mapper_prerequisites)
 
 
 
-# We need lupdate >= 5.6.1 for updates from source
 if(TARGET ${Qt5_LUPDATE_EXECUTABLE})
 	get_property(Qt5_LUPDATE_EXECUTABLE TARGET ${Qt5_LUPDATE_EXECUTABLE} PROPERTY IMPORTED_LOCATION)
 endif()
-execute_process(
-  COMMAND "${Qt5_LUPDATE_EXECUTABLE}" -version
-  OUTPUT_VARIABLE lupdate_version
+
+# A target which updates all translations.
+add_custom_target(Mapper_translations_update
+  # SOURCES are displayed in Qt Creator
+  SOURCES
+    ${Mapper_translations_template}
+    ${map_symbols_translations_template}
+    future_translations.cpp
+    ../packaging/translations.cpp
 )
-string(REGEX REPLACE "^.*([0-9]\\.1?[0-9]\\.[0-9]).*" "\\1" lupdate_version "${lupdate_version}")
-if(lupdate_version VERSION_LESS 5.6.1)
-	message(AUTHOR_WARNING "lupdate version ${lupdate_version} is less than 5.6.1. Updates disabled.")
-else()
-	# A target which updates all translations.
-	add_custom_target(Mapper_translations_update
-	  # SOURCES are displayed in Qt Creator
-	  SOURCES
-	    ${Mapper_translations_template}
-	    ${map_symbols_translations_template}
-	    future_translations.cpp
-	    ../packaging/translations.cpp
+
+set(listfile "${CMAKE_CURRENT_BINARY_DIR}/translations_sourcefiles.txt")
+set_property(SOURCE "${listfile}" PROPERTY GENERATED TRUE)
+set_property(TARGET Mapper_translations_update PROPERTY listfile "${listfile}")
+file(WRITE "${listfile}"
+  "${PROJECT_SOURCE_DIR}/translations/future_translations.cpp\n"
+  "${PROJECT_SOURCE_DIR}/packaging/translations.cpp\n"
+)
+
+# One target for each translation.
+foreach(translation ${Mapper_translations} ${Mapper_translations_template})
+	set(lupdate_options -locations absolute)
+	get_filename_component(ts_filename ${translation} NAME_WE)
+	if("${ts_filename}" STREQUAL "OpenOrienteering_en")
+		list(APPEND lupdate_options -pluralonly)
+	endif()
+	if("${ts_filename}" STREQUAL "OpenOrienteering_template")
+		list(APPEND lupdate_options -no-obsolete)
+	endif()
+
+	set(pre_lupdate )
+	set(post_lupdate
+	  COMMAND sed -e "/<context>/N\\;/<name>Q[A-Z]/,/<.context>/d" -i -- "${CMAKE_CURRENT_SOURCE_DIR}/${translation}"
 	)
-	
-	set(listfile "${CMAKE_CURRENT_BINARY_DIR}/translations_sourcefiles.txt")
-	set_property(SOURCE "${listfile}" PROPERTY GENERATED TRUE)
-	set_property(TARGET Mapper_translations_update PROPERTY listfile "${listfile}")
-	file(WRITE "${listfile}"
-	  "${PROJECT_SOURCE_DIR}/translations/future_translations.cpp\n"
-	  "${PROJECT_SOURCE_DIR}/packaging/translations.cpp\n"
+	if("${ts_filename}" STREQUAL "OpenOrienteering_hu")
+		# No plural support for Hungarian in Qt
+		# Save first numerusform in translatorcomment
+		list(APPEND pre_lupdate
+		  COMMAND sed -f "${save_first_numerusform}" -i -- "${CMAKE_CURRENT_SOURCE_DIR}/${translation}"
+		)
+		# Restore first numerusform for translatorcomment
+		list(APPEND post_lupdate
+		  COMMAND sed -f "${restore_first_numerusform}" -i -- "${CMAKE_CURRENT_SOURCE_DIR}/${translation}"
+		)
+	endif()
+
+	add_custom_target(Mapper_${ts_filename}_update
+	  ${pre_lupdate}
+	  COMMAND "${Qt5_LUPDATE_EXECUTABLE}" ${lupdate_options} "@${listfile}" -ts "${CMAKE_CURRENT_SOURCE_DIR}/${translation}"
+	  COMMAND sed -e "/<context>/N;/<name>Q[A-Z]/,/<.context>/d" -i -- "${CMAKE_CURRENT_SOURCE_DIR}/${translation}"
+	  ${post_lupdate}
+	  COMMAND rm -f "${CMAKE_CURRENT_SOURCE_DIR}/${translation}--"
+	  VERBATIM
 	)
-	
-	# One target for each translation.
-	foreach(translation ${Mapper_translations} ${Mapper_translations_template})
-		set(lupdate_options -locations absolute)
-		get_filename_component(ts_filename ${translation} NAME_WE)
-		if("${ts_filename}" STREQUAL "OpenOrienteering_en")
-			list(APPEND lupdate_options -pluralonly)
-		endif()
-		if("${ts_filename}" STREQUAL "OpenOrienteering_template")
-			list(APPEND lupdate_options -no-obsolete)
-		endif()
-		
-		set(pre_lupdate )
-		set(post_lupdate
-		  COMMAND sed -e "/<context>/N\\;/<name>Q[A-Z]/,/<.context>/d" -i -- "${CMAKE_CURRENT_SOURCE_DIR}/${translation}"
-		)
-		if("${ts_filename}" STREQUAL "OpenOrienteering_hu")
-			# No plural support for Hungarian in Qt
-			# Save first numerusform in translatorcomment
-			list(APPEND pre_lupdate
-			  COMMAND sed -f "${save_first_numerusform}" -i -- "${CMAKE_CURRENT_SOURCE_DIR}/${translation}"
-			)
-			# Restore first numerusform for translatorcomment
-			list(APPEND post_lupdate
-			  COMMAND sed -f "${restore_first_numerusform}" -i -- "${CMAKE_CURRENT_SOURCE_DIR}/${translation}"
-			)
-		endif()
-		
-		add_custom_target(Mapper_${ts_filename}_update
-		  ${pre_lupdate}
-		  COMMAND "${Qt5_LUPDATE_EXECUTABLE}" ${lupdate_options} "@${listfile}" -ts "${CMAKE_CURRENT_SOURCE_DIR}/${translation}"
-		  COMMAND sed -e "/<context>/N;/<name>Q[A-Z]/,/<.context>/d" -i -- "${CMAKE_CURRENT_SOURCE_DIR}/${translation}"
-		  ${post_lupdate}
-		  COMMAND rm -f "${CMAKE_CURRENT_SOURCE_DIR}/${translation}--"
-		  VERBATIM
-		)
-		add_dependencies(Mapper_translations_update Mapper_${ts_filename}_update)
-	endforeach()
-endif()
+	add_dependencies(Mapper_translations_update Mapper_${ts_filename}_update)
+endforeach()
 
 #
 # A macro for collecting translations sources.

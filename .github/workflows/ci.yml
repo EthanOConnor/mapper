@@ -84,8 +84,16 @@ jobs:
             mingw-w64-x86_64-qt5-translations
             mingw-w64-x86_64-doxygen
 
+      - name: Set up ccache
+        uses: hendrikmuhs/ccache-action@v1
+        with:
+          key: windows
+
       - name: Configure
-        run: cmake --preset ci-windows
+        run: >
+          cmake --preset ci-windows
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
         run: cmake --build --preset ci-windows --parallel

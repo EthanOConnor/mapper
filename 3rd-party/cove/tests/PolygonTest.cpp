@@ -154,7 +154,7 @@ void PolygonTest::compareResults(const cove::PolygonList& polys,
 		auto as_string = [](auto const& list) {
 			return std::accumulate(begin(list) + 1, end(list),
 			                       QByteArray::number(list.front()).rightJustified(10),
-			                       [](auto& accumulated, auto& current) {
+			                       [](auto&& accumulated, auto const& current) {
 				return accumulated + ' ' + (QByteArray::number(current).rightJustified(5));
 			});
 		};

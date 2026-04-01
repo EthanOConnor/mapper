@@ -31,12 +31,6 @@ if(Mapper_DEVELOPMENT_BUILD)
 	enable_sanitize(address undefined NO_RECOVER)
 endif()
 
-add_definitions(
-  -DQT_NO_CAST_FROM_ASCII
-  -DQT_NO_CAST_TO_ASCII
-  -DQT_USE_QSTRINGBUILDER
-)
-
 configure_file(test_config.h.in ${CMAKE_CURRENT_BINARY_DIR}/test_config.h @ONLY)
 
 
@@ -64,8 +58,18 @@ function(add_test_helper testname autorun)
 		endif()
 	endforeach()
 	add_executable(${testname} ${testname}.cpp ${TEST_${testname}_SRCS})
+	target_include_directories(${testname} PRIVATE
+	  "${PROJECT_SOURCE_DIR}/src"
+	  "${PROJECT_BINARY_DIR}/src"
+	  "${CMAKE_CURRENT_BINARY_DIR}"
+	)
+	target_compile_definitions(${testname} PRIVATE
+	  QT_NO_CAST_FROM_ASCII
+	  QT_NO_CAST_TO_ASCII
+	  QT_USE_QSTRINGBUILDER
+	)
 	target_link_libraries(${testname} PRIVATE
-	  ${PROJ_LIBRARIES}
+	  PROJ::proj
 	  Qt5::Test
 	  Qt5::Gui
 	  Polyclipping::Polyclipping
@@ -129,12 +133,6 @@ function(add_system_test testname)
 	  Qt5::Widgets
 	)
 endfunction()
-
-
-# Include generated files (moc output, build configuration)
-include_directories("${PROJECT_BINARY_DIR}/src")
-include_directories("${PROJECT_SOURCE_DIR}/src")
-include_directories("${CMAKE_CURRENT_BINARY_DIR}")
 
 
 # Unit tests

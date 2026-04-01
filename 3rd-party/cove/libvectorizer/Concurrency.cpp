@@ -39,22 +39,22 @@ static_assert(!std::is_move_assignable<Progress>::value, "Concurrency::Progress 
 
 int Progress::getPercentage() const noexcept
 {
-	return data->percentage.load();
+	return data->percentage.loadRelaxed();
 }
 
 void Progress::setPercentage(int percentage)
 {
-	data->percentage.store(percentage);
+	data->percentage.storeRelaxed(percentage);
 }
 
 bool Progress::isInterruptionRequested() const
 {
-	return bool(data->canceled.load());
+	return bool(data->canceled.loadRelaxed());
 }
 
 void Progress::requestInterruption() noexcept
 {
-	data->canceled.store(int(true));
+	data->canceled.storeRelaxed(int(true));
 }
 
 

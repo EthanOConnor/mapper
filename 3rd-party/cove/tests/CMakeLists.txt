@@ -2,7 +2,6 @@ find_package(Qt5Core ${Qt5Core_VERSION} REQUIRED)
 find_package(Qt5Gui ${Qt5Core_VERSION} REQUIRED)
 find_package(Qt5Test ${Qt5Core_VERSION} REQUIRED)
 
-set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_AUTOMOC ON)
 
 configure_file(test_config.h.in test_config.h)
@@ -16,10 +15,6 @@ add_test(
   NAME cove-ParallelImageProcessingTest
   COMMAND cove-ParallelImageProcessingTest
 )
-if(${CMAKE_VERSION} VERSION_LESS 3.8)
-	target_include_directories(cove-ParallelImageProcessingTest PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
-endif()
-
 add_executable(cove-PolygonTest
   PolygonTest.cpp
 )

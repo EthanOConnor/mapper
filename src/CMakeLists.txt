@@ -25,8 +25,6 @@ find_package(Qt5PrintSupport REQUIRED)
 
 set(CMAKE_AUTOMOC ON)
 
-include_directories("${CMAKE_CURRENT_SOURCE_DIR}")
-
 
 # Build configuration
 
@@ -68,6 +66,7 @@ set(SCALING_ICON_ENGINE_LINK_LIBRARIES
 
 add_library(scaling-icon-engine STATIC  ${SCALING_ICON_ENGINE_SOURCES})
 target_compile_definitions(scaling-icon-engine  ${SCALING_ICON_ENGINE_DEFINITIONS})
+target_include_directories(scaling-icon-engine PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(scaling-icon-engine  ${SCALING_ICON_ENGINE_LINK_LIBRARIES})
 
 
@@ -311,9 +310,10 @@ add_library(Mapper_Common STATIC
 add_dependencies(Mapper_Common
   Mapper_prerequisites
 )
+target_include_directories(Mapper_Common PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(Mapper_Common
   Polyclipping::Polyclipping
-  ${PROJ_LIBRARIES}
+  PROJ::proj
   Qt5::Widgets
 )
 foreach(lib
@@ -383,25 +383,12 @@ install(TARGETS Mapper
 )
 
 
-# Workaround Qt private include dir issue
-# Cf. https://bugreports.qt.io/browse/QTBUG-37417
-
-set(PRIVATE_MODULES Core Gui)
+include(Qt5PrivateIncludes)
+set(_private_modules Core Gui)
 if(WIN32)
-	list(APPEND PRIVATE_MODULES PrintSupport)
+	list(APPEND _private_modules PrintSupport)
 endif()
-foreach(module ${PRIVATE_MODULES})
-	set(qt_module Qt${module})
-	set(qt5_module Qt5${module})
-	if("${${qt5_module}_PRIVATE_INCLUDE_DIRS}" STREQUAL "")
-		foreach(base_dir ${${qt5_module}_INCLUDE_DIRS})
-			if("${base_dir}" MATCHES "/${qt_module}\$")
-				list(APPEND ${qt5_module}_PRIVATE_INCLUDE_DIRS "${base_dir}/${${qt5_module}_VERSION}/${qt_module}")
-			endif()
-		endforeach()
-	endif()
-	target_include_directories(Mapper_Common SYSTEM PRIVATE ${${qt5_module}_PRIVATE_INCLUDE_DIRS})
-endforeach()
+target_qt5_private_includes(Mapper_Common ${_private_modules})
 
 
 # Workaround for "assistant" not being in PATH.

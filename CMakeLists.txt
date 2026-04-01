@@ -49,10 +49,10 @@ endif()
 # Build configuration options
 
 if(NOT CMAKE_BUILD_TYPE)
-	SET(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING
+	set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING
 	  "Type of build, options are: None Debug Release RelWithDebInfo MinSizeRel."
 	  FORCE)
-endif(NOT CMAKE_BUILD_TYPE)
+endif()
 
 option(Mapper_DEBUG_TRANSLATIONS "Debug missing translations" OFF)
 
@@ -140,11 +140,12 @@ include(CTest)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED TRUE)
+set(CMAKE_C_STANDARD 99)
 
-if(CMAKE_COMPILER_IS_GNUCXX)
-	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wpedantic -Wextra")
-	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c99 -Wall -Wpedantic")
-endif()
+add_compile_options(
+  "$<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-Wall;-Wpedantic;-Wextra>"
+  "$<$<COMPILE_LANG_AND_ID:C,GNU,Clang,AppleClang>:-Wall;-Wpedantic>"
+)
 
 add_custom_target(Mapper_prerequisites
   SOURCES # Extra files to be shown in IDE
@@ -170,33 +171,29 @@ else()
 	find_package(Polyclipping 6.1.3 MODULE REQUIRED)
 endif()
 
-find_package(PROJ CONFIG REQUIRED)
-if(PROJ_VERSION VERSION_LESS 9.4)
-	message(FATAL_ERROR "At least PROJ 9.4 is required, found: ${PROJ_VERSION}")
-endif()
-set(PROJ_LIBRARIES PROJ::proj)
+find_package(PROJ 9.4 CONFIG REQUIRED)
 
 if(Mapper_USE_GDAL)
-	find_package(GDAL 3.8 REQUIRED)
+	find_package(GDAL 3.8 CONFIG REQUIRED)
 endif()
 
 find_package(Qt5Core 5.15 REQUIRED)
-add_definitions(-DQT_DISABLE_DEPRECATED_BEFORE=0x050500)
+add_compile_definitions(QT_DISABLE_DEPRECATED_BEFORE=0x050500)
 
 if(CMAKE_CXX_BYTE_ORDER STREQUAL "BIG_ENDIAN")
-	add_definitions(-DMAPPER_BIG_ENDIAN)
+	add_compile_definitions(MAPPER_BIG_ENDIAN)
 endif()
 
 
-add_definitions(-D_USE_MATH_DEFINES -DUNICODE)
+add_compile_definitions(_USE_MATH_DEFINES UNICODE)
 
 if(Mapper_DEVELOPMENT_BUILD)
-	add_definitions(-DMAPPER_DEVELOPMENT_BUILD)
+	add_compile_definitions(MAPPER_DEVELOPMENT_BUILD)
 	include(EnableSanitize)
 	enable_sanitize(address undefined)
 	configure_file(suppress.txt.in suppress.txt COPYONLY)
 else()
-	add_definitions(-DQT_NO_DEBUG -DQT_NO_DEBUG_OUTPUT -DQT_NO_WARNING_OUTPUT -DNDEBUG)
+	add_compile_definitions(QT_NO_DEBUG QT_NO_DEBUG_OUTPUT QT_NO_WARNING_OUTPUT NDEBUG)
 endif()
 
 

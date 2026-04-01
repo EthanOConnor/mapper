@@ -150,20 +150,6 @@ set(CPACK_PACKAGE_VERSION_MAJOR ${Mapper_VERSION_MAJOR})
 set(CPACK_PACKAGE_VERSION_MINOR ${Mapper_VERSION_MINOR})
 set(CPACK_PACKAGE_VERSION_PATCH ${Mapper_VERSION_PATCH})
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Map drawing program from OpenOrienteering")
-if(NOT CMAKE_SIZEOF_VOID_P AND MINGW)
-	set(_env_lang $ENV{LANG})
-	set(ENV{LANG} C)
-	execute_process(
-	  COMMAND ${CMAKE_C_COMPILER} -dumpmachine
-	  OUTPUT_VARIABLE HOST_TRIPLET
-	)
-	set(ENV{LANG} ${_env_lang})
-	if(${HOST_TRIPLET} MATCHES ^i686)
-		set(CMAKE_SIZEOF_VOID_P 4)
-	elseif(${HOST_TRIPLET} MATCHES ^x86_64)
-		set(CMAKE_SIZEOF_VOID_P 8)
-	endif()
-endif()
 if(APPLE)
 	set(_system_name "macOS")
 elseif(CMAKE_SIZEOF_VOID_P EQUAL 4)
@@ -289,8 +275,6 @@ if(Mapper_PACKAGE_PROJ)
 			string(REGEX REPLACE "/PROJ[^/]*$|/proj[^/]*$" "" proj_prefix "${proj_prefix}")   # U, W
 			string(REGEX REPLACE "/cmake$" "" proj_prefix "${proj_prefix}")                   # U
 			string(REGEX REPLACE "/lib/[^/]*$|/lib$|/share$" "" proj_prefix "${proj_prefix}") # U, W
-		elseif(PROJ4_PC_PREFIX)
-			set(proj_prefix "${PROJ4_PC_PREFIX}")
 		else()
 			set(proj_prefix "${CMAKE_INSTALL_PREFIX}")
 		endif()
@@ -328,10 +312,8 @@ if(Mapper_PACKAGE_GDAL)
 		endif()
 		if(GDAL_CONFIG AND gdal_config_result EQUAL 0)
 			set(gdal_data_paths "${gdal_data_dir}")
-		elseif(GDAL_INCLUDE_DIRS)
-			string(REGEX REPLACE "/include$" "/share/gdal" gdal_data_paths "${GDAL_INCLUDE_DIRS}") # MSYS2 et al.
 		else()
-			set(gdal_data_paths PATHS "${CMAKE_INSTALL_PREFIX}/share/gdal")
+			set(gdal_data_paths "${CMAKE_INSTALL_PREFIX}/share/gdal")
 		endif()
 		find_path(GDAL_DATA_DIR
 		  DOC "The GDAL data files directory"
@@ -350,12 +332,6 @@ if(Mapper_PACKAGE_GDAL)
 	install(
 	  DIRECTORY "${GDAL_DATA_DIR}/"
 	  DESTINATION "${MAPPER_DATA_DESTINATION}/gdal")
-	foreach(item IN LISTS GDAL_LIBRARIES)
-		if(EXISTS "${item}")
-			get_filename_component(GDAL_LIBRARY_DIR "{item}" PATH)
-			list(APPEND MAPPER_LIB_HINTS "${GDAL_LIBRARY_DIR}")
-		endif()
-	endforeach()
 endif()
 
 unset(MAPPER_QT_PLUGINS)
@@ -404,18 +380,6 @@ if(Mapper_PACKAGE_QT)
 	set(QT_PLUGIN_TARGETS )
 	foreach(module ${MAPPER_QT_MODULES})
 		find_package(Qt5${module} QUIET)
-		if(module STREQUAL "Positioning" AND Qt5Positioning_DIR)
-			# Workaround for QTBUG-58812 CMake: Plugin config not loaded
-			# unless plugin class name ends in Plugin
-			file(GLOB pluginTargets "${Qt5Positioning_DIR}/Qt5Positioning_*.cmake")
-			foreach(file ${pluginTargets})
-				string(REGEX REPLACE "^.*/Qt5Positioning_([^/]*)\\.cmake" "Qt5::\\1" lib "${file}")
-				if(NOT file MATCHES "Plugin.cmake"
-				   AND NOT "${Qt5Positioning_PLUGINS}" MATCHES "${lib}")
-					include(${file})
-				endif()
-			endforeach()
-		endif()
 		list(APPEND QT_PLUGIN_TARGETS ${Qt5${module}_PLUGINS})
 	endforeach()
 	# Cf. Qt5's qt_de.ts for dependencies - qt_de.ts would not load without them.

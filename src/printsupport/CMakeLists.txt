@@ -23,11 +23,7 @@ find_package(ZLIB REQUIRED)
 set(CMAKE_CXX_CLANG_TIDY "")
 set(CMAKE_CXX_INCLUDE_WHAT_YOU_USE "")
 
-if (${Qt5PrintSupport_VERSION} VERSION_LESS 5.12.0)
-	message(FATAL_ERROR "Need at least Qt5PrintSupport 5.12.0, found: ${Qt5PrintSupport_VERSION}")
-else()
-	set(FORK_VERSION qt-5.12.4)
-endif()
+set(FORK_VERSION qt-5.12.4)
 
 set(PRINTSUPPORT_SRCS
   advanced_pdf_printer.cpp
@@ -74,18 +70,5 @@ foreach(flag IN ITEMS "-Wno-stringop-overflow")
 endforeach()
 
 
-# Workaround Qt private include dir issue
-# Cf. https://bugreports.qt.io/browse/QTBUG-37417
-
-foreach(module Core Gui PrintSupport)
-	set(qt_module Qt${module})
-	set(qt5_module Qt5${module})
-	if("${${qt5_module}_PRIVATE_INCLUDE_DIRS}" STREQUAL "")
-		foreach(base_dir ${${qt5_module}_INCLUDE_DIRS})
-			if("${base_dir}" MATCHES "/${qt_module}\$")
-				list(APPEND ${qt5_module}_PRIVATE_INCLUDE_DIRS "${base_dir}/${${qt5_module}_VERSION}/${qt_module}")
-			endif()
-		endforeach()
-	endif()
-	target_include_directories(printsupport SYSTEM PRIVATE ${${qt5_module}_PRIVATE_INCLUDE_DIRS})
-endforeach()
+include(Qt5PrivateIncludes)
+target_qt5_private_includes(printsupport Core Gui PrintSupport)
