@@ -75,6 +75,10 @@ find_program(DOXYGEN_EXECUTABLE
   DOC "The path of the doxygen executable"
 )
 if(NOT DOXYGEN_EXECUTABLE)
+	if(CMAKE_CROSSCOMPILING)
+		message(STATUS "doxygen not found, skipping manual (cross-compiling)")
+		return()
+	endif()
 	message(FATAL_ERROR "doxygen executable not found.")
 endif()
 
