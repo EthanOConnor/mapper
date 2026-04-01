@@ -43,6 +43,7 @@ template <class Key, class T>
 class QHash;
 class QImage;
 class QPainter;
+class QPdfWriter;
 class QPrinter;
 class QRectF;
 class QSizeF;
@@ -344,17 +345,25 @@ public:
 	
 	/** Creates a printer configured according to the current settings. */
 	std::unique_ptr<QPrinter> makePrinter() const;
-	
-	/** Takes the settings from the given printer, 
+
+	/** Creates a QPdfWriter configured for CMYK + PDF/A-1b output. */
+	std::unique_ptr<QPdfWriter> makePdfWriter(const QString& filename) const;
+
+	/** Takes the settings from the given printer,
 	 *  and generates signals for changing properties. */
 	void takePrinterSettings(const QPrinter* printer);
-	
+
 	/** Prints the map to the given printer.
-	 * 
+	 *
 	 *  This will first update this object's properties from the printer's properties.
 	 *
 	 *  @return true on success, false on error. */
 	bool printMap(QPrinter* printer);
+
+	/** Prints the map to a QPdfWriter (used for CMYK PDF export).
+	 *
+	 *  @return true on success, false on error. */
+	bool printMap(QPdfWriter* writer);
 	
 	/** Draws a single page to the painter.
 	 * 

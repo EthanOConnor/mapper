@@ -46,8 +46,8 @@
 
 
 #if defined(QT_PRINTSUPPORT_LIB)
+#  include <QPdfWriter>
 #  include <QPrinter>
-#  include <advanced_pdf_printer.h>
 #  include <printer_properties.h>
 #  if defined(Q_OS_WIN)
 #    include <private/qprintengine_win_p.h>
@@ -502,10 +502,6 @@ std::unique_ptr<QPrinter> MapPrinter::makePrinter() const
 	else if (isPrinter())
 	{
 		printer = std::make_unique<QPrinter>(*target, QPrinter::HighResolution);
-	}
-	else if (options.color_mode == MapPrinterOptions::DeviceCmyk)
-	{
-		printer = std::make_unique<AdvancedPdfPrinter>(*target, QPrinter::HighResolution);
 	}
 	else
 	{
@@ -1399,6 +1395,87 @@ bool MapPrinter::printMap(QPrinter* printer)
 		}
 	}
 	
+	if (cancel_print_map)
+	{
+		emit printProgress(100, ::OpenOrienteering::MapPrinter::tr("Canceled"));
+	}
+	else if (!painter.isActive())
+	{
+		emit printProgress(100, ::OpenOrienteering::MapPrinter::tr("Error"));
+		return false;
+	}
+	else
+	{
+		emit printProgress(100, ::OpenOrienteering::MapPrinter::tr("Finished"));
+	}
+	return true;
+}
+
+std::unique_ptr<QPdfWriter> MapPrinter::makePdfWriter(const QString& filename) const
+{
+	auto writer = std::make_unique<QPdfWriter>(filename);
+	if (options.color_mode == MapPrinterOptions::DeviceCmyk)
+		writer->setColorModel(QPdfWriter::ColorModel::CMYK);
+	writer->setPdfVersion(QPagedPaintDevice::PdfVersion_A1b);
+	writer->setResolution(options.resolution);
+	if (page_format.page_size == QPageSize::Custom)
+	{
+		writer->setPageSize(QPageSize(page_format.paper_dimensions, QPageSize::Millimeter));
+		writer->setPageOrientation(QPageLayout::Portrait);
+	}
+	else
+	{
+		writer->setPageSize(QPageSize{page_format.page_size});
+		writer->setPageOrientation((page_format.orientation == MapPrinterPageFormat::Portrait) ? QPageLayout::Portrait : QPageLayout::Landscape);
+	}
+	writer->setPageMargins(QMarginsF(0.0, 0.0, 0.0, 0.0), QPageLayout::Millimeter);
+	return writer;
+}
+
+bool MapPrinter::printMap(QPdfWriter* writer)
+{
+	QSizeF extent_size = page_format.page_rect.size() / scale_adjustment;
+	QPainter painter(writer);
+
+	cancel_print_map = false;
+	int step = 0;
+	auto num_steps = v_page_pos.size() * h_page_pos.size();
+	const QString message_template(
+	  ::OpenOrienteering::MapPrinter::tr("Processing page %1...") );
+	auto message = message_template.arg(1);
+	emit printProgress(0, message);
+
+	bool need_new_page = false;
+	for (auto vpos : v_page_pos)
+	{
+		if (!painter.isActive())
+			break;
+
+		for (auto hpos : h_page_pos)
+		{
+			if (!painter.isActive())
+				break;
+
+			++step;
+			auto progress = qMin(99, qMax(1, int((100 * static_cast<decltype(num_steps)>(step) - 50) / num_steps)));
+			emit printProgress(progress, message_template.arg(step));
+
+			if (cancel_print_map)
+			{
+				painter.end();
+				break;
+			}
+
+			if (need_new_page)
+				writer->newPage();
+
+			QRectF page_extent = QRectF(QPointF(hpos, vpos), extent_size);
+			drawPage(&painter, page_extent);
+
+			need_new_page = true;
+		}
+	}
+
 	if (cancel_print_map)
 	{
 		emit printProgress(100, ::OpenOrienteering::MapPrinter::tr("Canceled"));

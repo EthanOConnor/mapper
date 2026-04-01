@@ -53,6 +53,7 @@
 #include <QPageLayout>
 #include <QPageSize>
 #include <QPainter>
+#include <QPdfWriter>
 #include <QPointF>
 #include <QPrinter>
 #include <QPrinterInfo>
@@ -1364,18 +1365,6 @@ bool PrintWidget::exportWorldFile(const QString& path) const
 
 void PrintWidget::exportToPdf()
 {
-	auto printer = map_printer->makePrinter();
-	if (!printer)
-	{
-		QMessageBox::warning(this, tr("Error"), tr("Failed to prepare the PDF export."));
-		return;
-	}
-	
-	printer->setOutputFormat(QPrinter::PdfFormat);
-	printer->setCopyCount(copies_edit->value());
-	printer->setCreator(main_window->appName());
-	printer->setDocName(QFileInfo(main_window->currentPath()).baseName());
-
 	static const QString filter_template(QString::fromLatin1("%1 (%2)"));
 	QStringList filters = { filter_template.arg(tr("PDF"), QString::fromLatin1("*.pdf")),
 	                        tr("All files (*.*)") };
@@ -1388,13 +1377,36 @@ void PrintWidget::exportToPdf()
 	{
 		path.append(QLatin1String(".pdf"));
 	}
-	printer->setOutputFileName(path);
-	
+
 	PrintProgressDialog progress(map_printer, main_window);
 	progress.setWindowTitle(tr("Export map ..."));
-	
-	// Export the map
-	if (!map_printer->printMap(printer.get()))
+
+	bool ok;
+	if (map_printer->getOptions().color_mode == MapPrinterOptions::DeviceCmyk)
+	{
+		// CMYK PDF export via Qt 6.8+ QPdfWriter public API
+		auto writer = map_printer->makePdfWriter(path);
+		writer->setCreator(main_window->appName());
+		writer->setTitle(QFileInfo(main_window->currentPath()).baseName());
+		ok = map_printer->printMap(writer.get());
+	}
+	else
+	{
+		auto printer = map_printer->makePrinter();
+		if (!printer)
+		{
+			QMessageBox::warning(this, tr("Error"), tr("Failed to prepare the PDF export."));
+			return;
+		}
+		printer->setOutputFormat(QPrinter::PdfFormat);
+		printer->setCopyCount(copies_edit->value());
+		printer->setCreator(main_window->appName());
+		printer->setDocName(QFileInfo(main_window->currentPath()).baseName());
+		printer->setOutputFileName(path);
+		ok = map_printer->printMap(printer.get());
+	}
+
+	if (!ok)
 	{
 		QFile(path).remove();
 		QMessageBox::warning(this, tr("Error"), tr("Failed to finish the PDF export."));

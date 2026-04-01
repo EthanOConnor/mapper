@@ -1,36 +1,25 @@
 #
 #    Copyright 2015, 2016 Kai Pastor
-#    
+#
 #    This file is part of OpenOrienteering.
-# 
+#
 #    OpenOrienteering is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
 #    the Free Software Foundation, either version 3 of the License, or
 #    (at your option) any later version.
-# 
+#
 #    OpenOrienteering is distributed in the hope that it will be useful,
 #    but WITHOUT ANY WARRANTY; without even the implied warranty of
 #    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 #    GNU General Public License for more details.
-# 
+#
 #    You should have received a copy of the GNU General Public License
 #    along with OpenOrienteering.  If not, see <http://www.gnu.org/licenses/>.
 
 find_package(Qt6 REQUIRED COMPONENTS Gui PrintSupport)
-find_package(Qt6 REQUIRED COMPONENTS CorePrivate GuiPrivate PrintSupportPrivate)
-find_package(ZLIB REQUIRED)
-
-set(CMAKE_CXX_CLANG_TIDY "")
-set(CMAKE_CXX_INCLUDE_WHAT_YOU_USE "")
-
-set(FORK_VERSION qt-5.12.4)
 
 set(PRINTSUPPORT_SRCS
-  advanced_pdf_printer.cpp
   printer_properties.h
-  ${FORK_VERSION}/advanced_pdf.cpp
-  ${FORK_VERSION}/printengine_advanced_pdf.cpp
-  ${FORK_VERSION}/qfontsubset.cpp
 )
 
 if(WIN32)
@@ -47,23 +36,9 @@ target_compile_definitions(printsupport PRIVATE
   QT_USE_QSTRINGBUILDER
 )
 target_include_directories(printsupport
-  SYSTEM
-  BEFORE
-  PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/${FORK_VERSION}"
   INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
 target_link_libraries(printsupport
   PUBLIC Qt6::PrintSupport Qt6::Gui
-  PRIVATE ZLIB::ZLIB Qt6::CorePrivate Qt6::GuiPrivate Qt6::PrintSupportPrivate
 )
-
-# Suppress warnings from Qt code
-include(CheckCXXCompilerFlag)
-foreach(flag IN ITEMS "-Wno-stringop-overflow")
-    string(MAKE_C_IDENTIFIER "HAVE_${flag}" cache_var)
-    check_cxx_compiler_flag("${flag}" "${cache_var}")
-    if("${${cache_var}}")
-        target_compile_options(printsupport PRIVATE "${flag}")
-    endif()
-endforeach()

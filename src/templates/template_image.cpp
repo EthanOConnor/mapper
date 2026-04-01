@@ -37,7 +37,7 @@
 #include <QImageWriter>
 #include <QLatin1String>
 #include <QList>
-#include <QPaintEngine>
+
 #include <QPainter>
 #include <QPen>
 #include <QPoint>
@@ -55,9 +55,6 @@
 #include "core/storage_location.h"  // IWYU pragma: keep
 #include "gui/georeferencing_dialog.h"
 #include "gui/select_crs_dialog.h"
-#ifdef QT_PRINTSUPPORT_LIB
-#include "printsupport/advanced_pdf_printer.h"
-#endif
 #include "templates/template_image_open_dialog.h"
 #include "templates/world_file.h"
 #include "util/transformation.h"
@@ -344,22 +341,6 @@ void TemplateImage::drawTemplate(QPainter* painter, const QRectF& /*clip_rect*/,
 	
 	painter->setRenderHint(QPainter::SmoothPixmapTransform);
 	painter->setOpacity(opacity);
-#ifdef QT_PRINTSUPPORT_LIB
-	// QTBUG-70752: QPdfEngine fails to properly apply constant opacity on
-	// images. This can be worked around by setting a real brush.
-	// Fixed in Qt 5.12.0.
-	/// \todo Fix image opacity in AdvancedPdfEngine
-#if QT_VERSION < 0x051200
-	if (painter->paintEngine()->type() == QPaintEngine::Pdf
-	    || painter->paintEngine()->type() == AdvancedPdfPrinter::paintEngineType())
-#else
-	if (painter->paintEngine()->type() == AdvancedPdfPrinter::paintEngineType())
-#endif
-	{
-		if (opacity < 1)
-			painter->setBrush(Qt::white);
-	}
-#endif
 	painter->drawImage(QPointF(-image.width() * 0.5, -image.height() * 0.5), image);
 	painter->setRenderHint(QPainter::SmoothPixmapTransform, false);
 }
