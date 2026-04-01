@@ -22,7 +22,7 @@
 
 #if defined(Q_OS_ANDROID)
 #  include <jni.h>
-#  include <QAndroidJniObject>
+#  include <QJniObject>
 #endif
 #if defined(QT_POSITIONING_LIB)
 #  include <QGeoCoordinate>
@@ -164,10 +164,10 @@ bool GPSDisplay::checkGPSEnabled()
 	static bool translation_initialized = false;
 	if (!translation_initialized)
 	{
-		QAndroidJniObject gps_disabled_string = QAndroidJniObject::fromString(tr("GPS is disabled in the device settings. Open settings now?"));
-		QAndroidJniObject yes_string = QAndroidJniObject::fromString(tr("Yes"));
-		QAndroidJniObject no_string  = QAndroidJniObject::fromString(tr("No"));
-		QAndroidJniObject::callStaticMethod<void>(
+		QJniObject gps_disabled_string = QJniObject::fromString(tr("GPS is disabled in the device settings. Open settings now?"));
+		QJniObject yes_string = QJniObject::fromString(tr("Yes"));
+		QJniObject no_string  = QJniObject::fromString(tr("No"));
+		QJniObject::callStaticMethod<void>(
 			"org/openorienteering/mapper/MapperActivity",
 			"setTranslatableStrings",
 			"(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V",
@@ -177,7 +177,7 @@ bool GPSDisplay::checkGPSEnabled()
 		translation_initialized = true;
 	}
 	
-	QAndroidJniObject::callStaticMethod<void>("org/openorienteering/mapper/MapperActivity",
+	QJniObject::callStaticMethod<void>("org/openorienteering/mapper/MapperActivity",
                                        "checkGPSEnabled",
                                        "()V");
 #endif

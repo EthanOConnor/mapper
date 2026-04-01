@@ -116,6 +116,65 @@
                 "GDAL_DATA_DIR": "/mingw64/share/gdal",
                 "PROJ_DATA_DIR": "/mingw64/share/proj"
             }
+        },
+        {
+            "name": "mobile-base",
+            "hidden": true,
+            "inherits": "ci-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "BUILD_SHARED_LIBS": "OFF",
+                "Mapper_PACKAGE_ASSISTANT": "OFF"
+            }
+        },
+        {
+            "name": "android-arm64",
+            "displayName": "Android arm64-v8a",
+            "inherits": "mobile-base",
+            "binaryDir": "${sourceDir}/build/android-arm64",
+            "cacheVariables": {
+                "CMAKE_TOOLCHAIN_FILE": "$env{ANDROID_NDK_ROOT}/build/cmake/android.toolchain.cmake",
+                "ANDROID_ABI": "arm64-v8a",
+                "ANDROID_PLATFORM": "android-28",
+                "QT_HOST_PATH": "$env{QT_HOST_PATH}"
+            }
+        },
+        {
+            "name": "android-x86_64",
+            "displayName": "Android x86_64 (emulator)",
+            "inherits": "mobile-base",
+            "binaryDir": "${sourceDir}/build/android-x86_64",
+            "cacheVariables": {
+                "CMAKE_TOOLCHAIN_FILE": "$env{ANDROID_NDK_ROOT}/build/cmake/android.toolchain.cmake",
+                "ANDROID_ABI": "x86_64",
+                "ANDROID_PLATFORM": "android-28",
+                "QT_HOST_PATH": "$env{QT_HOST_PATH}"
+            }
+        },
+        {
+            "name": "ios-arm64",
+            "displayName": "iOS arm64",
+            "inherits": "mobile-base",
+            "generator": "Xcode",
+            "binaryDir": "${sourceDir}/build/ios-arm64",
+            "cacheVariables": {
+                "CMAKE_SYSTEM_NAME": "iOS",
+                "CMAKE_OSX_DEPLOYMENT_TARGET": "16.0",
+                "CMAKE_OSX_ARCHITECTURES": "arm64"
+            }
+        },
+        {
+            "name": "ios-simulator",
+            "displayName": "iOS Simulator (arm64 + x86_64)",
+            "inherits": "mobile-base",
+            "generator": "Xcode",
+            "binaryDir": "${sourceDir}/build/ios-simulator",
+            "cacheVariables": {
+                "CMAKE_SYSTEM_NAME": "iOS",
+                "CMAKE_OSX_DEPLOYMENT_TARGET": "16.0",
+                "CMAKE_OSX_ARCHITECTURES": "arm64;x86_64",
+                "CMAKE_OSX_SYSROOT": "iphonesimulator"
+            }
         }
     ],
     "buildPresets": [
@@ -154,6 +213,22 @@
         {
             "name": "release-windows",
             "configurePreset": "release-windows"
+        },
+        {
+            "name": "android-arm64",
+            "configurePreset": "android-arm64"
+        },
+        {
+            "name": "android-x86_64",
+            "configurePreset": "android-x86_64"
+        },
+        {
+            "name": "ios-arm64",
+            "configurePreset": "ios-arm64"
+        },
+        {
+            "name": "ios-simulator",
+            "configurePreset": "ios-simulator"
         }
     ],
     "testPresets": [

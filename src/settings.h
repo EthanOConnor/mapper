@@ -124,7 +124,7 @@ public:
 	int getStartDragDistancePx();
 	
 	
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
 	constexpr bool touchModeEnabled() const noexcept { return true; }
 	void setTouchModeEnabled(bool /* ignored */) {};
 	constexpr static bool mobileModeEnforced() noexcept { return true; }
@@ -246,7 +246,7 @@ private:
 		QString nmea_serialport = {};
 	} sensors;
 	
-#ifndef Q_OS_ANDROID
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
 	bool touch_mode_enabled = false;
 #endif
 };

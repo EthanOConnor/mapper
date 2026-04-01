@@ -1,5 +1,6 @@
 /*
  *    Copyright 2019 Kai Pastor
+ *    Copyright 2026 The OpenOrienteering developers
  *
  *    This file is part of OpenOrienteering.
  *
@@ -20,6 +21,45 @@
 
 #include "app_permissions.h"
 
-#ifdef Q_OS_ANDROID
-#  include "app_permissions_android.cpp"
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+
+#include <QCoreApplication>
+#include <QPermission>
+
+
+namespace AppPermissions
+{
+
+PermissionResult checkPermission(AppPermission permission)
+{
+	switch (permission)
+	{
+	case LocationAccess:
+		{
+			QLocationPermission loc;
+			loc.setAccuracy(QLocationPermission::Precise);
+			if (qApp->checkPermission(loc) == Qt::PermissionStatus::Granted)
+				return Granted;
+			return Denied;
+		}
+
+	case StorageAccess:
+		// Qt6 scoped storage: app-specific directories don't need permission
+		return Granted;
+	}
+
+	return Denied;
+}
+
+
+PermissionResult requestPermissionSync(AppPermission permission)
+{
+	// Qt6 does not provide synchronous permission requests.
+	// Check the current state instead.
+	return checkPermission(permission);
+}
+
+
+}  // namespace AppPermissions
+
 #endif

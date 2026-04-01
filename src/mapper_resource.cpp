@@ -65,6 +65,11 @@ void setSeachPaths()
 	auto assets = QString::fromLatin1("assets:");
 	data_paths.append(assets);
 	doc_paths.append(assets + QLatin1String("/doc"));
+#elif defined(Q_OS_IOS)
+	// iOS: load resources from the app bundle
+	auto app_dir = QDir { QCoreApplication::applicationDirPath() };
+	data_paths.append(app_dir.absolutePath());
+	doc_paths.append(app_dir.absoluteFilePath(QLatin1String("doc")));
 #else
 	data_paths.append(QString::fromLatin1(MAPPER_DATA_DESTINATION));
 	doc_paths.append(QString::fromLatin1(MAPPER_ABOUT_DESTINATION));

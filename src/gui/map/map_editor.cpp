@@ -92,7 +92,10 @@
 #include <QWidget>
 
 #ifdef Q_OS_ANDROID
-#include <QtAndroidExtras/QAndroidJniObject>
+#include <QJniObject>
+#endif
+#ifdef Q_OS_IOS
+#include "util/ios_lifecycle.h"
 #endif
 
 #include "settings.h"
@@ -732,10 +735,12 @@ void MapEditorController::attach(MainWindow* window)
 	}
 	connect(map, &Map::hasUnsavedChanged, window, &MainWindow::setHasUnsavedChanges);
 	
-#ifdef Q_OS_ANDROID
-	QAndroidJniObject::callStaticMethod<void>("org/openorienteering/mapper/MapperActivity",
-                                       "lockOrientation",
-                                       "()V");
+#if defined(Q_OS_ANDROID)
+	QJniObject::callStaticMethod<void>("org/openorienteering/mapper/MapperActivity",
+	                                   "lockOrientation",
+	                                   "()V");
+#elif defined(Q_OS_IOS)
+	iOS::lockOrientation();
 #endif
 	if (mobile_mode)
 	{
@@ -1707,10 +1712,12 @@ void MapEditorController::detach()
 	delete statusbar_zoom_frame;
 	delete statusbar_cursorpos_label;
 	
-#ifdef Q_OS_ANDROID
-	QAndroidJniObject::callStaticMethod<void>("org/openorienteering/mapper/MapperActivity",
-                                       "unlockOrientation",
-                                       "()V");
+#if defined(Q_OS_ANDROID)
+	QJniObject::callStaticMethod<void>("org/openorienteering/mapper/MapperActivity",
+	                                   "unlockOrientation",
+	                                   "()V");
+#elif defined(Q_OS_IOS)
+	iOS::unlockOrientation();
 #endif
 	
 	if (mobile_mode)
@@ -4391,7 +4398,7 @@ EditorDockWidget::EditorDockWidget(const QString& title, QAction* action, MapEdi
 		connect(toggleViewAction(), &QAction::toggled, action, &QAction::setChecked);
 	}
 	
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
 	size_grip = new QSizeGrip(this);
 	size_grip->resize(size_grip->sizeHint());
 	size_grip->setVisible(isTopLevel());
@@ -4421,11 +4428,11 @@ bool EditorDockWidget::event(QEvent* event)
 
 void EditorDockWidget::resizeEvent(QResizeEvent* event)
 {
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
 	int fw = style()->pixelMetric(QStyle::PM_DockWidgetFrameWidth, 0, this);
 	size_grip->move(rect().bottomRight() - size_grip->rect().bottomRight() - QPoint{fw, fw});
 	size_grip->raise();
-	
+
 	if (isTopLevel())
 	{
 		auto const frame = frameGeometry();

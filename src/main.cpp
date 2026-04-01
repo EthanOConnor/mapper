@@ -140,8 +140,10 @@ int main(int argc, char** argv)
 	QApplication qapp(argc, argv);
 #endif
 	
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID)
 	qputenv("QT_USE_ANDROID_NATIVE_STYLE", "1");
+#elif defined(Q_OS_IOS)
+	// iOS uses the default Fusion style for QWidgets
 #endif
 	
 	// Load resources

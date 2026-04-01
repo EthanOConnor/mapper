@@ -105,7 +105,17 @@ set(Mapper_PACKAGE_NAME "openorienteering-mapper" CACHE STRING
 
 # These value are used for the DESTINATION parameter of the install command
 # and must not be empty.
-if(WIN32 AND BIN_INSTALL_DIR)
+if(ANDROID)
+	set(MAPPER_RUNTIME_DESTINATION .)
+	set(MAPPER_LIBRARY_DESTINATION .)
+	set(MAPPER_DATA_DESTINATION    .)
+	set(MAPPER_ABOUT_DESTINATION   "doc")
+elseif(IOS)
+	set(MAPPER_RUNTIME_DESTINATION .)
+	set(MAPPER_LIBRARY_DESTINATION .)
+	set(MAPPER_DATA_DESTINATION    .)
+	set(MAPPER_ABOUT_DESTINATION   "doc")
+elseif(WIN32 AND BIN_INSTALL_DIR)
 	set(MAPPER_RUNTIME_DESTINATION "${BIN_INSTALL_DIR}")
 	set(MAPPER_LIBRARY_DESTINATION "${LIB_INSTALL_DIR}")
 	set(MAPPER_DATA_DESTINATION    "${SHARE_INSTALL_DIR}/${Mapper_PACKAGE_NAME}")
@@ -186,6 +196,10 @@ endif()
 
 
 add_compile_definitions(_USE_MATH_DEFINES UNICODE)
+
+if(ANDROID OR IOS)
+	add_compile_definitions(MAPPER_MOBILE)
+endif()
 
 if(Mapper_DEVELOPMENT_BUILD)
 	add_compile_definitions(MAPPER_DEVELOPMENT_BUILD)

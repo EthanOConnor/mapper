@@ -50,7 +50,7 @@ const QUrl& aboutPageUrl()
  */
 QString formatBlock(const QStringList& items)
 {
-#if defined(Q_OS_ANDROID) // or any other small-screen device
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS) // small-screen device
 	QString block = QLatin1String("<p>")
 	                + items.join(QString::fromLatin1(", "))
 	                + QLatin1String("</p>");

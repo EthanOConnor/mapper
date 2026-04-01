@@ -87,14 +87,14 @@ TextBrowserDialog::TextBrowserDialog(QWidget* parent)
 	connect(back_button,  &QPushButton::clicked, text_browser, &QTextBrowser::backward);
 	connect(close_button, &QPushButton::clicked, this, &TextBrowserDialog::accept);
 	
-#if defined(Q_OS_ANDROID)
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
 	QScroller::grabGesture(text_browser->viewport(), QScroller::TouchGesture);
 	// Disable selection, so that it doesn't interfere with scrolling
 	text_browser->setTextInteractionFlags(Qt::TextInteractionFlags(Qt::TextBrowserInteraction) & ~Qt::TextSelectableByMouse);
 	// Note: Only the above combination of QScroller::LeftMouseButtonGesture
 	// and ~Qt::TextSelectableByMouse seems to achieve the desired behaviour
 	// (touch-scrolling without selecting text.)
-	
+
 	setWindowState((windowState() & ~(Qt::WindowMinimized | Qt::WindowFullScreen))
                    | Qt::WindowMaximized);
 #endif

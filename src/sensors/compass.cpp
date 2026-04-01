@@ -45,7 +45,7 @@
 #include <QWaitCondition>
 
 #ifdef Q_OS_ANDROID
-#include <QtAndroidExtras/QAndroidJniObject>
+#include <QJniObject>
 #endif
 
 #else  // no Qt Sensors lib
@@ -457,7 +457,7 @@ private:
 			p->latest_azimuth = 180 * azimuth / M_PI;
 #ifdef Q_OS_ANDROID
 			// Adjust for display rotation
-			jint orientation = QAndroidJniObject::callStaticMethod<jint>(
+			jint orientation = QJniObject::callStaticMethod<jint>(
 			                    "org/openorienteering/mapper/MapperActivity",
                                 "getDisplayRotation");
 			switch (orientation)

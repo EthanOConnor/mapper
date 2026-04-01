@@ -172,7 +172,7 @@ Settings::Settings()
 
 	QSettings settings;
 	
-#ifndef Q_OS_ANDROID
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
 	// Overwrite default value with actual setting
 	touch_mode_enabled = mobileModeEnforced() || settings.value(QLatin1String("General/touch_mode_enabled"), touch_mode_enabled).toBool();
 #endif
@@ -358,7 +358,7 @@ int Settings::getStartDragDistancePx()
 }
 
 
-#ifndef Q_OS_ANDROID
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
 
 void Settings::setTouchModeEnabled(bool enabled)
 {

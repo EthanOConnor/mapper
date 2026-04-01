@@ -1502,7 +1502,7 @@ void MapWidget::updateSceneTiles()
 
 				RenderConfig config = { *map, tile_map_rect, snap.zoom_factor, options, 1.0 };
 
-#ifndef Q_OS_ANDROID
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
 				if (snap.overprinting)
 					mr->drawOverprintingSimulation(&painter, config);
 				else

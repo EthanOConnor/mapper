@@ -141,7 +141,7 @@ TextObjectEditorHelper::TextObjectEditorHelper(not_null<TextObject*> text_object
 	widget->setAttribute(Qt::WA_InputMethodEnabled, true);
 	//updateCursor(widget, 0);
 	
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
 	claimFocus();
 #else
 	// Workaround to set the focus to the map widget again after it was lost
@@ -245,7 +245,7 @@ void TextObjectEditorHelper::commitStateChange()
 			qDebug("\n>>> inputMethod()->update(%d)", im_query);	
 #endif
 			QGuiApplication::inputMethod()->update(im_query);
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
 			// QTBUG-58013
 			Q_UNUSED(im_query)
 #  ifdef DEBUG_INPUT_METHOD_SUPPORT
@@ -663,7 +663,7 @@ bool TextObjectEditorHelper::mouseReleaseEvent(QMouseEvent* event, const MapCoor
 		    && !QGuiApplication::inputMethod()->isVisible()
 		    && widget->style()->styleHint(QStyle::SH_RequestSoftwareInputPanel) == QStyle::RSIP_OnMouseClick)
 		{
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
 			// Workaround for QTBUG-58063: Move to the end of the word
 			if (!isPreediting() && cursor_position == anchor_position)
 			{

@@ -23,16 +23,17 @@
 #include <cstddef>
 
 #include <QtGlobal>
+#include <QDir>
 #include <QStandardPaths>
 #include <QStringList>
 #include <QTemporaryFile>
 
 
 #ifdef Q_OS_ANDROID
-#include <QtAndroid>
-#include <QAndroidActivityResultReceiver>
-#include <QAndroidJniEnvironment>
-#include <QAndroidJniObject>
+#include <QCoreApplication>
+#include <QJniEnvironment>
+#include <QJniObject>
+#include <QNativeInterface>
 #include <QDir>
 #include <QFileInfo>
 #include <QProcessEnvironment>
@@ -62,15 +63,15 @@ bool storageAccessGranted()
 void mediaScannerScanFile(const QString& path)
 {
 	static const auto ACTION_MEDIA_SCANNER_SCAN_FILE = 
-	        QAndroidJniObject::getStaticObjectField<jstring>("android/content/Intent",
+	        QJniObject::getStaticObjectField<jstring>("android/content/Intent",
 	                                                         "ACTION_MEDIA_SCANNER_SCAN_FILE");
-	auto intent = QAndroidJniObject { "android/content/Intent",
+	auto intent = QJniObject { "android/content/Intent",
 	                                  "(Ljava/lang/String;)V",
 	                                  ACTION_MEDIA_SCANNER_SCAN_FILE.object<jstring>() };
-	auto file = QAndroidJniObject { "java/io/File",
+	auto file = QJniObject { "java/io/File",
 	                                "(Ljava/lang/String;)V",
-	                                QAndroidJniObject::fromString(path).object<jstring>() };
-	auto uri  = QAndroidJniObject::callStaticObjectMethod(
+	                                QJniObject::fromString(path).object<jstring>() };
+	auto uri  = QJniObject::callStaticObjectMethod(
 	                "android/net/Uri",
 	                "fromFile",
 	                "(Ljava/io/File;)Landroid/net/Uri;",
@@ -79,11 +80,9 @@ void mediaScannerScanFile(const QString& path)
 	intent.callObjectMethod("setData",
 	                        "(Landroid/net/Uri;)Landroid/content/Intent;",
 	                        uri.object());
-	auto activity = QtAndroid::androidActivity();
-	auto context = activity.callObjectMethod(
-	                   "getApplicationContext",
-	                   "()Landroid/content/Context;");
-	context.callMethod<void>("sendBroadcast", "(Landroid/content/Intent;)V", intent.object());
+	auto context = QNativeInterface::QAndroidApplication::context();
+	QJniObject app_context { context };
+	app_context.callMethod<void>("sendBroadcast", "(Landroid/content/Intent;)V", intent.object());
 }
 
 /**
@@ -101,18 +100,15 @@ void mediaScannerScanFile(const QString& path)
  */
 std::vector<QString> getExternalFilesDirs(jstring* type)
 {
-	auto activity = QtAndroid::androidActivity();
-	auto context = activity.callObjectMethod(
-	                   "getApplicationContext",
-	                   "()Landroid/content/Context;");
-	
+	QJniObject context { QNativeInterface::QAndroidApplication::context() };
+
 	// Get directories with synthesized permissions on all external storage volumes
 	auto external_files_dirs = context.callObjectMethod(
 	                               "getExternalFilesDirs",
 	                               "(Ljava/lang/String;)[Ljava/io/File;",
 	                               type);
 	
-	QAndroidJniEnvironment jni;
+	QJniEnvironment jni;
 	const auto length = jni->GetArrayLength(external_files_dirs.object<jarray>());
 	
 	std::vector<QString> locations;
@@ -120,7 +116,7 @@ std::vector<QString> getExternalFilesDirs(jstring* type)
 	for (auto i = 0; i < length; ++i)
 	{
 		auto location_jni = jni->GetObjectArrayElement(external_files_dirs.object<jobjectArray>(), i);
-		auto location = QAndroidJniObject{ location_jni }.toString();
+		auto location = QJniObject{ location_jni }.toString();
 		
 		const auto warning_path = QString(location + QLatin1String("/README.html"));
 		QFile warning(warning_path);
@@ -196,7 +192,7 @@ std::vector<StorageLocation> knownLocations()
 	} locations;
 	
 	// API level 1, single primary external storage
-	auto primary_storage = QAndroidJniObject::callStaticObjectMethod(
+	auto primary_storage = QJniObject::callStaticObjectMethod(
 	                           "android/os/Environment",
 	                           "getExternalStorageDirectory",
 	                           "()Ljava/io/File;",
@@ -217,7 +213,7 @@ std::vector<StorageLocation> knownLocations()
 	// Volatile: Application-specific directories on external storage.
 	// Access needs no explicit permissions.
 	std::vector<QString> external_files_dirs;
-	if (QtAndroid::androidSdkVersion() >= 19)
+	if (QNativeInterface::QAndroidApplication::sdkVersion() >= 19)
 	{
 		// API level 19
 		external_files_dirs = Android::getExternalFilesDirs(nullptr);
@@ -271,10 +267,22 @@ namespace OpenOrienteering {
 // static
 std::shared_ptr<const std::vector<StorageLocation>> StorageLocation::knownLocations()
 {
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID)
 	if (!Android::locations_cache)
 		Android::locations_cache = std::make_shared<const std::vector<StorageLocation>>(Android::knownLocations());
 	return Android::locations_cache;
+#elif defined(Q_OS_IOS)
+	// iOS: sandboxed Documents directory visible in Files app
+	auto locations = std::vector<StorageLocation>();
+	auto documents = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+	if (!documents.isEmpty())
+	{
+		QDir dir(documents);
+		if (!dir.exists())
+			dir.mkpath(QStringLiteral("."));
+		locations.emplace_back(documents, HintNormal);
+	}
+	return std::make_shared<const std::vector<StorageLocation>>(std::move(locations));
 #else
 	auto locations = std::vector<StorageLocation>();
 	auto const paths = QStandardPaths::standardLocations(QStandardPaths::DocumentsLocation);

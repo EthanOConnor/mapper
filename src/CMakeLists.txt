@@ -274,6 +274,14 @@ set(Mapper_Common_SRCS
   util/xml_stream_util.cpp
 )
 
+if(IOS)
+	enable_language(OBJCXX)
+	list(APPEND Mapper_Common_SRCS
+	  gui/ios_safe_area.mm
+	  util/ios_lifecycle.mm
+	)
+endif()
+
 # Extra header to be shown in the IDE or to be translated
 set(Mapper_Common_HEADERS
   core/image_transparency_fixup.h
@@ -336,6 +344,10 @@ target_compile_definitions(Mapper_Common PRIVATE
 target_compile_definitions(Mapper_Common INTERFACE
   MAPPER_COMMON_LIB
 )
+if(IOS)
+	find_library(UIKIT_FRAMEWORK UIKit REQUIRED)
+	target_link_libraries(Mapper_Common PRIVATE "${UIKIT_FRAMEWORK}")
+endif()
 
 
 mapper_translations_sources(${Mapper_Common_SRCS} ${Mapper_Common_HEADERS})
@@ -346,7 +358,7 @@ mapper_translations_sources(${Mapper_Common_SRCS} ${Mapper_Common_HEADERS})
 set(Mapper_SRCS
   main.cpp
 )
- 
+
 if(WIN32)
 	enable_language(RC)
 	configure_file(mingw/resources.rc.in ${CMAKE_CURRENT_BINARY_DIR}/resources.rc @ONLY)
@@ -354,11 +366,15 @@ if(WIN32)
 	list(APPEND Mapper_SRCS ${CMAKE_CURRENT_BINARY_DIR}/resources.rc)
 endif()
 
-add_executable(Mapper WIN32 MACOSX_BUNDLE ${Mapper_SRCS})
-target_compile_definitions(Mapper PRIVATE MAPPER_USE_QTSINGLEAPPLICATION)
-target_link_libraries(Mapper QtSingleApplication)
+if(ANDROID OR IOS)
+	qt_add_executable(Mapper ${Mapper_SRCS})
+else()
+	add_executable(Mapper WIN32 MACOSX_BUNDLE ${Mapper_SRCS})
+	target_compile_definitions(Mapper PRIVATE MAPPER_USE_QTSINGLEAPPLICATION)
+	target_link_libraries(Mapper PRIVATE QtSingleApplication)
+endif()
 
-target_link_libraries(Mapper
+target_link_libraries(Mapper PRIVATE
   Mapper_Common
 )
 target_compile_definitions(Mapper PRIVATE
@@ -366,7 +382,24 @@ target_compile_definitions(Mapper PRIVATE
   QT_NO_CAST_TO_ASCII
   QT_USE_QSTRINGBUILDER
 )
-if(APPLE)
+
+if(ANDROID)
+	set_target_properties(Mapper PROPERTIES
+		QT_ANDROID_PACKAGE_SOURCE_DIR "${PROJECT_SOURCE_DIR}/android"
+		QT_ANDROID_PACKAGE_NAME "org.openorienteering.mapper"
+	)
+endif()
+
+if(IOS)
+	enable_language(OBJCXX)
+	set_target_properties(Mapper PROPERTIES
+		MACOSX_BUNDLE_INFO_PLIST "${PROJECT_SOURCE_DIR}/ios/Info.plist"
+		MACOSX_BUNDLE_GUI_IDENTIFIER "org.openorienteering.mapper"
+		MACOSX_BUNDLE_BUNDLE_VERSION "${Mapper_VERSION}"
+		MACOSX_BUNDLE_SHORT_VERSION_STRING "${Mapper_VERSION}"
+		XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "org.openorienteering.mapper"
+	)
+elseif(APPLE AND NOT IOS)
 	add_custom_command(
 	  TARGET Mapper
 	  POST_BUILD
@@ -377,7 +410,7 @@ endif()
 
 install(TARGETS Mapper
   RUNTIME DESTINATION "${MAPPER_RUNTIME_DESTINATION}"
-  BUNDLE DESTINATION "${MAPPER_RUNTIME_DESTINATION}"   # macOS
+  BUNDLE DESTINATION "${MAPPER_RUNTIME_DESTINATION}"   # macOS / iOS
 )
 
 

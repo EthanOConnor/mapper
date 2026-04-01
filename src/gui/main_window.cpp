@@ -41,9 +41,15 @@
 #include <QWhatsThis>
 
 #if defined(Q_OS_ANDROID)
-#  include <QtAndroid>
+#  include <QJniObject>
+#  include <QNativeInterface>
 #  include <QScreen>
 #  include <QUrl>
+#endif
+#if defined(Q_OS_IOS)
+#  include <QScreen>
+#  include <QUrl>
+#  include "gui/ios_safe_area.h"
 #endif
 
 #include "mapper_config.h"
@@ -135,8 +141,8 @@ MainWindow::MainWindow(bool as_main_window, QWidget* parent, Qt::WindowFlags fla
 	if (as_main_window)
 		loadWindowSettings();
 	
-#if defined(Q_OS_ANDROID)
-	// Needed to catch Qt::Key_Back, cf. MainWindow::eventFilter()
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+	// Needed to catch Qt::Key_Back on Android, cf. MainWindow::eventFilter()
 	qApp->installEventFilter(this);
 #else
 	installEventFilter(this);
@@ -181,11 +187,11 @@ void MainWindow::updateToastEnabled()
 
 void MainWindow::applicationStateChanged()
 {
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID)
 	// The Android app may be started or resumed when the user triggers a suitable "intent".
 	if (QGuiApplication::applicationState() == Qt::ApplicationActive)
 	{
-		auto activity = QtAndroid::androidActivity();
+		auto activity = QJniObject(QNativeInterface::QAndroidApplication::context());
 		auto intent_path = activity.callObjectMethod<jstring>("takeIntentPath").toString();
 		if (!intent_path.isEmpty())
 		{
@@ -771,9 +777,9 @@ bool MainWindow::showSaveOnCloseDialog()
 
 void MainWindow::saveWindowSettings()
 {
-#if !defined(Q_OS_ANDROID)
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
 	QSettings settings;
-	
+
 	settings.beginGroup(QString::fromLatin1("MainWindow"));
 	settings.setValue(QString::fromLatin1("pos"), pos());
 	settings.setValue(QString::fromLatin1("size"), size());
@@ -784,8 +790,8 @@ void MainWindow::saveWindowSettings()
 
 void MainWindow::loadWindowSettings()
 {
-#if defined(Q_OS_ANDROID)
-	// Always show the window on the whole available area on Android
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+	// Always show the window on the whole available area on mobile
 	if (auto* screen = QGuiApplication::primaryScreen())
 		resize(screen->availableGeometry().size());
 #else
@@ -917,7 +923,7 @@ bool MainWindow::openPath(const QString& path, const FileFormat* format)
 	if (path.isEmpty())
 		return true;
 	
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
 	showStatusBarMessageImmediately(tr("Opening %1").arg(QFileInfo(path).fileName()));
 #else
 	MainWindow* const existing = findMainWindow(path);
@@ -968,7 +974,7 @@ bool MainWindow::openPath(const QString& path, const FileFormat* format)
 	bool new_autosave_conflict = QFileInfo::exists(autosave_path);
 	if (new_autosave_conflict)
 	{
-#if defined(Q_OS_ANDROID)
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
 		// Assuming small screen, showing dialog before opening the file
 		AutosaveDialog* autosave_dialog = new AutosaveDialog(path, autosave_path, autosave_path, this);
 		int result = autosave_dialog->exec();
@@ -990,7 +996,7 @@ bool MainWindow::openPath(const QString& path, const FileFormat* format)
 	}
 	
 	MainWindow* open_window = this;
-#if !defined(Q_OS_ANDROID)
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
 	if (has_opened_file)
 		open_window = new MainWindow();
 #endif
@@ -1008,8 +1014,8 @@ bool MainWindow::openPath(const QString& path, const FileFormat* format)
 	settings.remove(reopen_blocker);
 	setMostRecentlyUsedFile(path);
 	
-#if !defined(Q_OS_ANDROID)
-	// Assuming large screen. Android handled above.
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
+	// Assuming large screen. Mobile handled above.
 	if (new_autosave_conflict)
 	{
 		auto autosave_dialog = new AutosaveDialog(path, autosave_path, new_actual_path, open_window, Qt::WindowTitleHint | Qt::CustomizeWindowHint);

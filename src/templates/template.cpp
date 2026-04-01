@@ -55,8 +55,10 @@
 #include "core/map.h"
 #include "core/objects/object.h"
 #include "fileformats/file_format.h"
+#ifdef MAPPER_USE_GDAL
 #include "gdal/gdal_template.h"
 #include "gdal/ogr_template.h"
+#endif
 #include "gui/file_dialog.h"
 #include "templates/template_image.h"
 #include "templates/template_map.h"

@@ -105,7 +105,7 @@ void fillTableRow(QTableWidget * table, int row, QColor color)
 
 QColor spawnColorDialog(const QColor &initial = Qt::white, QWidget *parent = nullptr)
 {
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
 	        return ColorWheelDialog::getColor(initial, parent);
 #else
 	        return QColorDialog::getColor(initial, parent);

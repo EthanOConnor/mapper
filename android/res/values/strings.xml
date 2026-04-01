@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">OpenOrienteering Mapper</string>
+    <string name="notification_channel_name">Mapper Background Service</string>
+    <string name="notification_channel_description">Keeps Mapper alive for map saving and GPX recording</string>
+</resources>

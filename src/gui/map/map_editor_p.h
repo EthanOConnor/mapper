@@ -58,7 +58,7 @@ private:
 	QAction* action;
 	MapEditorController* editor;
 	
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
 	QSizeGrip* size_grip;
 #endif
 };
