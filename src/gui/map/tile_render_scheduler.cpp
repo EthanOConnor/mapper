@@ -40,6 +40,10 @@ TileRenderScheduler::TileRenderScheduler(QObject* parent)
 
 TileRenderScheduler::~TileRenderScheduler()
 {
+	// Drain all in-flight renders before shutdown so workers don't
+	// access map/template data that may be destroyed after us.
+	cancelPending();
+
 	stopping.store(true, std::memory_order_release);
 	queue_cv.notify_all();
 	for (auto& w : workers)
