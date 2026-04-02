@@ -55,6 +55,8 @@ namespace OpenOrienteering {
 class ActionGridBar;
 class CompassDisplay;
 class EditorDockWidget;
+class GnssSession;
+class GnssStatusOverlay;
 class FileFormat;
 class GPSDisplay;
 class GPSTemporaryMarkers;
@@ -830,6 +832,10 @@ private:
 	CompassDisplay* compass_display;
 	QAction* align_map_with_north_act = {};
 	QTimer align_map_with_north_timer;
+
+	// GNSS/RTK
+	GnssSession* gnss_session = nullptr;
+	GnssStatusOverlay* gnss_status_overlay = nullptr;
 	
 	QAction* mappart_add_act = {};
 	QAction* mappart_rename_act = {};

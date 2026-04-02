@@ -138,6 +138,19 @@
 #include "gui/widgets/symbol_widget.h"
 #include "gui/widgets/tags_widget.h"
 #include "gui/widgets/template_list_widget.h"
+#include "gnss/gnss_session.h"
+#include "gnss/gnss_state.h"
+#include "gnss/transport/ble_device_model.h"
+#include "gnss/ui/gnss_detail_panel.h"
+#include "gnss/ui/gnss_device_dialog.h"
+#include "gnss/ui/gnss_status_overlay.h"
+
+#if defined(MAPPER_GNSS_BLE_COREBLUETOOTH)
+#  include "gnss/transport/ble_transport_corebluetooth.h"
+#  include "gnss/transport/ble_scanner_corebluetooth.h"
+#elif defined(MAPPER_GNSS_BLE)
+#  include "gnss/transport/ble_transport.h"
+#endif
 #include "sensors/compass.h"
 #include "sensors/gps_display.h"
 #include "sensors/gps_temporary_markers.h"
@@ -303,6 +316,8 @@ MapEditorController::MapEditorController(OperatingMode mode, Map* map, MapView* 
 	gps_track_recorder = nullptr;
 	compass_display = nullptr;
 	gps_marker_display = nullptr;
+	gnss_session = nullptr;
+	gnss_status_overlay = nullptr;
 	
 	actionsById[""] = new QAction(this); // dummy action
 	
@@ -336,6 +351,8 @@ MapEditorController::~MapEditorController()
 	delete mappart_move_menu;
 	if (mappart_selector_box)
 		delete mappart_selector_box;
+	delete gnss_status_overlay;
+	delete gnss_session;
 	delete gps_display;
 	delete gps_track_recorder;
 	delete compass_display;
@@ -813,6 +830,16 @@ void MapEditorController::attach(MainWindow* window)
 			createMobileGUI();
 			compass_display = new CompassDisplay(map_widget->parentWidget());
 			compass_display->setVisible(false);
+			gnss_status_overlay = new GnssStatusOverlay(map_widget->parentWidget());
+			gnss_status_overlay->setVisible(false);
+			connect(gnss_status_overlay, &GnssStatusOverlay::clicked, this, [this]() {
+				if (gnss_session)
+				{
+					auto* panel = new GnssDetailPanel();
+					panel->updateState(gnss_session->currentState());
+					showPopupWidget(panel, tr("GNSS Details"));
+				}
+			});
 		}
 		else
 		{
@@ -1694,6 +1721,10 @@ void MapEditorController::detach()
 	else if (nullptr != symbol_widget)
 		delete symbol_widget;
 	
+	delete gnss_status_overlay;
+	gnss_status_overlay = nullptr;
+	delete gnss_session;
+	gnss_session = nullptr;
 	delete gps_display;
 	gps_display = nullptr;
 	delete gps_track_recorder;
@@ -3604,8 +3635,100 @@ void MapEditorController::enableGPSDisplay(bool enable)
 {
 	if (enable)
 	{
+		// Check if we should use an external GNSS session
+		auto const& settings = Settings::getInstance();
+		auto const source = settings.positionSource();
+		if (source == QLatin1String("external_ble")
+		    || source == QLatin1String("external_ble_ntrip"))
+		{
+			// Create GNSS session if needed
+			if (!gnss_session)
+			{
+				gnss_session = new GnssSession(this);
+				gnss_session->setAutoReconnect(true);
+				gps_display->setGnssSession(gnss_session);
+				if (gnss_status_overlay)
+				{
+					connect(gnss_session, &GnssSession::stateChanged,
+					        gnss_status_overlay, &GnssStatusOverlay::updateState);
+				}
+			}
+
+			// Show BLE device picker if no transport is set yet
+			if (!gnss_session->isActive())
+			{
+#if defined(MAPPER_GNSS_BLE_COREBLUETOOTH) || defined(MAPPER_GNSS_BLE)
+				auto* model = new BleDeviceModel(this);
+				auto* dialog = new GnssDeviceDialog(window);
+				dialog->setDeviceModel(model);
+
+#if defined(MAPPER_GNSS_BLE_COREBLUETOOTH)
+				auto* scanner = new BleScannerCoreBluetooth(model, dialog);
+				scanner->startScan();
+#endif
+
+				connect(dialog, &GnssDeviceDialog::deviceSelected, this, [this, model, dialog
+#if defined(MAPPER_GNSS_BLE_COREBLUETOOTH)
+				        , scanner
+#endif
+				](int index) {
+					auto const& device = model->deviceAt(index);
+					dialog->showConnecting(device.name);
+#if defined(MAPPER_GNSS_BLE_COREBLUETOOTH)
+					// Use the SAME CBCentralManager for scanning AND connecting
+					scanner->connectToDevice(device.address, device.name);
+#endif
+				});
+
+#if defined(MAPPER_GNSS_BLE_COREBLUETOOTH)
+				// Scanner signals for connection lifecycle
+				connect(scanner, &BleScannerCoreBluetooth::deviceConnected, dialog,
+				        [this, dialog, scanner](const QString& name) {
+					dialog->showConnected(name, {});
+
+					// Wire scanner's data into the GNSS session parsers
+					connect(scanner, &BleScannerCoreBluetooth::dataReceived,
+					        gnss_session, [this](const QByteArray& data) {
+						gnss_session->feedData(data);
+					});
+				});
+
+				connect(scanner, &BleScannerCoreBluetooth::deviceConnectionFailed, dialog,
+				        [dialog](const QString& error) {
+					dialog->showScanPage(error);
+				});
+#endif
+
+				connect(dialog, &GnssDeviceDialog::cancelConnection, this, [this, dialog] {
+					dialog->showScanPage();
+				});
+
+				connect(dialog, &GnssDeviceDialog::dialogCompleted, dialog, &QDialog::deleteLater);
+				connect(dialog, &QDialog::rejected, dialog, &QDialog::deleteLater);
+
+				dialog->show();
+#endif
+			}
+		}
+
 		gps_display->startUpdates();
-		
+
+		// Show GNSS status overlay if session is active
+		if (gnss_session && gnss_status_overlay)
+		{
+			auto size = gnss_status_overlay->sizeHint();
+			// Position at top-right of map widget area
+			auto parent = gnss_status_overlay->parentWidget();
+			if (parent)
+			{
+				int x = parent->width() - size.width() - 4;
+				int y = (top_action_bar && top_action_bar->isVisible())
+				        ? top_action_bar->height() + 4 : 4;
+				gnss_status_overlay->setGeometry(x, y, size.width(), size.height());
+			}
+			gnss_status_overlay->show();
+		}
+
 		// Create gps_track_recorder if we can determine a template track filename
 		constexpr int gps_track_draw_update_interval = 10 * 1000; // in milliseconds
 		if (! window->currentPath().isEmpty())
@@ -3669,12 +3792,23 @@ void MapEditorController::enableGPSDisplay(bool enable)
 	else
 	{
 		gps_display->stopUpdates();
-		
+
 		delete gps_track_recorder;
 		gps_track_recorder = nullptr;
+
+		// Clean up GNSS session
+		if (gnss_session)
+		{
+			gnss_session->stop();
+			gps_display->setGnssSession(nullptr);
+			delete gnss_session;
+			gnss_session = nullptr;
+		}
+		if (gnss_status_overlay)
+			gnss_status_overlay->hide();
 	}
 	gps_display->setVisible(enable);
-	
+
 	if (! enable)
 	{
 		gps_marker_display->stopPath();

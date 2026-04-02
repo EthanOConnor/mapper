@@ -49,9 +49,15 @@
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Mapper uses your location for GPS track recording.</string>
 
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Mapper connects to external GNSS receivers via Bluetooth for high-accuracy positioning.</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>Mapper connects to external GNSS receivers via Bluetooth for high-accuracy positioning.</string>
+
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>
+		<string>bluetooth-central</string>
 	</array>
 
 	<key>UIFileSharingEnabled</key>

@@ -23,6 +23,7 @@
 #define OPENORIENTEERING_TRACK_H
 
 #include <cmath>
+#include <cstdint>
 #include <vector>
 
 #include <QDateTime>
@@ -49,6 +50,7 @@ struct TrackPoint
 	QDateTime datetime  = {};       // QDateTime() when invalid
 	float elevation     = NAN;      // NaN when invalid
 	float hDOP          = NAN;      // NaN when invalid
+	std::uint8_t fixType = 0;      // 0=unknown, matches GnssFixType values
 	MapCoordF map_coord = {};
 	
 	// Default special member functions are fine.

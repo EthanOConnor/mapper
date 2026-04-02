@@ -156,6 +156,7 @@ target_compile_definitions(mapper-sensors  ${MAPPER_SENSORS_DEFINITIONS})
 target_include_directories(mapper-sensors  PRIVATE "${PROJECT_SOURCE_DIR}/src")
 target_link_libraries(mapper-sensors
   PUBLIC
+    mapper-gnss
     nmea_position_source
     powershell_position_source
     Qt6::Core

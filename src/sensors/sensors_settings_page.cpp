@@ -138,7 +138,28 @@ void SensorsSettingsPage::updateWidgets()
 	{
 		add_position_source(source);
 	}
-	
+
+	// External GNSS receiver options
+	position_source_box->addItem(tr("External Receiver (BLE)"), QLatin1String("external_ble"));
+	if (current_source_name == QLatin1String("external_ble"))
+		position_source_box->setCurrentIndex(position_source_box->count()-1);
+
+	position_source_box->addItem(tr("External Receiver + NTRIP"), QLatin1String("external_ble_ntrip"));
+	if (current_source_name == QLatin1String("external_ble_ntrip"))
+		position_source_box->setCurrentIndex(position_source_box->count()-1);
+
+#ifdef MAPPER_GNSS_SPP
+	position_source_box->addItem(tr("External Receiver (Bluetooth Classic)"), QLatin1String("external_spp"));
+	if (current_source_name == QLatin1String("external_spp"))
+		position_source_box->setCurrentIndex(position_source_box->count()-1);
+#endif
+
+#ifdef MAPPER_GNSS_SERIAL
+	position_source_box->addItem(tr("External Receiver (USB Serial)"), QLatin1String("external_serial"));
+	if (current_source_name == QLatin1String("external_serial"))
+		position_source_box->setCurrentIndex(position_source_box->count()-1);
+#endif
+
 #ifdef QT_SERIALPORT_LIB
 	if (nmea_serialport_box)
 	{

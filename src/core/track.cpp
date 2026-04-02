@@ -59,6 +59,8 @@ void TrackPoint::save(QXmlStreamWriter* stream) const
 		stream->writeTextElement(QStringLiteral("ele"), QString::number(static_cast<qreal>(elevation), 'f', 3));
 	if (!qIsNaN(hDOP))
 		stream->writeTextElement(QStringLiteral("hdop"), QString::number(static_cast<qreal>(hDOP), 'f', 3));
+	if (fixType > 0)
+		stream->writeTextElement(QStringLiteral("fix"), QString::number(fixType));
 }
 
 bool operator==(const TrackPoint& lhs, const TrackPoint& rhs)
@@ -71,7 +73,8 @@ bool operator==(const TrackPoint& lhs, const TrackPoint& rhs)
 	       && lhs.map_coord == rhs.map_coord
 	       && lhs.datetime == rhs.datetime
 	       && fuzzyCompare(lhs.elevation, rhs.elevation)
-	       && fuzzyCompare(lhs.hDOP, rhs.hDOP);
+	       && fuzzyCompare(lhs.hDOP, rhs.hDOP)
+	       && lhs.fixType == rhs.fixType;
 }
 
 

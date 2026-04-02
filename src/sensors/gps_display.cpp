@@ -55,6 +55,10 @@
 #include "sensors/compass.h"
 #include "util/backports.h"  // IWYU pragma: keep
 
+#include "gnss/gnss_position.h"
+#include "gnss/gnss_position_source.h"
+#include "gnss/gnss_session.h"
+
 #if defined(MAPPER_USE_FAKE_POSITION_PLUGIN)
 #include "sensors/fake_position_source.h"
 #endif
@@ -184,8 +188,35 @@ bool GPSDisplay::checkGPSEnabled()
 	return true;
 }
 
+void GPSDisplay::setGnssSession(GnssSession* session)
+{
+	if (session)
+	{
+		// Create the position source bridge if needed
+		if (!gnss_source)
+		{
+			gnss_source = new GnssPositionSource(this);
+			connect(gnss_source, &GnssPositionSource::positionUpdated,
+			        this, &GPSDisplay::gnssPositionUpdated);
+			connect(gnss_source, &GnssPositionSource::positionLost,
+			        this, &GPSDisplay::gnssPositionLost);
+		}
+		gnss_source->setSession(session);
+	}
+	else if (gnss_source)
+	{
+		gnss_source->setSession(nullptr);
+	}
+}
+
+
 void GPSDisplay::startUpdates()
 {
+	if (gnss_source && gnss_source->session())
+	{
+		// GNSS session is active — it manages its own start/stop
+		return;
+	}
 #if defined(QT_POSITIONING_LIB)
 	if (source)
 	{
@@ -197,6 +228,12 @@ void GPSDisplay::startUpdates()
 
 void GPSDisplay::stopUpdates()
 {
+	if (gnss_source && gnss_source->session())
+	{
+		has_valid_position = false;
+		gnss_fix_type = 0;
+		return;
+	}
 #if defined(QT_POSITIONING_LIB)
 	if (source)
 	{
@@ -252,9 +289,23 @@ void GPSDisplay::paint(QPainter* painter)
 	const auto opacity = painter->opacity();
 	painter->setOpacity(pulsating_opacity.current() * opacity);
 	
-	// Highlight markers by white framing.
+	// Color by fix type when using GNSS session, otherwise original behavior.
 	const auto framing = QColor(Qt::white);
-	const auto foreground = QColor(tracking_lost ? Qt::gray : Qt::red);
+	QColor foreground;
+	if (tracking_lost)
+		foreground = QColor(Qt::gray);
+	else if (gnss_fix_type >= 5)   // RtkFixed
+		foreground = QColor(0x22, 0x7C, 0xE8);  // blue
+	else if (gnss_fix_type == 4)   // RtkFloat
+		foreground = QColor(0xED, 0x9A, 0x14);  // amber
+	else if (gnss_fix_type == 3)   // DGPS
+		foreground = QColor(0x00, 0x96, 0x88);  // teal
+	else if (gnss_fix_type >= 1)   // Fix2D or Fix3D
+		foreground = QColor(Qt::red);
+	else if (gnss_fix_type == 0 && gnss_source && gnss_source->session())
+		foreground = QColor(Qt::gray);           // GNSS active but no fix
+	else
+		foreground = QColor(Qt::red);            // default (Qt positioning)
 	
 	// Draw center dot or arrow
 	if (heading_indicator_enabled)
@@ -326,17 +377,53 @@ void GPSDisplay::paint(QPainter* painter)
 		}
 	}
 	
-	// Draw accuracy circle
-	if (latest_gps_coord_accuracy >= 0)
+	// Draw accuracy circle or P95 error ellipse
+	if (gnss_ellipse_available)
+	{
+		// Draw P95 error ellipse from covariance matrix
+		const auto major_pixels = qreal(gnss_ellipse_semi_major) * meters_to_pixels;
+		const auto minor_pixels = qreal(gnss_ellipse_semi_minor) * meters_to_pixels;
+		// Orientation is from North clockwise; add map rotation
+		const auto rotation_deg = qreal(gnss_ellipse_orientation)
+		                          + qRadiansToDegrees(widget->getMapView()->getRotation());
+
+		painter->save();
+		painter->translate(gps_pos);
+		painter->rotate(rotation_deg);
+
+		// Semi-transparent fill
+		auto fill_color = foreground;
+		fill_color.setAlpha(30);
+		painter->setBrush(fill_color);
+		painter->setPen(QPen(framing, mmToPixelLogical(0.5)));
+		painter->drawEllipse(QPointF(0, 0), major_pixels, minor_pixels);
+		painter->setPen(QPen(foreground, mmToPixelLogical(0.3)));
+		painter->drawEllipse(QPointF(0, 0), major_pixels, minor_pixels);
+
+		painter->restore();
+	}
+	else if (latest_gps_coord_accuracy >= 0)
 	{
 		const auto accuracy_pixels = qreal(latest_gps_coord_accuracy) * meters_to_pixels;
-		painter->setBrush(Qt::NoBrush);
+
+		// Semi-transparent fill for P95 circle when using GNSS
+		if (gnss_fix_type > 0)
+		{
+			auto fill_color = foreground;
+			fill_color.setAlpha(30);
+			painter->setBrush(fill_color);
+		}
+		else
+		{
+			painter->setBrush(Qt::NoBrush);
+		}
+
 		painter->setPen(QPen(framing, mmToPixelLogical(1)));
 		painter->drawEllipse(gps_pos, accuracy_pixels, accuracy_pixels);
 		painter->setPen(QPen(foreground, mmToPixelLogical(0.5)));
 		painter->drawEllipse(gps_pos, accuracy_pixels, accuracy_pixels);
 	}
-	
+
 	painter->setOpacity(opacity);
 	painter->setRenderHints(QPainter::Antialiasing);
 }
@@ -392,6 +479,59 @@ void GPSDisplay::positionUpdated(const QGeoPositionInfo& info)
 	updateMapWidget();
 #endif
 }
+
+void GPSDisplay::gnssPositionUpdated(const GnssPosition& position)
+{
+	gps_updated = true;
+	tracking_lost = false;
+	has_valid_position = position.valid;
+
+	// Store GNSS-specific data for enhanced rendering
+	gnss_fix_type = static_cast<std::uint8_t>(position.fixType);
+	gnss_h_accuracy_p95 = position.hAccuracyP95;
+	gnss_latitude = position.latitude;
+	gnss_longitude = position.longitude;
+	gnss_altitude = std::isnan(position.altitudeMsl) ? -9999.0 : position.altitudeMsl;
+
+	// Store P95 ellipse data
+	gnss_ellipse_available = position.ellipseAvailable;
+	if (position.ellipseAvailable)
+	{
+		gnss_ellipse_semi_major = position.ellipseSemiMajorP95;
+		gnss_ellipse_semi_minor = position.ellipseSemiMinorP95;
+		gnss_ellipse_orientation = position.ellipseOrientationDeg;
+	}
+
+	// Use P95 accuracy for the circle, fall back to reported accuracy
+	latest_gps_coord_accuracy = !std::isnan(position.hAccuracyP95)
+	    ? position.hAccuracyP95
+	    : (!std::isnan(position.hAccuracy) ? position.hAccuracy : -1.0f);
+
+	// Convert to map coordinates
+	LatLon latlon(position.latitude, position.longitude);
+	bool ok = false;
+	latest_gps_coord = georeferencing.toMapCoordF(latlon, &ok);
+	if (ok)
+	{
+		gps_updated = false;
+		emit mapPositionUpdated(latest_gps_coord, latest_gps_coord_accuracy);
+		emit latLonUpdated(position.latitude, position.longitude, gnss_altitude, latest_gps_coord_accuracy);
+	}
+
+	updateMapWidget();
+}
+
+
+void GPSDisplay::gnssPositionLost()
+{
+	if (!tracking_lost)
+	{
+		tracking_lost = true;
+		emit positionUpdatesInterrupted();
+		updateMapWidget();
+	}
+}
+
 
 void GPSDisplay::errorOccurred(QGeoPositionInfoSource::Error positioningError)
 {

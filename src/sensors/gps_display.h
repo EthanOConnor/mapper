@@ -22,6 +22,8 @@
 #ifndef OPENORIENTEERING_GPS_DISPLAY_H
 #define OPENORIENTEERING_GPS_DISPLAY_H
 
+#include <cstdint>
+
 #include <QtGlobal>
 #include <QObject>
 #include <QString>
@@ -40,6 +42,9 @@ class QTimerEvent;
 namespace OpenOrienteering {
 
 class Georeferencing;
+class GnssPosition;
+class GnssPositionSource;
+class GnssSession;
 class MapWidget;
 
 
@@ -94,15 +99,22 @@ public:
 	/// Returns the accuracy of the latest received GPS coord, or -1 if unknown. Check hasValidPosition() beforehand!
 	float getLatestGPSCoordAccuracy() const { return latest_gps_coord_accuracy; }
 	
+	/// Sets a GnssSession as the position source, replacing QGeoPositionInfoSource.
+	/// Pass nullptr to revert to the default Qt positioning source.
+	void setGnssSession(GnssSession* session);
+
+	/// Returns the current GNSS fix type (0 = unknown/not using GNSS).
+	std::uint8_t currentFixType() const { return gnss_fix_type; }
+
 	/// Starts quick blinking for one or more seconds.
 	void startBlinking(int seconds);
-	
+
 	/// Stops blinking.
 	void stopBlinking();
-	
+
 	/// Returns true while blinking is active.
 	bool isBlinking() const { return blink_count > 0; }
-	
+
 protected:
 	/// Handles blinking.
 	void timerEvent(QTimerEvent* e) override;
@@ -124,6 +136,8 @@ signals:
 	
 private slots:
     void positionUpdated(const QGeoPositionInfo& info);
+	void gnssPositionUpdated(const OpenOrienteering::GnssPosition& position);
+	void gnssPositionLost();
 #if defined(QT_POSITIONING_LIB)
 	void errorOccurred(QGeoPositionInfoSource::Error positioningError);
 #endif
@@ -175,6 +189,18 @@ private:
 	bool visible                   = false;
 	bool distance_rings_enabled    = false;
 	bool heading_indicator_enabled = false;
+
+	// GNSS session integration
+	GnssPositionSource* gnss_source = nullptr;  // owned
+	std::uint8_t gnss_fix_type = 0;
+	float gnss_h_accuracy_p95 = -1;
+	float gnss_ellipse_semi_major = -1;
+	float gnss_ellipse_semi_minor = -1;
+	float gnss_ellipse_orientation = 0;
+	bool gnss_ellipse_available = false;
+	double gnss_latitude = 0;
+	double gnss_longitude = 0;
+	double gnss_altitude = -9999;
 };
 
 

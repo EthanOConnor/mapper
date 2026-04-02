@@ -193,6 +193,28 @@ public:
 	void setPositionSource(const QString& name);
 	
 	
+
+	// --- GNSS/RTK settings ---
+
+	QString gnssDeviceAddress() const { return gnss.ble_device_address; }
+	void setGnssDeviceAddress(const QString& address);
+
+	QString gnssDeviceName() const { return gnss.ble_device_name; }
+	void setGnssDeviceName(const QString& name);
+
+	QString gnssNtripActiveProfile() const { return gnss.ntrip_active_profile; }
+	void setGnssNtripActiveProfile(const QString& name);
+
+	bool gnssAutoConnect() const { return gnss.auto_connect; }
+	void setGnssAutoConnect(bool enable);
+
+	bool gnssAutoStartNtrip() const { return gnss.auto_start_ntrip; }
+	void setGnssAutoStartNtrip(bool enable);
+
+	bool gnssRawLogging() const { return gnss.raw_logging; }
+	void setGnssRawLogging(bool enable);
+
+
 	/**
 	 * Returns the name of the serial port for reading NMEA data.
 	 * 
@@ -245,6 +267,15 @@ private:
 		QString position_source = {};
 		QString nmea_serialport = {};
 	} sensors;
+
+	struct {
+		QString ble_device_address;
+		QString ble_device_name;
+		QString ntrip_active_profile;
+		bool auto_connect = false;
+		bool auto_start_ntrip = false;
+		bool raw_logging = false;
+	} gnss;
 	
 #if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
 	bool touch_mode_enabled = false;

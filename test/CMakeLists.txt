@@ -215,6 +215,11 @@ if(TARGET mapper-sensors)
 	endforeach()
 endif()
 
+if(TARGET mapper-gnss)
+	add_system_test(gnss_protocol_t)
+	target_link_libraries(gnss_protocol_t PRIVATE mapper-gnss)
+endif()
+
 # Collect the AUTORUN_TESTS
 get_property(Mapper_AUTORUN_TESTS DIRECTORY PROPERTY Mapper_AUTORUN_TESTS)
 if(Mapper_AUTORUN_TESTS)

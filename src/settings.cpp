@@ -179,7 +179,14 @@ Settings::Settings()
 	
 	sensors.position_source = settings.value(QLatin1String("Sensors/position_source"), sensors.position_source).toString();
 	sensors.nmea_serialport = settings.value(QLatin1String("Sensors/nmea_serialport"), sensors.nmea_serialport).toString();
-	
+
+	gnss.ble_device_address = settings.value(QLatin1String("Gnss/ble_device_address")).toString();
+	gnss.ble_device_name = settings.value(QLatin1String("Gnss/ble_device_name")).toString();
+	gnss.ntrip_active_profile = settings.value(QLatin1String("Gnss/ntrip_active_profile")).toString();
+	gnss.auto_connect = settings.value(QLatin1String("Gnss/auto_connect"), false).toBool();
+	gnss.auto_start_ntrip = settings.value(QLatin1String("Gnss/auto_start_ntrip"), false).toBool();
+	gnss.raw_logging = settings.value(QLatin1String("Gnss/raw_logging"), false).toBool();
+
 	// Migrate old settings
 	static bool migration_checked = false;
 	if (!migration_checked)
@@ -401,6 +408,62 @@ void Settings::setNmeaSerialPort(const QString& name)
 		emit settingsChanged();
 	}
 }
+
+
+void Settings::setGnssDeviceAddress(const QString& address)
+{
+	if (address != gnss.ble_device_address)
+	{
+		gnss.ble_device_address = address;
+		QSettings().setValue(QLatin1String("Gnss/ble_device_address"), address);
+	}
+}
+
+void Settings::setGnssDeviceName(const QString& name)
+{
+	if (name != gnss.ble_device_name)
+	{
+		gnss.ble_device_name = name;
+		QSettings().setValue(QLatin1String("Gnss/ble_device_name"), name);
+	}
+}
+
+void Settings::setGnssNtripActiveProfile(const QString& name)
+{
+	if (name != gnss.ntrip_active_profile)
+	{
+		gnss.ntrip_active_profile = name;
+		QSettings().setValue(QLatin1String("Gnss/ntrip_active_profile"), name);
+	}
+}
+
+void Settings::setGnssAutoConnect(bool enable)
+{
+	if (enable != gnss.auto_connect)
+	{
+		gnss.auto_connect = enable;
+		QSettings().setValue(QLatin1String("Gnss/auto_connect"), enable);
+	}
+}
+
+void Settings::setGnssAutoStartNtrip(bool enable)
+{
+	if (enable != gnss.auto_start_ntrip)
+	{
+		gnss.auto_start_ntrip = enable;
+		QSettings().setValue(QLatin1String("Gnss/auto_start_ntrip"), enable);
+	}
+}
+
+void Settings::setGnssRawLogging(bool enable)
+{
+	if (enable != gnss.raw_logging)
+	{
+		gnss.raw_logging = enable;
+		QSettings().setValue(QLatin1String("Gnss/raw_logging"), enable);
+	}
+}
+
 
 std::vector<QColor> Settings::colorsStringToVector(QString config_string)
 {
