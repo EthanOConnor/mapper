@@ -51,8 +51,8 @@ public:
 	/// Set the device model for scan results.
 	void setDeviceModel(BleDeviceModel* model);
 
-	/// Switch to connecting page with device name.
-	void showConnecting(const QString& deviceName);
+	/// Switch to connecting page with device name and attempt counter.
+	void showConnecting(const QString& deviceName, int attempt = 0, int maxAttempts = 0);
 
 	/// Switch to connected page with receiver info.
 	void showConnected(const QString& deviceName, const QString& firmware);
@@ -89,6 +89,7 @@ private:
 	QLabel* connected_device_label;
 	QLabel* firmware_label;
 	QPushButton* done_button;
+	QString m_connectingDeviceName;
 };
 
 

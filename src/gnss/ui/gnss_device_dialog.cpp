@@ -48,9 +48,16 @@ void GnssDeviceDialog::setDeviceModel(BleDeviceModel* model)
 }
 
 
-void GnssDeviceDialog::showConnecting(const QString& deviceName)
+void GnssDeviceDialog::showConnecting(const QString& deviceName, int attempt, int maxAttempts)
 {
-	connecting_label->setText(deviceName);
+	if (!deviceName.isEmpty())
+		m_connectingDeviceName = deviceName;
+	QString text = m_connectingDeviceName;
+	if (attempt > 0 && maxAttempts > 0)
+		text += QStringLiteral("\n\nConnecting — attempt %1 of %2...").arg(attempt).arg(maxAttempts);
+	else
+		text += QStringLiteral("\n\nConnecting...");
+	connecting_label->setText(text);
 	stack->setCurrentWidget(connecting_page);
 }
 

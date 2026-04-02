@@ -3663,7 +3663,7 @@ void MapEditorController::enableGPSDisplay(bool enable)
 				dialog->setDeviceModel(model);
 
 #if defined(MAPPER_GNSS_BLE_COREBLUETOOTH)
-				auto* scanner = new BleScannerCoreBluetooth(model, dialog);
+				auto* scanner = new BleScannerCoreBluetooth(model, this);
 				scanner->startScan();
 #endif
 
@@ -3693,13 +3693,25 @@ void MapEditorController::enableGPSDisplay(bool enable)
 					});
 				});
 
+				connect(scanner, &BleScannerCoreBluetooth::connectionRetrying, dialog,
+				        [dialog](int attempt, int maxAttempts) {
+					dialog->showConnecting({}, attempt, maxAttempts);
+				});
+
 				connect(scanner, &BleScannerCoreBluetooth::deviceConnectionFailed, dialog,
 				        [dialog](const QString& error) {
 					dialog->showScanPage(error);
 				});
 #endif
 
-				connect(dialog, &GnssDeviceDialog::cancelConnection, this, [this, dialog] {
+				connect(dialog, &GnssDeviceDialog::cancelConnection, this, [this, dialog
+#if defined(MAPPER_GNSS_BLE_COREBLUETOOTH)
+				        , scanner
+#endif
+				] {
+#if defined(MAPPER_GNSS_BLE_COREBLUETOOTH)
+					scanner->stopScan();
+#endif
 					dialog->showScanPage();
 				});
 

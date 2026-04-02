@@ -52,6 +52,8 @@ public:
 
 	/// Connect to a discovered device by UUID.
 	/// Stops scanning, connects, discovers NUS service, subscribes to TX.
+	/// If the device advertises an L2CAP PSM, opens an L2CAP channel for
+	/// higher-throughput data flow (falls back to NUS if unavailable).
 	/// Emits deviceConnected() when ready for data flow.
 	void connectToDevice(const QString& uuid, const QString& name);
 
@@ -61,6 +63,7 @@ public:
 	void didConnect();
 	void didFailToConnect(const QString& error);
 	void didDisconnect(const QString& error);
+	void didRetryConnect(int attempt, int maxAttempts);
 	void didBecomeReady();   // NUS service found, TX subscribed
 	void didReceiveData(const QByteArray& data);
 	void didWriteData(int bytesWritten);
@@ -70,6 +73,7 @@ signals:
 	void scanningChanged(bool scanning);
 	void deviceConnected(const QString& name);
 	void deviceConnectionFailed(const QString& error);
+	void connectionRetrying(int attempt, int maxAttempts);
 	void dataReceived(const QByteArray& data);
 	void writeComplete(int bytesWritten);
 
