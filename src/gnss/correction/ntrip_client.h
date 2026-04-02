@@ -80,11 +80,22 @@ public:
 	/// Called by GnssSession when a new position is available.
 	void setGgaSentence(const QByteArray& gga);
 
+	/// Track bytes forwarded to receiver (called by GnssSession after write).
+	void addBytesSentToReceiver(qint64 bytes) { m_totalBytesSent += bytes; }
+
 	// -- Health metrics --
 	float dataRate() const { return m_dataRate; }            ///< bytes/sec, smoothed
 	float correctionAge() const;                             ///< seconds since last data
 	int reconnectCount() const { return m_reconnectCount; }
 	const QString& mountpoint() const { return m_profile.mountpoint; }
+	int ggaSentCount() const { return m_ggaSentCount; }
+	qint64 totalBytesReceived() const { return m_totalBytesReceived; }
+	qint64 totalBytesSentToReceiver() const { return m_totalBytesSent; }
+
+	/// Negotiated NTRIP version string ("v1", "v2", or "v2 chunked")
+	const QString& negotiatedVersion() const { return m_negotiatedVersion; }
+	/// Server implementation from response headers (e.g., "NTRIP Earthscope Kafka Caster/2.0")
+	const QString& serverString() const { return m_serverString; }
 
 signals:
 	/// RTCM correction bytes received from the caster.
@@ -112,6 +123,8 @@ private:
 	void sendGga();
 	void scheduleReconnect();
 	void updateDataRate(int bytesReceived);
+	QByteArray dechunkData(const QByteArray& raw);
+	void parseResponseHeaders(const QString& headers);
 
 	NtripProfile m_profile;
 	QTcpSocket* m_socket = nullptr;
@@ -143,9 +156,21 @@ private:
 	bool m_headersParsed = false;
 	QByteArray m_headerBuffer;
 
-	// NTRIP v2 auto-detection
+	// NTRIP v2 auto-detection and chunked transfer
 	bool m_triedV2 = false;      ///< True if current attempt uses v2
 	bool m_v2Failed = false;     ///< True if v2 was rejected, fall back to v1
+	bool m_chunkedTransfer = false;  ///< True if response uses Transfer-Encoding: chunked
+	QByteArray m_chunkBuffer;    ///< Accumulates partial chunk data
+	int m_chunkRemaining = 0;    ///< Bytes remaining in current chunk (0 = reading size line)
+
+	// Connection info (extracted from response headers)
+	QString m_negotiatedVersion; ///< "v1", "v2", or "v2 chunked"
+	QString m_serverString;      ///< Server: header value
+
+	// Cumulative counters
+	int m_ggaSentCount = 0;
+	qint64 m_totalBytesReceived = 0;
+	qint64 m_totalBytesSent = 0; ///< Bytes forwarded to receiver (set externally)
 };
 
 

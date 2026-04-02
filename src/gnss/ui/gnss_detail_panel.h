@@ -24,6 +24,7 @@
 #include <QWidget>
 
 class QComboBox;
+class QEvent;
 class QLabel;
 class QPushButton;
 
@@ -46,19 +47,23 @@ public:
 	~GnssDetailPanel() override;
 
 	void updateState(const GnssState& state);
+	void setDumpStatus(const QString& message);
 
 signals:
 	void ntripProfileChangeRequested(const QString& profileName);
 	void disconnectRequested();
 	void connectRequested();
+	void dumpRawRequested();
 
 protected:
 	QSize sizeHint() const override;
+	bool event(QEvent* e) override;
 
 private:
 	void setupUi();
 
 	// Position section
+	QLabel* fix_time_label;
 	QLabel* fix_type_label;
 	QLabel* h_accuracy_label;
 	QLabel* v_accuracy_label;
@@ -77,9 +82,19 @@ private:
 	// Corrections section
 	QComboBox* ntrip_profile_combo;
 	QLabel* correction_status_label;
+	QLabel* ntrip_version_label;
+	QLabel* ntrip_server_label;
+	QLabel* local_age_label;
 	QLabel* correction_age_label;
 	QLabel* correction_rate_label;
+	QLabel* ntrip_bytes_label;
+	QLabel* gga_count_label;
 	QLabel* mountpoint_label;
+
+	// Messages section
+	QLabel* messages_label;
+	QPushButton* dump_button;
+	QLabel* dump_status_label;
 
 	// Receiver section
 	QLabel* device_name_label;

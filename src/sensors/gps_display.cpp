@@ -517,6 +517,11 @@ void GPSDisplay::gnssPositionUpdated(const GnssPosition& position)
 		emit mapPositionUpdated(latest_gps_coord, latest_gps_coord_accuracy);
 		emit latLonUpdated(position.latitude, position.longitude, gnss_altitude, latest_gps_coord_accuracy);
 	}
+	else
+	{
+		qWarning("GPSDisplay: GNSS coord conversion failed for %.6f, %.6f",
+		         position.latitude, position.longitude);
+	}
 
 	updateMapWidget();
 }
@@ -560,7 +565,15 @@ MapCoordF GPSDisplay::calcLatestGPSCoord(bool& ok)
 		ok = true;
 		return latest_gps_coord;
 	}
-	
+
+	// If no Qt Positioning source (e.g., using external GNSS session),
+	// fall back to cached coord from gnssPositionUpdated().
+	if (!source)
+	{
+		ok = (latest_gps_coord != MapCoordF{});
+		return latest_gps_coord;
+	}
+
 	const auto latest_pos_info = source->lastKnownPosition(true);
 	latest_gps_coord_accuracy = latest_pos_info.hasAttribute(QGeoPositionInfo::HorizontalAccuracy)
 	                            ? float(latest_pos_info.attribute(QGeoPositionInfo::HorizontalAccuracy))

@@ -20,7 +20,11 @@
 #include "gnss_session.h"
 
 #include <QDateTime>
+#include <QDir>
+#include <QFile>
 #include <QRandomGenerator>
+#include <QStandardPaths>
+#include <QTextStream>
 #include <QTimeZone>
 
 #include "correction/ntrip_client.h"
@@ -123,6 +127,17 @@ void GnssSession::start()
 	m_rtcmFramer->reset();
 
 	m_transport->connectToDevice();
+
+	// If transport is already connected (e.g., BLE handoff already established
+	// the connection), configure immediately — the stateChanged signal won't fire.
+	if (m_transport->state() == GnssTransport::State::Connected)
+	{
+		m_state.transportState = GnssTransportState::Connected;
+		configureReceiver();
+		if (m_ntrip && m_ntrip->state() == NtripClient::State::Disconnected)
+			startNtrip();
+		emitStateChanged();
+	}
 }
 
 
@@ -181,6 +196,8 @@ void GnssSession::connectNtripSignals()
 
 void GnssSession::onTransportDataReceived(const QByteArray& data)
 {
+	appendRawEntry('R', data);
+
 	// Raw logging
 	if (m_rawLogger && m_rawLogger->isLogging())
 		m_rawLogger->logReceiverData(data);
@@ -195,44 +212,20 @@ void GnssSession::onTransportDataReceived(const QByteArray& data)
 			m_protocolDetected = true;
 			m_state.protocol = m_detectedProtocol;
 
-			// Feed the buffered data to the appropriate parser(s)
-			switch (m_detectedProtocol) {
-			case GnssProtocol::UBX:
-				m_ubxParser->addData(m_detectionBuffer);
-				break;
-			case GnssProtocol::NMEA:
-				m_nmeaParser->addData(m_detectionBuffer);
-				break;
-			case GnssProtocol::Mixed:
-				// Feed to both parsers — each will skip bytes it doesn't understand
-				m_ubxParser->addData(m_detectionBuffer);
-				m_nmeaParser->addData(m_detectionBuffer);
-				break;
-			case GnssProtocol::Unknown:
-				// Try both and see what sticks
-				m_ubxParser->addData(m_detectionBuffer);
-				m_nmeaParser->addData(m_detectionBuffer);
-				break;
-			}
+			// Always feed both parsers — each skips bytes it doesn't recognize.
+			// The receiver may switch protocols mid-stream (e.g., NMEA → UBX
+			// after we send configuration), so single-parser routing is fragile.
+			m_ubxParser->addData(m_detectionBuffer);
+			m_nmeaParser->addData(m_detectionBuffer);
 			m_detectionBuffer.clear();
 		}
 		return;
 	}
 
-	// Route data to the detected parser(s)
-	switch (m_detectedProtocol) {
-	case GnssProtocol::UBX:
-		m_ubxParser->addData(data);
-		break;
-	case GnssProtocol::NMEA:
-		m_nmeaParser->addData(data);
-		break;
-	case GnssProtocol::Mixed:
-	case GnssProtocol::Unknown:
-		m_ubxParser->addData(data);
-		m_nmeaParser->addData(data);
-		break;
-	}
+	// Always feed both parsers — each skips foreign bytes at its sync level.
+	// Protocol detection is informational (for UI display), not routing.
+	m_ubxParser->addData(data);
+	m_nmeaParser->addData(data);
 }
 
 
@@ -258,6 +251,7 @@ void GnssSession::onTransportStateChanged(GnssTransport::State transportState)
 		break;
 	case GnssTransport::State::Reconnecting:
 		m_state.transportState = GnssTransportState::Reconnecting;
+		m_reconnectTimer.stop();  // transport is handling reconnect internally
 		break;
 	}
 	emitStateChanged();
@@ -276,16 +270,149 @@ void GnssSession::onTransportError(const QString& message)
 // ---- UBX parser callbacks ----
 
 
+void GnssSession::recordMessage(const QString& name)
+{
+	auto now = QDateTime::currentMSecsSinceEpoch();
+	for (int i = 0; i < m_state.messageStatCount; ++i)
+	{
+		if (m_state.messageStats[i].name == name)
+		{
+			auto& s = m_state.messageStats[i];
+			s.count++;
+			if (s.lastTimeMs > 0)
+			{
+				float dt = (now - s.lastTimeMs) * 0.001f;
+				if (dt > 0.0f)
+				{
+					float instantHz = 1.0f / dt;
+					// Exponential moving average
+					s.avgHz = (s.count <= 2) ? instantHz : s.avgHz * 0.8f + instantHz * 0.2f;
+				}
+			}
+			s.lastTimeMs = now;
+			return;
+		}
+	}
+	// New message type
+	if (m_state.messageStatCount < GnssState::kMaxMessageStats)
+	{
+		auto& s = m_state.messageStats[m_state.messageStatCount++];
+		s.name = name;
+		s.count = 1;
+		s.lastTimeMs = now;
+		s.avgHz = 0.0f;
+	}
+}
+
+
 void GnssSession::onUbxPositionUpdated(const GnssPosition& position)
 {
-	m_state.position = position;
-	m_state.lastPositionTime = QDateTime::currentDateTimeUtc();
+	recordMessage(QStringLiteral("UBX NAV-PVT"));
+	mergePosition(position, true);
+}
 
-	// Update GGA for VRS NTRIP casters
-	if (m_ntrip && position.valid)
-		m_ntrip->setGgaSentence(GgaGenerator::fromPosition(position));
+void GnssSession::onNmeaPositionUpdated(const GnssPosition& position)
+{
+	recordMessage(QStringLiteral("NMEA GGA/RMC"));
+	mergePosition(position, false);
+}
 
-	emit positionUpdated(position);
+
+void GnssSession::mergePosition(const GnssPosition& incoming, bool fromUbx)
+{
+	auto& current = m_state.position;
+	auto now = QDateTime::currentDateTimeUtc();
+	bool accepted = false;
+
+	if (fromUbx)
+	{
+		m_lastUbxTime = now;
+
+		// UBX NAV-PVT: always accept, but preserve data from other UBX
+		// messages (NAV-DOP, NAV-COV, NAV-SAT) that arrive independently.
+		auto savedDOP = current.pDOP;  // from NAV-DOP
+		auto savedHDOP = current.hDOP;
+		auto savedVDOP = current.vDOP;
+		auto savedGDOP = current.gDOP;
+		auto savedTDOP = current.tDOP;
+		auto savedNDOP = current.nDOP;
+		auto savedEDOP = current.eDOP;
+		auto savedEllipse = current.ellipseAvailable;
+		auto savedMajor = current.ellipseSemiMajorP95;
+		auto savedMinor = current.ellipseSemiMinorP95;
+		auto savedOrient = current.ellipseOrientationDeg;
+		auto savedSatUsed = current.satellitesUsed;
+		auto savedSatVis = current.satellitesVisible;
+
+		current = incoming;
+
+		// Restore fields from other UBX messages if NAV-PVT didn't set them
+		if (std::isnan(current.pDOP) && !std::isnan(savedDOP))
+		{
+			current.pDOP = savedDOP;
+			current.hDOP = savedHDOP;
+			current.vDOP = savedVDOP;
+			current.gDOP = savedGDOP;
+			current.tDOP = savedTDOP;
+			current.nDOP = savedNDOP;
+			current.eDOP = savedEDOP;
+		}
+		if (!current.ellipseAvailable && savedEllipse)
+		{
+			current.ellipseAvailable = savedEllipse;
+			current.ellipseSemiMajorP95 = savedMajor;
+			current.ellipseSemiMinorP95 = savedMinor;
+			current.ellipseOrientationDeg = savedOrient;
+		}
+		if (current.satellitesUsed == 0 && savedSatUsed > 0)
+		{
+			current.satellitesUsed = savedSatUsed;
+			current.satellitesVisible = savedSatVis;
+		}
+
+		accepted = true;
+	}
+	else
+	{
+		// NMEA: only use if UBX hasn't provided data recently (>3s)
+		bool ubxStale = !m_lastUbxTime.isValid()
+		    || m_lastUbxTime.msecsTo(now) > 3000;
+
+		if (ubxStale)
+		{
+			bool incomingBetter = (static_cast<int>(incoming.fixType)
+			    >= static_cast<int>(current.fixType)) || !current.valid;
+
+			if (incomingBetter)
+			{
+				auto savedEllipse = current.ellipseAvailable;
+				auto savedMajor = current.ellipseSemiMajorP95;
+				auto savedMinor = current.ellipseSemiMinorP95;
+				auto savedOrient = current.ellipseOrientationDeg;
+
+				current = incoming;
+
+				if (!current.ellipseAvailable && savedEllipse)
+				{
+					current.ellipseAvailable = savedEllipse;
+					current.ellipseSemiMajorP95 = savedMajor;
+					current.ellipseSemiMinorP95 = savedMinor;
+					current.ellipseOrientationDeg = savedOrient;
+				}
+				accepted = true;
+			}
+		}
+	}
+
+	if (!accepted)
+		return;
+
+	m_state.lastPositionTime = now;
+
+	if (m_ntrip && current.valid)
+		m_ntrip->setGgaSentence(GgaGenerator::fromPosition(current));
+
+	emit positionUpdated(current);
 	emitStateChanged();
 }
 
@@ -293,6 +420,7 @@ void GnssSession::onUbxPositionUpdated(const GnssPosition& position)
 void GnssSession::onUbxDopUpdated(float gDOP, float pDOP, float tDOP,
                                   float vDOP, float hDOP, float nDOP, float eDOP)
 {
+	recordMessage(QStringLiteral("UBX NAV-DOP"));
 	m_state.position.gDOP = gDOP;
 	m_state.position.pDOP = pDOP;
 	m_state.position.tDOP = tDOP;
@@ -306,6 +434,7 @@ void GnssSession::onUbxDopUpdated(float gDOP, float pDOP, float tDOP,
 
 void GnssSession::onUbxSatelliteInfoUpdated(int totalUsed, int totalVisible)
 {
+	recordMessage(QStringLiteral("UBX NAV-SAT"));
 	m_state.position.satellitesUsed = static_cast<std::uint8_t>(totalUsed);
 	m_state.position.satellitesVisible = static_cast<std::uint8_t>(totalVisible);
 	emitStateChanged();
@@ -314,6 +443,7 @@ void GnssSession::onUbxSatelliteInfoUpdated(int totalUsed, int totalVisible)
 
 void GnssSession::onUbxCovarianceUpdated(float covNN, float covNE, float covEE)
 {
+	recordMessage(QStringLiteral("UBX NAV-COV"));
 	m_state.position.computeP95Ellipse(covNN, covNE, covEE);
 	emitStateChanged();
 }
@@ -321,6 +451,7 @@ void GnssSession::onUbxCovarianceUpdated(float covNN, float covNE, float covEE)
 
 void GnssSession::onUbxStatusUpdated(bool fixOK, bool diffSoln, int carrSoln, int spoofDet)
 {
+	recordMessage(QStringLiteral("UBX NAV-STATUS"));
 	Q_UNUSED(fixOK)
 	Q_UNUSED(diffSoln)
 	Q_UNUSED(carrSoln)
@@ -352,23 +483,13 @@ void GnssSession::onUbxVersionReceived(const QString& sw, const QString& hw,
 // ---- NMEA parser callbacks ----
 
 
-void GnssSession::onNmeaPositionUpdated(const GnssPosition& position)
-{
-	// If UBX is providing positions, prefer UBX (richer metadata).
-	// Only use NMEA position if protocol is NMEA-only.
-	if (m_detectedProtocol == GnssProtocol::NMEA)
-	{
-		m_state.position = position;
-		m_state.lastPositionTime = QDateTime::currentDateTimeUtc();
-		emit positionUpdated(position);
-		emitStateChanged();
-	}
-}
-
-
 void GnssSession::onNmeaDopUpdated(float pDOP, float hDOP, float vDOP)
 {
-	if (m_detectedProtocol == GnssProtocol::NMEA)
+	recordMessage(QStringLiteral("NMEA GSA"));
+	// Accept NMEA DOP only when UBX isn't providing it
+	bool ubxStale = !m_lastUbxTime.isValid()
+	    || m_lastUbxTime.msecsTo(QDateTime::currentDateTimeUtc()) > 3000;
+	if (ubxStale)
 	{
 		m_state.position.pDOP = pDOP;
 		m_state.position.hDOP = hDOP;
@@ -390,11 +511,31 @@ void GnssSession::onNtripCorrectionData(const QByteArray& data)
 	// Validate the RTCM data
 	m_rtcmFramer->addData(data);
 
+	appendRawEntry('C', data);
+
 	// Forward corrections to the receiver
 	if (m_transport && m_transport->state() == GnssTransport::State::Connected)
+	{
+		appendRawEntry('T', data);
 		m_transport->write(data);
+		if (m_ntrip)
+			m_ntrip->addBytesSentToReceiver(data.size());
+	}
 
 	m_state.lastCorrectionTime = QDateTime::currentDateTimeUtc();
+
+	// Update live metrics from NTRIP client
+	if (m_ntrip)
+	{
+		m_state.correctionDataRate = m_ntrip->dataRate();
+		m_state.localCorrectionAge = m_ntrip->correctionAge();
+		m_state.ggaSentCount = m_ntrip->ggaSentCount();
+		m_state.ntripBytesReceived = m_ntrip->totalBytesReceived();
+		m_state.ntripBytesSentToReceiver = m_ntrip->totalBytesSentToReceiver();
+		m_state.ntripVersion = m_ntrip->negotiatedVersion();
+		m_state.ntripServer = m_ntrip->serverString();
+	}
+	emitStateChanged();
 }
 
 
@@ -427,12 +568,18 @@ void GnssSession::onNtripStateChanged()
 	m_state.correctionDataRate = m_ntrip->dataRate();
 	m_state.ntripMountpoint = m_ntrip->mountpoint();
 	m_state.reconnectCount = m_ntrip->reconnectCount();
+	m_state.ntripVersion = m_ntrip->negotiatedVersion();
+	m_state.ntripServer = m_ntrip->serverString();
+	m_state.ggaSentCount = m_ntrip->ggaSentCount();
+	m_state.ntripBytesReceived = m_ntrip->totalBytesReceived();
+	m_state.ntripBytesSentToReceiver = m_ntrip->totalBytesSentToReceiver();
 	emitStateChanged();
 }
 
 
 void GnssSession::onRtcmFrameValidated(int messageType, int payloadLength)
 {
+	recordMessage(QStringLiteral("RTCM %1").arg(messageType));
 	Q_UNUSED(messageType)
 	Q_UNUSED(payloadLength)
 	// Track correction health metrics
@@ -587,14 +734,115 @@ void GnssSession::configureReceiver()
 	if (!m_transport || m_transport->state() != GnssTransport::State::Connected)
 		return;
 
-	// Only send UBX config if we detected UBX or Mixed protocol,
-	// or if protocol is still unknown (first connect).
-	if (m_detectedProtocol == GnssProtocol::NMEA)
-		return;
-
+	// Send UBX configuration to enable richer data (covariance, satellite
+	// info, etc.). Both parsers always receive all data, so even if the
+	// receiver starts in NMEA mode and switches to UBX after config, the
+	// UBX parser picks it up seamlessly.
 	auto commands = UbxConfig::buildInitSequence();
 	for (const auto& cmd : commands)
+	{
+		appendRawEntry('W', cmd);  // W = config write to receiver
 		m_transport->write(cmd);
+	}
+}
+
+
+void GnssSession::appendRawEntry(char direction, const QByteArray& data)
+{
+	m_rawRing.append({QDateTime::currentMSecsSinceEpoch(), data, direction});
+	m_rawRingBytes += data.size();
+
+	// Trim old entries to stay under budget
+	while (m_rawRingBytes > kRawRingMaxBytes && !m_rawRing.isEmpty())
+	{
+		m_rawRingBytes -= m_rawRing.first().data.size();
+		m_rawRing.removeFirst();
+	}
+}
+
+
+QString GnssSession::dumpRawBuffer() const
+{
+	if (m_rawRing.isEmpty())
+		return {};
+
+	// Use temp directory — always writable on iOS
+	auto docsPath = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
+	if (docsPath.isEmpty())
+		docsPath = QDir::tempPath();
+
+	auto timestamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss"));
+	auto filePath = docsPath + QStringLiteral("/gnss-raw-%1.bin").arg(timestamp);
+
+	QFile file(filePath);
+	if (!file.open(QIODevice::WriteOnly))
+	{
+		// Return the error as the path so the UI can show what went wrong
+		return QStringLiteral("ERR: %1 (%2)").arg(file.errorString(), filePath);
+	}
+
+	// Write a simple header + entries
+	// Format: each entry is [timestamp_ms:8][direction:1][length:4][data:N]
+	// Header: magic + entry count
+	file.write("GNSSRAW1");  // magic
+	qint32 count = m_rawRing.size();
+	file.write(reinterpret_cast<const char*>(&count), 4);
+
+	// Also write a human-readable index alongside
+	QFile indexFile(filePath + QStringLiteral(".txt"));
+	indexFile.open(QIODevice::WriteOnly | QIODevice::Text);
+	QTextStream idx(&indexFile);
+	idx << "GNSS Raw Dump: " << timestamp << "\n";
+	idx << "Entries: " << count << "\n";
+	idx << "Directions: R=receiver→app, C=NTRIP→app, T=app→receiver, W=config→receiver\n\n";
+
+	qint64 baseTime = m_rawRing.first().timestampMs;
+	for (const auto& entry : m_rawRing)
+	{
+		// Binary entry
+		file.write(reinterpret_cast<const char*>(&entry.timestampMs), 8);
+		file.write(&entry.direction, 1);
+		qint32 len = entry.data.size();
+		file.write(reinterpret_cast<const char*>(&len), 4);
+		file.write(entry.data);
+
+		// Text index line
+		float relTime = (entry.timestampMs - baseTime) * 0.001f;
+		idx << QString::number(static_cast<double>(relTime), 'f', 3) << "s  "
+		    << entry.direction << "  " << len << " bytes";
+
+		// For small entries or text data, show content preview
+		if (len <= 80 && entry.direction != 'C' && entry.direction != 'T')
+		{
+			// Check if it's mostly printable (NMEA)
+			bool printable = true;
+			for (int i = 0; i < qMin(len, 40); ++i)
+			{
+				auto c = entry.data[i];
+				if (c < 0x20 && c != '\r' && c != '\n')
+				{
+					printable = false;
+					break;
+				}
+			}
+			if (printable)
+				idx << "  " << QString::fromLatin1(entry.data).trimmed();
+			else
+				idx << "  [hex] " << entry.data.left(20).toHex(' ');
+		}
+		else if (entry.direction == 'W')
+		{
+			idx << "  [hex] " << entry.data.left(20).toHex(' ');
+		}
+		idx << "\n";
+	}
+
+	file.close();
+	indexFile.close();
+
+	qDebug("GNSS: dumped %d raw entries (%lld bytes) to %s",
+	       count, m_rawRingBytes, qPrintable(filePath));
+	return filePath;
 }
 
 

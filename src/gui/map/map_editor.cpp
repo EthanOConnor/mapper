@@ -148,9 +148,7 @@
 #include "gnss/ui/gnss_status_overlay.h"
 
 #if defined(MAPPER_GNSS_BLE_COREBLUETOOTH)
-#  include "gnss/transport/ble_transport_corebluetooth.h"
-#  include "gnss/transport/ble_scanner_corebluetooth.h"
-#  include "gnss/transport/ble_scanner_transport_adapter.h"
+#  include "gnss/transport/ble_discovery_agent.h"
 #elif defined(MAPPER_GNSS_BLE)
 #  include "gnss/transport/ble_transport.h"
 #endif
@@ -356,7 +354,7 @@ MapEditorController::~MapEditorController()
 		delete mappart_selector_box;
 	delete gnss_device_dialog;
 #if defined(MAPPER_GNSS_BLE_COREBLUETOOTH)
-	delete gnss_ble_scanner;
+	delete gnss_ble_discovery;
 #endif
 	delete gnss_status_overlay;
 	delete gnss_session;
@@ -844,9 +842,35 @@ void MapEditorController::attach(MainWindow* window)
 				{
 					auto* panel = new GnssDetailPanel();
 					panel->updateState(gnss_session->currentState());
-					// Live updates while panel is open
 					connect(gnss_session, &GnssSession::stateChanged,
 					        panel, &GnssDetailPanel::updateState);
+					connect(panel, &GnssDetailPanel::ntripProfileChangeRequested,
+					        this, [this](const QString& profileName) {
+						if (!gnss_session || profileName.isEmpty())
+							return;
+						loadNtripProfile(profileName);
+					});
+					connect(panel, &GnssDetailPanel::disconnectRequested,
+					        this, [this]() {
+						if (gnss_session)
+							gnss_session->stop();
+					});
+					connect(panel, &GnssDetailPanel::connectRequested,
+					        this, [this]() {
+						if (gnss_session && !gnss_session->isActive())
+							gnss_session->start();
+					});
+					connect(panel, &GnssDetailPanel::dumpRawRequested,
+					        this, [this, panel]() {
+						if (!gnss_session) {
+							panel->setDumpStatus(QStringLiteral("No session"));
+							return;
+						}
+						auto path = gnss_session->dumpRawBuffer();
+						panel->setDumpStatus(path.isEmpty()
+						    ? QStringLiteral("Empty ring buffer")
+						    : path);
+					});
 					showPopupWidget(panel, tr("GNSS Details"));
 				}
 			});
@@ -1746,8 +1770,8 @@ void MapEditorController::detach()
 	delete gnss_device_dialog;
 	gnss_device_dialog = nullptr;
 #if defined(MAPPER_GNSS_BLE_COREBLUETOOTH)
-	delete gnss_ble_scanner;
-	gnss_ble_scanner = nullptr;
+	delete gnss_ble_discovery;
+	gnss_ble_discovery = nullptr;
 #endif
 	delete gnss_status_overlay;
 	gnss_status_overlay = nullptr;
@@ -3719,19 +3743,26 @@ void MapEditorController::enableGPSDisplay(bool enable)
 				auto* model = new BleDeviceModel(this);
 
 #if defined(MAPPER_GNSS_BLE_COREBLUETOOTH)
-				// Clean up previous scanner if any
-				delete gnss_ble_scanner;
-				gnss_ble_scanner = new BleScannerCoreBluetooth(model, this);
-				gnss_ble_scanner->startScan();
+				// Clean up previous discovery agent if any
+				delete gnss_ble_discovery;
+				gnss_ble_discovery = new BleDiscoveryAgent(model, this);
+				gnss_ble_discovery->startScan();
 
-				// Helper: after device selection, create transport adapter
-				// and hand it to the session. The adapter wraps the scanner
-				// into a GnssTransport, giving the session uniform control
-				// over data flow, reconnect, and RTCM write-back.
+				// Helper: create transport from discovery agent and start session.
+				// The agent hands off its CBCentralManager + CBPeripheral to the
+				// new IosBleNusTransport, which owns the entire BLE lifecycle.
 				auto connectDevice = [this](const QString& uuid, const QString& name) {
-					auto adapter = std::make_unique<BleScannerTransportAdapter>(
-						gnss_ble_scanner, uuid, name, gnss_session);
-					gnss_session->setTransport(std::move(adapter));
+					if (!gnss_ble_discovery)
+						return;
+					auto transport = gnss_ble_discovery->createTransportForDevice(uuid, name);
+					if (!transport)
+						return;
+
+					// Agent is now inert after handoff — clean it up
+					delete gnss_ble_discovery;
+					gnss_ble_discovery = nullptr;
+
+					gnss_session->setTransport(std::move(transport));
 					gnss_session->start();
 
 					// Save device for auto-reconnect
@@ -3756,7 +3787,7 @@ void MapEditorController::enableGPSDisplay(bool enable)
 					gnss_device_dialog->setDeviceModel(model);
 
 #if defined(MAPPER_GNSS_BLE_COREBLUETOOTH)
-					// Device selected → create adapter + start session
+					// Device selected → create transport + start session
 					connect(gnss_device_dialog, &GnssDeviceDialog::deviceSelected,
 					        this, [this, model, connectDevice](int index) {
 						auto const& device = model->deviceAt(index);
@@ -3765,32 +3796,28 @@ void MapEditorController::enableGPSDisplay(bool enable)
 						connectDevice(device.address, device.name);
 					});
 
-					// Scanner connected → update dialog
-					connect(gnss_ble_scanner, &BleScannerCoreBluetooth::deviceConnected,
-					        this, [this](const QString& name) {
-						if (gnss_device_dialog)
-							gnss_device_dialog->showConnected(name, {});
-					});
-
-					connect(gnss_ble_scanner, &BleScannerCoreBluetooth::connectionRetrying,
-					        this, [this](int attempt, int maxAttempts) {
-						if (gnss_device_dialog)
-							gnss_device_dialog->showConnecting({}, attempt, maxAttempts);
-					});
-
-					connect(gnss_ble_scanner, &BleScannerCoreBluetooth::deviceConnectionFailed,
-					        this, [this](const QString& error) {
-						if (gnss_device_dialog)
-							gnss_device_dialog->showScanPage(error);
+					// Transport connected → update dialog
+					// (connected signal comes from session state change)
+					connect(gnss_session, &GnssSession::stateChanged,
+					        this, [this] {
+						if (!gnss_device_dialog || !gnss_session)
+							return;
+						auto const& state = gnss_session->currentState();
+						if (state.transportState == GnssTransportState::Connected)
+							gnss_device_dialog->showConnected(state.deviceName, {});
+						else if (state.transportState == GnssTransportState::Disconnected
+						         && !state.deviceName.isEmpty())
+							gnss_device_dialog->showScanPage(
+								QStringLiteral("Connection failed"));
 					});
 #endif
 
-					// Cancel → stop scan, show scan page
+					// Cancel → stop discovery, show scan page
 					connect(gnss_device_dialog, &GnssDeviceDialog::cancelConnection,
 					        this, [this] {
 #if defined(MAPPER_GNSS_BLE_COREBLUETOOTH)
-						if (gnss_ble_scanner)
-							gnss_ble_scanner->stopScan();
+						if (gnss_ble_discovery)
+							gnss_ble_discovery->stopScan();
 #endif
 						if (gnss_device_dialog)
 							gnss_device_dialog->showScanPage();
@@ -3893,7 +3920,14 @@ void MapEditorController::enableGPSDisplay(bool enable)
 		delete gps_track_recorder;
 		gps_track_recorder = nullptr;
 
-		// Clean up GNSS session, scanner, and dialog
+		// Clean up dialog, discovery agent, and GNSS session.
+		// Order: dialog first, then agent, then session (which owns the transport).
+		delete gnss_device_dialog;
+		gnss_device_dialog = nullptr;
+#if defined(MAPPER_GNSS_BLE_COREBLUETOOTH)
+		delete gnss_ble_discovery;
+		gnss_ble_discovery = nullptr;
+#endif
 		if (gnss_session)
 		{
 			gnss_session->stop();
@@ -3901,12 +3935,6 @@ void MapEditorController::enableGPSDisplay(bool enable)
 			delete gnss_session;
 			gnss_session = nullptr;
 		}
-#if defined(MAPPER_GNSS_BLE_COREBLUETOOTH)
-		delete gnss_ble_scanner;
-		gnss_ble_scanner = nullptr;
-#endif
-		delete gnss_device_dialog;
-		gnss_device_dialog = nullptr;
 
 		if (gnss_status_overlay)
 			gnss_status_overlay->hide();
@@ -3923,6 +3951,40 @@ void MapEditorController::enableGPSDisplay(bool enable)
 	gps_temporary_point_act->setEnabled(enable);
 	gps_temporary_path_act->setEnabled(enable);
 	updateDrawPointGPSAvailability();
+}
+
+
+void MapEditorController::loadNtripProfile(const QString& profileName)
+{
+	if (!gnss_session)
+		return;
+
+	QSettings qsettings;
+	auto prefix = QStringLiteral("Gnss/ntrip_profile/%1/").arg(profileName);
+
+	NtripProfile profile;
+	profile.name = profileName;
+	profile.casterHost = qsettings.value(prefix + QStringLiteral("host")).toString();
+	profile.casterPort = static_cast<quint16>(qsettings.value(prefix + QStringLiteral("port"), 2101).toInt());
+	profile.mountpoint = qsettings.value(prefix + QStringLiteral("mountpoint")).toString();
+	profile.username = qsettings.value(prefix + QStringLiteral("username")).toString();
+	profile.password = qsettings.value(prefix + QStringLiteral("password")).toString();
+	profile.sendGga = qsettings.value(prefix + QStringLiteral("send_gga"), true).toBool();
+	profile.ggaIntervalSec = qsettings.value(prefix + QStringLiteral("gga_interval"), 10).toInt();
+
+	if (profile.casterHost.isEmpty() || profile.mountpoint.isEmpty())
+		return;
+
+	auto ntrip = std::make_unique<NtripClient>(gnss_session);
+	ntrip->setProfile(profile);
+	gnss_session->setNtripClient(std::move(ntrip));
+
+	// Save as active profile
+	Settings::getInstance().setGnssNtripActiveProfile(profileName);
+
+	// Start if transport is connected
+	if (gnss_session->isActive())
+		gnss_session->startNtrip();
 }
 
 void MapEditorController::enableGPSDistanceRings(bool enable)

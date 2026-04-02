@@ -67,6 +67,8 @@
 #  include "sensors/sensors_settings_page.h"
 #endif
 
+#include "gnss/ui/gnss_settings_page.h"
+
 
 namespace OpenOrienteering {
 
@@ -222,7 +224,8 @@ void SettingsDialog::addPages()
 #ifdef MAPPER_USE_SENSORS
 	addPage(new SensorsSettingsPage(this));
 #endif
-    addPage(new PaintOnTemplateSettingsPage(this));
+	addPage(new GnssSettingsPage(this));
+	addPage(new PaintOnTemplateSettingsPage(this));
 }
 
 void SettingsDialog::addPage(SettingsPage* page)

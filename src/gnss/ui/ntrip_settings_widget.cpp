@@ -25,6 +25,7 @@
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QInputDialog>
+#include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMessageBox>
@@ -33,6 +34,8 @@
 #include <QSpinBox>
 #include <QString>
 #include <QStringList>
+#include <QTcpSocket>
+#include <QTimer>
 #include <QVBoxLayout>
 
 
@@ -70,6 +73,10 @@ void NtripSettingsWidget::setupUi()
 
 	layout->addLayout(button_layout);
 
+	test_status_label = new QLabel(this);
+	test_status_label->setWordWrap(true);
+	layout->addWidget(test_status_label);
+
 	connect(add_button, &QPushButton::clicked, this, &NtripSettingsWidget::addProfile);
 	connect(edit_button, &QPushButton::clicked, this, [this]() {
 		auto row = profile_list->currentRow();
@@ -78,6 +85,23 @@ void NtripSettingsWidget::setupUi()
 	});
 	connect(remove_button, &QPushButton::clicked, this, &NtripSettingsWidget::removeProfile);
 	connect(test_button, &QPushButton::clicked, this, &NtripSettingsWidget::testConnection);
+}
+
+
+QString NtripSettingsWidget::selectedProfileName() const
+{
+	auto* item = profile_list->currentItem();
+	return item ? item->text() : QString{};
+}
+
+void NtripSettingsWidget::selectProfile(const QString& name)
+{
+	for (int i = 0; i < profile_list->count(); ++i) {
+		if (profile_list->item(i)->text() == name) {
+			profile_list->setCurrentRow(i);
+			return;
+		}
+	}
 }
 
 
@@ -114,7 +138,13 @@ void NtripSettingsWidget::addProfile()
 		return;
 
 	profile_list->addItem(name);
+	int row = profile_list->count() - 1;
+	profile_list->setCurrentRow(row);
 	saveProfiles();
+
+	// Immediately open edit dialog so the user can fill in caster details
+	editProfile(row);
+
 	emit profilesChanged();
 }
 
@@ -211,8 +241,138 @@ void NtripSettingsWidget::removeProfile()
 
 void NtripSettingsWidget::testConnection()
 {
-	QMessageBox::information(this, tr("Test Connection"),
-	                         tr("Connection test not yet implemented."));
+	auto row = profile_list->currentRow();
+	if (row < 0)
+	{
+		test_status_label->setText(tr("Select a profile first."));
+		return;
+	}
+
+	auto name = profile_list->item(row)->text();
+	auto prefix = QStringLiteral("Gnss/ntrip_profile/%1/").arg(name);
+	QSettings settings;
+
+	auto host = settings.value(prefix + QStringLiteral("host")).toString();
+	auto port = static_cast<quint16>(settings.value(prefix + QStringLiteral("port"), 2101).toInt());
+	auto mountpoint = settings.value(prefix + QStringLiteral("mountpoint")).toString();
+	auto username = settings.value(prefix + QStringLiteral("username")).toString();
+	auto password = settings.value(prefix + QStringLiteral("password")).toString();
+
+	if (host.isEmpty() || mountpoint.isEmpty())
+	{
+		test_status_label->setText(tr("Profile incomplete — edit host and mountpoint first."));
+		return;
+	}
+
+	// Clean up previous test
+	if (test_socket)
+	{
+		test_socket->disconnect(this);
+		test_socket->abort();
+		test_socket->deleteLater();
+		test_socket = nullptr;
+	}
+
+	test_status_label->setText(tr("Connecting to %1:%2...").arg(host).arg(port));
+	test_button->setEnabled(false);
+
+	test_socket = new QTcpSocket(this);
+
+	// Build NTRIP v2 request (matches what the live client sends in Auto mode)
+	QByteArray request;
+	request.append("GET /");
+	request.append(mountpoint.toLatin1());
+	request.append(" HTTP/1.1\r\n");
+	request.append("Host: ");
+	request.append(host.toLatin1());
+	request.append("\r\n");
+	request.append("Ntrip-Version: Ntrip/2.0\r\n");
+	request.append("User-Agent: NTRIP OpenOrienteeringMapper/1.0\r\n");
+	if (!username.isEmpty())
+	{
+		QByteArray cred = username.toLatin1() + ':' + password.toLatin1();
+		request.append("Authorization: Basic ");
+		request.append(cred.toBase64());
+		request.append("\r\n");
+	}
+	request.append("\r\n");
+
+	// On connect → send request
+	connect(test_socket, &QTcpSocket::connected, this, [this, request]() {
+		test_socket->write(request);
+		test_status_label->setText(tr("Connected. Waiting for response..."));
+	});
+
+	// On data → check response
+	connect(test_socket, &QTcpSocket::readyRead, this, [this]() {
+		auto data = test_socket->readAll();
+		auto response = QString::fromLatin1(data.left(200));
+
+		bool isSourcetable = response.startsWith(QLatin1String("SOURCETABLE 200 OK"));
+		bool ok = !isSourcetable
+		    && (response.startsWith(QLatin1String("ICY 200 OK"))
+		        || response.startsWith(QLatin1String("HTTP/1.0 200"))
+		        || response.startsWith(QLatin1String("HTTP/1.1 200")));
+
+		if (ok)
+		{
+			// Extract version and server info from headers
+			QString version = response.contains(QLatin1String("Ntrip/2.0"))
+			    ? QStringLiteral("v2") : QStringLiteral("v1");
+			if (response.contains(QLatin1String("chunked")))
+				version += QLatin1String(" chunked");
+			QString server;
+			for (const auto& line : response.split(QLatin1String("\r\n")))
+			{
+				if (line.startsWith(QLatin1String("Server:"), Qt::CaseInsensitive))
+				{
+					server = line.mid(7).trimmed();
+					break;
+				}
+			}
+			test_status_label->setText(
+			    tr("Success! NTRIP %1\nServer: %2").arg(version, server.isEmpty() ? tr("(unknown)") : server));
+		}
+		else if (isSourcetable)
+		{
+			test_status_label->setText(tr("Mountpoint not found — caster returned sourcetable. Check spelling."));
+		}
+		else
+		{
+			test_status_label->setText(tr("Rejected: %1").arg(response.left(80)));
+		}
+
+		test_socket->disconnect(this);
+		test_socket->abort();
+		test_socket->deleteLater();
+		test_socket = nullptr;
+		test_button->setEnabled(true);
+	});
+
+	// On error
+	connect(test_socket, &QTcpSocket::errorOccurred, this,
+	        [this](QAbstractSocket::SocketError) {
+		test_status_label->setText(
+		    tr("Connection failed: %1").arg(test_socket->errorString()));
+		test_socket->disconnect(this);
+		test_socket->deleteLater();
+		test_socket = nullptr;
+		test_button->setEnabled(true);
+	});
+
+	// Timeout
+	QTimer::singleShot(10000, this, [this]() {
+		if (!test_socket)
+			return;
+		test_status_label->setText(tr("Connection timed out (10s)."));
+		test_socket->disconnect(this);
+		test_socket->abort();
+		test_socket->deleteLater();
+		test_socket = nullptr;
+		test_button->setEnabled(true);
+	});
+
+	test_socket->connectToHost(host, port);
 }
 
 

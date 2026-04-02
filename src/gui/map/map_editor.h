@@ -53,7 +53,7 @@ class QWidget;
 namespace OpenOrienteering {
 
 class ActionGridBar;
-class BleScannerCoreBluetooth;
+class BleDiscoveryAgent;
 class CompassDisplay;
 class EditorDockWidget;
 class GnssDeviceDialog;
@@ -490,6 +490,7 @@ public slots:
 	
 	/** Enables or disables GPS display. */
 	void enableGPSDisplay(bool enable);
+	void loadNtripProfile(const QString& profileName);
 	/** Enables or disables showing distance rings when GPS display is active. */
 	void enableGPSDistanceRings(bool enable);
 	/** Updates availability of the GPS point drawing tool. */
@@ -839,7 +840,7 @@ private:
 	GnssSession* gnss_session = nullptr;
 	GnssStatusOverlay* gnss_status_overlay = nullptr;
 #if defined(MAPPER_GNSS_BLE_COREBLUETOOTH)
-	BleScannerCoreBluetooth* gnss_ble_scanner = nullptr;
+	BleDiscoveryAgent* gnss_ble_discovery = nullptr;
 #endif
 	GnssDeviceDialog* gnss_device_dialog = nullptr;
 	

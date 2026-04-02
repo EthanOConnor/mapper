@@ -23,8 +23,12 @@
 
 #include <memory>
 
+#include <QByteArray>
+#include <QDateTime>
 #include <QObject>
+#include <QString>
 #include <QTimer>
+#include <QVector>
 
 #include "gnss_position.h"
 #include "gnss_state.h"
@@ -133,6 +137,19 @@ private slots:
 	void onNmeaPositionUpdated(const GnssPosition& position);
 	void onNmeaDopUpdated(float pDOP, float hDOP, float vDOP);
 
+	// Position merge — combines UBX and NMEA data intelligently
+	void mergePosition(const GnssPosition& incoming, bool fromUbx);
+
+	// Message statistics
+	void recordMessage(const QString& name);
+
+public:
+	/// Dump the last ~20s of raw data to a file in the app's Documents dir.
+	/// Returns the file path, or empty string on failure.
+	QString dumpRawBuffer() const;
+	int rawRingEntryCount() const { return m_rawRing.size(); }
+	qint64 rawRingByteCount() const { return m_rawRingBytes; }
+
 	// NTRIP callbacks
 	void onNtripCorrectionData(const QByteArray& data);
 	void onNtripStateChanged();
@@ -161,6 +178,18 @@ private:
 	bool m_protocolDetected = false;
 	GnssProtocol m_detectedProtocol = GnssProtocol::Unknown;
 	QByteArray m_detectionBuffer;
+	QDateTime m_lastUbxTime;  ///< Last time UBX provided a position (for source priority)
+
+	// Raw data ring buffer for diagnostics dump
+	struct RawEntry {
+		qint64 timestampMs;
+		QByteArray data;
+		char direction;  // 'R' = received from receiver, 'C' = correction from NTRIP, 'T' = sent to receiver
+	};
+	QVector<RawEntry> m_rawRing;
+	static constexpr int kRawRingMaxBytes = 256 * 1024;  // ~256KB, covers ~20s at typical rates
+	qint64 m_rawRingBytes = 0;
+	void appendRawEntry(char direction, const QByteArray& data);
 
 	// Raw logging
 	std::unique_ptr<GnssRawLogger> m_rawLogger;

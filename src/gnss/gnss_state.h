@@ -108,8 +108,14 @@ struct GnssState
 	GnssCorrectionState correctionState = GnssCorrectionState::Disabled;
 	QString ntripMountpoint;
 	QString ntripProfileName;
+	QString ntripVersion;        ///< e.g. "v1", "v2 chunked"
+	QString ntripServer;         ///< Server: header from caster
 	float   correctionDataRate = 0.0f;  ///< bytes/sec, smoothed
+	float   localCorrectionAge = -1.0f; ///< seconds since last NTRIP data
 	int     reconnectCount     = 0;
+	int     ggaSentCount       = 0;
+	qint64  ntripBytesReceived = 0;
+	qint64  ntripBytesSentToReceiver = 0;
 
 	// -- Reference frame (from NTRIP sourcetable or manual config) --
 	QString referenceFrame;   ///< e.g. "ITRF2020", "ETRS89"
@@ -127,6 +133,18 @@ struct GnssState
 	QDateTime sessionStart;
 	QDateTime lastPositionTime;
 	QDateTime lastCorrectionTime;
+
+	// -- Message statistics --
+	struct MessageStat
+	{
+		QString name;
+		int count = 0;
+		qint64 lastTimeMs = 0;   ///< msecsSinceEpoch of last receipt
+		float avgHz = 0.0f;      ///< smoothed message rate
+	};
+	static constexpr int kMaxMessageStats = 16;
+	MessageStat messageStats[kMaxMessageStats] = {};
+	int messageStatCount = 0;
 };
 
 

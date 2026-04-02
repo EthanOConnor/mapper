@@ -22,10 +22,13 @@
 #define OPENORIENTEERING_NTRIP_SETTINGS_WIDGET_H
 
 #include <QObject>
+#include <QString>
 #include <QWidget>
 
+class QLabel;
 class QListWidget;
 class QPushButton;
+class QTcpSocket;
 
 
 namespace OpenOrienteering {
@@ -37,6 +40,12 @@ class NtripSettingsWidget : public QWidget
 public:
 	explicit NtripSettingsWidget(QWidget* parent = nullptr);
 	~NtripSettingsWidget() override;
+
+	/// Name of the currently selected (active) profile, or empty string.
+	QString selectedProfileName() const;
+
+	/// Select the profile with the given name in the list.
+	void selectProfile(const QString& name);
 
 signals:
 	void profilesChanged();
@@ -57,6 +66,8 @@ private:
 	QPushButton* edit_button;
 	QPushButton* remove_button;
 	QPushButton* test_button;
+	QLabel* test_status_label;
+	QTcpSocket* test_socket = nullptr;
 };
 
 

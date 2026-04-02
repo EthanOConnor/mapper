@@ -84,6 +84,11 @@ void GnssSettingsPage::apply()
 	settings.setGnssAutoConnect(auto_connect_box->isChecked());
 	settings.setGnssAutoStartNtrip(auto_start_ntrip_box->isChecked());
 	settings.setGnssRawLogging(raw_logging_box->isChecked());
+
+	// Save the selected NTRIP profile as active
+	auto active = ntrip_widget->selectedProfileName();
+	settings.setGnssNtripActiveProfile(active);
+
 	settings.applySettings();
 }
 
@@ -108,6 +113,11 @@ void GnssSettingsPage::updateWidgets()
 	auto_connect_box->setChecked(settings.gnssAutoConnect());
 	auto_start_ntrip_box->setChecked(settings.gnssAutoStartNtrip());
 	raw_logging_box->setChecked(settings.gnssRawLogging());
+
+	// Select the active NTRIP profile in the list
+	auto activeProfile = settings.gnssNtripActiveProfile();
+	if (!activeProfile.isEmpty())
+		ntrip_widget->selectProfile(activeProfile);
 }
 
 

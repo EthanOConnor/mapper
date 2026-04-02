@@ -23,12 +23,17 @@
 #include <cmath>
 
 #include <QComboBox>
+#include <QEvent>
+#include <QFont>
 #include <QFormLayout>
 #include <QLabel>
 #include <QPalette>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QScroller>
 #include <QScreen>
+#include <QSettings>
+#include <QSpacerItem>
 #include <QGuiApplication>
 #include <QVBoxLayout>
 
@@ -140,6 +145,26 @@ GnssDetailPanel::GnssDetailPanel(QWidget* parent)
 
 GnssDetailPanel::~GnssDetailPanel() = default;
 
+void GnssDetailPanel::setDumpStatus(const QString& message)
+{
+	dump_status_label->setText(message);
+}
+
+
+bool GnssDetailPanel::event(QEvent* e)
+{
+	// On mobile, this panel floats over the map widget. We must accept
+	// touch events to prevent them from falling through to the map.
+	// QScroller on the scroll area viewport handles the actual scrolling
+	// via gesture recognition, which runs before our event handler.
+	if (e->type() == QEvent::TouchBegin)
+	{
+		e->accept();
+		// Don't return true — let QWidget::event deliver to children
+	}
+	return QWidget::event(e);
+}
+
 
 QSize GnssDetailPanel::sizeHint() const
 {
@@ -160,6 +185,10 @@ void GnssDetailPanel::setupUi()
 	pal.setColor(QPalette::Window, Qt::white);
 	setPalette(pal);
 
+	// Accept all touch/mouse events so they don't pass through to the map
+	setAttribute(Qt::WA_AcceptTouchEvents);
+	setFocusPolicy(Qt::StrongFocus);
+
 	// Content widget inside scroll area
 	auto* content_widget = new QWidget();
 	auto* form = new QFormLayout(content_widget);
@@ -167,6 +196,9 @@ void GnssDetailPanel::setupUi()
 
 	// --- Position section ---
 	form->addRow(Util::Headline::create(tr("Position")));
+
+	fix_time_label = new QLabel(QStringLiteral("--"));
+	form->addRow(tr("Fix time:"), fix_time_label);
 
 	fix_type_label = new QLabel(QStringLiteral("--"));
 	form->addRow(tr("Fix type:"), fix_type_label);
@@ -216,11 +248,27 @@ void GnssDetailPanel::setupUi()
 	correction_status_label = new QLabel(QStringLiteral("--"));
 	form->addRow(tr("Status:"), correction_status_label);
 
+	ntrip_version_label = new QLabel(QStringLiteral("--"));
+	form->addRow(tr("NTRIP version:"), ntrip_version_label);
+
+	ntrip_server_label = new QLabel(QStringLiteral("--"));
+	ntrip_server_label->setWordWrap(true);
+	form->addRow(tr("Server:"), ntrip_server_label);
+
+	local_age_label = new QLabel(QStringLiteral("--"));
+	form->addRow(tr("Local age:"), local_age_label);
+
 	correction_age_label = new QLabel(QStringLiteral("--"));
-	form->addRow(tr("Correction age:"), correction_age_label);
+	form->addRow(tr("Receiver age:"), correction_age_label);
 
 	correction_rate_label = new QLabel(QStringLiteral("--"));
 	form->addRow(tr("Data rate:"), correction_rate_label);
+
+	ntrip_bytes_label = new QLabel(QStringLiteral("--"));
+	form->addRow(tr("Bytes (rx/tx):"), ntrip_bytes_label);
+
+	gga_count_label = new QLabel(QStringLiteral("--"));
+	form->addRow(tr("GGA sent:"), gga_count_label);
 
 	mountpoint_label = new QLabel(QStringLiteral("--"));
 	form->addRow(tr("Mountpoint:"), mountpoint_label);
@@ -243,11 +291,33 @@ void GnssDetailPanel::setupUi()
 			emit connectRequested();
 	});
 
+	// --- Messages section ---
+	form->addRow(Util::Headline::create(tr("Messages")));
+
+	messages_label = new QLabel(QStringLiteral("--"));
+	messages_label->setWordWrap(true);
+	messages_label->setFont(QFont(QStringLiteral("Menlo"), 10));
+	form->addRow(messages_label);
+
+	dump_button = new QPushButton(tr("Dump Raw Data"));
+	dump_status_label = new QLabel();
+	dump_status_label->setWordWrap(true);
+	form->addRow(dump_button);
+	form->addRow(dump_status_label);
+	connect(dump_button, &QPushButton::clicked, this, [this]() {
+		emit dumpRawRequested();
+	});
+
+	// Bottom spacer so content clears the toolbar
+	form->addItem(new QSpacerItem(0, 80));
+
 	// Scroll area wrapping the content
 	auto* scroll_area = new QScrollArea();
 	scroll_area->setWidget(content_widget);
 	scroll_area->setWidgetResizable(true);
 	scroll_area->setFrameShape(QFrame::NoFrame);
+	// Enable touch scrolling and consume touch events so the map doesn't scroll
+	QScroller::grabGesture(scroll_area->viewport(), QScroller::TouchGesture);
 
 	auto* main_layout = new QVBoxLayout(this);
 	main_layout->setContentsMargins(0, 0, 0, 0);
@@ -260,6 +330,11 @@ void GnssDetailPanel::updateState(const GnssState& state)
 	const auto& pos = state.position;
 
 	// Position section
+	if (pos.timestamp.isValid())
+		fix_time_label->setText(pos.timestamp.toLocalTime().toString(QStringLiteral("HH:mm:ss.zzz")));
+	else
+		fix_time_label->setText(QStringLiteral("--"));
+
 	fix_type_label->setText(fixTypeString(pos.fixType));
 	h_accuracy_label->setText(formatAccuracy(pos.hAccuracyP95));
 	v_accuracy_label->setText(formatAccuracy(pos.vAccuracyP95));
@@ -275,6 +350,25 @@ void GnssDetailPanel::updateState(const GnssState& state)
 	else
 	{
 		coordinates_label->setText(QStringLiteral("--"));
+	}
+
+	// Show ellipse info alongside H accuracy
+	if (pos.ellipseAvailable)
+	{
+		h_accuracy_label->setText(
+		    formatAccuracy(pos.hAccuracyP95)
+		    + QStringLiteral("  [%1 x %2m @%3\u00b0]")
+		        .arg(static_cast<double>(pos.ellipseSemiMajorP95), 0, 'f', 3)
+		        .arg(static_cast<double>(pos.ellipseSemiMinorP95), 0, 'f', 3)
+		        .arg(static_cast<double>(pos.ellipseOrientationDeg), 0, 'f', 0));
+	}
+
+	// Show raw V accuracy even if P95 computation fails
+	if (!std::isnan(pos.vAccuracy) && std::isnan(pos.vAccuracyP95))
+	{
+		v_accuracy_label->setText(
+		    QString::number(static_cast<double>(pos.vAccuracy), 'f', 3)
+		    + QLatin1String("m (raw)"));
 	}
 
 	// Satellites section
@@ -304,14 +398,84 @@ void GnssDetailPanel::updateState(const GnssState& state)
 	hdop_label->setText(formatDop(pos.hDOP));
 	vdop_label->setText(formatDop(pos.vDOP));
 
-	// Corrections section
+	// Corrections section — populate profile combo if needed
+	if (ntrip_profile_combo->count() == 0)
+	{
+		QSettings settings;
+		auto names = settings.value(QStringLiteral("Gnss/ntrip_profiles")).toStringList();
+		ntrip_profile_combo->blockSignals(true);
+		for (const auto& name : names)
+			ntrip_profile_combo->addItem(name);
+		if (!state.ntripProfileName.isEmpty())
+		{
+			int idx = ntrip_profile_combo->findText(state.ntripProfileName);
+			if (idx >= 0)
+				ntrip_profile_combo->setCurrentIndex(idx);
+		}
+		ntrip_profile_combo->blockSignals(false);
+	}
+
 	correction_status_label->setText(correctionStateString(state.correctionState));
+
+	ntrip_version_label->setText(state.ntripVersion.isEmpty() ? QStringLiteral("--") : state.ntripVersion);
+	ntrip_server_label->setText(state.ntripServer.isEmpty() ? QStringLiteral("--") : state.ntripServer);
+
+	local_age_label->setText(
+	    state.localCorrectionAge < 0.0f
+	        ? QStringLiteral("--")
+	        : QString::number(static_cast<double>(state.localCorrectionAge), 'f', 1) + QLatin1String("s"));
 	correction_age_label->setText(
 	    std::isnan(pos.correctionAge)
 	        ? QStringLiteral("--")
 	        : QString::number(static_cast<double>(pos.correctionAge), 'f', 1) + QLatin1String("s"));
 	correction_rate_label->setText(formatDataRate(state.correctionDataRate));
+
+	// Bytes received from caster / sent to receiver
+	if (state.ntripBytesReceived > 0 || state.ntripBytesSentToReceiver > 0)
+	{
+		auto fmtBytes = [](qint64 b) -> QString {
+			if (b >= 1024 * 1024)
+				return QString::number(static_cast<double>(b) / (1024.0 * 1024.0), 'f', 1) + QLatin1String(" MB");
+			if (b >= 1024)
+				return QString::number(static_cast<double>(b) / 1024.0, 'f', 1) + QLatin1String(" KB");
+			return QString::number(b) + QLatin1String(" B");
+		};
+		ntrip_bytes_label->setText(fmtBytes(state.ntripBytesReceived)
+		    + QLatin1String(" / ") + fmtBytes(state.ntripBytesSentToReceiver));
+	}
+	else
+	{
+		ntrip_bytes_label->setText(QStringLiteral("--"));
+	}
+
+	gga_count_label->setText(
+	    state.ggaSentCount > 0
+	        ? QString::number(state.ggaSentCount)
+	        : QStringLiteral("--"));
 	mountpoint_label->setText(state.ntripMountpoint.isEmpty() ? QStringLiteral("--") : state.ntripMountpoint);
+
+	// Messages section
+	{
+		auto now = QDateTime::currentMSecsSinceEpoch();
+		QStringList lines;
+		for (int i = 0; i < state.messageStatCount; ++i)
+		{
+			const auto& s = state.messageStats[i];
+			float ageSec = (s.lastTimeMs > 0) ? (now - s.lastTimeMs) * 0.001f : -1.0f;
+			QString ageStr = (ageSec < 0.0f) ? QStringLiteral("--")
+			    : (ageSec < 10.0f) ? QString::number(static_cast<double>(ageSec), 'f', 1) + QLatin1String("s")
+			    : QStringLiteral(">10s");
+			QString hzStr = (s.avgHz > 0.01f)
+			    ? QString::number(static_cast<double>(s.avgHz), 'f', 1) + QLatin1String("Hz")
+			    : QStringLiteral("--");
+			lines.append(QStringLiteral("%1  n=%2  %3  %4")
+			    .arg(s.name, -16)
+			    .arg(s.count, 5)
+			    .arg(hzStr, 7)
+			    .arg(ageStr, 6));
+		}
+		messages_label->setText(lines.isEmpty() ? QStringLiteral("--") : lines.join(QLatin1Char('\n')));
+	}
 
 	// Receiver section
 	device_name_label->setText(state.deviceName.isEmpty() ? QStringLiteral("--") : state.deviceName);

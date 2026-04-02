@@ -67,8 +67,8 @@ set(MAPPER_GNSS_SOURCES
   ui/gnss_status_overlay.cpp
   ui/gnss_detail_panel.cpp
   ui/gnss_device_dialog.cpp
-  ui/ntrip_settings_widget.cpp
-  ui/gnss_settings_page.cpp
+  # ntrip_settings_widget.cpp and gnss_settings_page.cpp are built in
+  # Mapper_Common so the linker resolves GnssSettingsPage from settings_dialog.
 )
 
 # BLE transport — platform-specific implementation
@@ -76,9 +76,8 @@ if(IOS)
 	# iOS: Native CoreBluetooth (no Qt Bluetooth dependency)
 	enable_language(OBJCXX)
 	list(APPEND MAPPER_GNSS_SOURCES
-	  transport/ble_transport_corebluetooth.mm
-	  transport/ble_scanner_corebluetooth.mm
-	  transport/ble_scanner_transport_adapter.cpp
+	  transport/ble_discovery_agent.mm
+	  transport/ios_ble_nus_transport.mm
 	)
 	list(APPEND MAPPER_GNSS_DEFINITIONS
 	  PUBLIC MAPPER_GNSS_BLE_COREBLUETOOTH
@@ -117,6 +116,12 @@ target_link_libraries(mapper-gnss
 )
 if(IOS)
 	target_compile_options(mapper-gnss PRIVATE $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>)
+	# Also set ARC per-file for Xcode generator compatibility
+	set_source_files_properties(
+	  transport/ble_discovery_agent.mm
+	  transport/ios_ble_nus_transport.mm
+	  PROPERTIES COMPILE_FLAGS "-fobjc-arc"
+	)
 	find_library(COREBLUETOOTH_FRAMEWORK CoreBluetooth)
 	if(COREBLUETOOTH_FRAMEWORK)
 		target_link_libraries(mapper-gnss PRIVATE "${COREBLUETOOTH_FRAMEWORK}")

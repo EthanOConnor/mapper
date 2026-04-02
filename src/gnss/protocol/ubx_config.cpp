@@ -140,27 +140,48 @@ QByteArray UbxConfig::buildPollRequest(std::uint8_t msgClass, std::uint8_t msgId
 }
 
 
+static QByteArray u1(std::uint8_t v)
+{
+	return QByteArray(1, static_cast<char>(v));
+}
+
 QVector<QByteArray> UbxConfig::buildInitSequence()
 {
 	QVector<QByteArray> sequence;
-	sequence.reserve(6);
 
-	// Enable NAV-PVT at every epoch
-	sequence.append(buildCfgMsg(kClassNav, kIdNavPvt, 1));
+	// Use CFG-VALSET (modern key-value config, works on F9P and X20P).
+	// Target UART1 explicitly — this is the port the ArduSimple BLE bridge
+	// connects to. Legacy CFG-MSG sets the "current port" which may not be
+	// UART1 when commands arrive via BLE.
+	//
+	// Config keys from u-blox F9 HPG 1.51 / X20 HPG 2.02 interface descriptions.
+	// Layer = 0x01 (RAM only, self-healing on power cycle).
 
-	// Enable NAV-DOP at every epoch
-	sequence.append(buildCfgMsg(kClassNav, kIdNavDop, 1));
+	QVector<CfgKeyValue> items;
+	items.reserve(16);
 
-	// Enable NAV-SAT every 5th epoch (reduce bandwidth)
-	sequence.append(buildCfgMsg(kClassNav, kIdNavSat, 5));
+	// --- Enable UBX output on UART1 ---
+	items.append({0x10740001, u1(1)});  // CFG-UART1OUTPROT-UBX = true
 
-	// Enable NAV-COV at every epoch
-	sequence.append(buildCfgMsg(kClassNav, kIdNavCov, 1));
+	// --- Primary messages: every epoch on UART1 ---
+	items.append({0x20910007, u1(1)});  // CFG-MSGOUT-UBX_NAV_PVT_UART1 = 1
+	items.append({0x20910034, u1(1)});  // CFG-MSGOUT-UBX_NAV_HPPOSLLH_UART1 = 1
+	items.append({0x20910085, u1(1)});  // CFG-MSGOUT-UBX_NAV_COV_UART1 = 1
+	items.append({0x20910039, u1(1)});  // CFG-MSGOUT-UBX_NAV_DOP_UART1 = 1
+	items.append({0x2091001b, u1(1)});  // CFG-MSGOUT-UBX_NAV_STATUS_UART1 = 1
 
-	// Enable NAV-STATUS at every epoch
-	sequence.append(buildCfgMsg(kClassNav, kIdNavStatus, 1));
+	// --- Diagnostic messages: every 5th epoch on UART1 ---
+	items.append({0x20910016, u1(5)});  // CFG-MSGOUT-UBX_NAV_SAT_UART1 = 5
 
-	// Poll MON-VER once
+	// --- Accept RTCM3 corrections on UART1 (BLE bridge forwards these) ---
+	items.append({0x10730004, u1(1)});  // CFG-UART1INPROT-RTCM3X = true
+
+	// --- Accept UBX commands on UART1 ---
+	items.append({0x10730001, u1(1)});  // CFG-UART1INPROT-UBX = true
+
+	sequence.append(buildCfgValset(items, 0x01));  // RAM layer
+
+	// Poll MON-VER once to identify receiver model
 	sequence.append(buildPollRequest(kClassMon, kIdMonVer));
 
 	return sequence;

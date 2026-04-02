@@ -69,6 +69,14 @@ void NtripClient::start()
 	m_bytesInWindow = 0;
 	m_v2Failed = false;
 	m_triedV2 = false;
+	m_chunkedTransfer = false;
+	m_chunkBuffer.clear();
+	m_chunkRemaining = 0;
+	m_ggaSentCount = 0;
+	m_totalBytesReceived = 0;
+	m_totalBytesSent = 0;
+	m_negotiatedVersion.clear();
+	m_serverString.clear();
 
 	attemptConnect();
 }
@@ -82,6 +90,7 @@ void NtripClient::stop()
 
 	if (m_socket)
 	{
+		m_socket->disconnect(this);
 		m_socket->abort();
 		m_socket->deleteLater();
 		m_socket = nullptr;
@@ -112,16 +121,24 @@ void NtripClient::attemptConnect()
 {
 	if (m_profile.casterHost.isEmpty() || m_profile.mountpoint.isEmpty())
 	{
+		qWarning("NTRIP: profile incomplete (host='%s' mount='%s')",
+		         qPrintable(m_profile.casterHost), qPrintable(m_profile.mountpoint));
 		emit errorOccurred(QStringLiteral("NTRIP profile incomplete"));
 		return;
 	}
+
+	qDebug("NTRIP: connecting to %s:%d/%s (attempt %d)",
+	       qPrintable(m_profile.casterHost), m_profile.casterPort,
+	       qPrintable(m_profile.mountpoint), m_reconnectCount + 1);
 
 	setState(m_reconnectCount > 0 ? State::Reconnecting : State::Connecting);
 
 	if (m_socket)
 	{
+		m_socket->disconnect(this);  // disconnect all signals before deletion
 		m_socket->abort();
 		m_socket->deleteLater();
+		m_socket = nullptr;
 	}
 
 	m_socket = new QTcpSocket(this);
@@ -201,6 +218,8 @@ void NtripClient::sendNtripRequest()
 
 	request.append("\r\n");
 
+	qDebug("NTRIP: sending request (%d bytes) to %s:%d",
+	       request.size(), qPrintable(m_profile.casterHost), m_profile.casterPort);
 	m_socket->write(request);
 
 	setState(State::Connected);
@@ -246,12 +265,37 @@ void NtripClient::onSocketReadyRead()
 
 		// Check response status
 		auto headerStr = QString::fromLatin1(m_headerBuffer.left(headerEnd));
-		bool accepted = headerStr.startsWith(QLatin1String("ICY 200 OK"))
-		    || headerStr.startsWith(QLatin1String("HTTP/1.0 200"))
-		    || headerStr.startsWith(QLatin1String("HTTP/1.1 200"));
+		// SOURCETABLE 200 OK means the mountpoint was not found — the caster
+		// returns the sourcetable instead of a data stream.
+		bool isSourcetable = headerStr.startsWith(QLatin1String("SOURCETABLE 200 OK"));
+		bool accepted = !isSourcetable
+		    && (headerStr.startsWith(QLatin1String("ICY 200 OK"))
+		        || headerStr.startsWith(QLatin1String("HTTP/1.0 200"))
+		        || headerStr.startsWith(QLatin1String("HTTP/1.1 200")));
 
 		if (!accepted)
 		{
+			if (isSourcetable)
+			{
+				qWarning("NTRIP: mountpoint '%s' not found — caster returned sourcetable",
+				         qPrintable(m_profile.mountpoint));
+				emit errorOccurred(QStringLiteral("Mountpoint \"%1\" not found on caster. Check spelling.")
+				    .arg(m_profile.mountpoint));
+				// Don't reconnect for a bad mountpoint — it won't fix itself
+				setState(State::Disconnected);
+				if (m_socket)
+				{
+					m_socket->disconnect(this);
+					m_socket->abort();
+					m_socket->deleteLater();
+					m_socket = nullptr;
+				}
+				return;
+			}
+
+			qWarning("NTRIP: caster rejected request. Response: %s",
+			         qPrintable(headerStr.left(120)));
+
 			// If we tried v2 in Auto mode and it was rejected, fall back to v1
 			if (m_triedV2 && m_profile.version == NtripVersion::Auto && !m_v2Failed)
 			{
@@ -259,6 +303,7 @@ void NtripClient::onSocketReadyRead()
 				qDebug("NTRIP: v2 rejected, falling back to v1");
 				if (m_socket)
 				{
+					m_socket->disconnect(this);
 					m_socket->abort();
 					m_socket->deleteLater();
 					m_socket = nullptr;
@@ -275,6 +320,7 @@ void NtripClient::onSocketReadyRead()
 		}
 
 		m_headersParsed = true;
+		parseResponseHeaders(headerStr);
 
 		// Extract any data after the headers
 		data = m_headerBuffer.mid(headerEnd + 4);
@@ -284,7 +330,15 @@ void NtripClient::onSocketReadyRead()
 			return;
 	}
 
+	// De-chunk if needed (NTRIP v2 chunked transfer)
+	if (m_chunkedTransfer)
+		data = dechunkData(data);
+
+	if (data.isEmpty())
+		return;
+
 	// RTCM correction data
+	m_totalBytesReceived += data.size();
 	m_lastDataTimestamp = QDateTime::currentMSecsSinceEpoch();
 	updateDataRate(data.size());
 
@@ -314,6 +368,7 @@ void NtripClient::onSocketError(QAbstractSocket::SocketError error)
 	Q_UNUSED(error)
 
 	QString msg = m_socket ? m_socket->errorString() : QStringLiteral("Socket error");
+	qWarning("NTRIP: socket error: %s", qPrintable(msg));
 	emit errorOccurred(msg);
 
 	if (m_state != State::Disconnected)
@@ -360,7 +415,10 @@ void NtripClient::sendGga()
 		return;
 
 	if (m_socket->state() == QAbstractSocket::ConnectedState)
+	{
 		m_socket->write(m_currentGga);
+		++m_ggaSentCount;
+	}
 }
 
 
@@ -371,6 +429,7 @@ void NtripClient::scheduleReconnect()
 
 	if (m_socket)
 	{
+		m_socket->disconnect(this);  // prevent stale signal delivery
 		m_socket->abort();
 		m_socket->deleteLater();
 		m_socket = nullptr;
@@ -431,6 +490,100 @@ void NtripClient::setState(State newState)
 		m_state = newState;
 		emit stateChanged(m_state);
 	}
+}
+
+
+void NtripClient::parseResponseHeaders(const QString& headers)
+{
+	// Detect chunked transfer encoding (NTRIP v2)
+	m_chunkedTransfer = headers.contains(
+	    QLatin1String("Transfer-Encoding: chunked"), Qt::CaseInsensitive);
+	m_chunkBuffer.clear();
+	m_chunkRemaining = 0;
+
+	// Determine negotiated version
+	if (headers.startsWith(QLatin1String("ICY 200 OK")))
+		m_negotiatedVersion = QStringLiteral("v1");
+	else if (m_chunkedTransfer)
+		m_negotiatedVersion = QStringLiteral("v2 chunked");
+	else if (m_triedV2)
+		m_negotiatedVersion = QStringLiteral("v2");
+	else
+		m_negotiatedVersion = QStringLiteral("v1");
+
+	// Extract Server: header
+	m_serverString.clear();
+	for (const auto& line : headers.split(QLatin1String("\r\n")))
+	{
+		if (line.startsWith(QLatin1String("Server:"), Qt::CaseInsensitive))
+		{
+			m_serverString = line.mid(7).trimmed();
+			break;
+		}
+	}
+
+	qDebug("NTRIP: connected (%s), server: %s",
+	       qPrintable(m_negotiatedVersion), qPrintable(m_serverString));
+}
+
+
+QByteArray NtripClient::dechunkData(const QByteArray& raw)
+{
+	// HTTP chunked transfer encoding:
+	//   <hex-size>\r\n<data>\r\n<hex-size>\r\n<data>\r\n...0\r\n\r\n
+	// Data may arrive split across multiple readyRead calls, so we
+	// maintain m_chunkBuffer and m_chunkRemaining across calls.
+
+	m_chunkBuffer.append(raw);
+	QByteArray result;
+
+	while (!m_chunkBuffer.isEmpty())
+	{
+		if (m_chunkRemaining > 0)
+		{
+			// Reading chunk data
+			int available = qMin(m_chunkRemaining, static_cast<int>(m_chunkBuffer.size()));
+			result.append(m_chunkBuffer.left(available));
+			m_chunkBuffer.remove(0, available);
+			m_chunkRemaining -= available;
+
+			if (m_chunkRemaining == 0)
+			{
+				// Consume trailing \r\n after chunk data
+				if (m_chunkBuffer.startsWith("\r\n"))
+					m_chunkBuffer.remove(0, 2);
+			}
+		}
+		else
+		{
+			// Reading chunk size line
+			int lineEnd = m_chunkBuffer.indexOf("\r\n");
+			if (lineEnd < 0)
+				break;  // Incomplete size line — wait for more data
+
+			bool ok = false;
+			int chunkSize = m_chunkBuffer.left(lineEnd).trimmed().toInt(&ok, 16);
+			m_chunkBuffer.remove(0, lineEnd + 2);
+
+			if (!ok || chunkSize < 0)
+			{
+				qWarning("NTRIP: invalid chunk size, dropping buffer");
+				m_chunkBuffer.clear();
+				break;
+			}
+
+			if (chunkSize == 0)
+			{
+				// Terminal chunk — stream complete (caster closed)
+				m_chunkBuffer.clear();
+				break;
+			}
+
+			m_chunkRemaining = chunkSize;
+		}
+	}
+
+	return result;
 }
 
 

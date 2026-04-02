@@ -17,7 +17,7 @@
 #    You should have received a copy of the GNU General Public License
 #    along with OpenOrienteering.  If not, see <http://www.gnu.org/licenses/>.
 
-find_package(Qt6 REQUIRED COMPONENTS Core Core5Compat Widgets Network PrintSupport)
+find_package(Qt6 REQUIRED COMPONENTS Core Widgets Network PrintSupport)
 
 set(CMAKE_AUTOMOC ON)
 
@@ -150,6 +150,8 @@ set(Mapper_Common_SRCS
   gui/print_widget.cpp
   gui/select_crs_dialog.cpp
   gui/settings_dialog.cpp
+  gnss/ui/gnss_settings_page.cpp
+  gnss/ui/ntrip_settings_widget.cpp
   gui/simple_course_dialog.cpp
   gui/task_dialog.cpp
   gui/text_browser_dialog.cpp
@@ -261,6 +263,7 @@ set(Mapper_Common_SRCS
   undo/undo_manager.cpp
   
   util/encoding.cpp
+  util/legacy_codec.cpp
   util/item_delegates.cpp
   util/key_value_container.cpp
   util/mapper_service_proxy.cpp
@@ -319,13 +322,13 @@ target_link_libraries(Mapper_Common
   PUBLIC
     Polyclipping::Polyclipping
     PROJ::proj
-    Qt6::Core5Compat
     Qt6::Widgets
 )
 foreach(lib
   cove
   mapper-config
   mapper-gdal
+  mapper-gnss
   mapper-sensors
   printsupport
   scaling-icon-engine
@@ -395,6 +398,7 @@ if(IOS)
 	set_target_properties(Mapper PROPERTIES
 		MACOSX_BUNDLE_INFO_PLIST "${PROJECT_SOURCE_DIR}/ios/Info.plist"
 		MACOSX_BUNDLE_GUI_IDENTIFIER "org.openorienteering.mapper"
+		MACOSX_BUNDLE_BUNDLE_NAME "OpenOrienteering Mapper"
 		MACOSX_BUNDLE_BUNDLE_VERSION "${Mapper_VERSION}"
 		MACOSX_BUNDLE_SHORT_VERSION_STRING "${Mapper_VERSION}"
 		XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "org.openorienteering.mapper"
