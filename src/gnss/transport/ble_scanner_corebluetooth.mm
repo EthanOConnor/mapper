@@ -47,6 +47,16 @@ static CBUUID* nusTxCharUuid()
 	return uuid;
 }
 
+/// Case-insensitive UUID string comparison — works around CoreBluetooth
+/// isEqual: failures with some ESP32 Bluedroid BLE stacks.
+static BOOL uuidMatches(CBUUID* a, CBUUID* b)
+{
+	if ([a isEqual:b])
+		return YES;
+	// Fallback: compare string representations case-insensitively
+	return [a.UUIDString caseInsensitiveCompare:b.UUIDString] == NSOrderedSame;
+}
+
 // Custom GNSS Hub service — our future custom firmware advertises this
 // alongside NUS for backward compatibility. Contains L2CAP PSM characteristic.
 static CBUUID* gnssHubServiceUuid()
@@ -94,6 +104,7 @@ static const int kMaxConnectAttempts = 4;
 - (void)stopScan;
 - (void)connectToUuid:(NSString*)uuidString;
 - (void)cancelConnection;
+- (void)teardown;
 - (BOOL)writeData:(const QByteArray&)data;
 @end
 
@@ -115,8 +126,8 @@ static const int kMaxConnectAttempts = 4;
 {
 	if (_centralManager.state == CBManagerStatePoweredOn) {
 		NSLog(@"GNSS BLE: starting scan for NUS devices");
-		[_centralManager scanForPeripheralsWithServices:nil
-		                                       options:@{CBCentralManagerScanOptionAllowDuplicatesKey: @YES}];
+		[_centralManager scanForPeripheralsWithServices:@[nusServiceUuid()]
+		                                       options:@{CBCentralManagerScanOptionAllowDuplicatesKey: @NO}];
 	}
 }
 
@@ -222,8 +233,28 @@ static const int kMaxConnectAttempts = 4;
 	}
 }
 
+/// Tear down all BLE state. Called before the C++ scanner is destroyed.
+- (void)teardown
+{
+	_scanner = nil;
+	[_connectTimeoutTimer invalidate];
+	_connectTimeoutTimer = nil;
+	[_centralManager stopScan];
+	if (_peripheral) {
+		if (_txCharacteristic && _txCharacteristic.isNotifying) {
+			[_peripheral setNotifyValue:NO forCharacteristic:_txCharacteristic];
+		}
+		[_centralManager cancelPeripheralConnection:_peripheral];
+		_peripheral = nil;
+	}
+	_rxCharacteristic = nil;
+	_txCharacteristic = nil;
+	_l2capChannel = nil;
+}
+
 - (BOOL)writeData:(const QByteArray&)data
 {
+	if (!_scanner) return NO;
 	// Prefer L2CAP if available (higher throughput, no fragmentation needed)
 	if (_usingL2cap && _l2capChannel) {
 		NSInteger written = [_l2capChannel.outputStream write:
@@ -271,11 +302,15 @@ static const int kMaxConnectAttempts = 4;
 }
 
 
+// Guard macro: bail from ObjC callback if C++ scanner is already torn down
+#define GUARD_SCANNER() do { if (!_scanner) return; } while(0)
+
 // ---- CBCentralManagerDelegate ----
 
 - (void)centralManagerDidUpdateState:(CBCentralManager*)central
 {
 	NSLog(@"GNSS BLE: centralManagerDidUpdateState: %ld", (long)central.state);
+	if (!_scanner) return;
 	_scanner->didUpdateState(static_cast<int>(central.state));
 }
 
@@ -284,6 +319,7 @@ static const int kMaxConnectAttempts = 4;
      advertisementData:(NSDictionary<NSString*,id>*)advertisementData
                   RSSI:(NSNumber*)RSSI
 {
+	GUARD_SCANNER();
 	NSString* name = peripheral.name;
 	if (!name || name.length == 0)
 		name = advertisementData[CBAdvertisementDataLocalNameKey];
@@ -304,6 +340,7 @@ static const int kMaxConnectAttempts = 4;
 - (void)centralManager:(CBCentralManager*)central
   didConnectPeripheral:(CBPeripheral*)peripheral
 {
+	GUARD_SCANNER();
 	NSLog(@"GNSS BLE: didConnectPeripheral: %@ — discovering ALL services", peripheral.name);
 	_connected = YES;
 	[_connectTimeoutTimer invalidate];
@@ -317,6 +354,7 @@ static const int kMaxConnectAttempts = 4;
 didFailToConnectPeripheral:(CBPeripheral*)peripheral
                  error:(NSError*)error
 {
+	GUARD_SCANNER();
 	NSLog(@"GNSS BLE: didFailToConnect: %@", error);
 	_scanner->didFailToConnect(
 		QString::fromNSString(error ? error.localizedDescription : @"Connection failed"));
@@ -326,6 +364,7 @@ didFailToConnectPeripheral:(CBPeripheral*)peripheral
 didDisconnectPeripheral:(CBPeripheral*)peripheral
                  error:(NSError*)error
 {
+	GUARD_SCANNER();
 	NSLog(@"GNSS BLE: didDisconnect: %@", error);
 	_rxCharacteristic = nil;
 	_txCharacteristic = nil;
@@ -345,6 +384,7 @@ didDisconnectPeripheral:(CBPeripheral*)peripheral
 - (void)peripheral:(CBPeripheral*)peripheral
 didDiscoverServices:(NSError*)error
 {
+	GUARD_SCANNER();
 	if (error) {
 		NSLog(@"GNSS BLE: service discovery error: %@", error);
 		_scanner->didFailToConnect(QString::fromNSString(error.localizedDescription));
@@ -352,27 +392,29 @@ didDiscoverServices:(NSError*)error
 	}
 
 	NSLog(@"GNSS BLE: discovered %lu services:", (unsigned long)peripheral.services.count);
-	BOOL foundNus = NO;
-	BOOL foundGnssHub = NO;
+	BOOL foundKnown = NO;
 	for (CBService* service in peripheral.services) {
 		NSLog(@"GNSS BLE:   service: %@", service.UUID);
-		if ([service.UUID isEqual:nusServiceUuid()]) {
-			foundNus = YES;
-			NSLog(@"GNSS BLE: found NUS — discovering characteristics");
-			[peripheral discoverCharacteristics:@[nusRxCharUuid(), nusTxCharUuid()]
-			                         forService:service];
+		if (uuidMatches(service.UUID, nusServiceUuid())) {
+			foundKnown = YES;
+			NSLog(@"GNSS BLE: found NUS by UUID — discovering characteristics");
+			[peripheral discoverCharacteristics:nil forService:service];
 		}
-		if ([service.UUID isEqual:gnssHubServiceUuid()]) {
-			foundGnssHub = YES;
-			NSLog(@"GNSS BLE: found GNSS Hub service — discovering L2CAP PSM characteristic");
-			[peripheral discoverCharacteristics:@[gnssL2capPsmCharUuid()]
-			                         forService:service];
+		else if (uuidMatches(service.UUID, gnssHubServiceUuid())) {
+			foundKnown = YES;
+			NSLog(@"GNSS BLE: found GNSS Hub service — discovering characteristics");
+			[peripheral discoverCharacteristics:nil forService:service];
 		}
 	}
-	if (!foundNus && !foundGnssHub) {
-		NSLog(@"GNSS BLE: no compatible service found");
-		_scanner->didFailToConnect(
-			QString::fromNSString(@"No compatible GNSS service found on this device"));
+
+	// Fallback: if no known UUID matched, discover characteristics on ALL services.
+	// The device was found via NUS-filtered scan, so it has NUS — the UUID comparison
+	// just fails (CoreBluetooth quirk with some ESP32 Bluedroid implementations).
+	if (!foundKnown) {
+		NSLog(@"GNSS BLE: no known service UUID matched — discovering all characteristics");
+		for (CBService* service in peripheral.services) {
+			[peripheral discoverCharacteristics:nil forService:service];
+		}
 	}
 }
 
@@ -380,6 +422,7 @@ didDiscoverServices:(NSError*)error
 didDiscoverCharacteristicsForService:(CBService*)service
              error:(NSError*)error
 {
+	GUARD_SCANNER();
 	if (error) {
 		NSLog(@"GNSS BLE: characteristic discovery error: %@", error);
 		_scanner->didFailToConnect(QString::fromNSString(error.localizedDescription));
@@ -390,14 +433,14 @@ didDiscoverCharacteristicsForService:(CBService*)service
 	      (unsigned long)service.characteristics.count, service.UUID);
 	for (CBCharacteristic* ch in service.characteristics) {
 		NSLog(@"GNSS BLE:   char: %@ props=%lu", ch.UUID, (unsigned long)ch.properties);
-		if ([ch.UUID isEqual:nusRxCharUuid()]) {
+		if (uuidMatches(ch.UUID, nusRxCharUuid())) {
 			NSLog(@"GNSS BLE: matched NUS RX by UUID");
 			_rxCharacteristic = ch;
-		} else if ([ch.UUID isEqual:nusTxCharUuid()]) {
+		} else if (uuidMatches(ch.UUID, nusTxCharUuid())) {
 			NSLog(@"GNSS BLE: matched NUS TX by UUID — subscribing");
 			_txCharacteristic = ch;
 			[peripheral setNotifyValue:YES forCharacteristic:ch];
-		} else if ([ch.UUID isEqual:gnssL2capPsmCharUuid()]) {
+		} else if (uuidMatches(ch.UUID, gnssL2capPsmCharUuid())) {
 			NSLog(@"GNSS BLE: found L2CAP PSM characteristic — reading");
 			[peripheral readValueForCharacteristic:ch];
 		}
@@ -420,7 +463,7 @@ didDiscoverCharacteristicsForService:(CBService*)service
 		}
 	}
 
-	if ([service.UUID isEqual:gnssHubServiceUuid()] && !_l2capChannel) {
+	if (uuidMatches(service.UUID, gnssHubServiceUuid()) && !_l2capChannel) {
 		NSLog(@"GNSS BLE: attempting L2CAP channel with default PSM 0x%04X", kGnssHubL2capPsm);
 		[peripheral openL2CAPChannel:kGnssHubL2capPsm];
 	}
@@ -430,6 +473,7 @@ didDiscoverCharacteristicsForService:(CBService*)service
 didUpdateNotificationStateForCharacteristic:(CBCharacteristic*)characteristic
              error:(NSError*)error
 {
+	GUARD_SCANNER();
 	if (error) {
 		NSLog(@"GNSS BLE: notification subscribe error: %@", error);
 		return;
@@ -448,6 +492,7 @@ didUpdateNotificationStateForCharacteristic:(CBCharacteristic*)characteristic
 didUpdateValueForCharacteristic:(CBCharacteristic*)characteristic
              error:(NSError*)error
 {
+	GUARD_SCANNER();
 	if (error || !characteristic.value)
 		return;
 
@@ -461,6 +506,7 @@ didUpdateValueForCharacteristic:(CBCharacteristic*)characteristic
 didWriteValueForCharacteristic:(CBCharacteristic*)characteristic
              error:(NSError*)error
 {
+	GUARD_SCANNER();
 	if (error) {
 		NSLog(@"GNSS BLE: write error: %@", error);
 	}
@@ -473,6 +519,7 @@ didWriteValueForCharacteristic:(CBCharacteristic*)characteristic
  didOpenL2CAPChannel:(CBL2CAPChannel*)channel
                error:(NSError*)error
 {
+	GUARD_SCANNER();
 	if (error || !channel) {
 		NSLog(@"GNSS BLE: L2CAP channel open failed: %@ — falling back to NUS", error);
 		// NUS is already set up, so we're fine
@@ -529,7 +576,11 @@ BleScannerCoreBluetooth::BleScannerCoreBluetooth(BleDeviceModel* model, QObject*
 
 BleScannerCoreBluetooth::~BleScannerCoreBluetooth()
 {
-	stopScan();
+	if (m_delegate)
+	{
+		[m_delegate teardown];
+		m_delegate = nil;
+	}
 }
 
 

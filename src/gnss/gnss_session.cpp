@@ -481,6 +481,12 @@ void GnssSession::onReconnectTimer()
 
 void GnssSession::feedData(const QByteArray& data)
 {
+	// Mark transport as connected when receiving external data
+	if (m_state.transportState != GnssTransportState::Connected)
+	{
+		m_state.transportState = GnssTransportState::Connected;
+		emitStateChanged();
+	}
 	onTransportDataReceived(data);
 }
 
