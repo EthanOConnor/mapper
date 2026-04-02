@@ -53,8 +53,10 @@ class QWidget;
 namespace OpenOrienteering {
 
 class ActionGridBar;
+class BleScannerCoreBluetooth;
 class CompassDisplay;
 class EditorDockWidget;
+class GnssDeviceDialog;
 class GnssSession;
 class GnssStatusOverlay;
 class FileFormat;
@@ -836,6 +838,10 @@ private:
 	// GNSS/RTK
 	GnssSession* gnss_session = nullptr;
 	GnssStatusOverlay* gnss_status_overlay = nullptr;
+#if defined(MAPPER_GNSS_BLE_COREBLUETOOTH)
+	BleScannerCoreBluetooth* gnss_ble_scanner = nullptr;
+#endif
+	GnssDeviceDialog* gnss_device_dialog = nullptr;
 	
 	QAction* mappart_add_act = {};
 	QAction* mappart_rename_act = {};

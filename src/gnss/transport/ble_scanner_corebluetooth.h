@@ -49,6 +49,7 @@ public:
 	void startScan();
 	void stopScan();
 	bool isScanning() const { return m_scanning; }
+	const QString& connectedDeviceUuid() const { return m_connectUuid; }
 
 	/// Connect to a discovered device by UUID.
 	/// Stops scanning, connects, discovers NUS service, subscribes to TX.
@@ -72,6 +73,7 @@ public:
 signals:
 	void scanningChanged(bool scanning);
 	void deviceConnected(const QString& name);
+	void deviceDisconnected(const QString& reason);
 	void deviceConnectionFailed(const QString& error);
 	void connectionRetrying(int attempt, int maxAttempts);
 	void dataReceived(const QByteArray& data);

@@ -21,10 +21,21 @@
 #ifndef OPENORIENTEERING_NTRIP_PROFILE_H
 #define OPENORIENTEERING_NTRIP_PROFILE_H
 
+#include <cstdint>
+
 #include <QDateTime>
 #include <QString>
 
 namespace OpenOrienteering {
+
+
+/// NTRIP protocol version.
+enum class NtripVersion : std::uint8_t
+{
+	Auto = 0,  ///< Try v2 first, fall back to v1
+	V1   = 1,
+	V2   = 2,
+};
 
 
 /// Stored configuration for an NTRIP caster connection.
@@ -39,6 +50,7 @@ struct NtripProfile
 	QString mountpoint;                  ///< Mountpoint name
 	QString username;
 	QString password;                    ///< In memory only; persisted to keychain
+	NtripVersion version = NtripVersion::Auto;  ///< Protocol version
 	bool useTls = false;                 ///< TLS encryption
 	bool sendGga = true;                 ///< Inject GGA for VRS services
 	int ggaIntervalSec = 10;             ///< GGA injection interval

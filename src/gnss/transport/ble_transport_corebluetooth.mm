@@ -26,17 +26,27 @@
 #include <QString>
 
 
-// Nordic UART Service UUIDs
-static CBUUID* NUS_SERVICE_UUID;
-static CBUUID* NUS_RX_CHAR_UUID;  // Phone → receiver (write)
-static CBUUID* NUS_TX_CHAR_UUID;  // Receiver → phone (notify)
-
-__attribute__((constructor))
-static void initUUIDs() {
-	NUS_SERVICE_UUID = [CBUUID UUIDWithString:@"6E400001-B5A3-F393-E0A9-E50E24DCCA9E"];
-	NUS_RX_CHAR_UUID = [CBUUID UUIDWithString:@"6E400002-B5A3-F393-E0A9-E50E24DCCA9E"];
-	NUS_TX_CHAR_UUID = [CBUUID UUIDWithString:@"6E400003-B5A3-F393-E0A9-E50E24DCCA9E"];
+// Nordic UART Service UUIDs — explicitly retained for non-ARC safety.
+static CBUUID* nusServiceUuid()
+{
+	static CBUUID* uuid = (__bridge CBUUID*)CFBridgingRetain([CBUUID UUIDWithString:@"6E400001-B5A3-F393-E0A9-E50E24DCCA9E"]);
+	return uuid;
 }
+static CBUUID* nusRxCharUuid()
+{
+	static CBUUID* uuid = (__bridge CBUUID*)CFBridgingRetain([CBUUID UUIDWithString:@"6E400002-B5A3-F393-E0A9-E50E24DCCA9E"]);
+	return uuid;
+}
+static CBUUID* nusTxCharUuid()
+{
+	static CBUUID* uuid = (__bridge CBUUID*)CFBridgingRetain([CBUUID UUIDWithString:@"6E400003-B5A3-F393-E0A9-E50E24DCCA9E"]);
+	return uuid;
+}
+
+// Aliases for backward compat with references in this file
+#define NUS_SERVICE_UUID nusServiceUuid()
+#define NUS_RX_CHAR_UUID nusRxCharUuid()
+#define NUS_TX_CHAR_UUID nusTxCharUuid()
 
 
 // ============================================================================

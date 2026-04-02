@@ -67,6 +67,8 @@ void NtripClient::start()
 	m_headerBuffer.clear();
 	m_dataRate = 0.0f;
 	m_bytesInWindow = 0;
+	m_v2Failed = false;
+	m_triedV2 = false;
 
 	attemptConnect();
 }
@@ -151,19 +153,42 @@ void NtripClient::onSocketConnected()
 
 void NtripClient::sendNtripRequest()
 {
-	// NTRIP v1 request format (HTTP/1.0-style):
-	//   GET /mountpoint HTTP/1.0
-	//   User-Agent: NTRIP OpenOrienteeringMapper/1.0
-	//   Authorization: Basic <base64(user:pass)>
-	//   Ntrip-Version: Ntrip/1.0
-	//   \r\n
+	// Decide whether to use v2 or v1
+	bool useV2 = false;
+	switch (m_profile.version) {
+	case NtripVersion::Auto:
+		useV2 = !m_v2Failed;  // Try v2 first, fall back to v1
+		break;
+	case NtripVersion::V1:
+		useV2 = false;
+		break;
+	case NtripVersion::V2:
+		useV2 = true;
+		break;
+	}
+	m_triedV2 = useV2;
 
 	QByteArray request;
 	request.append("GET /");
 	request.append(m_profile.mountpoint.toLatin1());
-	request.append(" HTTP/1.0\r\n");
+
+	if (useV2)
+	{
+		// NTRIP v2: HTTP/1.1 with Ntrip-Version: Ntrip/2.0
+		request.append(" HTTP/1.1\r\n");
+		request.append("Host: ");
+		request.append(m_profile.casterHost.toLatin1());
+		request.append("\r\n");
+		request.append("Ntrip-Version: Ntrip/2.0\r\n");
+	}
+	else
+	{
+		// NTRIP v1: HTTP/1.0 with Ntrip-Version: Ntrip/1.0
+		request.append(" HTTP/1.0\r\n");
+		request.append("Ntrip-Version: Ntrip/1.0\r\n");
+	}
+
 	request.append("User-Agent: NTRIP OpenOrienteeringMapper/1.0\r\n");
-	request.append("Ntrip-Version: Ntrip/1.0\r\n");
 
 	if (!m_profile.username.isEmpty())
 	{
@@ -221,10 +246,29 @@ void NtripClient::onSocketReadyRead()
 
 		// Check response status
 		auto headerStr = QString::fromLatin1(m_headerBuffer.left(headerEnd));
-		if (!headerStr.startsWith(QLatin1String("ICY 200 OK"))
-		    && !headerStr.startsWith(QLatin1String("HTTP/1.0 200"))
-		    && !headerStr.startsWith(QLatin1String("HTTP/1.1 200")))
+		bool accepted = headerStr.startsWith(QLatin1String("ICY 200 OK"))
+		    || headerStr.startsWith(QLatin1String("HTTP/1.0 200"))
+		    || headerStr.startsWith(QLatin1String("HTTP/1.1 200"));
+
+		if (!accepted)
 		{
+			// If we tried v2 in Auto mode and it was rejected, fall back to v1
+			if (m_triedV2 && m_profile.version == NtripVersion::Auto && !m_v2Failed)
+			{
+				m_v2Failed = true;
+				qDebug("NTRIP: v2 rejected, falling back to v1");
+				if (m_socket)
+				{
+					m_socket->abort();
+					m_socket->deleteLater();
+					m_socket = nullptr;
+				}
+				m_headersParsed = false;
+				m_headerBuffer.clear();
+				attemptConnect();
+				return;
+			}
+
 			emit errorOccurred(QStringLiteral("NTRIP caster rejected: ") + headerStr.left(80));
 			scheduleReconnect();
 			return;

@@ -29,47 +29,54 @@
 #include "ble_device_model.h"
 
 
+// CBUUID statics: use CFBridgingRetain to prevent autorelease.
+// CMake's ObjCXX may not enable ARC, so we retain explicitly.
 static CBUUID* nusServiceUuid()
 {
-	static CBUUID* uuid = [CBUUID UUIDWithString:@"6E400001-B5A3-F393-E0A9-E50E24DCCA9E"];
+	static CBUUID* uuid = (__bridge CBUUID*)CFBridgingRetain([CBUUID UUIDWithString:@"6E400001-B5A3-F393-E0A9-E50E24DCCA9E"]);
 	return uuid;
 }
 
 static CBUUID* nusRxCharUuid()
 {
-	static CBUUID* uuid = [CBUUID UUIDWithString:@"6E400002-B5A3-F393-E0A9-E50E24DCCA9E"];
+	static CBUUID* uuid = (__bridge CBUUID*)CFBridgingRetain([CBUUID UUIDWithString:@"6E400002-B5A3-F393-E0A9-E50E24DCCA9E"]);
 	return uuid;
 }
 
 static CBUUID* nusTxCharUuid()
 {
-	static CBUUID* uuid = [CBUUID UUIDWithString:@"6E400003-B5A3-F393-E0A9-E50E24DCCA9E"];
+	static CBUUID* uuid = (__bridge CBUUID*)CFBridgingRetain([CBUUID UUIDWithString:@"6E400003-B5A3-F393-E0A9-E50E24DCCA9E"]);
 	return uuid;
 }
 
 /// Case-insensitive UUID string comparison — works around CoreBluetooth
 /// isEqual: failures with some ESP32 Bluedroid BLE stacks.
+/// Nil-safe: returns NO if either argument is nil.
 static BOOL uuidMatches(CBUUID* a, CBUUID* b)
 {
+	if (!a || !b)
+		return NO;
 	if ([a isEqual:b])
 		return YES;
 	// Fallback: compare string representations case-insensitively
-	return [a.UUIDString caseInsensitiveCompare:b.UUIDString] == NSOrderedSame;
+	NSString* sa = a.UUIDString;
+	NSString* sb = b.UUIDString;
+	if (!sa || !sb)
+		return NO;
+	return [sa caseInsensitiveCompare:sb] == NSOrderedSame;
 }
 
 // Custom GNSS Hub service — our future custom firmware advertises this
 // alongside NUS for backward compatibility. Contains L2CAP PSM characteristic.
 static CBUUID* gnssHubServiceUuid()
 {
-	// Custom UUID for our GNSS Hub firmware
-	static CBUUID* uuid = [CBUUID UUIDWithString:@"00000001-6E55-4800-0000-00000000CAFE"];
+	static CBUUID* uuid = (__bridge CBUUID*)CFBridgingRetain([CBUUID UUIDWithString:@"00000001-6E55-4800-0000-00000000CAFE"]);
 	return uuid;
 }
 
 static CBUUID* gnssL2capPsmCharUuid()
 {
-	// Characteristic that holds the L2CAP PSM number (uint16, read)
-	static CBUUID* uuid = [CBUUID UUIDWithString:@"00000002-6E55-4800-0000-00000000CAFE"];
+	static CBUUID* uuid = (__bridge CBUUID*)CFBridgingRetain([CBUUID UUIDWithString:@"00000002-6E55-4800-0000-00000000CAFE"]);
 	return uuid;
 }
 
@@ -108,6 +115,9 @@ static const int kMaxConnectAttempts = 4;
 - (BOOL)writeData:(const QByteArray&)data;
 @end
 
+
+// Guard macro: bail from ObjC callback if C++ scanner is already torn down
+#define GUARD_SCANNER() do { if (!_scanner) return; } while(0)
 
 @implementation BleScannerDelegate
 
@@ -184,6 +194,7 @@ static const int kMaxConnectAttempts = 4;
 - (void)connectTimeout:(NSTimer*)timer
 {
 	_connectTimeoutTimer = nil;
+	GUARD_SCANNER();
 	if (_connected)
 		return;
 
@@ -240,7 +251,19 @@ static const int kMaxConnectAttempts = 4;
 	[_connectTimeoutTimer invalidate];
 	_connectTimeoutTimer = nil;
 	[_centralManager stopScan];
+
+	// Unschedule L2CAP stream from runloop before releasing
+	if (_l2capChannel) {
+		_l2capChannel.inputStream.delegate = nil;
+		[_l2capChannel.inputStream removeFromRunLoop:[NSRunLoop mainRunLoop]
+		                                     forMode:NSDefaultRunLoopMode];
+		[_l2capChannel.inputStream close];
+		_usingL2cap = NO;
+		_l2capChannel = nil;
+	}
+
 	if (_peripheral) {
+		_peripheral.delegate = nil;
 		if (_txCharacteristic && _txCharacteristic.isNotifying) {
 			[_peripheral setNotifyValue:NO forCharacteristic:_txCharacteristic];
 		}
@@ -249,7 +272,7 @@ static const int kMaxConnectAttempts = 4;
 	}
 	_rxCharacteristic = nil;
 	_txCharacteristic = nil;
-	_l2capChannel = nil;
+	_centralManager.delegate = nil;
 }
 
 - (BOOL)writeData:(const QByteArray&)data
@@ -301,9 +324,6 @@ static const int kMaxConnectAttempts = 4;
 	return YES;
 }
 
-
-// Guard macro: bail from ObjC callback if C++ scanner is already torn down
-#define GUARD_SCANNER() do { if (!_scanner) return; } while(0)
 
 // ---- CBCentralManagerDelegate ----
 
@@ -542,6 +562,7 @@ didWriteValueForCharacteristic:(CBCharacteristic*)characteristic
 // NSStreamDelegate for L2CAP inputStream
 - (void)stream:(NSStream*)stream handleEvent:(NSStreamEvent)eventCode
 {
+	GUARD_SCANNER();
 	if (eventCode == NSStreamEventHasBytesAvailable && stream == _l2capChannel.inputStream) {
 		uint8_t buffer[4096];
 		NSInteger bytesRead = [_l2capChannel.inputStream read:buffer maxLength:sizeof(buffer)];
@@ -683,8 +704,7 @@ void BleScannerCoreBluetooth::didFailToConnect(const QString& error)
 
 void BleScannerCoreBluetooth::didDisconnect(const QString& error)
 {
-	if (!error.isEmpty())
-		emit deviceConnectionFailed(error);
+	emit deviceDisconnected(error);
 }
 
 void BleScannerCoreBluetooth::didBecomeReady()

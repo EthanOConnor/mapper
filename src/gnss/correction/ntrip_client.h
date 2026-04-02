@@ -142,6 +142,10 @@ private:
 	// HTTP response parsing
 	bool m_headersParsed = false;
 	QByteArray m_headerBuffer;
+
+	// NTRIP v2 auto-detection
+	bool m_triedV2 = false;      ///< True if current attempt uses v2
+	bool m_v2Failed = false;     ///< True if v2 was rejected, fall back to v1
 };
 
 

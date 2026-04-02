@@ -56,6 +56,7 @@ set(MAPPER_GNSS_SOURCES
   transport/ble_device_model.cpp
   # Corrections
   correction/ntrip_client.cpp
+  gga_generator.cpp
   # Protocol - configuration
   protocol/ubx_config.cpp
   # Session & integration
@@ -77,6 +78,7 @@ if(IOS)
 	list(APPEND MAPPER_GNSS_SOURCES
 	  transport/ble_transport_corebluetooth.mm
 	  transport/ble_scanner_corebluetooth.mm
+	  transport/ble_scanner_transport_adapter.cpp
 	)
 	list(APPEND MAPPER_GNSS_DEFINITIONS
 	  PUBLIC MAPPER_GNSS_BLE_COREBLUETOOTH
@@ -114,12 +116,13 @@ target_link_libraries(mapper-gnss
   PRIVATE Qt6::Network minmea
 )
 if(IOS)
+	target_compile_options(mapper-gnss PRIVATE $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>)
 	find_library(COREBLUETOOTH_FRAMEWORK CoreBluetooth)
 	if(COREBLUETOOTH_FRAMEWORK)
 		target_link_libraries(mapper-gnss PRIVATE "${COREBLUETOOTH_FRAMEWORK}")
 	endif()
 elseif(TARGET Qt6::Bluetooth)
-	target_link_libraries(mapper-gnss PRIVATE Qt6::Bluetooth)
+	target_link_libraries(mapper-gnss PUBLIC Qt6::Bluetooth)
 endif()
 if(TARGET Qt6::SerialPort)
 	target_link_libraries(mapper-gnss PRIVATE Qt6::SerialPort)

@@ -24,6 +24,7 @@
 #include <QTimeZone>
 
 #include "correction/ntrip_client.h"
+#include "gga_generator.h"
 #include "gnss_raw_logger.h"
 #include "protocol/ubx_config.h"
 #include "protocol/ubx_parser.h"
@@ -164,8 +165,14 @@ void GnssSession::connectTransportSignals()
 
 void GnssSession::connectNtripSignals()
 {
-	// NTRIP client signals will be connected here when NtripClient is implemented.
-	// For now this is a placeholder.
+	connect(m_ntrip.get(), &NtripClient::correctionDataReceived,
+	        this, &GnssSession::onNtripCorrectionData);
+	connect(m_ntrip.get(), &NtripClient::stateChanged,
+	        this, [this](NtripClient::State /*newState*/) { onNtripStateChanged(); });
+	connect(m_ntrip.get(), &NtripClient::errorOccurred,
+	        this, [this](const QString& msg) {
+		emit errorOccurred(QStringLiteral("NTRIP"), msg);
+	});
 }
 
 
@@ -244,8 +251,10 @@ void GnssSession::onTransportStateChanged(GnssTransport::State transportState)
 	case GnssTransport::State::Connected:
 		m_state.transportState = GnssTransportState::Connected;
 		m_reconnectBackoffMs = 0;  // Reset backoff on successful connect
-		// Send UBX configuration commands
 		configureReceiver();
+		// Auto-start NTRIP when transport connects
+		if (m_ntrip && m_ntrip->state() == NtripClient::State::Disconnected)
+			startNtrip();
 		break;
 	case GnssTransport::State::Reconnecting:
 		m_state.transportState = GnssTransportState::Reconnecting;
@@ -271,6 +280,11 @@ void GnssSession::onUbxPositionUpdated(const GnssPosition& position)
 {
 	m_state.position = position;
 	m_state.lastPositionTime = QDateTime::currentDateTimeUtc();
+
+	// Update GGA for VRS NTRIP casters
+	if (m_ntrip && position.valid)
+		m_ntrip->setGgaSentence(GgaGenerator::fromPosition(position));
+
 	emit positionUpdated(position);
 	emitStateChanged();
 }
@@ -386,7 +400,33 @@ void GnssSession::onNtripCorrectionData(const QByteArray& data)
 
 void GnssSession::onNtripStateChanged()
 {
-	// Will be implemented when NtripClient is available
+	if (!m_ntrip)
+		return;
+
+	switch (m_ntrip->state()) {
+	case NtripClient::State::Disconnected:
+		m_state.correctionState = GnssCorrectionState::Disconnected;
+		break;
+	case NtripClient::State::Connecting:
+		m_state.correctionState = GnssCorrectionState::Connecting;
+		break;
+	case NtripClient::State::Connected:
+		m_state.correctionState = GnssCorrectionState::Connected;
+		break;
+	case NtripClient::State::Flowing:
+		m_state.correctionState = GnssCorrectionState::Flowing;
+		break;
+	case NtripClient::State::Stale:
+		m_state.correctionState = GnssCorrectionState::Stale;
+		break;
+	case NtripClient::State::Reconnecting:
+		m_state.correctionState = GnssCorrectionState::Reconnecting;
+		break;
+	}
+
+	m_state.correctionDataRate = m_ntrip->dataRate();
+	m_state.ntripMountpoint = m_ntrip->mountpoint();
+	m_state.reconnectCount = m_ntrip->reconnectCount();
 	emitStateChanged();
 }
 
@@ -488,6 +528,24 @@ void GnssSession::feedData(const QByteArray& data)
 		emitStateChanged();
 	}
 	onTransportDataReceived(data);
+}
+
+
+void GnssSession::startNtrip()
+{
+	if (!m_ntrip)
+		return;
+
+	// Generate initial GGA from current position (or empty if no fix yet)
+	auto gga = GgaGenerator::fromPosition(m_state.position);
+	if (!gga.isEmpty())
+		m_ntrip->setGgaSentence(gga);
+
+	m_state.correctionState = GnssCorrectionState::Connecting;
+	m_state.ntripProfileName = m_ntrip->mountpoint();
+	emitStateChanged();
+
+	m_ntrip->start();
 }
 
 

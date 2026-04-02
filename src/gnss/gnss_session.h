@@ -100,6 +100,9 @@ public:
 	/// Used when the transport is managed externally (e.g., CoreBluetooth scanner).
 	void feedData(const QByteArray& data);
 
+	/// Start the NTRIP client if one is configured.
+	void startNtrip();
+
 signals:
 	/// Emitted when a new position fix is available.
 	void positionUpdated(const OpenOrienteering::GnssPosition& position);
