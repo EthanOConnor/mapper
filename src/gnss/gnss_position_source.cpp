@@ -57,6 +57,10 @@ void GnssPositionSource::setSession(GnssSession* session)
 		connect(m_session, &GnssSession::stateChanged,
 		        this, &GnssPositionSource::onSessionStateChanged);
 	}
+	else
+	{
+		m_lastPosition = {};
+	}
 }
 
 
@@ -85,6 +89,15 @@ void GnssPositionSource::onSessionPositionUpdated(const GnssPosition& position)
 
 void GnssPositionSource::onSessionStateChanged(const GnssState& state)
 {
+	if (!state.solution.hasFreshPosition || state.transportState == GnssTransportState::Disconnected)
+	{
+		bool hadValidPosition = m_hasValidPosition;
+		m_hasValidPosition = false;
+		m_positionTimeoutTimer.stop();
+		if (hadValidPosition)
+			emit positionLost();
+	}
+
 	emit stateChanged(state);
 }
 

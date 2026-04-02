@@ -30,7 +30,7 @@
 #include <QTimer>
 #include <QVector>
 
-#include "gnss_position.h"
+#include "gnss_fusion_engine.h"
 #include "gnss_state.h"
 #include "transport/gnss_transport.h"
 
@@ -82,8 +82,11 @@ public:
 	/// Current session state (position + transport + corrections).
 	const GnssState& currentState() const { return m_state; }
 
-	/// Most recent position fix.
-	const GnssPosition& lastPosition() const { return m_state.position; }
+	/// Most recent fused position fix.
+	const GnssPosition& lastPosition() const { return m_state.solution.position; }
+
+	/// Most recent fused solution.
+	const GnssSolutionSnapshot& currentSolution() const { return m_state.solution; }
 
 	/// Whether the session is active (transport connecting or connected).
 	bool isActive() const;
@@ -111,6 +114,9 @@ signals:
 	/// Emitted when a new position fix is available.
 	void positionUpdated(const OpenOrienteering::GnssPosition& position);
 
+	/// Emitted when the fused solution changes.
+	void solutionUpdated(const OpenOrienteering::GnssSolutionSnapshot& solution);
+
 	/// Emitted when any part of the session state changes.
 	void stateChanged(const OpenOrienteering::GnssState& state);
 
@@ -123,22 +129,13 @@ private slots:
 	void onTransportStateChanged(GnssTransport::State transportState);
 	void onTransportError(const QString& message);
 
-	// UBX parser callbacks
-	void onUbxPositionUpdated(const GnssPosition& position);
-	void onUbxDopUpdated(float gDOP, float pDOP, float tDOP, float vDOP,
-	                     float hDOP, float nDOP, float eDOP);
-	void onUbxSatelliteInfoUpdated(int totalUsed, int totalVisible);
-	void onUbxCovarianceUpdated(float covNN, float covNE, float covEE);
-	void onUbxStatusUpdated(bool fixOK, bool diffSoln, int carrSoln, int spoofDet);
-	void onUbxVersionReceived(const QString& sw, const QString& hw,
-	                          const QStringList& extensions);
-
-	// NMEA parser callbacks
-	void onNmeaPositionUpdated(const GnssPosition& position);
-	void onNmeaDopUpdated(float pDOP, float hDOP, float vDOP);
-
-	// Position merge — combines UBX and NMEA data intelligently
-	void mergePosition(const GnssPosition& incoming, bool fromUbx);
+	// Parser callbacks
+	void onPositionObservation(const OpenOrienteering::GnssPositionObservation& observation);
+	void onDopObservation(const OpenOrienteering::GnssDopObservation& observation);
+	void onSatelliteObservation(const OpenOrienteering::GnssSatelliteObservation& observation);
+	void onCovarianceObservation(const OpenOrienteering::GnssCovarianceObservation& observation);
+	void onStatusObservation(const OpenOrienteering::GnssStatusObservation& observation);
+	void onVersionObservation(const OpenOrienteering::GnssVersionObservation& observation);
 
 	// Message statistics
 	void recordMessage(const QString& name);
@@ -147,7 +144,7 @@ public:
 	/// Dump the last ~20s of raw data to a file in the app's Documents dir.
 	/// Returns the file path, or empty string on failure.
 	QString dumpRawBuffer() const;
-	int rawRingEntryCount() const { return m_rawRing.size(); }
+	int rawRingEntryCount() const { return static_cast<int>(m_rawRing.size()); }
 	qint64 rawRingByteCount() const { return m_rawRingBytes; }
 
 	// NTRIP callbacks
@@ -166,6 +163,9 @@ private:
 	void connectNtripSignals();
 	void emitStateChanged();
 	void scheduleReconnect();
+	void resetSessionState();
+	void updateSolution();
+	void updateNtripGga();
 
 	GnssState m_state;
 
@@ -174,11 +174,11 @@ private:
 	std::unique_ptr<UbxParser> m_ubxParser;
 	std::unique_ptr<NmeaParser> m_nmeaParser;
 	std::unique_ptr<RtcmFramer> m_rtcmFramer;
+	GnssFusionEngine m_fusion;
 
 	bool m_protocolDetected = false;
 	GnssProtocol m_detectedProtocol = GnssProtocol::Unknown;
 	QByteArray m_detectionBuffer;
-	QDateTime m_lastUbxTime;  ///< Last time UBX provided a position (for source priority)
 
 	// Raw data ring buffer for diagnostics dump
 	struct RawEntry {

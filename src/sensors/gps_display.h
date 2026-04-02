@@ -42,7 +42,7 @@ class QTimerEvent;
 namespace OpenOrienteering {
 
 class Georeferencing;
-class GnssPosition;
+struct GnssPosition;
 class GnssPositionSource;
 class GnssSession;
 class MapWidget;

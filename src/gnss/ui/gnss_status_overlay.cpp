@@ -119,8 +119,8 @@ GnssStatusOverlay::~GnssStatusOverlay()
 
 void GnssStatusOverlay::updateState(const GnssState& state)
 {
-	m_fixType = state.position.fixType;
-	m_accuracyP95 = state.position.hAccuracyP95;
+	m_fixType = state.solution.position.fixType;
+	m_accuracyP95 = state.solution.position.hAccuracyP95;
 	m_correctionState = state.correctionState;
 	m_transportState = state.transportState;
 	update();

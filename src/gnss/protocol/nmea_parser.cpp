@@ -19,14 +19,65 @@
 
 #include "nmea_parser.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 
+#include <QByteArrayList>
 #include <QTimeZone>
 
 #include "gnss/3rdparty/minmea/minmea.h"
 
 namespace OpenOrienteering {
+
+namespace {
+
+QString mergeLimitation(const QString& left, const QString& right)
+{
+	if (left.isEmpty())
+		return right;
+	if (right.isEmpty() || left == right)
+		return left;
+	return left + QStringLiteral(" | ") + right;
+}
+
+QByteArrayList splitSentenceFields(const char* sentence)
+{
+	QByteArray raw(sentence);
+	auto checksumPos = raw.indexOf('*');
+	if (checksumPos >= 0)
+		raw.truncate(checksumPos);
+	if (!raw.isEmpty() && raw[0] == '$')
+		raw.remove(0, 1);
+	return raw.split(',');
+}
+
+float horizontalResolutionFromNmeaFields(const QByteArray& latField, const QByteArray& lonField, double latitude)
+{
+	constexpr double kPi = 3.14159265358979323846;
+
+	auto fieldResolutionMinutes = [](const QByteArray& field) -> float {
+		auto dot = field.indexOf('.');
+		if (dot < 0)
+			return field.isEmpty() ? NAN : 1.0f;
+		auto decimals = field.size() - dot - 1;
+		if (decimals < 0)
+			return NAN;
+		return std::pow(10.0f, static_cast<float>(-decimals));
+	};
+
+	float latResolutionMinutes = fieldResolutionMinutes(latField);
+	float lonResolutionMinutes = fieldResolutionMinutes(lonField);
+	if (std::isnan(latResolutionMinutes) && std::isnan(lonResolutionMinutes))
+		return NAN;
+
+	float latResolutionM = std::isnan(latResolutionMinutes) ? 0.0f : latResolutionMinutes * 1852.0f;
+	float lonScale = std::cos(std::abs(latitude) * kPi / 180.0);
+	float lonResolutionM = std::isnan(lonResolutionMinutes) ? 0.0f : lonResolutionMinutes * 1852.0f * lonScale;
+	return std::max(latResolutionM, lonResolutionM);
+}
+
+}  // namespace
 
 
 NmeaParser::NmeaParser(QObject* parent)
@@ -68,8 +119,6 @@ void NmeaParser::addData(const QByteArray& data)
 void NmeaParser::reset()
 {
 	m_lineBuffer.clear();
-	m_pendingPosition = {};
-	m_hasGGA = false;
 	m_stats = {};
 }
 
@@ -107,50 +156,56 @@ void NmeaParser::handleGGA(const char* sentence)
 	if (!minmea_parse_gga(&gga, sentence))
 		return;
 
-	m_pendingPosition = {};
-	m_pendingPosition.latitude  = minmea_tocoord(&gga.latitude);
-	m_pendingPosition.longitude = minmea_tocoord(&gga.longitude);
+	GnssPositionObservation observation;
+	observation.meta.source = GnssObservationSource::NmeaGga;
+	observation.meta.observedAt = QDateTime::currentDateTimeUtc();
+	observation.position.latitude = minmea_tocoord(&gga.latitude);
+	observation.position.longitude = minmea_tocoord(&gga.longitude);
 
 	// Altitude above MSL
 	if (gga.altitude.scale != 0)
-		m_pendingPosition.altitudeMsl = minmea_tofloat(&gga.altitude);
+		observation.position.altitudeMsl = minmea_tofloat(&gga.altitude);
 
 	// Geoid separation
 	if (gga.height.scale != 0)
 	{
-		m_pendingPosition.geoidSeparation = minmea_tofloat(&gga.height);
-		if (!std::isnan(m_pendingPosition.altitudeMsl))
-			m_pendingPosition.altitude = m_pendingPosition.altitudeMsl + m_pendingPosition.geoidSeparation;
+		observation.position.geoidSeparation = minmea_tofloat(&gga.height);
+		if (!std::isnan(observation.position.altitudeMsl))
+			observation.position.altitude = observation.position.altitudeMsl + observation.position.geoidSeparation;
 	}
 
 	// Fix quality → fix type
 	switch (gga.fix_quality) {
-	case 0:  m_pendingPosition.fixType = GnssFixType::NoFix;    break;
-	case 1:  m_pendingPosition.fixType = GnssFixType::Fix3D;    break;
-	case 2:  m_pendingPosition.fixType = GnssFixType::DGPS;     break;
-	case 4:  m_pendingPosition.fixType = GnssFixType::RtkFixed; break;
-	case 5:  m_pendingPosition.fixType = GnssFixType::RtkFloat; break;
-	default: m_pendingPosition.fixType = GnssFixType::Fix3D;    break;
+	case 0:  observation.position.fixType = GnssFixType::NoFix;    break;
+	case 1:  observation.position.fixType = GnssFixType::Fix3D;    break;
+	case 2:  observation.position.fixType = GnssFixType::DGPS;     break;
+	case 4:  observation.position.fixType = GnssFixType::RtkFixed; break;
+	case 5:  observation.position.fixType = GnssFixType::RtkFloat; break;
+	default: observation.position.fixType = GnssFixType::Fix3D;    break;
 	}
 
-	m_pendingPosition.valid = (gga.fix_quality > 0);
-	m_pendingPosition.satellitesUsed = static_cast<std::uint8_t>(gga.satellites_tracked);
+	observation.position.valid = (gga.fix_quality > 0);
+	observation.position.satellitesUsed = static_cast<std::uint8_t>(gga.satellites_tracked);
 
 	// HDOP — we can derive a rough accuracy estimate: hAcc ~ HDOP * 2.5m (typical UERE)
 	if (gga.hdop.scale != 0)
 	{
-		m_pendingPosition.hDOP = minmea_tofloat(&gga.hdop);
+		observation.position.hDOP = minmea_tofloat(&gga.hdop);
 		// Use HDOP-derived accuracy only if we have no better source.
 		// UERE ~2.5m for single-frequency, ~1.5m for dual-frequency.
 		// We use 2.0m as a reasonable middle ground.
-		m_pendingPosition.hAccuracy = m_pendingPosition.hDOP * 2.0f;
-		m_pendingPosition.accuracyBasis = GnssAccuracyBasis::Sigma68;
-		m_pendingPosition.computeP95();
+		observation.position.hAccuracy = observation.position.hDOP * 2.0f;
+		observation.position.accuracyBasis = GnssAccuracyBasis::Sigma68;
+		observation.position.computeP95();
+		observation.meta.accuracyDerived = true;
+		observation.meta.limitation = mergeLimitation(
+		    observation.meta.limitation,
+		    QStringLiteral("Horizontal accuracy derived from HDOP with assumed 2.0m UERE"));
 	}
 
 	// Correction age
 	if (gga.dgps_age.scale != 0)
-		m_pendingPosition.correctionAge = minmea_tofloat(&gga.dgps_age);
+		observation.position.correctionAge = minmea_tofloat(&gga.dgps_age);
 
 	// Build timestamp from GGA time (time only, no date — RMC has date)
 	if (gga.time.hours >= 0)
@@ -159,12 +214,29 @@ void NmeaParser::handleGGA(const char* sentence)
 		           gga.time.microseconds / 1000);
 		if (time.isValid())
 		{
-			m_pendingPosition.timestamp = QDateTime(QDate::currentDate(), time, QTimeZone::UTC);
+			observation.position.timestamp = QDateTime(QDate::currentDate(), time, QTimeZone::UTC);
+			observation.meta.timestampHasTime = true;
+		}
+	}
+	observation.meta.timestampHasDate = false;
+	observation.meta.limitation = mergeLimitation(
+	    observation.meta.limitation,
+	    QStringLiteral("NMEA GGA provides time-of-day only; date remains inferred until paired with RMC"));
+
+	auto fields = splitSentenceFields(sentence);
+	if (fields.size() > 5)
+	{
+		observation.meta.horizontalResolutionM = horizontalResolutionFromNmeaFields(
+		    fields[2], fields[4], observation.position.latitude);
+		if (!std::isnan(observation.meta.horizontalResolutionM))
+		{
+			observation.meta.limitation = mergeLimitation(
+			    observation.meta.limitation,
+			    QStringLiteral("Position granularity limited by NMEA field precision"));
 		}
 	}
 
-	m_hasGGA = true;
-	emit positionUpdated(m_pendingPosition);
+	emit positionObservation(observation);
 }
 
 
@@ -174,23 +246,19 @@ void NmeaParser::handleRMC(const char* sentence)
 	if (!minmea_parse_rmc(&rmc, sentence))
 		return;
 
-	// If we have a pending GGA position, enrich it with RMC date and speed.
-	// Otherwise, build a position from RMC alone (less detail).
-	GnssPosition& pos = m_hasGGA ? m_pendingPosition : (m_pendingPosition = {});
-
-	if (!m_hasGGA)
-	{
-		pos.latitude  = minmea_tocoord(&rmc.latitude);
-		pos.longitude = minmea_tocoord(&rmc.longitude);
-		pos.valid = rmc.valid;
-		pos.fixType = rmc.valid ? GnssFixType::Fix3D : GnssFixType::NoFix;
-	}
+	GnssPositionObservation observation;
+	observation.meta.source = GnssObservationSource::NmeaRmc;
+	observation.meta.observedAt = QDateTime::currentDateTimeUtc();
+	observation.position.latitude = minmea_tocoord(&rmc.latitude);
+	observation.position.longitude = minmea_tocoord(&rmc.longitude);
+	observation.position.valid = rmc.valid;
+	observation.position.fixType = rmc.valid ? GnssFixType::Fix3D : GnssFixType::NoFix;
 
 	// Speed and course
 	if (rmc.speed.scale != 0)
-		pos.groundSpeed = minmea_tofloat(&rmc.speed) * 0.514444f;  // knots → m/s
+		observation.position.groundSpeed = minmea_tofloat(&rmc.speed) * 0.514444f;  // knots → m/s
 	if (rmc.course.scale != 0)
-		pos.headingMotion = minmea_tofloat(&rmc.course);
+		observation.position.headingMotion = minmea_tofloat(&rmc.course);
 
 	// Date + time for a full timestamp
 	if (rmc.date.year > 0 && rmc.time.hours >= 0)
@@ -199,13 +267,29 @@ void NmeaParser::handleRMC(const char* sentence)
 		QTime time(rmc.time.hours, rmc.time.minutes, rmc.time.seconds,
 		           rmc.time.microseconds / 1000);
 		if (date.isValid() && time.isValid())
-			pos.timestamp = QDateTime(date, time, QTimeZone::UTC);
+		{
+			observation.position.timestamp = QDateTime(date, time, QTimeZone::UTC);
+			observation.meta.timestampHasDate = true;
+			observation.meta.timestampHasTime = true;
+		}
 	}
 
-	if (!m_hasGGA && pos.valid)
-		emit positionUpdated(pos);
+	auto fields = splitSentenceFields(sentence);
+	if (fields.size() > 6)
+	{
+		observation.meta.horizontalResolutionM = horizontalResolutionFromNmeaFields(
+		    fields[3], fields[5], observation.position.latitude);
+	}
 
-	m_hasGGA = false;
+	observation.meta.limitation = QStringLiteral("NMEA RMC carries no altitude or direct accuracy estimate");
+	if (!std::isnan(observation.meta.horizontalResolutionM))
+	{
+		observation.meta.limitation = mergeLimitation(
+		    observation.meta.limitation,
+		    QStringLiteral("Position granularity limited by NMEA field precision"));
+	}
+
+	emit positionObservation(observation);
 }
 
 
@@ -220,7 +304,14 @@ void NmeaParser::handleGSA(const char* sentence)
 	if (gsa.hdop.scale != 0) hDOP = minmea_tofloat(&gsa.hdop);
 	if (gsa.vdop.scale != 0) vDOP = minmea_tofloat(&gsa.vdop);
 
-	emit dopUpdated(pDOP, hDOP, vDOP);
+	GnssDopObservation observation;
+	observation.meta.source = GnssObservationSource::NmeaGsa;
+	observation.meta.observedAt = QDateTime::currentDateTimeUtc();
+	observation.meta.limitation = QStringLiteral("NMEA GSA reports DOP only; no covariance or confidence basis");
+	observation.pDOP = pDOP;
+	observation.hDOP = hDOP;
+	observation.vDOP = vDOP;
+	emit dopObservation(observation);
 }
 
 
@@ -230,7 +321,12 @@ void NmeaParser::handleGSV(const char* sentence)
 	if (!minmea_parse_gsv(&gsv, sentence))
 		return;
 
-	emit satelliteInfoUpdated(gsv.total_sats);
+	GnssSatelliteObservation observation;
+	observation.meta.source = GnssObservationSource::NmeaGsv;
+	observation.meta.observedAt = QDateTime::currentDateTimeUtc();
+	observation.meta.limitation = QStringLiteral("NMEA GSV reports visible satellites only");
+	observation.satellitesVisible = gsv.total_sats;
+	emit satelliteObservation(observation);
 }
 
 

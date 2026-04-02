@@ -3741,6 +3741,8 @@ void MapEditorController::enableGPSDisplay(bool enable)
 				auto savedName = settings.gnssDeviceName();
 
 				auto* model = new BleDeviceModel(this);
+				if (!savedAddr.isEmpty())
+					model->markAsKnown(savedAddr);
 
 #if defined(MAPPER_GNSS_BLE_COREBLUETOOTH)
 				// Clean up previous discovery agent if any
@@ -3776,7 +3778,28 @@ void MapEditorController::enableGPSDisplay(bool enable)
 				if (settings.gnssAutoConnect() && !savedAddr.isEmpty())
 				{
 #if defined(MAPPER_GNSS_BLE_COREBLUETOOTH)
-					connectDevice(savedAddr, savedName);
+					auto trySavedDevice = [this, model, connectDevice, savedAddr, savedName]() {
+						if (!gnss_session || gnss_session->isActive())
+							return false;
+
+						int idx = model->findByAddress(savedAddr);
+						if (idx < 0)
+							return false;
+
+						auto const& device = model->deviceAt(idx);
+						connectDevice(savedAddr, device.name.isEmpty() ? savedName : device.name);
+						return true;
+					};
+
+					if (!trySavedDevice())
+					{
+						connect(model, &QAbstractItemModel::rowsInserted,
+						        this,
+						        [trySavedDevice](const QModelIndex&, int, int) {
+							if (trySavedDevice())
+								return;
+						});
+					}
 #endif
 				}
 				else

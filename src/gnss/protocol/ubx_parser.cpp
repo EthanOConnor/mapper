@@ -69,7 +69,7 @@ void UbxParser::reset()
 void UbxParser::processBuffer()
 {
 	const char* buf = m_buffer.constData();
-	int size = m_buffer.size();
+	int size = static_cast<int>(m_buffer.size());
 	int pos = 0;
 
 	while (pos < size)
@@ -234,7 +234,13 @@ void UbxParser::handleNavPvt(const char* payload, int length)
 	Ubx::NavPvt pvt;
 	std::memcpy(&pvt, payload, sizeof(pvt));
 
-	GnssPosition pos;
+	GnssPositionObservation observation;
+	observation.meta.source = GnssObservationSource::UbxNavPvt;
+	observation.meta.observedAt = QDateTime::currentDateTimeUtc();
+	observation.meta.timestampHasDate = true;
+	observation.meta.timestampHasTime = true;
+	observation.meta.limitation = QStringLiteral("u-blox accuracy values are receiver-estimated and treated as ~1-sigma");
+	auto& pos = observation.position;
 	pos.fixType = classifyFix(pvt.fixType, pvt.flags);
 	pos.valid = (pos.fixType != GnssFixType::NoFix);
 
@@ -270,7 +276,7 @@ void UbxParser::handleNavPvt(const char* payload, int length)
 		}
 	}
 
-	emit positionUpdated(pos);
+	emit positionObservation(observation);
 }
 
 
@@ -282,10 +288,17 @@ void UbxParser::handleNavDop(const char* payload, int length)
 	Ubx::NavDop dop;
 	std::memcpy(&dop, payload, sizeof(dop));
 
-	emit dopUpdated(
-	    dop.gDopScaled(), dop.pDopScaled(), dop.tDopScaled(),
-	    dop.vDopScaled(), dop.hDopScaled(),
-	    dop.nDopScaled(), dop.eDopScaled());
+	GnssDopObservation observation;
+	observation.meta.source = GnssObservationSource::UbxNavDop;
+	observation.meta.observedAt = QDateTime::currentDateTimeUtc();
+	observation.gDOP = dop.gDopScaled();
+	observation.pDOP = dop.pDopScaled();
+	observation.tDOP = dop.tDopScaled();
+	observation.vDOP = dop.vDopScaled();
+	observation.hDOP = dop.hDopScaled();
+	observation.nDOP = dop.nDopScaled();
+	observation.eDOP = dop.eDopScaled();
+	emit dopObservation(observation);
 }
 
 
@@ -314,7 +327,12 @@ void UbxParser::handleNavSat(const char* payload, int length)
 			++totalUsed;
 	}
 
-	emit satelliteInfoUpdated(totalUsed, totalVisible);
+	GnssSatelliteObservation observation;
+	observation.meta.source = GnssObservationSource::UbxNavSat;
+	observation.meta.observedAt = QDateTime::currentDateTimeUtc();
+	observation.satellitesUsed = totalUsed;
+	observation.satellitesVisible = totalVisible;
+	emit satelliteObservation(observation);
 }
 
 
@@ -331,7 +349,13 @@ void UbxParser::handleNavCov(const char* payload, int length)
 
 	// Emit the horizontal (NE) covariance for P95 ellipse computation.
 	// The position covariance is in NED frame.
-	emit covarianceUpdated(cov.posCovNN, cov.posCovNE, cov.posCovEE);
+	GnssCovarianceObservation observation;
+	observation.meta.source = GnssObservationSource::UbxNavCov;
+	observation.meta.observedAt = QDateTime::currentDateTimeUtc();
+	observation.covNN = cov.posCovNN;
+	observation.covNE = cov.posCovNE;
+	observation.covEE = cov.posCovEE;
+	emit covarianceObservation(observation);
 }
 
 
@@ -343,11 +367,14 @@ void UbxParser::handleNavStatus(const char* payload, int length)
 	Ubx::NavStatus status;
 	std::memcpy(&status, payload, sizeof(status));
 
-	emit statusUpdated(
-	    status.gpsFixOK(),
-	    status.diffSoln(),
-	    status.carrSoln(),
-	    status.spoofDet());
+	GnssStatusObservation observation;
+	observation.meta.source = GnssObservationSource::UbxNavStatus;
+	observation.meta.observedAt = QDateTime::currentDateTimeUtc();
+	observation.fixOK = status.gpsFixOK();
+	observation.diffSoln = status.diffSoln();
+	observation.carrSoln = status.carrSoln();
+	observation.spoofDet = status.spoofDet();
+	emit statusObservation(observation);
 }
 
 
@@ -373,7 +400,13 @@ void UbxParser::handleMonVer(const char* payload, int length)
 		extOffset += Ubx::kMonVerExtensionSize;
 	}
 
-	emit versionReceived(sw, hw, extensions);
+	GnssVersionObservation observation;
+	observation.meta.source = GnssObservationSource::UbxMonVer;
+	observation.meta.observedAt = QDateTime::currentDateTimeUtc();
+	observation.swVersion = sw;
+	observation.hwVersion = hw;
+	observation.extensions = extensions;
+	emit versionObservation(observation);
 }
 
 

@@ -69,6 +69,8 @@ private:
 	QLabel* v_accuracy_label;
 	QLabel* altitude_label;
 	QLabel* coordinates_label;
+	QLabel* source_label;
+	QLabel* limitation_label;
 
 	// Satellites section
 	QLabel* satellites_label;

@@ -28,7 +28,7 @@
 #include <QString>
 #include <QStringList>
 
-#include "gnss/gnss_position.h"
+#include "gnss/gnss_observation.h"
 
 namespace OpenOrienteering {
 
@@ -77,25 +77,22 @@ public:
 
 signals:
 	/// Emitted for each successfully decoded NAV-PVT message.
-	/// The GnssPosition is fully populated with P95 accuracy.
-	void positionUpdated(const OpenOrienteering::GnssPosition& position);
+	void positionObservation(const OpenOrienteering::GnssPositionObservation& observation);
 
 	/// Emitted for NAV-DOP with all DOP values.
-	void dopUpdated(float gDOP, float pDOP, float tDOP, float vDOP, float hDOP, float nDOP, float eDOP);
+	void dopObservation(const OpenOrienteering::GnssDopObservation& observation);
 
 	/// Emitted for NAV-SAT with per-satellite info.
-	/// Each entry: (gnssId, svId, cno, elevation, azimuth, used).
-	void satelliteInfoUpdated(int totalUsed, int totalVisible);
+	void satelliteObservation(const OpenOrienteering::GnssSatelliteObservation& observation);
 
 	/// Emitted when NAV-COV provides a valid position covariance.
-	/// Values are NED covariance in m^2.
-	void covarianceUpdated(float covNN, float covNE, float covEE);
+	void covarianceObservation(const OpenOrienteering::GnssCovarianceObservation& observation);
 
 	/// Emitted for NAV-STATUS with fix status details.
-	void statusUpdated(bool fixOK, bool diffSoln, int carrSoln, int spoofDet);
+	void statusObservation(const OpenOrienteering::GnssStatusObservation& observation);
 
 	/// Emitted when MON-VER is decoded.
-	void versionReceived(const QString& swVersion, const QString& hwVersion, const QStringList& extensions);
+	void versionObservation(const OpenOrienteering::GnssVersionObservation& observation);
 
 	/// Emitted for any valid UBX frame (class, id, raw payload).
 	/// Useful for logging and passthrough of unhandled messages.

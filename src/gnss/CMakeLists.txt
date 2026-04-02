@@ -60,6 +60,7 @@ set(MAPPER_GNSS_SOURCES
   # Protocol - configuration
   protocol/ubx_config.cpp
   # Session & integration
+  gnss_fusion_engine.cpp
   gnss_session.cpp
   gnss_position_source.cpp
   gnss_raw_logger.cpp

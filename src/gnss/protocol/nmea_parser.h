@@ -26,7 +26,7 @@
 #include <QByteArray>
 #include <QObject>
 
-#include "gnss/gnss_position.h"
+#include "gnss/gnss_observation.h"
 
 namespace OpenOrienteering {
 
@@ -69,14 +69,14 @@ public:
 	const Stats& stats() const { return m_stats; }
 
 signals:
-	/// Emitted when a GGA or RMC sentence provides a position update.
-	void positionUpdated(const OpenOrienteering::GnssPosition& position);
+	/// Emitted when a GGA or RMC sentence provides an observation.
+	void positionObservation(const OpenOrienteering::GnssPositionObservation& observation);
 
 	/// Emitted when GSA provides DOP values.
-	void dopUpdated(float pDOP, float hDOP, float vDOP);
+	void dopObservation(const OpenOrienteering::GnssDopObservation& observation);
 
 	/// Emitted when GSV provides satellite count.
-	void satelliteInfoUpdated(int totalVisible);
+	void satelliteObservation(const OpenOrienteering::GnssSatelliteObservation& observation);
 
 private:
 	/// Process a single complete NMEA sentence (including $ and checksum).
@@ -89,10 +89,6 @@ private:
 
 	QByteArray m_lineBuffer;
 	Stats m_stats;
-
-	/// Accumulated state from multiple sentences (GGA + RMC build a position).
-	GnssPosition m_pendingPosition;
-	bool m_hasGGA = false;
 
 	static constexpr int kMaxLineLength = 256;  // NMEA max is 82, generous buffer
 };

@@ -75,6 +75,24 @@ QString formatDop(float value)
 	return formatFloat(value, 'f', 1);
 }
 
+QString formatFieldSource(const GnssFieldSource& field)
+{
+	if (!field.available)
+		return QStringLiteral("--");
+
+	auto text = gnssObservationSourceName(field.source);
+	if (!std::isnan(field.nominalResolutionM))
+	{
+		text += QStringLiteral("  [res >= %1m]")
+		        .arg(static_cast<double>(field.nominalResolutionM), 0, 'f', field.nominalResolutionM < 1.0f ? 3 : 1);
+	}
+	if (field.derived)
+		text += QStringLiteral("  [derived]");
+	if (!field.timestampComplete)
+		text += QStringLiteral("  [partial time]");
+	return text;
+}
+
 /// Format data rate: convert to KB/s when >= 1024 bytes/sec.
 QString formatDataRate(float bytesPerSec)
 {
@@ -215,6 +233,14 @@ void GnssDetailPanel::setupUi()
 	coordinates_label = new QLabel(QStringLiteral("--"));
 	form->addRow(tr("Coordinates:"), coordinates_label);
 
+	source_label = new QLabel(QStringLiteral("--"));
+	source_label->setWordWrap(true);
+	form->addRow(tr("Primary source:"), source_label);
+
+	limitation_label = new QLabel(QStringLiteral("--"));
+	limitation_label->setWordWrap(true);
+	form->addRow(tr("Limitations:"), limitation_label);
+
 	// --- Satellites section ---
 	form->addRow(Util::Headline::create(tr("Satellites")));
 
@@ -327,7 +353,8 @@ void GnssDetailPanel::setupUi()
 
 void GnssDetailPanel::updateState(const GnssState& state)
 {
-	const auto& pos = state.position;
+	const auto& solution = state.solution;
+	const auto& pos = solution.position;
 
 	// Position section
 	if (pos.timestamp.isValid())
@@ -351,6 +378,11 @@ void GnssDetailPanel::updateState(const GnssState& state)
 	{
 		coordinates_label->setText(QStringLiteral("--"));
 	}
+
+	source_label->setText(formatFieldSource(solution.positionSource));
+	limitation_label->setText(solution.summaryLimitation.isEmpty()
+	                          ? QStringLiteral("--")
+	                          : solution.summaryLimitation);
 
 	// Show ellipse info alongside H accuracy
 	if (pos.ellipseAvailable)

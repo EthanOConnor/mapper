@@ -27,7 +27,7 @@
 #include <QMetaType>
 #include <QString>
 
-#include "gnss_position.h"
+#include "gnss_solution.h"
 
 namespace OpenOrienteering {
 
@@ -93,8 +93,8 @@ struct GnssConstellationInfo
 /// manager needs to track. Updated atomically by GnssSession.
 struct GnssState
 {
-	// -- Position --
-	GnssPosition position;
+	// -- Fused solution --
+	GnssSolutionSnapshot solution;
 
 	// -- Transport --
 	GnssTransportState transportState = GnssTransportState::Disconnected;
