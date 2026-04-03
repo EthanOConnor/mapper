@@ -78,7 +78,7 @@ constexpr auto size_mm      = 100;  // multiple of 2
 
 
 void showMessage (MainWindow* window, const QString &message) {
-#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+#ifdef MAPPER_MOBILE
 	window->showStatusBarMessage(message, 2000);
 #else
 	QMessageBox::warning(window,

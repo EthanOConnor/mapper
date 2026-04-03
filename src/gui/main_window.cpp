@@ -142,7 +142,7 @@ MainWindow::MainWindow(bool as_main_window, QWidget* parent, Qt::WindowFlags fla
 	if (as_main_window)
 		loadWindowSettings();
 	
-#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+#ifdef MAPPER_MOBILE
 	// Needed to catch Qt::Key_Back on Android, cf. MainWindow::eventFilter()
 	qApp->installEventFilter(this);
 #else
@@ -778,7 +778,7 @@ bool MainWindow::showSaveOnCloseDialog()
 
 void MainWindow::saveWindowSettings()
 {
-#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
+#ifndef MAPPER_MOBILE
 	QSettings settings;
 
 	settings.beginGroup(QString::fromLatin1("MainWindow"));
@@ -791,10 +791,16 @@ void MainWindow::saveWindowSettings()
 
 void MainWindow::loadWindowSettings()
 {
-#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+#ifdef MAPPER_MOBILE
 	// Always show the window on the whole available area on mobile
 	if (auto* screen = QGuiApplication::primaryScreen())
 		resize(screen->availableGeometry().size());
+#if defined(Q_OS_IOS)
+	{
+		auto insets = iOS::safeAreaInsets();
+		setContentsMargins(insets.left(), insets.top(), insets.right(), insets.bottom());
+	}
+#endif
 #else
 	QSettings settings;
 	
@@ -924,7 +930,7 @@ bool MainWindow::openPath(const QString& path, const FileFormat* format)
 	if (path.isEmpty())
 		return true;
 	
-#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+#ifdef MAPPER_MOBILE
 	showStatusBarMessageImmediately(tr("Opening %1").arg(QFileInfo(path).fileName()));
 #else
 	MainWindow* const existing = findMainWindow(path);
@@ -975,7 +981,7 @@ bool MainWindow::openPath(const QString& path, const FileFormat* format)
 	bool new_autosave_conflict = QFileInfo::exists(autosave_path);
 	if (new_autosave_conflict)
 	{
-#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+#ifdef MAPPER_MOBILE
 		// Assuming small screen, showing dialog before opening the file
 		AutosaveDialog* autosave_dialog = new AutosaveDialog(path, autosave_path, autosave_path, this);
 		int result = autosave_dialog->exec();
@@ -997,7 +1003,7 @@ bool MainWindow::openPath(const QString& path, const FileFormat* format)
 	}
 	
 	MainWindow* open_window = this;
-#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
+#ifndef MAPPER_MOBILE
 	if (has_opened_file)
 		open_window = new MainWindow();
 #endif
@@ -1015,7 +1021,7 @@ bool MainWindow::openPath(const QString& path, const FileFormat* format)
 	settings.remove(reopen_blocker);
 	setMostRecentlyUsedFile(path);
 	
-#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
+#ifndef MAPPER_MOBILE
 	// Assuming large screen. Mobile handled above.
 	if (new_autosave_conflict)
 	{

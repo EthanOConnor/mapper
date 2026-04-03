@@ -617,7 +617,7 @@ bool TemplateListWidget::eventFilter(QObject* watched, QEvent* event)
 				return true;
 			break;
 			
-#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+#ifdef MAPPER_MOBILE
 		case QEvent::Show:
 			{
 				auto map_row = rowFromPos(map.getFirstFrontTemplate()) + 1;

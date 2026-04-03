@@ -74,6 +74,9 @@ public:
 	 */
 	bool mouseDoubleClickEvent(QMouseEvent* event);
 	
+	/** Sets whether the cursor is allowed to show. */
+	void setVisible(bool enabled);
+
 	/** Paints the cursor. */
 	void paint(QPainter* painter);
 

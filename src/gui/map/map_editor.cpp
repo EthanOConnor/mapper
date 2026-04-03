@@ -399,8 +399,9 @@ void MapEditorController::setTool(MapEditorTool* new_tool)
 	if (current_tool && !override_tool)
 	{
 		current_tool->init();
+		map_widget->setTouchCursorVisible(current_tool->toolType() != MapEditorTool::Pan);
 	}
-	
+
 	if (!override_tool)
 		map_widget->setTool(current_tool);
 }
@@ -4734,7 +4735,7 @@ EditorDockWidget::EditorDockWidget(const QString& title, QAction* action, MapEdi
 		connect(toggleViewAction(), &QAction::toggled, action, &QAction::setChecked);
 	}
 	
-#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+#ifdef MAPPER_MOBILE
 	size_grip = new QSizeGrip(this);
 	size_grip->resize(size_grip->sizeHint());
 	size_grip->setVisible(isTopLevel());
@@ -4764,7 +4765,7 @@ bool EditorDockWidget::event(QEvent* event)
 
 void EditorDockWidget::resizeEvent(QResizeEvent* event)
 {
-#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+#ifdef MAPPER_MOBILE
 	int fw = style()->pixelMetric(QStyle::PM_DockWidgetFrameWidth, 0, this);
 	size_grip->move(rect().bottomRight() - size_grip->rect().bottomRight() - QPoint{fw, fw});
 	size_grip->raise();

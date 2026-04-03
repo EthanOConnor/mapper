@@ -22,6 +22,7 @@
 
 #ifdef Q_OS_IOS
 #import <UIKit/UIKit.h>
+#import <objc/runtime.h>
 #endif
 
 
@@ -53,20 +54,97 @@ void endBackgroundTask(unsigned long identifier)
 }
 
 
+
+#ifdef Q_OS_IOS
+namespace {
+
+UIInterfaceOrientationMask g_locked_orientations = 0;
+IMP g_original_supportedOrientations = nullptr;
+
+UIInterfaceOrientationMask swizzled_supportedInterfaceOrientations(id self, SEL _cmd)
+{
+	if (g_locked_orientations)
+		return g_locked_orientations;
+	return reinterpret_cast<UIInterfaceOrientationMask(*)(id, SEL)>(g_original_supportedOrientations)(self, _cmd);
+}
+
+void ensureSwizzled()
+{
+	static bool done = false;
+	if (done)
+		return;
+	done = true;
+
+	Class vcClass = objc_getClass("QIOSViewController");
+	if (!vcClass)
+		vcClass = [UIViewController class];
+	SEL sel = @selector(supportedInterfaceOrientations);
+	Method method = class_getInstanceMethod(vcClass, sel);
+	g_original_supportedOrientations = method_setImplementation(method, reinterpret_cast<IMP>(swizzled_supportedInterfaceOrientations));
+}
+
+UIWindowScene* activeWindowScene()
+{
+	for (UIScene* scene in UIApplication.sharedApplication.connectedScenes)
+	{
+		if ([scene isKindOfClass:[UIWindowScene class]])
+			return (UIWindowScene*)scene;
+	}
+	return nil;
+}
+
+void requestOrientationUpdate(UIWindowScene* windowScene, UIInterfaceOrientationMask mask)
+{
+	if (!windowScene)
+		return;
+	auto* prefs = [[UIWindowSceneGeometryPreferencesIOS alloc] initWithInterfaceOrientations:mask];
+	[windowScene requestGeometryUpdateWithPreferences:prefs errorHandler:nil];
+	for (UIWindow* w in windowScene.windows)
+	{
+		if (w.rootViewController)
+			[w.rootViewController setNeedsUpdateOfSupportedInterfaceOrientations];
+	}
+}
+
+}  // anonymous namespace
+#endif
+
+
 void lockOrientation()
 {
-	// TODO: iOS orientation locking requires subclassing the Qt view controller
-	// and overriding supportedInterfaceOrientations.  Qt6 manages the root
-	// UIViewController internally, so proper locking needs either a custom
-	// QPA plugin or a runtime method-swizzle approach.  For now this is a
-	// no-op; the app respects Info.plist UISupportedInterfaceOrientations.
+#ifdef Q_OS_IOS
+	ensureSwizzled();
+
+	auto* windowScene = activeWindowScene();
+	switch (windowScene.interfaceOrientation)
+	{
+	case UIInterfaceOrientationPortrait:
+		g_locked_orientations = UIInterfaceOrientationMaskPortrait;
+		break;
+	case UIInterfaceOrientationLandscapeLeft:
+		g_locked_orientations = UIInterfaceOrientationMaskLandscapeLeft;
+		break;
+	case UIInterfaceOrientationLandscapeRight:
+		g_locked_orientations = UIInterfaceOrientationMaskLandscapeRight;
+		break;
+	default:
+		g_locked_orientations = UIInterfaceOrientationMaskPortrait;
+		break;
+	}
+
+	requestOrientationUpdate(windowScene, g_locked_orientations);
+#endif
 }
 
 
 void unlockOrientation()
 {
-	// TODO: See lockOrientation() — no-op until view controller subclassing
-	// is implemented.
+#ifdef Q_OS_IOS
+	g_locked_orientations = 0;
+
+	auto* windowScene = activeWindowScene();
+	requestOrientationUpdate(windowScene, 0);
+#endif
 }
 
 

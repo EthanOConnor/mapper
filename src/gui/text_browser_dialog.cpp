@@ -87,7 +87,7 @@ TextBrowserDialog::TextBrowserDialog(QWidget* parent)
 	connect(back_button,  &QPushButton::clicked, text_browser, &QTextBrowser::backward);
 	connect(close_button, &QPushButton::clicked, this, &TextBrowserDialog::accept);
 	
-#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+#ifdef MAPPER_MOBILE
 	QScroller::grabGesture(text_browser->viewport(), QScroller::TouchGesture);
 	// Disable selection, so that it doesn't interfere with scrolling
 	text_browser->setTextInteractionFlags(Qt::TextInteractionFlags(Qt::TextBrowserInteraction) & ~Qt::TextSelectableByMouse);

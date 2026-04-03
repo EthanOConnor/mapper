@@ -1174,7 +1174,7 @@ void PrintWidget::colorModeChanged()
 // slot
 void PrintWidget::previewClicked()
 {
-#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+#ifdef MAPPER_MOBILE
 	// Qt for mobile has no QPrintPreviewDialog
 	QMessageBox::warning(this, tr("Error"), tr("Print preview is not available on this platform."));
 #else

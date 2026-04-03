@@ -21,7 +21,7 @@
 
 #include "app_permissions.h"
 
-#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+#ifdef MAPPER_MOBILE
 
 #include <QCoreApplication>
 #include <QPermission>

@@ -190,7 +190,8 @@ namespace
 		{
 			proj_context_use_proj4_init_rules(PJ_DEFAULT_CTX, 1);
 
-#if defined(Q_OS_ANDROID) && !defined(PROJ_USE_ONLY_EMBEDDED_RESOURCE_FILES)
+#ifndef PROJ_USE_ONLY_EMBEDDED_RESOURCE_FILES
+#if defined(Q_OS_ANDROID)
 			proj_log_func(nullptr, nullptr, [](void* /*unused*/, int /*unused*/, const char *msg) {
 				qDebug("%s", msg);
 			});
@@ -209,6 +210,7 @@ namespace
 				GdalManager::setProjSearchPaths(data);
 #endif
 			}
+#endif // !PROJ_USE_ONLY_EMBEDDED_RESOURCE_FILES
 		}
 	};
 	

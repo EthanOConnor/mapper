@@ -367,6 +367,9 @@ public slots:
 	
 	/** Enables or disables the touch cursor. */
 	void enableTouchCursor(bool enabled);
+
+	/** Shows or hides the touch cursor without creating or destroying it. */
+	void setTouchCursorVisible(bool visible);
 	
 signals:
 	/**

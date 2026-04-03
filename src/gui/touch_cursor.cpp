@@ -166,6 +166,15 @@ bool TouchCursor::mouseDoubleClickEvent(QMouseEvent* event)
 		return false;
 }
 
+void TouchCursor::setVisible(bool enabled)
+{
+	if (visible != enabled)
+	{
+		visible = enabled;
+		updateMapWidget(false);
+	}
+}
+
 void TouchCursor::paint(QPainter* painter)
 {
 	if (!visible)

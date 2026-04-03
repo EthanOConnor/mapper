@@ -274,7 +274,7 @@ void MapperProxyStyle::drawPrimitive(QStyle::PrimitiveElement element, const QSt
 		}
 		break;
 		
-#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+#ifdef MAPPER_MOBILE
 	case QStyle::PE_IndicatorItemViewItemCheck:
 		if (option->state.testFlag(QStyle::State_NoChange)
 		    || !option->state.testFlag(QStyle::State_Enabled))
@@ -458,7 +458,7 @@ QIcon MapperProxyStyle::standardIcon(QStyle::StandardPixmap standard_icon, const
 	QIcon icon;
 	switch (standard_icon)
 	{
-#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+#ifdef MAPPER_MOBILE
 	// Cf. https://code.qt.io/cgit/qt/qtbase.git/tree/src/widgets/styles/qfusionstyle.cpp?h=5.12#n3785
 	case QStyle::SP_TitleBarNormalButton:
 	case QStyle::SP_TitleBarCloseButton:
@@ -483,7 +483,7 @@ QPixmap MapperProxyStyle::standardPixmap(QStyle::StandardPixmap standard_pixmap,
 {
 	switch (standard_pixmap)
 	{
-#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+#ifdef MAPPER_MOBILE
 	// Cf. https://code.qt.io/cgit/qt/qtbase.git/tree/src/widgets/styles/qfusionstyle.cpp?h=5.12#n3807
 	case QStyle::SP_TitleBarNormalButton:
 	case QStyle::SP_TitleBarCloseButton:
@@ -508,7 +508,7 @@ int MapperProxyStyle::styleHint(QStyle::StyleHint hint, const QStyleOption* opti
 		if (touch_mode)
 			return true;
 		break;
-#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+#ifdef MAPPER_MOBILE
 	case QStyle::SH_FormLayoutWrapPolicy:
 		return QFormLayout::WrapLongRows;
 #endif

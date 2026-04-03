@@ -50,7 +50,7 @@
 #include <QStyle>
 #include <QTextDocumentFragment>
 #include <QToolButton>
-#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+#ifdef MAPPER_MOBILE
 #include <QUrl>
 #endif
 #include <QVariant>
@@ -109,7 +109,7 @@ namespace Util {
 	
 	void showHelp(QWidget* dialog_parent, const QString& file_and_anchor)
 	{
-	#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+	#ifdef MAPPER_MOBILE
 		const QString manual_path = QLatin1String("doc:/manual/") + file_and_anchor;
 		const QUrl help_url = QUrl::fromLocalFile(manual_path);
 		TextBrowserDialog help_dialog(help_url, dialog_parent);

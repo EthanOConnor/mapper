@@ -24,7 +24,7 @@
 
 #include <QtGlobal>
 
-#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+#ifdef MAPPER_MOBILE
 #  include <functional>
 #  include <QCoreApplication>
 #  include <QObject>
@@ -88,7 +88,7 @@ namespace AppPermissions
 
 
 
-#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+#ifdef MAPPER_MOBILE
 
 	// Mobile platforms use the Qt 6 QPermission API.
 

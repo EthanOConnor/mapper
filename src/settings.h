@@ -124,7 +124,7 @@ public:
 	int getStartDragDistancePx();
 	
 	
-#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+#ifdef MAPPER_MOBILE
 	constexpr bool touchModeEnabled() const noexcept { return true; }
 	void setTouchModeEnabled(bool /* ignored */) {};
 	constexpr static bool mobileModeEnforced() noexcept { return true; }
@@ -277,7 +277,7 @@ private:
 		bool raw_logging = false;
 	} gnss;
 	
-#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
+#ifndef MAPPER_MOBILE
 	bool touch_mode_enabled = false;
 #endif
 };

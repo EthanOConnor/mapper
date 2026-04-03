@@ -80,7 +80,7 @@ AutosaveDialog::AutosaveDialog(const QString& path, const QString& autosave_path
 	
 	connect(list_widget, &QListWidget::currentRowChanged, this, &AutosaveDialog::currentRowChanged, Qt::QueuedConnection);
 	
-#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+#ifdef MAPPER_MOBILE
 	setWindowState((windowState() & ~(Qt::WindowMinimized | Qt::WindowFullScreen))
 	               | Qt::WindowMaximized);
 #endif

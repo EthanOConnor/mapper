@@ -1327,6 +1327,12 @@ void MapWidget::enableTouchCursor(bool enabled)
 	}
 }
 
+void MapWidget::setTouchCursorVisible(bool visible)
+{
+	if (touch_cursor)
+		touch_cursor->setVisible(visible);
+}
+
 void MapWidget::focusOutEvent(QFocusEvent* event)
 {
 	if (tool)
@@ -1492,7 +1498,7 @@ void MapWidget::updateSceneTiles()
 
 				RenderConfig config = { *map, tile_map_rect, snap.zoom_factor, options, 1.0 };
 
-#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
+#ifndef MAPPER_MOBILE
 				if (snap.overprinting)
 					mr->drawOverprintingSimulation(&painter, config);
 				else
