@@ -33,7 +33,7 @@
 #include <QIODevice>
 #include <QLatin1Char>
 #include <QScopedValueRollback>
-#include <QTextCodec>
+#include "util/legacy_codec.h"
 // IWYU pragma: no_include <qxmlstream.h>
 
 #include "core/map_coord.h"
@@ -91,12 +91,12 @@ bool XmlRecoveryHelper::operator() ()
 		auto raw_data = stream->readAll();
 		
 		// Determine the encoding
-		QTextCodec* codec = nullptr;
+		const LegacyCodec* codec = nullptr;
 		for (QXmlStreamReader probe(raw_data); !probe.atEnd(); probe.readNext())
 		{
 			if (probe.tokenType() == QXmlStreamReader::StartDocument)
 			{
-				codec = QTextCodec::codecForName(probe.documentEncoding().toLatin1());
+				codec = LegacyCodec::forName(probe.documentEncoding().toLatin1());
 				break;
 			}
 		}

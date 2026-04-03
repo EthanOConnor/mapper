@@ -24,9 +24,9 @@
 #include <QLatin1String>
 #include <QLocale>
 #include <QString>
-#include <QTextCodec>
 
 #include "util/encoding.h"
+#include "util/legacy_codec.h"
 
 using namespace OpenOrienteering;
 
@@ -62,9 +62,9 @@ void EncodingTest::testCodecForName()
 {
 	QVERIFY(Util::codecForName("Windows-1250") == Util::codecForName("Windows-1250"));
 	QVERIFY(Util::codecForName("Windows-1250") != Util::codecForName("Windows-1251"));
-	QVERIFY(Util::codecForName("Windows-1250") == QTextCodec::codecForName("Windows-1250"));
-	QVERIFY(Util::codecForName("Windows-1250") != QTextCodec::codecForName("Windows-1251"));
-	QVERIFY(Util::codecForName("Default") == QTextCodec::codecForName(Util::codepageForLanguage(QLocale().name())));
+	QVERIFY(Util::codecForName("Windows-1250") == LegacyCodec::forName("Windows-1250"));
+	QVERIFY(Util::codecForName("Windows-1250") != LegacyCodec::forName("Windows-1251"));
+	QVERIFY(Util::codecForName("Default") == LegacyCodec::forName(Util::codepageForLanguage(QLocale().name())));
 }
 
 

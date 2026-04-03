@@ -47,9 +47,9 @@
 #include <QLatin1String>
 #include <QPointF>
 #include <QStringView>
-#include <QTextCodec>
-#include <QTextDecoder>
 #include <QVariant>
+
+#include "util/legacy_codec.h"
 
 #include "settings.h"
 #include "core/georeferencing.h"
@@ -87,12 +87,12 @@ namespace OpenOrienteering {
 
 namespace {
 
-static QTextCodec* codecFromSettings()
+static const LegacyCodec* codecFromSettings()
 {
 	const auto& settings = Settings::getInstance();
 	const auto name = settings.getSetting(Settings::General_Local8BitEncoding).toByteArray();
 	return Util::codecForName(name);
-}	
+}
 
 
 }  // namespace
@@ -111,14 +111,14 @@ OcdFileImport::OcdFileImport(const QString& path, Map* map, MapView* view)
 	if (!custom_8bit_encoding)
 	{
 		addWarning(tr("Encoding '%1' is not available. Check the settings."));
-		custom_8bit_encoding = QTextCodec::codecForLocale();
+		custom_8bit_encoding = LegacyCodec::forLocale();
 	}
 }
 
 OcdFileImport::~OcdFileImport() = default;
 
 
-void OcdFileImport::setCustom8BitEncoding(QTextCodec* encoding)
+void OcdFileImport::setCustom8BitEncoding(const LegacyCodec* encoding)
 {
 	custom_8bit_encoding = encoding;
 }
@@ -174,11 +174,9 @@ QString OcdFileImport::convertOcdString(const QChar* src, uint maxlen) const
 			--maxlen;
 		}
 	}
-	/// \todo Create and use static decoder
-	QTextCodec* utf16 = QTextCodec::codecForName("UTF-16LE");
-	FILEFORMAT_ASSERT(utf16);
-	auto decoder = std::unique_ptr<QTextDecoder>(utf16->makeDecoder(QTextCodec::ConvertInvalidToNull));
-	return decoder->toUnicode(reinterpret_cast<const char*>(src), 2*int(last - src));
+	static const auto* utf16 = LegacyCodec::forName("UTF-16LE");
+	LegacyCodec::Decoder decoder(utf16, LegacyCodec::ConvertInvalidToNull);
+	return decoder.toUnicode(reinterpret_cast<const char*>(src), 2*int(last - src));
 }
 
 

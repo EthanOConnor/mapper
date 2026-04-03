@@ -46,11 +46,11 @@
 #include "fileformats/ocd_types_v8.h" // IWYU pragma: keep
 
 class QChar;
-class QTextCodec;
 
 namespace OpenOrienteering {
 
 class CombinedSymbol;
+class LegacyCodec;
 class Map;
 class MapColor;
 class MapPart;
@@ -125,7 +125,7 @@ public:
 	~OcdFileImport() override;
 	
 	
-	void setCustom8BitEncoding(QTextCodec* encoding);
+	void setCustom8BitEncoding(const LegacyCodec* encoding);
 	
 	
 	template< unsigned char N >
@@ -338,7 +338,7 @@ protected:
 	QByteArray buffer;
 	
 	/// Character encoding to use for 1-byte (narrow) strings
-	QTextCodec *custom_8bit_encoding;
+	const LegacyCodec* custom_8bit_encoding;
 	
 	/// Temporarily stores spot colors
 	std::vector<MapColor*> spot_colors;

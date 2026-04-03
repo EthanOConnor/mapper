@@ -17,7 +17,7 @@
 #    along with OpenOrienteering.  If not, see <http://www.gnu.org/licenses/>.
 
 
-find_package(Qt6 REQUIRED COMPONENTS Core5Compat Network PrintSupport Test Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Network PrintSupport Test Widgets)
 find_package(Qt6 COMPONENTS Positioning Sensors)
 
 set(CMAKE_AUTOMOC ON)
@@ -66,7 +66,6 @@ function(add_test_helper testname autorun)
 	)
 	target_link_libraries(${testname} PRIVATE
 	  PROJ::proj
-	  Qt6::Core5Compat
 	  Qt6::Test
 	  Qt6::Gui
 	  Polyclipping::Polyclipping
@@ -137,7 +136,7 @@ add_unit_test(tst_qglobal)
 add_unit_test(autosave_t MANUAL ../src/core/autosave
 	../src/settings
 )
-add_unit_test(encoding_t ../src/util/encoding)
+add_unit_test(encoding_t ../src/util/encoding ../src/util/legacy_codec)
 add_unit_test(georef_ocd_mapping_t
 	../src/settings
 	../src/gui/util_gui

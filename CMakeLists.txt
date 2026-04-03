@@ -182,7 +182,7 @@ if(Mapper_USE_GDAL)
 	find_package(GDAL 3.8 CONFIG REQUIRED)
 endif()
 
-find_package(Qt6 6.8 REQUIRED COMPONENTS Core Core5Compat)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Core)
 add_compile_definitions(QT_DISABLE_DEPRECATED_BEFORE=0x060000)
 
 if(CMAKE_CXX_BYTE_ORDER STREQUAL "BIG_ENDIAN")

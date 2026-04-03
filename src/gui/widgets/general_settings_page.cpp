@@ -53,7 +53,6 @@
 #include <QSpacerItem>
 #include <QSpinBox>
 #include <QStringList>
-#include <QTextCodec>
 #include <QToolButton>
 #include <QVBoxLayout>
 #include <QWidget>
@@ -63,6 +62,7 @@
 #include "gui/util_gui.h"
 #include "gui/widgets/home_screen_widget.h"
 #include "gui/widgets/settings_page.h"
+#include "util/legacy_codec.h"
 #include "util/translation_util.h"
 
 
@@ -148,7 +148,7 @@ GeneralSettingsPage::GeneralSettingsPage(QWidget* parent)
 	encoding_box->setEditable(true);
 	encoding_box->addItem(available_codecs.first());
 	encoding_box->addItem(QString::fromLatin1("Windows-1252")); // Serves as an example, not translated.
-	const auto available_codecs_raw = QTextCodec::availableCodecs();
+	const auto available_codecs_raw = LegacyCodec::availableCodecs();
 	available_codecs.reserve(available_codecs_raw.size());
 	for (const QByteArray& item : available_codecs_raw)
 	{
@@ -231,7 +231,7 @@ void GeneralSettingsPage::apply()
 	
 	auto encoding = encoding_box->currentText().toLatin1();
 	if (QLatin1String(encoding) == encoding_box->itemText(0)
-	    || !QTextCodec::codecForName(encoding))
+	    || !LegacyCodec::forName(encoding))
 	{
 		encoding = "Default";
 	}
@@ -294,7 +294,7 @@ void GeneralSettingsPage::updateWidgets()
 	
 	auto encoding = getSetting(Settings::General_Local8BitEncoding).toByteArray();
 	if (encoding != "Default"
-	    && QTextCodec::codecForName(encoding))
+	    && LegacyCodec::forName(encoding))
 	{
 		encoding_box->setCurrentText(QString::fromLatin1(encoding));
 	}

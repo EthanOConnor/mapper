@@ -23,7 +23,8 @@
 #include <QLocale>
 #include <QString>
 #include <QStringView>
-#include <QTextCodec>
+
+#include "util/legacy_codec.h"
 
 
 namespace {
@@ -71,12 +72,12 @@ const char* Util::codepageForLanguage(const QString& language_name)
 }
 
 
-QTextCodec* Util::codecForName(const char* name)
+const LegacyCodec* Util::codecForName(const char* name)
 {
 	if  (qstrcmp(name, "Default") == 0)
-		return QTextCodec::codecForName(Util::codepageForLanguage(QLocale().name()));
+		return LegacyCodec::forName(Util::codepageForLanguage(QLocale().name()));
 	else
-		return QTextCodec::codecForName(name);
+		return LegacyCodec::forName(name);
 }
 
 

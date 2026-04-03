@@ -34,8 +34,6 @@
 #include <QCoreApplication>
 #include <QLocale>
 #include <QString>
-#include <QTextCodec>
-
 #include "core/map_coord.h"
 #include "fileformats/file_import_export.h"
 
@@ -46,6 +44,7 @@ namespace OpenOrienteering {
 
 class AreaSymbol;
 class CombinedSymbol;
+class LegacyCodec;
 class LineSymbol;
 class Map;
 class MapColor;
@@ -99,12 +98,9 @@ class OcdFileExport : public Exporter
 	struct ExportableString
 	{
 		const QString& string;
-		const QTextCodec* custom_8bit_encoding;
-		
-		operator QByteArray() const
-		{
-			return custom_8bit_encoding ? custom_8bit_encoding->fromUnicode(string) : string.toUtf8();
-		}
+		const LegacyCodec* custom_8bit_encoding;
+
+		operator QByteArray() const;
 		
 		operator QString() const noexcept
 		{
@@ -141,7 +137,7 @@ protected:
 protected:
 	
 	template< class Encoding >
-	QTextCodec* determineEncoding();
+	const LegacyCodec* determineEncoding();
 	
 	
 	template< class Format >
@@ -316,7 +312,7 @@ private:
 	QLocale locale;
 	
 	/// Character encoding to use for 1-byte (narrow) strings
-	QTextCodec *custom_8bit_encoding = nullptr;
+	const LegacyCodec* custom_8bit_encoding = nullptr;
 	
 	MapCoord area_offset;
 	
