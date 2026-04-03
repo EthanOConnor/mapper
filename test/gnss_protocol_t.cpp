@@ -26,6 +26,7 @@
 #include <QSignalSpy>
 #include <QtTest>
 
+#include "gnss/gnss_observation.h"
 #include "gnss/gnss_position.h"
 #include "gnss/gnss_state.h"
 #include "gnss/protocol/ubx_parser.h"
@@ -216,7 +217,8 @@ void GnssProtocolTest::ubxNavPvtParsing()
 	parser.addData(frame);
 
 	QCOMPARE(spy.count(), 1);
-	auto pos = spy[0][0].value<GnssPosition>();
+	auto obs = spy[0][0].value<GnssPositionObservation>();
+	const auto& pos = obs.position;
 
 	QCOMPARE(pos.fixType, GnssFixType::RtkFixed);
 	QVERIFY(pos.valid);
@@ -245,37 +247,37 @@ void GnssProtocolTest::ubxNavPvtFixClassification()
 	auto frame = buildUbxFrame(Ubx::kClassNAV, Ubx::kIdNAV_PVT,
 	    buildNavPvtPayload(0, 0, 0, 3, 0x00, 1000, 1000, 5));
 	parser.addData(frame);
-	QCOMPARE(spy.last()[0].value<GnssPosition>().fixType, GnssFixType::NoFix);
+	QCOMPARE(spy.last()[0].value<GnssPositionObservation>().position.fixType, GnssFixType::NoFix);
 
 	// 2D fix
 	frame = buildUbxFrame(Ubx::kClassNAV, Ubx::kIdNAV_PVT,
 	    buildNavPvtPayload(0, 0, 0, 2, 0x01, 1000, 1000, 5));
 	parser.addData(frame);
-	QCOMPARE(spy.last()[0].value<GnssPosition>().fixType, GnssFixType::Fix2D);
+	QCOMPARE(spy.last()[0].value<GnssPositionObservation>().position.fixType, GnssFixType::Fix2D);
 
 	// 3D fix
 	frame = buildUbxFrame(Ubx::kClassNAV, Ubx::kIdNAV_PVT,
 	    buildNavPvtPayload(0, 0, 0, 3, 0x01, 1000, 1000, 5));
 	parser.addData(frame);
-	QCOMPARE(spy.last()[0].value<GnssPosition>().fixType, GnssFixType::Fix3D);
+	QCOMPARE(spy.last()[0].value<GnssPositionObservation>().position.fixType, GnssFixType::Fix3D);
 
 	// DGPS (diffSoln set)
 	frame = buildUbxFrame(Ubx::kClassNAV, Ubx::kIdNAV_PVT,
 	    buildNavPvtPayload(0, 0, 0, 3, 0x03, 1000, 1000, 5));
 	parser.addData(frame);
-	QCOMPARE(spy.last()[0].value<GnssPosition>().fixType, GnssFixType::DGPS);
+	QCOMPARE(spy.last()[0].value<GnssPositionObservation>().position.fixType, GnssFixType::DGPS);
 
 	// RTK float (carrSoln=1 → bits 7:6 = 01 = 0x40)
 	frame = buildUbxFrame(Ubx::kClassNAV, Ubx::kIdNAV_PVT,
 	    buildNavPvtPayload(0, 0, 0, 3, 0x41, 1000, 1000, 5));
 	parser.addData(frame);
-	QCOMPARE(spy.last()[0].value<GnssPosition>().fixType, GnssFixType::RtkFloat);
+	QCOMPARE(spy.last()[0].value<GnssPositionObservation>().position.fixType, GnssFixType::RtkFloat);
 
 	// RTK fixed (carrSoln=2 → bits 7:6 = 10 = 0x80)
 	frame = buildUbxFrame(Ubx::kClassNAV, Ubx::kIdNAV_PVT,
 	    buildNavPvtPayload(0, 0, 0, 3, 0x81, 1000, 1000, 5));
 	parser.addData(frame);
-	QCOMPARE(spy.last()[0].value<GnssPosition>().fixType, GnssFixType::RtkFixed);
+	QCOMPARE(spy.last()[0].value<GnssPositionObservation>().position.fixType, GnssFixType::RtkFixed);
 }
 
 
@@ -298,9 +300,10 @@ void GnssProtocolTest::ubxNavDopParsing()
 	parser.addData(frame);
 
 	QCOMPARE(spy.count(), 1);
-	QVERIFY(std::abs(spy[0][0].toFloat() - 1.56f) < 0.01f);  // gDOP
-	QVERIFY(std::abs(spy[0][1].toFloat() - 1.20f) < 0.01f);  // pDOP
-	QVERIFY(std::abs(spy[0][4].toFloat() - 0.75f) < 0.01f);  // hDOP
+	auto dopObs = spy[0][0].value<GnssDopObservation>();
+	QVERIFY(std::abs(dopObs.gDOP - 1.56f) < 0.01f);
+	QVERIFY(std::abs(dopObs.pDOP - 1.20f) < 0.01f);
+	QVERIFY(std::abs(dopObs.hDOP - 0.75f) < 0.01f);
 }
 
 
@@ -321,9 +324,10 @@ void GnssProtocolTest::ubxNavCovParsing()
 	parser.addData(frame);
 
 	QCOMPARE(spy.count(), 1);
-	QVERIFY(std::abs(spy[0][0].toFloat() - 0.0004f) < 1e-6f);  // covNN
-	QVERIFY(std::abs(spy[0][1].toFloat() - 0.0001f) < 1e-6f);  // covNE
-	QVERIFY(std::abs(spy[0][2].toFloat() - 0.0009f) < 1e-6f);  // covEE
+	auto covObs = spy[0][0].value<GnssCovarianceObservation>();
+	QVERIFY(std::abs(covObs.covNN - 0.0004f) < 1e-6f);
+	QVERIFY(std::abs(covObs.covNE - 0.0001f) < 1e-6f);
+	QVERIFY(std::abs(covObs.covEE - 0.0009f) < 1e-6f);
 }
 
 
@@ -351,8 +355,9 @@ void GnssProtocolTest::ubxNavSatParsing()
 	parser.addData(frame);
 
 	QCOMPARE(spy.count(), 1);
-	QCOMPARE(spy[0][0].toInt(), 2);   // totalUsed
-	QCOMPARE(spy[0][1].toInt(), 3);   // totalVisible
+	auto satObs = spy[0][0].value<GnssSatelliteObservation>();
+	QCOMPARE(satObs.satellitesUsed, 2);
+	QCOMPARE(satObs.satellitesVisible, 3);
 }
 
 
@@ -372,9 +377,10 @@ void GnssProtocolTest::ubxNavStatusParsing()
 	parser.addData(frame);
 
 	QCOMPARE(spy.count(), 1);
-	QCOMPARE(spy[0][0].toBool(), true);   // fixOK
-	QCOMPARE(spy[0][1].toBool(), true);   // diffSoln
-	QCOMPARE(spy[0][2].toInt(), 2);       // carrSoln (fixed)
+	auto statusObs = spy[0][0].value<GnssStatusObservation>();
+	QCOMPARE(statusObs.fixOK, true);
+	QCOMPARE(statusObs.diffSoln, true);
+	QCOMPARE(statusObs.carrSoln, 2);
 }
 
 
@@ -395,11 +401,11 @@ void GnssProtocolTest::ubxMonVerParsing()
 	parser.addData(frame);
 
 	QCOMPARE(spy.count(), 1);
-	QCOMPARE(spy[0][0].toString(), QStringLiteral("HPG 1.51"));
-	QCOMPARE(spy[0][1].toString(), QStringLiteral("00190000"));
-	auto exts = spy[0][2].toStringList();
-	QCOMPARE(exts.size(), 1);
-	QCOMPARE(exts[0], QStringLiteral("FWVER=HPG 1.51"));
+	auto verObs = spy[0][0].value<GnssVersionObservation>();
+	QCOMPARE(verObs.swVersion, QStringLiteral("HPG 1.51"));
+	QCOMPARE(verObs.hwVersion, QStringLiteral("00190000"));
+	QCOMPARE(verObs.extensions.size(), 1);
+	QCOMPARE(verObs.extensions[0], QStringLiteral("FWVER=HPG 1.51"));
 }
 
 
@@ -469,7 +475,8 @@ void GnssProtocolTest::nmeaGgaParsing()
 	parser.addData(sentence);
 
 	QCOMPARE(spy.count(), 1);
-	auto pos = spy[0][0].value<GnssPosition>();
+	auto obs = spy[0][0].value<GnssPositionObservation>();
+	const auto& pos = obs.position;
 	QCOMPARE(pos.fixType, GnssFixType::RtkFixed);
 	QVERIFY(pos.valid);
 	// 4807.038 N = 48 + 7.038/60 = 48.1173
@@ -487,7 +494,8 @@ void GnssProtocolTest::nmeaRmcParsing()
 	parser.addData(sentence);
 
 	QCOMPARE(spy.count(), 1);
-	auto pos = spy[0][0].value<GnssPosition>();
+	auto obs = spy[0][0].value<GnssPositionObservation>();
+	const auto& pos = obs.position;
 	QVERIFY(pos.valid);
 	// Speed: 22.4 knots = 11.52 m/s
 	QVERIFY(std::abs(pos.groundSpeed - 11.52f) < 0.1f);
@@ -503,9 +511,10 @@ void GnssProtocolTest::nmeaGsaParsing()
 	parser.addData(sentence);
 
 	QCOMPARE(spy.count(), 1);
-	QVERIFY(std::abs(spy[0][0].toFloat() - 1.2f) < 0.01f);  // pDOP
-	QVERIFY(std::abs(spy[0][1].toFloat() - 0.8f) < 0.01f);  // hDOP
-	QVERIFY(std::abs(spy[0][2].toFloat() - 0.9f) < 0.01f);  // vDOP
+	auto dopObs = spy[0][0].value<GnssDopObservation>();
+	QVERIFY(std::abs(dopObs.pDOP - 1.2f) < 0.01f);
+	QVERIFY(std::abs(dopObs.hDOP - 0.8f) < 0.01f);
+	QVERIFY(std::abs(dopObs.vDOP - 0.9f) < 0.01f);
 }
 
 
@@ -518,7 +527,8 @@ void GnssProtocolTest::nmeaGsvParsing()
 	parser.addData(sentence);
 
 	QCOMPARE(spy.count(), 1);
-	QCOMPARE(spy[0][0].toInt(), 12);  // 12 satellites in view
+	auto satObs = spy[0][0].value<GnssSatelliteObservation>();
+	QCOMPARE(satObs.satellitesVisible, 12);
 }
 
 

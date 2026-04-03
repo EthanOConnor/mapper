@@ -53,6 +53,8 @@ jobs:
         run: cmake --build --preset ci-linux --parallel
 
       - name: Test
+        env:
+          QT_QPA_PLATFORM: offscreen
         run: >
           ctest --preset ci-linux
           --output-junit ${{ github.workspace }}/test-results.xml
@@ -100,6 +102,8 @@ jobs:
         run: cmake --build --preset dev-linux --parallel
 
       - name: Test
+        env:
+          QT_QPA_PLATFORM: offscreen
         run: >
           ctest --preset dev-linux
           --output-junit ${{ github.workspace }}/test-results.xml
@@ -156,10 +160,7 @@ jobs:
           key: windows
 
       - name: Configure
-        run: >
-          cmake --preset ci-windows
-          -DCMAKE_C_COMPILER_LAUNCHER=ccache
-          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+        run: cmake --preset ci-windows
 
       - name: Build
         run: cmake --build --preset ci-windows --parallel
