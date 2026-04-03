@@ -46,6 +46,8 @@ jobs:
         run: >
           cmake --preset ci-linux
           -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
         run: cmake --build --preset ci-linux --parallel
@@ -154,7 +156,10 @@ jobs:
           key: windows
 
       - name: Configure
-        run: cmake --preset ci-windows
+        run: >
+          cmake --preset ci-windows
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
         run: cmake --build --preset ci-windows --parallel
@@ -193,6 +198,8 @@ jobs:
         run: >
           cmake --preset ci-macos
           -DCMAKE_PREFIX_PATH="$(brew --prefix qt)"
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
         run: cmake --build --preset ci-macos --parallel
@@ -282,6 +289,8 @@ jobs:
           -DANDROID_STL=c++_shared
           -DMapper_USE_GDAL=OFF
           -DMapper_WITH_COVE=OFF
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
         run: cmake --build build/android-arm64 --parallel

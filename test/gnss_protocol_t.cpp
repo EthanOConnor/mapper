@@ -183,7 +183,7 @@ void GnssProtocolTest::ubxFletcher8Checksum()
 	auto frame = buildUbxFrame(Ubx::kClassNAV, Ubx::kIdNAV_PVT, payload);
 
 	UbxParser parser;
-	QSignalSpy spy(&parser, &UbxParser::positionUpdated);
+	QSignalSpy spy(&parser, &UbxParser::positionObservation);
 	parser.addData(frame);
 	QCOMPARE(spy.count(), 1);
 	QCOMPARE(parser.stats().checksumErrors, std::uint64_t(0));
@@ -212,7 +212,7 @@ void GnssProtocolTest::ubxNavPvtParsing()
 	auto frame = buildUbxFrame(Ubx::kClassNAV, Ubx::kIdNAV_PVT, payload);
 
 	UbxParser parser;
-	QSignalSpy spy(&parser, &UbxParser::positionUpdated);
+	QSignalSpy spy(&parser, &UbxParser::positionObservation);
 	parser.addData(frame);
 
 	QCOMPARE(spy.count(), 1);
@@ -237,7 +237,7 @@ void GnssProtocolTest::ubxNavPvtParsing()
 void GnssProtocolTest::ubxNavPvtFixClassification()
 {
 	UbxParser parser;
-	QSignalSpy spy(&parser, &UbxParser::positionUpdated);
+	QSignalSpy spy(&parser, &UbxParser::positionObservation);
 
 	// Test each fix type classification
 
@@ -294,7 +294,7 @@ void GnssProtocolTest::ubxNavDopParsing()
 	auto frame = buildUbxFrame(Ubx::kClassNAV, Ubx::kIdNAV_DOP, payload);
 
 	UbxParser parser;
-	QSignalSpy spy(&parser, &UbxParser::dopUpdated);
+	QSignalSpy spy(&parser, &UbxParser::dopObservation);
 	parser.addData(frame);
 
 	QCOMPARE(spy.count(), 1);
@@ -317,7 +317,7 @@ void GnssProtocolTest::ubxNavCovParsing()
 	auto frame = buildUbxFrame(Ubx::kClassNAV, Ubx::kIdNAV_COV, payload);
 
 	UbxParser parser;
-	QSignalSpy spy(&parser, &UbxParser::covarianceUpdated);
+	QSignalSpy spy(&parser, &UbxParser::covarianceObservation);
 	parser.addData(frame);
 
 	QCOMPARE(spy.count(), 1);
@@ -347,7 +347,7 @@ void GnssProtocolTest::ubxNavSatParsing()
 	auto frame = buildUbxFrame(Ubx::kClassNAV, Ubx::kIdNAV_SAT, payload);
 
 	UbxParser parser;
-	QSignalSpy spy(&parser, &UbxParser::satelliteInfoUpdated);
+	QSignalSpy spy(&parser, &UbxParser::satelliteObservation);
 	parser.addData(frame);
 
 	QCOMPARE(spy.count(), 1);
@@ -368,7 +368,7 @@ void GnssProtocolTest::ubxNavStatusParsing()
 	auto frame = buildUbxFrame(Ubx::kClassNAV, Ubx::kIdNAV_STATUS, payload);
 
 	UbxParser parser;
-	QSignalSpy spy(&parser, &UbxParser::statusUpdated);
+	QSignalSpy spy(&parser, &UbxParser::statusObservation);
 	parser.addData(frame);
 
 	QCOMPARE(spy.count(), 1);
@@ -391,7 +391,7 @@ void GnssProtocolTest::ubxMonVerParsing()
 	auto frame = buildUbxFrame(Ubx::kClassMON, Ubx::kIdMON_VER, payload);
 
 	UbxParser parser;
-	QSignalSpy spy(&parser, &UbxParser::versionReceived);
+	QSignalSpy spy(&parser, &UbxParser::versionObservation);
 	parser.addData(frame);
 
 	QCOMPARE(spy.count(), 1);
@@ -409,7 +409,7 @@ void GnssProtocolTest::ubxPartialFrame()
 	auto frame = buildUbxFrame(Ubx::kClassNAV, Ubx::kIdNAV_PVT, payload);
 
 	UbxParser parser;
-	QSignalSpy spy(&parser, &UbxParser::positionUpdated);
+	QSignalSpy spy(&parser, &UbxParser::positionObservation);
 
 	// Feed first half
 	parser.addData(frame.left(50));
@@ -430,7 +430,7 @@ void GnssProtocolTest::ubxBadChecksum()
 	frame[frame.size() - 1] = static_cast<char>(frame[frame.size() - 1] ^ 0xFF);
 
 	UbxParser parser;
-	QSignalSpy spy(&parser, &UbxParser::positionUpdated);
+	QSignalSpy spy(&parser, &UbxParser::positionObservation);
 	parser.addData(frame);
 
 	QCOMPARE(spy.count(), 0);
@@ -448,7 +448,7 @@ void GnssProtocolTest::ubxResyncAfterGarbage()
 	QByteArray data = garbage + frame;
 
 	UbxParser parser;
-	QSignalSpy spy(&parser, &UbxParser::positionUpdated);
+	QSignalSpy spy(&parser, &UbxParser::positionObservation);
 	parser.addData(data);
 
 	QCOMPARE(spy.count(), 1);
@@ -462,7 +462,7 @@ void GnssProtocolTest::ubxResyncAfterGarbage()
 void GnssProtocolTest::nmeaGgaParsing()
 {
 	NmeaParser parser;
-	QSignalSpy spy(&parser, &NmeaParser::positionUpdated);
+	QSignalSpy spy(&parser, &NmeaParser::positionObservation);
 
 	// Standard GGA sentence with RTK fixed quality (4)
 	QByteArray sentence("$GNGGA,123519.00,4807.038,N,01131.000,E,4,08,0.9,545.4,M,47.0,M,1.0,0000*55\r\n");
@@ -481,7 +481,7 @@ void GnssProtocolTest::nmeaGgaParsing()
 void GnssProtocolTest::nmeaRmcParsing()
 {
 	NmeaParser parser;
-	QSignalSpy spy(&parser, &NmeaParser::positionUpdated);
+	QSignalSpy spy(&parser, &NmeaParser::positionObservation);
 
 	QByteArray sentence("$GNRMC,123519.00,A,4807.038,N,01131.000,E,022.4,084.4,230326,003.1,W*53\r\n");
 	parser.addData(sentence);
@@ -497,7 +497,7 @@ void GnssProtocolTest::nmeaRmcParsing()
 void GnssProtocolTest::nmeaGsaParsing()
 {
 	NmeaParser parser;
-	QSignalSpy spy(&parser, &NmeaParser::dopUpdated);
+	QSignalSpy spy(&parser, &NmeaParser::dopObservation);
 
 	QByteArray sentence("$GNGSA,A,3,01,02,03,04,05,06,07,08,,,,,1.2,0.8,0.9*26\r\n");
 	parser.addData(sentence);
@@ -512,7 +512,7 @@ void GnssProtocolTest::nmeaGsaParsing()
 void GnssProtocolTest::nmeaGsvParsing()
 {
 	NmeaParser parser;
-	QSignalSpy spy(&parser, &NmeaParser::satelliteInfoUpdated);
+	QSignalSpy spy(&parser, &NmeaParser::satelliteObservation);
 
 	QByteArray sentence("$GPGSV,3,1,12,01,40,083,46,02,17,308,44,12,07,344,39,14,22,228,45*7A\r\n");
 	parser.addData(sentence);
@@ -525,7 +525,7 @@ void GnssProtocolTest::nmeaGsvParsing()
 void GnssProtocolTest::nmeaBadChecksum()
 {
 	NmeaParser parser;
-	QSignalSpy spy(&parser, &NmeaParser::positionUpdated);
+	QSignalSpy spy(&parser, &NmeaParser::positionObservation);
 
 	// Corrupt the checksum
 	QByteArray sentence("$GNGGA,123519.00,4807.038,N,01131.000,E,4,08,0.9,545.4,M,47.0,M,1.0,0000*FF\r\n");  // FF is wrong checksum (correct is 55)
