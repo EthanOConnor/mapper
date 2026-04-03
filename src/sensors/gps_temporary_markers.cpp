@@ -26,13 +26,11 @@
 #include <QBrush>
 #include <QPainter>
 #include <QPen>
-#include <QRgb>
 
 #include "core/map_coord.h"
 #include "core/map_view.h"
 #include "gui/map/map_widget.h"
 #include "sensors/gps_display.h"
-#include "tools/tool.h"
 
 class QPointF;
 
@@ -89,31 +87,67 @@ void GPSTemporaryMarkers::paint(QPainter* painter)
 {
 	painter->save();
 	widget->applyMapTransform(painter);
-	float scale_factor = 1.0f / widget->getMapView()->getZoom();
-	
-	// Draw paths
-	painter->setBrush(Qt::NoBrush);
+	painter->setClipping(false);
+	painter->setRenderHint(QPainter::Antialiasing, true);
 
-	painter->setPen(QPen(QBrush(qRgb(255, 255, 255)), scale_factor * 0.3f));
+	const auto pixel_to_map = [this](qreal pixels) {
+		return widget->getMapView()->pixelToLength(pixels);
+	};
+	const auto point_outer_radius = pixel_to_map(4.5);
+	const auto point_inner_radius = pixel_to_map(3.25);
+	const auto path_vertex_outer_radius = pixel_to_map(2.8);
+	const auto path_vertex_inner_radius = pixel_to_map(1.8);
+	auto outer_pen = QPen(QColor(Qt::white), 3.0);
+	outer_pen.setCosmetic(true);
+	outer_pen.setCapStyle(Qt::RoundCap);
+	outer_pen.setJoinStyle(Qt::RoundJoin);
+	auto inner_pen = QPen(QColor(0x22, 0x7C, 0xE8), 1.75);
+	inner_pen.setCosmetic(true);
+	inner_pen.setCapStyle(Qt::RoundCap);
+	inner_pen.setJoinStyle(Qt::RoundJoin);
+
+	// Draw paths with a framed stroke so they stay legible over imagery.
+	painter->setBrush(Qt::NoBrush);
+	painter->setPen(outer_pen);
 	for (const auto& path : paths)
-		painter->drawPolyline(path.data(), path.size());
+	{
+		if (path.empty())
+			continue;
+		painter->drawPolyline(path.data(), static_cast<int>(path.size()));
+	}
 	
-	painter->setPen(QPen(QBrush(MapEditorTool::active_color), scale_factor * 0.2f));
+	painter->setPen(inner_pen);
 	for (const auto& path : paths)
-		painter->drawPolyline(path.data(), path.size());
+	{
+		if (path.empty())
+			continue;
+		painter->drawPolyline(path.data(), static_cast<int>(path.size()));
+	}
+
+	painter->setPen(Qt::NoPen);
+	painter->setBrush(QBrush(Qt::white));
+	for (const auto& path : paths)
+	{
+		for (const auto& point : path)
+			painter->drawEllipse(point, path_vertex_outer_radius, path_vertex_outer_radius);
+	}
+	painter->setBrush(QBrush(QColor(0x22, 0x7C, 0xE8)));
+	for (const auto& path : paths)
+	{
+		for (const auto& point : path)
+			painter->drawEllipse(point, path_vertex_inner_radius, path_vertex_inner_radius);
+	}
 	
 	// Draw points
 	painter->setPen(Qt::NoPen);
 	
-	painter->setBrush(QBrush(qRgb(255, 255, 255)));
-	float point_radius = scale_factor * 0.5f;
+	painter->setBrush(QBrush(Qt::white));
 	for (const auto& point : points)
-		painter->drawEllipse(point, point_radius, point_radius);
+		painter->drawEllipse(point, point_outer_radius, point_outer_radius);
 	
-	painter->setBrush(QBrush(MapEditorTool::inactive_color));
-	point_radius = scale_factor * 0.4f;
+	painter->setBrush(QBrush(QColor(0x22, 0x7C, 0xE8)));
 	for (const auto& point : points)
-		painter->drawEllipse(point, point_radius, point_radius);
+		painter->drawEllipse(point, point_inner_radius, point_inner_radius);
 	
 	painter->restore();
 }

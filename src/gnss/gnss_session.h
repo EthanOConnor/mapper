@@ -93,6 +93,9 @@ public:
 
 	/// Enable or disable raw stream logging.
 	void setRawLogging(bool enable, const QString& directory = {});
+	/// Enable or disable the in-memory raw capture ring used for on-demand dumps.
+	void setRawCaptureEnabled(bool enable);
+	bool rawCaptureEnabled() const { return m_rawCaptureEnabled; }
 
 	/// Enable auto-reconnect on transport disconnect.
 	void setAutoReconnect(bool enable);
@@ -189,6 +192,7 @@ private:
 	QVector<RawEntry> m_rawRing;
 	static constexpr int kRawRingMaxBytes = 256 * 1024;  // ~256KB, covers ~20s at typical rates
 	qint64 m_rawRingBytes = 0;
+	bool m_rawCaptureEnabled = false;
 	void appendRawEntry(char direction, const QByteArray& data);
 
 	// Raw logging

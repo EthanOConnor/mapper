@@ -48,12 +48,13 @@ public:
 
 	void updateState(const GnssState& state);
 	void setDumpStatus(const QString& message);
+	void setRawCaptureActive(bool active);
 
 signals:
 	void ntripProfileChangeRequested(const QString& profileName);
 	void disconnectRequested();
 	void connectRequested();
-	void dumpRawRequested();
+	void rawCaptureActionRequested();
 
 protected:
 	QSize sizeHint() const override;

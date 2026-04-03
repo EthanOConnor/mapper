@@ -225,10 +225,13 @@ GnssPositionObservation GnssFusionEngine::buildCompositeNmeaPosition(const QDate
 void GnssFusionEngine::applyPrimaryPosition(const GnssPositionObservation& observation, const QDateTime& now)
 {
 	m_solution.position = observation.position;
+	m_solution.position.applyHorizontalQuantization(observation.meta.horizontalResolutionM);
 	m_solution.positionSource = makeFieldSource(observation.meta, now);
 	m_solution.hasFreshPosition = observation.position.valid;
 
 	if (!std::isnan(observation.position.hAccuracyP95) || !std::isnan(observation.position.hAccuracy))
+		m_solution.accuracySource = makeFieldSource(observation.meta, now);
+	else if (!std::isnan(m_solution.position.hAccuracyP95))
 		m_solution.accuracySource = makeFieldSource(observation.meta, now);
 	if (!std::isnan(observation.position.groundSpeed) || !std::isnan(observation.position.headingMotion))
 		m_solution.velocitySource = makeFieldSource(observation.meta, now);

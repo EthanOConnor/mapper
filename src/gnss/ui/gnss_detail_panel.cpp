@@ -169,6 +169,12 @@ void GnssDetailPanel::setDumpStatus(const QString& message)
 }
 
 
+void GnssDetailPanel::setRawCaptureActive(bool active)
+{
+	dump_button->setText(active ? tr("Dump Raw Capture") : tr("Start Raw Capture"));
+}
+
+
 bool GnssDetailPanel::event(QEvent* e)
 {
 	// On mobile, this panel floats over the map widget. We must accept
@@ -325,13 +331,13 @@ void GnssDetailPanel::setupUi()
 	messages_label->setFont(QFont(QStringLiteral("Menlo"), 10));
 	form->addRow(messages_label);
 
-	dump_button = new QPushButton(tr("Dump Raw Data"));
+	dump_button = new QPushButton(tr("Start Raw Capture"));
 	dump_status_label = new QLabel();
 	dump_status_label->setWordWrap(true);
 	form->addRow(dump_button);
 	form->addRow(dump_status_label);
 	connect(dump_button, &QPushButton::clicked, this, [this]() {
-		emit dumpRawRequested();
+		emit rawCaptureActionRequested();
 	});
 
 	// Bottom spacer so content clears the toolbar

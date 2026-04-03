@@ -124,6 +124,7 @@ struct GnssPosition
 	/// CEP = sigma * sqrt(2 * ln(2)) ~ 1.1774 * sigma
 	/// Ratio = 2.4477 / 1.1774 ~ 2.0789
 	static constexpr float kP95FromCEP50 = 2.0789f;
+	static constexpr float kChi2_95_2dof = 5.9915f;
 
 	/// Convert a reported accuracy radius to P95 based on its stated basis.
 	static float toP95(float reported, GnssAccuracyBasis basis)
@@ -140,6 +141,18 @@ struct GnssPosition
 			return reported * kP95FromSigma68;
 		}
 		return reported * kP95FromSigma68;
+	}
+
+	/// Convert a coordinate quantization step to an equivalent horizontal P95 floor.
+	///
+	/// We model per-axis quantization noise as uniform in +/- resolution/2, which
+	/// has variance resolution^2 / 12. Converting that isotropic variance to a
+	/// 2D P95 radius yields sqrt(chi2_95(2) / 12) * resolution ~= 0.7067 * step.
+	static float quantizationP95(float resolution)
+	{
+		if (std::isnan(resolution) || resolution <= 0.0f)
+			return NAN;
+		return resolution * std::sqrt(kChi2_95_2dof / 12.0f);
 	}
 
 	/// Compute P95 fields from the reported accuracy and basis.
@@ -161,9 +174,6 @@ struct GnssPosition
 	/// Semi-axis = sqrt(eigenvalue * 5.9915).
 	void computeP95Ellipse(float covNN, float covNE, float covEE)
 	{
-		// chi-squared 95th percentile with 2 degrees of freedom
-		constexpr float kChi2_95_2dof = 5.9915f;
-
 		float trace = covNN + covEE;
 		float det = (covNN * covEE) - (covNE * covNE);
 		float discriminant = (trace * trace * 0.25f) - det;
@@ -193,6 +203,25 @@ struct GnssPosition
 			ellipseOrientationDeg -= 360.0f;
 
 		ellipseAvailable = true;
+	}
+
+	/// Inflate horizontal uncertainty with a quantization floor derived from the
+	/// source coordinate resolution.
+	void applyHorizontalQuantization(float resolution)
+	{
+		const float floorP95 = quantizationP95(resolution);
+		if (std::isnan(floorP95))
+			return;
+
+		hAccuracyP95 = std::isnan(hAccuracyP95) ? floorP95 : std::hypot(hAccuracyP95, floorP95);
+
+		if (!ellipseAvailable)
+			return;
+
+		if (!std::isnan(ellipseSemiMajorP95))
+			ellipseSemiMajorP95 = std::hypot(ellipseSemiMajorP95, floorP95);
+		if (!std::isnan(ellipseSemiMinorP95))
+			ellipseSemiMinorP95 = std::hypot(ellipseSemiMinorP95, floorP95);
 	}
 };
 

@@ -570,6 +570,17 @@ void GnssSession::setRawLogging(bool enable, const QString& directory)
 }
 
 
+void GnssSession::setRawCaptureEnabled(bool enable)
+{
+	if (m_rawCaptureEnabled == enable)
+		return;
+
+	m_rawCaptureEnabled = enable;
+	m_rawRing.clear();
+	m_rawRingBytes = 0;
+}
+
+
 // ---- Auto-reconnect ----
 
 
@@ -704,6 +715,9 @@ void GnssSession::configureReceiver()
 
 void GnssSession::appendRawEntry(char direction, const QByteArray& data)
 {
+	if (!m_rawCaptureEnabled)
+		return;
+
 	m_rawRing.append({QDateTime::currentMSecsSinceEpoch(), data, direction});
 	m_rawRingBytes += data.size();
 

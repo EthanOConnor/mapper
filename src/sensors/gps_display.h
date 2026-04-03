@@ -42,9 +42,9 @@ class QTimerEvent;
 namespace OpenOrienteering {
 
 class Georeferencing;
-struct GnssPosition;
-class GnssPositionSource;
 class GnssSession;
+struct GnssSolutionSnapshot;
+struct GnssState;
 class MapWidget;
 
 
@@ -136,15 +136,17 @@ signals:
 	
 private slots:
     void positionUpdated(const QGeoPositionInfo& info);
-	void gnssPositionUpdated(const OpenOrienteering::GnssPosition& position);
-	void gnssPositionLost();
+	void gnssSolutionUpdated(const OpenOrienteering::GnssSolutionSnapshot& solution);
+	void gnssStateChanged(const OpenOrienteering::GnssState& state);
 #if defined(QT_POSITIONING_LIB)
 	void errorOccurred(QGeoPositionInfoSource::Error positioningError);
 #endif
 	
 private:
-	MapCoordF calcLatestGPSCoord(bool& ok);
+	void applyGnssSolution(const OpenOrienteering::GnssSolutionSnapshot& solution, bool emit_signals);
+	void refreshFromGnssSession();
 	void updateMapWidget();
+	void resetPositionState(bool clear_display_position = true);
 	
 	/**
 	 * A lightweight utility for sinusoidal pulsating opacity.
@@ -179,19 +181,19 @@ private:
 	MapWidget* widget;
 	const Georeferencing& georeferencing;
 	QGeoPositionInfoSource* source = nullptr;
+	GnssSession* gnss_session = nullptr;
 	MapCoordF latest_gps_coord;
 	float latest_gps_coord_accuracy = 0;
 	PulsatingOpacity pulsating_opacity;
 	int blink_count = 0;
 	bool tracking_lost             = false;
 	bool has_valid_position        = false;
-	bool gps_updated               = false;
+	bool has_display_position      = false;
 	bool visible                   = false;
 	bool distance_rings_enabled    = false;
 	bool heading_indicator_enabled = false;
 
 	// GNSS session integration
-	GnssPositionSource* gnss_source = nullptr;  // owned
 	std::uint8_t gnss_fix_type = 0;
 	float gnss_h_accuracy_p95 = -1;
 	float gnss_ellipse_semi_major = -1;

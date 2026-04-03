@@ -1037,11 +1037,13 @@ void MapWidget::paintEvent(QPaintEvent* event)
 	//painter.setClipRect(exposed);
 	
 	// Show current drawings
+	painter.save();
 	if (activity_dirty_rect.isValid())
 		activity->draw(&painter, this);
 	
 	if (drawing_dirty_rect.isValid())
 		tool->draw(&painter, this);
+	painter.restore();
 	
 	
 	// Draw temporary GPS marker display

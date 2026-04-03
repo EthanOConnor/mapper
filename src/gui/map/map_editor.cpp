@@ -842,6 +842,7 @@ void MapEditorController::attach(MainWindow* window)
 				{
 					auto* panel = new GnssDetailPanel();
 					panel->updateState(gnss_session->currentState());
+					panel->setRawCaptureActive(gnss_session->rawCaptureEnabled());
 					connect(gnss_session, &GnssSession::stateChanged,
 					        panel, &GnssDetailPanel::updateState);
 					connect(panel, &GnssDetailPanel::ntripProfileChangeRequested,
@@ -860,15 +861,27 @@ void MapEditorController::attach(MainWindow* window)
 						if (gnss_session && !gnss_session->isActive())
 							gnss_session->start();
 					});
-					connect(panel, &GnssDetailPanel::dumpRawRequested,
+					connect(panel, &GnssDetailPanel::rawCaptureActionRequested,
 					        this, [this, panel]() {
 						if (!gnss_session) {
 							panel->setDumpStatus(QStringLiteral("No session"));
+							panel->setRawCaptureActive(false);
 							return;
 						}
+
+						if (!gnss_session->rawCaptureEnabled())
+						{
+							gnss_session->setRawCaptureEnabled(true);
+							panel->setRawCaptureActive(true);
+							panel->setDumpStatus(QStringLiteral("Capturing raw GNSS traffic (256 KB cap)"));
+							return;
+						}
+
 						auto path = gnss_session->dumpRawBuffer();
+						gnss_session->setRawCaptureEnabled(false);
+						panel->setRawCaptureActive(false);
 						panel->setDumpStatus(path.isEmpty()
-						    ? QStringLiteral("Empty ring buffer")
+						    ? QStringLiteral("No captured raw data")
 						    : path);
 					});
 					showPopupWidget(panel, tr("GNSS Details"));
