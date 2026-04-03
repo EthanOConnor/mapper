@@ -12,6 +12,10 @@
 #include <string.h>
 #include <stdarg.h>
 
+#ifdef _WIN32
+#define timegm _mkgmtime
+#endif
+
 #define boolstr(s) ((s) ? "true" : "false")
 #define countof(array) (sizeof(array) / sizeof(array[0]))
 
