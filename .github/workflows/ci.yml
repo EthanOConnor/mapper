@@ -17,6 +17,8 @@ jobs:
   linux:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env:
+      QT_VERSION: "6.10.2"
     steps:
       - uses: actions/checkout@v6
 
@@ -25,11 +27,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential ninja-build ccache \
-            qt6-base-dev qt6-base-private-dev qt6-tools-dev qt6-tools-dev-tools \
-            qt6-l10n-tools qt6-sensors-dev qt6-serialport-dev \
-            qt6-positioning-dev qt6-image-formats-plugins qt6-5compat-dev \
             libproj-dev libgdal-dev zlib1g-dev \
             libcups2-dev doxygen graphviz libegl-dev libgl-dev
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          modules: qt5compat qtsensors qtpositioning qtserialport qtimageformats
+          cache: true
 
       - name: Set up ccache
         uses: hendrikmuhs/ccache-action@v1.2.22
@@ -37,7 +43,9 @@ jobs:
           key: linux
 
       - name: Configure
-        run: cmake --preset ci-linux
+        run: >
+          cmake --preset ci-linux
+          -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
 
       - name: Build
         run: cmake --build --preset ci-linux --parallel
@@ -60,6 +68,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
+      QT_VERSION: "6.10.2"
       ASAN_OPTIONS: "detect_leaks=1:suppressions=${{ github.workspace }}/build/dev-linux/suppress.txt"
       UBSAN_OPTIONS: "print_stacktrace=1:suppressions=${{ github.workspace }}/build/dev-linux/suppress.txt"
     steps:
@@ -70,14 +79,20 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential ninja-build \
-            qt6-base-dev qt6-base-private-dev qt6-tools-dev qt6-tools-dev-tools \
-            qt6-l10n-tools qt6-sensors-dev qt6-serialport-dev \
-            qt6-positioning-dev qt6-image-formats-plugins qt6-5compat-dev \
             libproj-dev libgdal-dev zlib1g-dev \
             libcups2-dev doxygen graphviz libegl-dev libgl-dev
 
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          modules: qt5compat qtsensors qtpositioning qtserialport qtimageformats
+          cache: true
+
       - name: Configure
-        run: cmake --preset dev-linux
+        run: >
+          cmake --preset dev-linux
+          -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
 
       - name: Build
         run: cmake --build --preset dev-linux --parallel

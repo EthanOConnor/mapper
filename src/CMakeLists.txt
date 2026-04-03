@@ -347,17 +347,19 @@ target_compile_definitions(Mapper_Common PRIVATE
 target_compile_definitions(Mapper_Common INTERFACE
   MAPPER_COMMON_LIB
 )
-target_precompile_headers(Mapper_Common PRIVATE
-  <QCoreApplication>
-  <QDebug>
-  <QObject>
-  <QPointF>
-  <QRectF>
-  <QString>
-  <QWidget>
-  <memory>
-  <vector>
-)
+if(NOT CMAKE_CROSSCOMPILING)
+	target_precompile_headers(Mapper_Common PRIVATE
+	  <QCoreApplication>
+	  <QDebug>
+	  <QObject>
+	  <QPointF>
+	  <QRectF>
+	  <QString>
+	  <QWidget>
+	  <memory>
+	  <vector>
+	)
+endif()
 if(IOS)
 	find_library(UIKIT_FRAMEWORK UIKit REQUIRED)
 	target_link_libraries(Mapper_Common PRIVATE "${UIKIT_FRAMEWORK}")

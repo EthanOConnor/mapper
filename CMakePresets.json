@@ -55,6 +55,7 @@
                 "Mapper_PACKAGE_PROJ": "OFF",
                 "Mapper_PACKAGE_GDAL": "OFF",
                 "Mapper_PACKAGE_ASSISTANT": "OFF",
+                "Mapper_MANUAL_QTHELP": "OFF",
                 "CMAKE_C_COMPILER_LAUNCHER": "ccache",
                 "CMAKE_CXX_COMPILER_LAUNCHER": "ccache"
             }
