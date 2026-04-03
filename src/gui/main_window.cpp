@@ -1279,6 +1279,24 @@ MainWindow::FileInfo MainWindow::getOpenFileName(QWidget* parent, const QString&
 // static
 void MainWindow::showMessageBox(QWidget* parent, const QString& title, const QString& headline, const std::vector<QString>& messages)
 {
+#if defined(Q_OS_ANDROID)
+	QString text = headline;
+	for (const auto& message : messages)
+	{
+		if (!text.isEmpty())
+			text += QLatin1String("\n\n");
+		text += message;
+	}
+
+	QMessageBox message_box(QMessageBox::Warning, title, text, QMessageBox::Ok, parent);
+	message_box.setTextFormat(Qt::PlainText);
+	message_box.setWindowModality(parent ? Qt::WindowModal : Qt::ApplicationModal);
+	message_box.exec();
+	// Let Android update the screen.
+	QApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 100 /* ms */);
+	return;
+#endif
+
 	QString document;
 	if (!headline.isEmpty())
 		document += QLatin1String("<p><b>") + headline + QLatin1String("</b></p>");

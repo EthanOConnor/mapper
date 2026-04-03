@@ -141,7 +141,10 @@ int main(int argc, char** argv)
 #endif
 	
 #if defined(Q_OS_ANDROID)
-	qputenv("QT_USE_ANDROID_NATIVE_STYLE", "1");
+	// QtActivityLoader enables the Android native widget style by default.
+	// On our Qt 6 mobile build, that style can lose compound-button
+	// indicators, leaving checkbox state invisible in settings pages.
+	qputenv("QT_USE_ANDROID_NATIVE_STYLE", "0");
 #elif defined(Q_OS_IOS)
 	// iOS uses the default Fusion style for QWidgets
 #endif

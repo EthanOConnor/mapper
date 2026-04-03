@@ -86,7 +86,10 @@ SettingsDialog::SettingsDialog(QWidget* parent)
 	if (Settings::mobileModeEnforced())
 	{
 		if (parent)
+		{
 			setGeometry(parent->geometry());
+			setMinimumSize(parent->size());
+		}
 		
 		stack_widget = new QStackedWidget();
 		layout->addWidget(stack_widget, 1);
@@ -180,6 +183,10 @@ void SettingsDialog::resizeToFit(QScrollArea& scrollarea)
 	auto size_hint = page->sizeHint();
 	if (!size_hint.isValid())
 		return;
+
+	auto const available_size = scrollarea.viewport()->size();
+	if (!available_size.isValid() || available_size.width() <= 0)
+		return;
 	
 	// Use QWidget::heightForWidth() when it is available,
 	// otherwise grow, but not shrink, to QWidget::sizeHint()'s height.
@@ -195,22 +202,18 @@ void SettingsDialog::resizeToFit(QScrollArea& scrollarea)
 		auto top = table_widget->visualRect(model->index(0, 0)).top();
 		auto bottom = table_widget->visualRect(model->index(model->rowCount() - 1, 0)).bottom();
 		size_hint.setHeight(size_hint.height() - table_widget->sizeHint().height() + table_widget->horizontalHeader()->height() + bottom - top);
-		size_hint = size_hint.expandedTo(scrollarea.size());
+		size_hint = size_hint.expandedTo(available_size);
 	}
-	auto size = scrollarea.size();
-	if (size_hint.width() > size.width())
-	{
-		// Fit to width
-		size_hint.setWidth(size.width());
-		size_hint.setHeight(heightForWidth(page, size.width()));
-	}
-	if (size_hint.height() > size.height())
+
+	int width = available_size.width();
+	int height = heightForWidth(page, width);
+	if (height > available_size.height())
 	{
 		// Fit to width minus scrollbar
-		size_hint.setWidth(std::min(size_hint.width(), size.width() - scrollbar_extent));
-		size_hint.setHeight(heightForWidth(page, size_hint.width()));
+		width = std::max(1, available_size.width() - scrollbar_extent);
+		height = heightForWidth(page, width);
 	}
-	page->resize(size_hint);
+	page->resize(QSize{width, std::max(size_hint.height(), height)});
 }
 
 
@@ -242,7 +245,10 @@ void SettingsDialog::addPage(SettingsPage* page)
 		
 		auto scrollarea = new QScrollArea();
 		scrollarea->setFrameShape(QFrame::NoFrame);
+		scrollarea->setWidgetResizable(true);
+		scrollarea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 		QScroller::grabGesture(scrollarea, QScroller::TouchGesture);
+		page->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
 		scrollarea->setWidget(page);
 		stack_widget->addWidget(scrollarea);
 		
