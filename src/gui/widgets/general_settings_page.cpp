@@ -230,11 +230,12 @@ void GeneralSettingsPage::apply()
 	setSetting(Settings::General_PixelsPerInch, ppi_edit->value());
 	
 	auto encoding = encoding_box->currentText().toLatin1();
-	if (QLatin1String(encoding) == encoding_box->itemText(0)
-	    || !LegacyCodec::forName(encoding))
+	if (QLatin1String(encoding) == encoding_box->itemText(0))
 	{
 		encoding = "Default";
 	}
+	// Preserve the encoding name even if LegacyCodec doesn't support it,
+	// so users with e.g. Shift-JIS don't lose their setting.
 	setSetting(Settings::General_Local8BitEncoding, encoding);
 	
 	int interval = autosave_interval_edit->value();

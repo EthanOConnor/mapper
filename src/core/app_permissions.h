@@ -31,6 +31,11 @@
 #  include <QPermission>
 #  include <QPointer>
 #  include <QTimer>
+#  if defined(Q_OS_ANDROID)
+#    include <QJniObject>
+#    include <QtCore/qnativeinterface.h>
+#    include <QtCore/qcoreapplication_platform.h>
+#  endif
 #endif
 
 
@@ -114,9 +119,31 @@ namespace AppPermissions
 			break;
 
 		case StorageAccess:
-			// Qt6 on Android 10+ uses scoped storage; explicit storage
-			// permission is no longer needed for app-specific directories.
-			// Grant immediately.
+#if defined(Q_OS_ANDROID)
+			if (QNativeInterface::QAndroidApplication::sdkVersion() >= 30)
+			{
+				// API 30+: open system all-files-access settings
+				auto uri = QJniObject::callStaticObjectMethod(
+				    "android/net/Uri", "parse",
+				    "(Ljava/lang/String;)Landroid/net/Uri;",
+				    QJniObject::fromString(
+				        QStringLiteral("package:org.openorienteering.mapper")).object<jstring>());
+				QJniObject intent("android/content/Intent",
+				    "(Ljava/lang/String;Landroid/net/Uri;)V",
+				    QJniObject::fromString(
+				        QStringLiteral("android.settings.MANAGE_APP_ALL_FILES_ACCESS_PERMISSION")).object<jstring>(),
+				    uri.object());
+				intent.callObjectMethod("addFlags", "(I)Landroid/content/Intent;", 0x10000000 /*FLAG_ACTIVITY_NEW_TASK*/);
+				QJniObject context = QNativeInterface::QAndroidApplication::context();
+				context.callObjectMethod("startActivity",
+				    "(Landroid/content/Intent;)V",
+				    intent.object());
+				// User returns from settings; callback fires immediately.
+				// The home screen will re-check permissions when it refreshes.
+				QTimer::singleShot(10, object, function);
+				break;
+			}
+#endif
 			QTimer::singleShot(10, object, function);
 			break;
 		}

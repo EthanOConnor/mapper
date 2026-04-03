@@ -386,9 +386,14 @@ QByteArray LegacyCodec::fromUnicode(const QString& str) const
 	case WindowsCodepage:
 	{
 		const auto& table = codepage_tables[m_codepage_index].map;
+		// Windows-1258 uses combining tone marks; decompose precomposed
+		// Vietnamese characters to NFD so base + mark encode separately.
+		auto input = (m_codepage_index == 8)
+		             ? str.normalized(QString::NormalizationForm_D)
+		             : str;
 		QByteArray result;
-		result.reserve(str.size());
-		for (auto ch : str)
+		result.reserve(input.size());
+		for (auto ch : input)
 		{
 			auto code = ch.unicode();
 			if (code < 0x80)

@@ -662,6 +662,12 @@ bool MainWindow::event(QEvent* event)
 	case QEvent::Resize:
 		if (toast)
 			toast->adjustPosition(frameGeometry());
+#if defined(Q_OS_IOS)
+		{
+			auto insets = iOS::safeAreaInsets();
+			setContentsMargins(insets.left(), insets.top(), insets.right(), insets.bottom());
+		}
+#endif
 		break;
 		
 	default:

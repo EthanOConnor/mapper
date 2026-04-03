@@ -77,10 +77,18 @@ void ensureSwizzled()
 
 	Class vcClass = objc_getClass("QIOSViewController");
 	if (!vcClass)
-		vcClass = [UIViewController class];
+		return;  // Qt's view controller not found; do nothing
+
 	SEL sel = @selector(supportedInterfaceOrientations);
-	Method method = class_getInstanceMethod(vcClass, sel);
-	g_original_supportedOrientations = method_setImplementation(method, reinterpret_cast<IMP>(swizzled_supportedInterfaceOrientations));
+	Method inherited = class_getInstanceMethod(vcClass, sel);
+	g_original_supportedOrientations = method_getImplementation(inherited);
+
+	// Add an override to QIOSViewController specifically, not to the
+	// inherited UIViewController method. This scopes the swizzle to
+	// Qt's root controller and leaves unrelated controllers untouched.
+	class_addMethod(vcClass, sel,
+	    reinterpret_cast<IMP>(swizzled_supportedInterfaceOrientations),
+	    method_getTypeEncoding(inherited));
 }
 
 UIWindowScene* activeWindowScene()

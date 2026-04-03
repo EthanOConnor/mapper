@@ -26,6 +26,12 @@
 #include <QCoreApplication>
 #include <QPermission>
 
+#if defined(Q_OS_ANDROID)
+#  include <QJniObject>
+#  include <QtCore/qnativeinterface.h>
+#  include <QtCore/qcoreapplication_platform.h>
+#endif
+
 
 namespace AppPermissions
 {
@@ -44,8 +50,20 @@ PermissionResult checkPermission(AppPermission permission)
 		}
 
 	case StorageAccess:
-		// Qt6 scoped storage: app-specific directories don't need permission
+#if defined(Q_OS_ANDROID)
+		if (QNativeInterface::QAndroidApplication::sdkVersion() >= 30)
+		{
+			// API 30+: need MANAGE_EXTERNAL_STORAGE, checked via Environment.isExternalStorageManager()
+			auto result = QJniObject::callStaticMethod<jboolean>(
+			    "android/os/Environment", "isExternalStorageManager");
+			return result ? Granted : Denied;
+		}
+		// API 28-29: requestLegacyExternalStorage + manifest permissions suffice
 		return Granted;
+#else
+		// iOS: app-specific directories don't need permission
+		return Granted;
+#endif
 	}
 
 	return Denied;
