@@ -69,9 +69,14 @@ void StyleTest::scalingIconEngineTest()
 		QCOMPARE(icon.pixmap(QSize(10,10)).size(), QSize(4,4));
 	}
 	{
-		// ScalingIconEngine:
-		QIcon icon(new ScalingIconEngine(QString{}));
-		icon.addPixmap(pm);
+		// ScalingIconEngine wrapping a QIcon that already has the pixmap.
+		// This matches actual usage: the plugin and MapperProxyStyle both
+		// provide icon content during engine construction, not via
+		// QIcon::addPixmap on the outer icon (which triggers detach and
+		// replaces the engine in Qt 6).
+		QIcon base;
+		base.addPixmap(pm);
+		QIcon icon(new ScalingIconEngine(base));
 		// Scaling down
 		QCOMPARE(icon.actualSize(QSize(1,1)), QSize(1,1));
 		QCOMPARE(icon.pixmap(QSize(1,1)).size(), QSize(1,1));
