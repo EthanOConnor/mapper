@@ -161,7 +161,7 @@ jobs:
           key: windows
 
       - name: Configure
-        run: cmake --preset ci-windows --log-level=VERBOSE 2>&1 || echo "Configure exit code: $?"
+        run: cmake --preset ci-windows
 
       - name: Build
         run: cmake --build --preset ci-windows --parallel
