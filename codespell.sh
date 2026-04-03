@@ -9,6 +9,7 @@ while read WORD; do SKIP_LIST="${SKIP_LIST:+$SKIP_LIST,}$WORD"; done \
   src/gdal/mapper-osmconf.ini
   src/printsupport/qt-5.5.1
   src/printsupport/qt-5.12.4
+  src/gnss/3rdparty
 END_SKIP_LIST
 
 codespell -q 7 \
@@ -28,7 +29,7 @@ codespell -q 7 \
   'translations/future_translations.cpp' \
   -S "$SKIP_LIST" \
   -x codespell-ignore.txt \
-  -L clen \
+  -L clen,ned \
   "$@"
 
 git log -n 20 | codespell -q 7 - | sed 's/^/git log: /'
