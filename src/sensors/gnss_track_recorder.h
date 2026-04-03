@@ -18,8 +18,8 @@
  */
 
 
-#ifndef OPENORIENTEERING_GPS_TRACK_RECORDER_H
-#define OPENORIENTEERING_GPS_TRACK_RECORDER_H
+#ifndef OPENORIENTEERING_GNSS_TRACK_RECORDER_H
+#define OPENORIENTEERING_GNSS_TRACK_RECORDER_H
 
 #include <QObject>
 #include <QString>
@@ -30,15 +30,15 @@ namespace OpenOrienteering {
 class MapWidget;
 class Template;
 class TemplateTrack;
-class GPSDisplay;
+class GnssPositionBridge;
 
 
-/** Records GPS tracks into a TemplateTrack. */
-class GPSTrackRecorder : public QObject
+/** Records GNSS tracks into a TemplateTrack. */
+class GnssTrackRecorder : public QObject
 {
 Q_OBJECT
 public:
-	GPSTrackRecorder(GPSDisplay* gps_display, TemplateTrack* target_template, int draw_update_interval_milliseconds = -1, MapWidget* widget = nullptr);
+	GnssTrackRecorder(GnssPositionBridge* position_bridge, TemplateTrack* target_template, int draw_update_interval_milliseconds = -1, MapWidget* widget = nullptr);
 
 public slots:
 	void newPosition(double latitude, double longitude, double altitude, float accuracy);
@@ -47,7 +47,7 @@ public slots:
 	void drawUpdate();
 	
 private:
-	GPSDisplay* gps_display;
+	GnssPositionBridge* position_bridge;
 	TemplateTrack* target_template;
 	MapWidget* widget;
 	QTimer draw_update_timer;

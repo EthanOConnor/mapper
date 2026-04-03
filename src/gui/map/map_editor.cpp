@@ -153,9 +153,9 @@
 #  include "gnss/transport/ble_transport.h"
 #endif
 #include "sensors/compass.h"
-#include "sensors/gps_display.h"
-#include "sensors/gps_temporary_markers.h"
-#include "sensors/gps_track_recorder.h"
+#include "sensors/gnss_map_overlay.h"
+#include "sensors/gnss_position_bridge.h"
+#include "sensors/gnss_track_recorder.h"
 #include "templates/paint_on_template_feature.h"
 #include "templates/template.h"
 #include "templates/template_dialog_reopen.h"
@@ -169,7 +169,7 @@
 #include "tools/draw_freehand_tool.h"
 #include "tools/draw_path_tool.h"
 #include "tools/draw_point_tool.h"
-#include "tools/draw_point_gps_tool.h"
+#include "tools/draw_point_gnss_tool.h"
 #include "tools/draw_rectangle_tool.h"
 #include "tools/draw_text_tool.h"
 #include "tools/edit_point_tool.h"
@@ -313,10 +313,10 @@ MapEditorController::MapEditorController(OperatingMode mode, Map* map, MapView* 
 	statusbar_zoom_frame = nullptr;
 	statusbar_cursorpos_label = nullptr;
 	
-	gps_display = nullptr;
-	gps_track_recorder = nullptr;
+	gnss_position_bridge = nullptr;
+	gnss_track_recorder = nullptr;
 	compass_display = nullptr;
-	gps_marker_display = nullptr;
+	gnss_map_overlay = nullptr;
 	gnss_session = nullptr;
 	gnss_status_overlay = nullptr;
 	
@@ -358,10 +358,10 @@ MapEditorController::~MapEditorController()
 #endif
 	delete gnss_status_overlay;
 	delete gnss_session;
-	delete gps_display;
-	delete gps_track_recorder;
+	delete gnss_position_bridge;
+	delete gnss_track_recorder;
 	delete compass_display;
-	delete gps_marker_display;
+	delete gnss_map_overlay;
 	delete map;
 }
 
@@ -826,8 +826,8 @@ void MapEditorController::attach(MainWindow* window)
 	// Create menu and toolbar together, so actions can be inserted into one or both
 	if (mode == MapEditor)
 	{
-		gps_display = new GPSDisplay(map_widget, map->getGeoreferencing());
-		gps_marker_display = new GPSTemporaryMarkers(map_widget, gps_display);
+		gnss_position_bridge = new GnssPositionBridge(map->getGeoreferencing());
+		gnss_map_overlay = new GnssMapOverlay(map_widget, gnss_position_bridge, map->getGeoreferencing());
 		
 		createActions();
 		if (mobile_mode)
@@ -888,15 +888,15 @@ void MapEditorController::attach(MainWindow* window)
 				}
 			});
 
-			// Auto-enable GPS on map open if auto-connect is configured
+			// Auto-enable live GNSS display on map open if auto-connect is configured.
 			{
 				auto const& settings = Settings::getInstance();
 				if (settings.gnssAutoConnect()
 				    && !settings.gnssDeviceAddress().isEmpty()
-				    && gps_display_action->isEnabled())
+				    && gnss_display_action->isEnabled())
 				{
-					gps_display_action->setChecked(true);
-					enableGPSDisplay(true);
+					gnss_display_action->setChecked(true);
+					enableGnssDisplay(true);
 				}
 			}
 		}
@@ -1113,8 +1113,8 @@ void MapEditorController::createActions()
 	show_grid_act = newCheckAction("showgrid", tr("Show grid"), this, SLOT(showGrid()), "grid.png", QString{}, "grid.html");
 	configure_grid_act = newAction("configuregrid", tr("Configure grid..."), this, SLOT(configureGrid()), "grid.png", QString{}, "grid.html");
 	pan_act = newToolAction("panmap", tr("Pan"), this, SLOT(pan()), "move.png", QString{}, "view_menu.html");
-	move_to_gps_pos_act = newAction("movegps", tr("Move to my location"), this, SLOT(moveToGpsPos()), "move-to-gps.png", QString{}, "view_menu.html");
-	move_to_gps_pos_act->setEnabled(false);
+	move_to_gnss_position_act = newAction("movegps", tr("Move to my location"), this, SLOT(moveToCurrentGnssPosition()), "move-to-gps.png", QString{}, "view_menu.html");
+	move_to_gnss_position_act->setEnabled(false);
 	follow_position_act = newCheckAction("follow-position", tr("Keep my location on screen"), this, SLOT(followPositionClicked(bool)), nullptr, QString{}, "view_menu.html");
 	zoom_in_act = newAction("zoomin", tr("Zoom in"), this, SLOT(zoomIn()), "view-zoom-in.png", QString{}, "view_menu.html");
 	zoom_out_act = newAction("zoomout", tr("Zoom out"), this, SLOT(zoomOut()), "view-zoom-out.png", QString{}, "view_menu.html");
@@ -1198,18 +1198,18 @@ void MapEditorController::createActions()
 	paint_feature = std::make_unique<PaintOnTemplateFeature>(*this);
 	
 	touch_cursor_action = newCheckAction("touchcursor", tr("Enable touch cursor"), map_widget, SLOT(enableTouchCursor(bool)), "tool-touch-cursor.png", QString{}, "toolbars.html#touch_cursor"); // TODO: write documentation
-	gps_display_action = newCheckAction("gpsdisplay", tr("Enable GPS display"), this, SLOT(enableGPSDisplay(bool)), "tool-gps-display.png", QString{}, "toolbars.html#gps_display"); // TODO: write documentation
-	gps_display_action->setEnabled(map->getGeoreferencing().getState() == Georeferencing::Geospatial);
-	gps_distance_rings_action = newCheckAction("gpsdistancerings", tr("Enable GPS distance rings"), this, SLOT(enableGPSDistanceRings(bool)), "gps-distance-rings.png", QString{}, "toolbars.html#gps_distance_rings"); // TODO: write documentation
-	gps_distance_rings_action->setEnabled(false);
-	draw_point_gps_act = newToolAction("drawpointgps", tr("Set point object at GPS position"), this, SLOT(drawPointGPSClicked()), "draw-point-gps.png", QString{}, "toolbars.html#tool_draw_point_gps"); // TODO: write documentation
-	draw_point_gps_act->setEnabled(false);
-	gps_temporary_point_act = newAction("gpstemporarypoint", tr("Set temporary marker at GPS position"), this, SLOT(gpsTemporaryPointClicked()), "gps-temporary-point.png", QString{}, "toolbars.html#gps_temporary_point"); // TODO: write documentation
-	gps_temporary_point_act->setEnabled(false);
-	gps_temporary_path_act = newCheckAction("gpstemporarypath", tr("Create temporary path at GPS position"), this, SLOT(gpsTemporaryPathClicked(bool)), "gps-temporary-path.png", QString{}, "toolbars.html#gps_temporary_path"); // TODO: write documentation
-	gps_temporary_path_act->setEnabled(false);
-	gps_temporary_clear_act = newAction("gpstemporaryclear", tr("Clear temporary GPS markers"), this, SLOT(gpsTemporaryClearClicked()), "gps-temporary-clear.png", QString{}, "toolbars.html#gps_temporary_clear"); // TODO: write documentation
-	gps_temporary_clear_act->setEnabled(false);
+	gnss_display_action = newCheckAction("gpsdisplay", tr("Show live GNSS position"), this, SLOT(enableGnssDisplay(bool)), "tool-gps-display.png", QString{}, "toolbars.html#gps_display"); // TODO: write documentation
+	gnss_display_action->setEnabled(map->getGeoreferencing().getState() == Georeferencing::Geospatial);
+	gnss_distance_rings_action = newCheckAction("gpsdistancerings", tr("Show GNSS distance rings"), this, SLOT(enableGnssDistanceRings(bool)), "gps-distance-rings.png", QString{}, "toolbars.html#gps_distance_rings"); // TODO: write documentation
+	gnss_distance_rings_action->setEnabled(false);
+	draw_point_gnss_act = newToolAction("drawpointgps", tr("Set point object at GNSS position"), this, SLOT(drawPointGnssClicked()), "draw-point-gps.png", QString{}, "toolbars.html#tool_draw_point_gps"); // TODO: write documentation
+	draw_point_gnss_act->setEnabled(false);
+	gnss_temporary_point_act = newAction("gpstemporarypoint", tr("Set temporary marker at GNSS position"), this, SLOT(gnssTemporaryPointClicked()), "gps-temporary-point.png", QString{}, "toolbars.html#gps_temporary_point"); // TODO: write documentation
+	gnss_temporary_point_act->setEnabled(false);
+	gnss_temporary_path_act = newCheckAction("gpstemporarypath", tr("Create temporary path at GNSS position"), this, SLOT(gnssTemporaryPathClicked(bool)), "gps-temporary-path.png", QString{}, "toolbars.html#gps_temporary_path"); // TODO: write documentation
+	gnss_temporary_path_act->setEnabled(false);
+	gnss_temporary_clear_act = newAction("gpstemporaryclear", tr("Clear temporary GNSS markers"), this, SLOT(gnssTemporaryClearClicked()), "gps-temporary-clear.png", QString{}, "toolbars.html#gps_temporary_clear"); // TODO: write documentation
+	gnss_temporary_clear_act->setEnabled(false);
 	
 	compass_action = newCheckAction("compassdisplay", tr("Enable compass display"), this, SLOT(enableCompassDisplay(bool)), "compass.png", QString{}, "toolbars.html#compass_display"); // TODO: write documentation
 	align_map_with_north_act = newCheckAction("alignmapwithnorth", tr("Align map with north"), this, SLOT(alignMapWithNorth(bool)), "rotate-map.png", QString{}, "toolbars.html#align_map_with_north"); // TODO: write documentation
@@ -1648,23 +1648,23 @@ void MapEditorController::createMobileGUI()
 	});
 	zoom_out_button->setMenu(mobile_zoom_out_menu);
 
-	auto* move_to_gps_pos_menu = new QMenu(bottom_action_bar);
-	move_to_gps_pos_menu->addAction(follow_position_act);
-	move_to_gps_pos_act->setMenu(move_to_gps_pos_menu);
-	bottom_action_bar->addAction(move_to_gps_pos_act, 1, col++);
-	if (auto* button = bottom_action_bar->getButtonForAction(move_to_gps_pos_act))
+	auto* move_to_location_menu = new QMenu(bottom_action_bar);
+	move_to_location_menu->addAction(follow_position_act);
+	move_to_gnss_position_act->setMenu(move_to_location_menu);
+	bottom_action_bar->addAction(move_to_gnss_position_act, 1, col++);
+	if (auto* button = bottom_action_bar->getButtonForAction(move_to_gnss_position_act))
 		button->setPopupMode(QToolButton::DelayedPopup);
 	
 	bottom_action_bar->addAction(hatch_areas_view_act, 0, col);
 	bottom_action_bar->addAction(baseline_view_act, 1, col++);	
 
-	bottom_action_bar->addAction(gps_temporary_path_act, 0, col);
-	auto* temp_path_button = bottom_action_bar->getButtonForAction(gps_temporary_path_act);
+	bottom_action_bar->addAction(gnss_temporary_path_act, 0, col);
+	auto* temp_path_button = bottom_action_bar->getButtonForAction(gnss_temporary_path_act);
 	auto* mobile_gps_temp_path_menu = new QMenu(temp_path_button);
-	mobile_gps_temp_path_menu->addAction(gps_temporary_clear_act);
+	mobile_gps_temp_path_menu->addAction(gnss_temporary_clear_act);
 	temp_path_button->setMenu(mobile_gps_temp_path_menu);
 	
-	bottom_action_bar->addAction(gps_temporary_point_act, 1, col++);
+	bottom_action_bar->addAction(gnss_temporary_point_act, 1, col++);
 
 	auto* paint_action = paint_feature->paintAction();
 	bottom_action_bar->addAction(paint_action, 0, col);
@@ -1678,7 +1678,7 @@ void MapEditorController::createMobileGUI()
 	
 	col = 2;
 	bottom_action_bar->addActionAtEnd(draw_point_act, 0, col);
-	bottom_action_bar->addActionAtEnd(draw_point_gps_act, 1, col++);
+	bottom_action_bar->addActionAtEnd(draw_point_gnss_act, 1, col++);
 	
 	bottom_action_bar->addActionAtEnd(draw_path_act, 0, col);
 	bottom_action_bar->addActionAtEnd(draw_freehand_act, 1, col++);
@@ -1699,9 +1699,9 @@ void MapEditorController::createMobileGUI()
 	top_action_bar->addAction(window->getSaveAct(), 1, col++);
 	
 	top_action_bar->addAction(compass_action, 0, col);
-	top_action_bar->addAction(gps_display_action, 1, col++);
+	top_action_bar->addAction(gnss_display_action, 1, col++);
 	
-	top_action_bar->addAction(gps_distance_rings_action, 0, col);
+	top_action_bar->addAction(gnss_distance_rings_action, 0, col);
 	top_action_bar->addAction(align_map_with_north_act, 1, col++);
 	
 	top_action_bar->addAction(show_grid_act, 0, col);
@@ -1790,14 +1790,14 @@ void MapEditorController::detach()
 	gnss_status_overlay = nullptr;
 	delete gnss_session;
 	gnss_session = nullptr;
-	delete gps_display;
-	gps_display = nullptr;
-	delete gps_track_recorder;
-	gps_track_recorder = nullptr;
+	delete gnss_position_bridge;
+	gnss_position_bridge = nullptr;
+	delete gnss_track_recorder;
+	gnss_track_recorder = nullptr;
 	delete compass_display;
 	compass_display = nullptr;
-	delete gps_marker_display;
-	gps_marker_display = nullptr;
+	delete gnss_map_overlay;
+	gnss_map_overlay = nullptr;
 	
 	find_feature.reset(nullptr);
 	paint_feature.reset(nullptr);
@@ -2183,21 +2183,21 @@ void MapEditorController::pan()
 	setTool(new PanTool(this, pan_act));
 }
 
-void MapEditorController::moveToGpsPos()
+void MapEditorController::moveToCurrentGnssPosition()
 {
-	if (!gps_display->hasValidPosition())
+	if (!gnss_position_bridge->hasLivePosition())
 		return;
-	auto cur_gps_pos = gps_display->getLatestGPSCoord();
-	main_view->setCenter({ cur_gps_pos.x(), cur_gps_pos.y() });
-	gps_display->startBlinking(3);
+	auto current_position = gnss_position_bridge->latestMapCoord();
+	main_view->setCenter({ current_position.x(), current_position.y() });
+	gnss_map_overlay->startBlinking(3);
 }
 
 void MapEditorController::followPositionClicked(bool enable)
 {
 	if (enable)
-		connect(gps_display, &GPSDisplay::mapPositionUpdated, this, &MapEditorController::followPositionUpdate);
+		connect(gnss_position_bridge, &GnssPositionBridge::mapPositionUpdated, this, &MapEditorController::followPositionUpdate);
 	else
-		disconnect(gps_display, &GPSDisplay::mapPositionUpdated, this, &MapEditorController::followPositionUpdate);
+		disconnect(gnss_position_bridge, &GnssPositionBridge::mapPositionUpdated, this, &MapEditorController::followPositionUpdate);
 }
 
 void MapEditorController::followPositionUpdate(MapCoordF position)
@@ -2540,14 +2540,14 @@ void MapEditorController::georeferencingDialogFinished()
 	georeferencing_dialog.take()->deleteLater();
 	map->updateAllMapWidgets();
 	
-	bool gps_display_possible = map->getGeoreferencing().getState() == Georeferencing::Geospatial;
-	if (!gps_display_possible)
+	bool gnss_display_possible = map->getGeoreferencing().getState() == Georeferencing::Geospatial;
+	if (!gnss_display_possible)
 	{
-		gps_display_action->setChecked(false);
-		if (gps_display)
-			enableGPSDisplay(false);
+		gnss_display_action->setChecked(false);
+		if (gnss_position_bridge)
+			enableGnssDisplay(false);
 	}
-	gps_display_action->setEnabled(gps_display_possible);
+	gnss_display_action->setEnabled(gnss_display_possible);
 }
 
 void MapEditorController::selectedSymbolsChanged()
@@ -2674,7 +2674,7 @@ void MapEditorController::updateSymbolDependentActions()
 	
 	select_by_current_symbol_act->setEnabled(!editing_in_progress && symbol_widget && symbol_widget->selectedSymbolsCount());
 	
-	updateDrawPointGPSAvailability();
+	updateDrawPointGnssAvailability();
 	draw_point_act->setEnabled(type == Symbol::Point && !symbol->isHidden());
 	draw_point_act->setStatusTip(tr("Place point objects on the map.") + (draw_point_act->isEnabled() ? QString{} : QString(QLatin1Char(' ') + tr("Select a point symbol to be able to use this tool."))));
 	draw_path_act->setEnabled((type == Symbol::Line || type == Symbol::Area || type == Symbol::Combined) && !symbol->isHidden());
@@ -3696,7 +3696,7 @@ void MapEditorController::addFloatingDockWidget(QDockWidget* dock_widget)
 }
 
 
-void MapEditorController::enableGPSDisplay(bool enable)
+void MapEditorController::enableGnssDisplay(bool enable)
 {
 	if (enable)
 	{
@@ -3711,7 +3711,7 @@ void MapEditorController::enableGPSDisplay(bool enable)
 			{
 				gnss_session = new GnssSession(this);
 				gnss_session->setAutoReconnect(true);
-				gps_display->setGnssSession(gnss_session);
+				gnss_position_bridge->setGnssSession(gnss_session);
 				if (gnss_status_overlay)
 				{
 					connect(gnss_session, &GnssSession::stateChanged,
@@ -3859,7 +3859,7 @@ void MapEditorController::enableGPSDisplay(bool enable)
 							gnss_device_dialog->showScanPage();
 					});
 
-					// Dialog closed → just hide (cleaned up in enableGPSDisplay(false))
+					// Dialog closed → just hide (cleaned up in enableGnssDisplay(false))
 					connect(gnss_device_dialog, &GnssDeviceDialog::dialogCompleted,
 					        gnss_device_dialog, &QWidget::hide);
 					connect(gnss_device_dialog, &QDialog::rejected,
@@ -3871,7 +3871,7 @@ void MapEditorController::enableGPSDisplay(bool enable)
 			}
 		}
 
-		gps_display->startUpdates();
+		gnss_position_bridge->startUpdates();
 
 		// Show GNSS status overlay if session is active
 		if (gnss_session && gnss_status_overlay)
@@ -3889,8 +3889,8 @@ void MapEditorController::enableGPSDisplay(bool enable)
 			gnss_status_overlay->show();
 		}
 
-		// Create gps_track_recorder if we can determine a template track filename
-		constexpr int gps_track_draw_update_interval = 10 * 1000; // in milliseconds
+		// Create gnss_track_recorder if we can determine a template track filename.
+		constexpr int gnss_track_draw_update_interval = 10 * 1000; // in milliseconds
 		if (! window->currentPath().isEmpty())
 		{
 			// Find or create a template for the track with a specific name
@@ -3898,7 +3898,7 @@ void MapEditorController::enableGPSDisplay(bool enable)
 				QFileInfo(window->currentPath()).absoluteDir().canonicalPath()
 				+ QLatin1Char('/')
 				+ QFileInfo(window->currentPath()).completeBaseName()
-				+ QLatin1String(" - GPS-")
+				+ QLatin1String(" - GNSS-")
 				+ QDate::currentDate().toString(Qt::ISODate)
 				+ QLatin1String(".gpx");
 
@@ -3946,15 +3946,15 @@ void MapEditorController::enableGPSDisplay(bool enable)
 
 			main_view->setTemplateVisibility(track, visibility);
 
-			gps_track_recorder = new GPSTrackRecorder(gps_display, track, gps_track_draw_update_interval, map_widget);
+			gnss_track_recorder = new GnssTrackRecorder(gnss_position_bridge, track, gnss_track_draw_update_interval, map_widget);
 		}
 	}
 	else
 	{
-		gps_display->stopUpdates();
+		gnss_position_bridge->stopUpdates();
 
-		delete gps_track_recorder;
-		gps_track_recorder = nullptr;
+		delete gnss_track_recorder;
+		gnss_track_recorder = nullptr;
 
 		// Clean up dialog, discovery agent, and GNSS session.
 		// Order: dialog first, then agent, then session (which owns the transport).
@@ -3967,7 +3967,7 @@ void MapEditorController::enableGPSDisplay(bool enable)
 		if (gnss_session)
 		{
 			gnss_session->stop();
-			gps_display->setGnssSession(nullptr);
+			gnss_position_bridge->setGnssSession(nullptr);
 			delete gnss_session;
 			gnss_session = nullptr;
 		}
@@ -3975,18 +3975,18 @@ void MapEditorController::enableGPSDisplay(bool enable)
 		if (gnss_status_overlay)
 			gnss_status_overlay->hide();
 	}
-	gps_display->setVisible(enable);
+	gnss_map_overlay->setVisible(enable);
 
 	if (! enable)
 	{
-		gps_marker_display->stopPath();
-		gps_temporary_path_act->setChecked(false);
+		gnss_map_overlay->stopPath();
+		gnss_temporary_path_act->setChecked(false);
 	}
 
-	gps_distance_rings_action->setEnabled(enable);
-	gps_temporary_point_act->setEnabled(enable);
-	gps_temporary_path_act->setEnabled(enable);
-	updateDrawPointGPSAvailability();
+	gnss_distance_rings_action->setEnabled(enable);
+	gnss_temporary_point_act->setEnabled(enable);
+	gnss_temporary_path_act->setEnabled(enable);
+	updateDrawPointGnssAvailability();
 }
 
 
@@ -4023,49 +4023,49 @@ void MapEditorController::loadNtripProfile(const QString& profileName)
 		gnss_session->startNtrip();
 }
 
-void MapEditorController::enableGPSDistanceRings(bool enable)
+void MapEditorController::enableGnssDistanceRings(bool enable)
 {
-	gps_display->enableDistanceRings(enable);
+	gnss_map_overlay->enableDistanceRings(enable);
 }
 
-void MapEditorController::updateDrawPointGPSAvailability()
+void MapEditorController::updateDrawPointGnssAvailability()
 {
 	const Symbol* symbol = activeSymbol();
-	draw_point_gps_act->setEnabled(symbol && gps_display->isVisible() && symbol->getType() == Symbol::Point && !symbol->isHidden());
-	move_to_gps_pos_act->setEnabled(gps_display->isVisible());
+	draw_point_gnss_act->setEnabled(symbol && gnss_map_overlay->isVisible() && symbol->getType() == Symbol::Point && !symbol->isHidden());
+	move_to_gnss_position_act->setEnabled(gnss_map_overlay->isVisible());
 }
 
-void MapEditorController::drawPointGPSClicked()
+void MapEditorController::drawPointGnssClicked()
 {
-	setTool(new DrawPointGPSTool(gps_display, this, draw_point_gps_act));
+	setTool(new DrawPointGnssTool(gnss_position_bridge, this, draw_point_gnss_act));
 }
 
-void MapEditorController::gpsTemporaryPointClicked()
+void MapEditorController::gnssTemporaryPointClicked()
 {
-	if (gps_marker_display->addPoint())
-		gps_temporary_clear_act->setEnabled(true);
+	if (gnss_map_overlay->addPoint())
+		gnss_temporary_clear_act->setEnabled(true);
 }
 
-void MapEditorController::gpsTemporaryPathClicked(bool enable)
+void MapEditorController::gnssTemporaryPathClicked(bool enable)
 {
 	if (enable)
 	{
-		gps_marker_display->startPath();
-		gps_temporary_clear_act->setEnabled(true);
+		gnss_map_overlay->startPath();
+		gnss_temporary_clear_act->setEnabled(true);
 	}
 	else
-		gps_marker_display->stopPath();
+		gnss_map_overlay->stopPath();
 }
 
-void MapEditorController::gpsTemporaryClearClicked()
+void MapEditorController::gnssTemporaryClearClicked()
 {
-	if (QMessageBox::question(window, tr("Clear temporary markers"), tr("Are you sure you want to delete all temporary GPS markers? This cannot be undone."), QMessageBox::Yes | QMessageBox::No) == QMessageBox::No)
+	if (QMessageBox::question(window, tr("Clear temporary markers"), tr("Are you sure you want to delete all temporary GNSS markers? This cannot be undone."), QMessageBox::Yes | QMessageBox::No) == QMessageBox::No)
 		return;
 	
-	gps_marker_display->stopPath();
-	gps_temporary_path_act->setChecked(false);
-	gps_marker_display->clear();
-	gps_temporary_clear_act->setEnabled(false);
+	gnss_map_overlay->stopPath();
+	gnss_temporary_path_act->setChecked(false);
+	gnss_map_overlay->clear();
+	gnss_temporary_clear_act->setEnabled(false);
 }
 
 void MapEditorController::enableCompassDisplay(bool enable)
@@ -4098,7 +4098,7 @@ void MapEditorController::alignMapWithNorth(bool enable)
 	if (enable)
 	{
 		Compass::getInstance().startUsage();
-		gps_display->enableHeadingIndicator(true);
+		gnss_map_overlay->enableHeadingIndicator(true);
 		
 		connect(&align_map_with_north_timer, &QTimer::timeout, this, &MapEditorController::alignMapWithNorthUpdate);
 		align_map_with_north_timer.start(update_interval);
@@ -4109,7 +4109,7 @@ void MapEditorController::alignMapWithNorth(bool enable)
 		align_map_with_north_timer.disconnect();
 		align_map_with_north_timer.stop();
 		
-		gps_display->enableHeadingIndicator(false);
+		gnss_map_overlay->enableHeadingIndicator(false);
 		Compass::getInstance().stopUsage();
 		
 		main_view->setRotation(0);

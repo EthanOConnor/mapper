@@ -33,11 +33,11 @@ class GnssSession;
 class Georeferencing;
 
 
-/// Adapter that bridges GnssSession to the Mapper GPS display system.
+/// Adapter that bridges GnssSession to Mapper live-position consumers.
 ///
 /// Connects to a GnssSession's position updates, tracks position
 /// timeout (loss of fix), and provides the latest position and state
-/// for consumption by GPSDisplay and other UI components.
+/// for consumption by GnssPositionBridge and other UI components.
 class GnssPositionSource : public QObject
 {
 	Q_OBJECT

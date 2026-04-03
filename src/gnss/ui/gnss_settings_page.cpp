@@ -45,7 +45,7 @@ GnssSettingsPage::GnssSettingsPage(QWidget* parent)
 	device_selector->setEditable(true);
 	layout->addRow(tr("Device:"), device_selector);
 
-	auto_connect_box = new QCheckBox(tr("Connect automatically when GPS enabled"), this);
+	auto_connect_box = new QCheckBox(tr("Connect automatically when GNSS display is enabled"), this);
 	layout->addRow(auto_connect_box);
 
 	layout->addItem(Util::SpacerItem::create(this));

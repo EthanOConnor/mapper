@@ -46,7 +46,7 @@ namespace OpenOrienteering
  * 
  * The serial port device is taken from the QT_NMEA_SERIAL_PORT environment
  * variable which is also used by Qt's serialnmea plugin. In OpenOrienteering
- * Mapper, this variable is set by the GPSDisplay class if the user explicitly
+ * Mapper, this variable is set by the GnssPositionBridge class if the user explicitly
  * chooses a setting different from "Default".
  * 
  * Unlike Qt's serialnmea, this plugin accepts the absolute path of any readable

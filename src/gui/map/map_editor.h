@@ -60,9 +60,9 @@ class GnssDeviceDialog;
 class GnssSession;
 class GnssStatusOverlay;
 class FileFormat;
-class GPSDisplay;
-class GPSTemporaryMarkers;
-class GPSTrackRecorder;
+class GnssMapOverlay;
+class GnssPositionBridge;
+class GnssTrackRecorder;
 class GeoreferencingDialog;
 class MainWindow;
 class MapCoordF;
@@ -304,8 +304,8 @@ public slots:
 	
 	/** Activates the pan tool. */
 	void pan();
-	/** Moves view to GPS position. */
-	void moveToGpsPos();
+	/** Moves view to the current GNSS position. */
+	void moveToCurrentGnssPosition();
 	/** Activates or stops follow-position mode. */
 	void followPositionClicked(bool enable);
 	/** Follow-position mode update handler. */
@@ -488,21 +488,21 @@ public slots:
 	 *  The prerequisites for using the tool must be given. */
 	void distributePointsClicked();
 	
-	/** Enables or disables GPS display. */
-	void enableGPSDisplay(bool enable);
+	/** Enables or disables live GNSS position display. */
+	void enableGnssDisplay(bool enable);
 	void loadNtripProfile(const QString& profileName);
-	/** Enables or disables showing distance rings when GPS display is active. */
-	void enableGPSDistanceRings(bool enable);
-	/** Updates availability of the GPS point drawing tool. */
-	void updateDrawPointGPSAvailability();
-	/** Switches to the GPS point drawing tool. */
-	void drawPointGPSClicked();
-	/** Sets a temporary marker at the GPS position. */
-	void gpsTemporaryPointClicked();
-	/** Draws a temporary path at the GPS position. */
-	void gpsTemporaryPathClicked(bool enable);
-	/** Clears temporary GPS markers. */
-	void gpsTemporaryClearClicked();
+	/** Enables or disables showing distance rings when live GNSS display is active. */
+	void enableGnssDistanceRings(bool enable);
+	/** Updates availability of the GNSS point drawing tool. */
+	void updateDrawPointGnssAvailability();
+	/** Switches to the GNSS point drawing tool. */
+	void drawPointGnssClicked();
+	/** Sets a temporary marker at the GNSS position. */
+	void gnssTemporaryPointClicked();
+	/** Draws a temporary path at the GNSS position. */
+	void gnssTemporaryPathClicked(bool enable);
+	/** Clears temporary GNSS markers. */
+	void gnssTemporaryClearClicked();
 	
 	/** Enables or disables digital compass display. */
 	void enableCompassDisplay(bool enable);
@@ -732,7 +732,7 @@ private:
 	QAction* clear_undo_redo_history_act = {};
 	
 	QAction* pan_act = {};
-	QAction* move_to_gps_pos_act = {};
+	QAction* move_to_gnss_position_act = {};
 	QAction* follow_position_act = {};
 	QAction* zoom_in_act = {};
 	QAction* zoom_out_act = {};
@@ -822,15 +822,15 @@ private:
 	std::unique_ptr<PaintOnTemplateFeature> paint_feature;
 	
 	QAction* touch_cursor_action = {};
-	QAction* gps_display_action = {};
-	QAction* gps_distance_rings_action = {};
-	QAction* draw_point_gps_act = {};
-	QAction* gps_temporary_point_act = {};
-	QAction* gps_temporary_path_act = {};
-	QAction* gps_temporary_clear_act = {};
-	GPSTemporaryMarkers* gps_marker_display;
-	GPSDisplay* gps_display;
-	GPSTrackRecorder* gps_track_recorder;
+	QAction* gnss_display_action = {};
+	QAction* gnss_distance_rings_action = {};
+	QAction* draw_point_gnss_act = {};
+	QAction* gnss_temporary_point_act = {};
+	QAction* gnss_temporary_path_act = {};
+	QAction* gnss_temporary_clear_act = {};
+	GnssMapOverlay* gnss_map_overlay;
+	GnssPositionBridge* gnss_position_bridge;
+	GnssTrackRecorder* gnss_track_recorder;
 	QAction* compass_action = {};
 	CompassDisplay* compass_display;
 	QAction* align_map_with_north_act = {};

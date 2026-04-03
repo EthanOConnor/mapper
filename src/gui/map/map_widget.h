@@ -62,8 +62,7 @@ class QWheelEvent;
 
 namespace OpenOrienteering {
 
-class GPSDisplay;
-class GPSTemporaryMarkers;
+class GnssMapOverlay;
 class MapEditorActivity;
 class MapEditorTool;
 class PieMenu;
@@ -331,10 +330,8 @@ public:
 	 *  (mouse press or drag) with the widget. */
 	int getTimeSinceLastInteraction();
 	
-	/** Sets the GPS display to use. This is called internally by the GPSDisplay constructor. */
-	void setGPSDisplay(GPSDisplay* gps_display);
-	/** Sets the GPS temporary markers display to use. This is called internally by the GPSTemporaryMarkers constructor. */
-	void setTemporaryMarkerDisplay(GPSTemporaryMarkers* marker_display);
+	/** Sets the GNSS overlay to use. */
+	void setGnssMapOverlay(GnssMapOverlay* gnss_map_overlay);
 	
 	/** Returns the widget's context menu widget. */
 	QWidget* getContextMenu();
@@ -581,10 +578,8 @@ private:
 	QTime last_mouse_release_time;
 	int current_pressed_buttons;
 	
-	/** Optional GPS display */
-	GPSDisplay* gps_display;
-	/** Optional temporary GPS marker display. */
-	GPSTemporaryMarkers* marker_display;
+	/** Optional GNSS overlay. */
+	GnssMapOverlay* gnss_map_overlay;
 	
 	/** @brief Indicates whether gesture recognition is enabled. */
 	bool gestures_enabled;

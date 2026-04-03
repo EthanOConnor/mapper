@@ -64,8 +64,7 @@
 #include "gui/widgets/action_grid_bar.h"
 #include "gui/widgets/key_button_bar.h"
 #include "gui/widgets/pie_menu.h"
-#include "sensors/gps_display.h"
-#include "sensors/gps_temporary_markers.h"
+#include "sensors/gnss_map_overlay.h"
 #include "templates/template.h"
 #include "tools/tool.h"
 #include "util/backports.h" // IWYU pragma: keep
@@ -100,8 +99,7 @@ MapWidget::MapWidget(bool show_help, bool force_antialiasing, QWidget* parent)
  , activity_dirty_rect_border(0)
  , last_mouse_release_time(QTime::currentTime())
  , current_pressed_buttons(0)
- , gps_display(nullptr)
- , marker_display(nullptr)
+ , gnss_map_overlay(nullptr)
 {
 	context_menu = new PieMenu(this);
 // 	context_menu->setMinimumActionCount(8);
@@ -848,14 +846,9 @@ int MapWidget::getTimeSinceLastInteraction()
 		return last_mouse_release_time.msecsTo(QTime::currentTime());
 }
 
-void MapWidget::setGPSDisplay(GPSDisplay* gps_display)
+void MapWidget::setGnssMapOverlay(GnssMapOverlay* gnss_map_overlay)
 {
-	this->gps_display = gps_display;
-}
-
-void MapWidget::setTemporaryMarkerDisplay(GPSTemporaryMarkers* marker_display)
-{
-	this->marker_display = marker_display;
+	this->gnss_map_overlay = gnss_map_overlay;
 }
 
 QWidget* MapWidget::getContextMenu()
@@ -1046,13 +1039,8 @@ void MapWidget::paintEvent(QPaintEvent* event)
 	painter.restore();
 	
 	
-	// Draw temporary GPS marker display
-	if (marker_display)
-		marker_display->paint(&painter);
-	
-	// Draw GPS display
-	if (gps_display)
-		gps_display->paint(&painter);
+	if (gnss_map_overlay)
+		gnss_map_overlay->paint(&painter);
 	
 	// Draw touch cursor
 	if (touch_cursor && tool && tool->usesTouchCursor())

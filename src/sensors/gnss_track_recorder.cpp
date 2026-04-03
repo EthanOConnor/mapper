@@ -18,7 +18,7 @@
  */
 
 
-#include "gps_track_recorder.h"
+#include "gnss_track_recorder.h"
 
 #include <QDateTime>
 #include <QtGlobal>
@@ -28,16 +28,16 @@
 #include "core/map_view.h"
 #include "core/track.h"
 #include "gui/map/map_widget.h"
-#include "sensors/gps_display.h"
+#include "sensors/gnss_position_bridge.h"
 #include "templates/template_track.h"
 
 
 namespace OpenOrienteering {
 
-GPSTrackRecorder::GPSTrackRecorder(GPSDisplay* gps_display, TemplateTrack* target_template, int draw_update_interval_milliseconds, MapWidget* widget)
+GnssTrackRecorder::GnssTrackRecorder(GnssPositionBridge* position_bridge, TemplateTrack* target_template, int draw_update_interval_milliseconds, MapWidget* widget)
  : QObject()
 {
-	this->gps_display = gps_display;
+	this->position_bridge = position_bridge;
 	this->target_template = target_template;
 	this->widget = widget;
 	
@@ -47,18 +47,18 @@ GPSTrackRecorder::GPSTrackRecorder(GPSDisplay* gps_display, TemplateTrack* targe
 	// Start with a new segment
 	target_template->getTrack().finishCurrentSegment();
 	
-	connect(gps_display, &GPSDisplay::latLonUpdated, this, &GPSTrackRecorder::newPosition);
-	connect(gps_display, &GPSDisplay::positionUpdatesInterrupted, this, &GPSTrackRecorder::positionUpdatesInterrupted);
-	connect(target_template->getMap(), &Map::templateDeleted, this, &GPSTrackRecorder::templateDeleted);
+	connect(position_bridge, &GnssPositionBridge::latLonUpdated, this, &GnssTrackRecorder::newPosition);
+	connect(position_bridge, &GnssPositionBridge::positionUpdatesInterrupted, this, &GnssTrackRecorder::positionUpdatesInterrupted);
+	connect(target_template->getMap(), &Map::templateDeleted, this, &GnssTrackRecorder::templateDeleted);
 	
 	if (draw_update_interval_milliseconds > 0)
 	{
-		connect(&draw_update_timer, &QTimer::timeout, this, &GPSTrackRecorder::drawUpdate);
+		connect(&draw_update_timer, &QTimer::timeout, this, &GnssTrackRecorder::drawUpdate);
 		draw_update_timer.start(draw_update_interval_milliseconds);
 	}
 }
 
-void GPSTrackRecorder::newPosition(double latitude, double longitude, double altitude, float accuracy)
+void GnssTrackRecorder::newPosition(double latitude, double longitude, double altitude, float accuracy)
 {
 	auto new_point = TrackPoint {
 		LatLon(latitude, longitude),
@@ -66,22 +66,22 @@ void GPSTrackRecorder::newPosition(double latitude, double longitude, double alt
 		static_cast<float>(altitude),
 		accuracy,
 	};
-	// Record fix type from GPS display if available
-	if (gps_display)
-		new_point.fixType = gps_display->currentFixType();
+	// Record fix type from the live-position bridge if available.
+	if (position_bridge)
+		new_point.fixType = position_bridge->currentFixType();
 	target_template->getTrack().appendTrackPoint(new_point);
 	target_template->setHasUnsavedChanges(true);
 	track_changed_since_last_update = true;
 }
 
-void GPSTrackRecorder::positionUpdatesInterrupted()
+void GnssTrackRecorder::positionUpdatesInterrupted()
 {
 	target_template->getTrack().finishCurrentSegment();
 	target_template->setHasUnsavedChanges(true);
 	track_changed_since_last_update = true;
 }
 
-void GPSTrackRecorder::templateDeleted(int pos, const Template* old_temp)
+void GnssTrackRecorder::templateDeleted(int pos, const Template* old_temp)
 {
 	Q_UNUSED(pos);
 	if (!is_active)
@@ -90,13 +90,13 @@ void GPSTrackRecorder::templateDeleted(int pos, const Template* old_temp)
 	if (old_temp == target_template)
 	{
 		// Deactivate
-		gps_display->disconnect(this);
+		position_bridge->disconnect(this);
 		draw_update_timer.stop();
 		is_active = false;
 	}
 }
 
-void GPSTrackRecorder::drawUpdate()
+void GnssTrackRecorder::drawUpdate()
 {
 	if (!is_active)
 		return;

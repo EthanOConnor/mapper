@@ -18,8 +18,8 @@
  */
 
 
-#ifndef OPENORIENTEERING_DRAW_POINT_GPS_H
-#define OPENORIENTEERING_DRAW_POINT_GPS_H
+#ifndef OPENORIENTEERING_DRAW_POINT_GNSS_H
+#define OPENORIENTEERING_DRAW_POINT_GNSS_H
 
 #include <QObject>
 #include <QPointer>
@@ -36,7 +36,7 @@ class QRectF;
 
 namespace OpenOrienteering {
 
-class GPSDisplay;
+class GnssPositionBridge;
 class MapCoordF;
 class MapEditorController;
 class MapRenderables;
@@ -46,17 +46,17 @@ class Symbol;
 
 
 /**
- * Tool to draw a PointObject at the GPS position.
+ * Tool to draw a PointObject at the GNSS position.
  */
-class DrawPointGPSTool : public MapEditorToolBase
+class DrawPointGnssTool : public MapEditorToolBase
 {
 Q_OBJECT
 public:
-	DrawPointGPSTool(GPSDisplay* gps_display, MapEditorController* editor, QAction* tool_action);
-	~DrawPointGPSTool() override;
+	DrawPointGnssTool(GnssPositionBridge* position_bridge, MapEditorController* editor, QAction* tool_action);
+	~DrawPointGnssTool() override;
 	
 public slots:
-	void newGPSPosition(const OpenOrienteering::MapCoordF& coord, float accuracy);
+	void newGnssPosition(const OpenOrienteering::MapCoordF& coord, float accuracy);
 	
 protected slots:
 	void activeSymbolChanged(const OpenOrienteering::Symbol* symbol);

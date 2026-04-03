@@ -236,7 +236,7 @@ set(Mapper_Common_SRCS
   tools/distribute_points_tool.cpp
   tools/draw_line_and_area_tool.cpp
   tools/draw_point_tool.cpp
-  tools/draw_point_gps_tool.cpp
+  tools/draw_point_gnss_tool.cpp
   tools/draw_path_tool.cpp
   tools/draw_circle_tool.cpp
   tools/draw_rectangle_tool.cpp

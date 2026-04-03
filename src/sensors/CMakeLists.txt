@@ -134,9 +134,9 @@ target_link_libraries(powershell_position_source  ${POWERSHELL_POSITION_LINK_LIB
 
 set(MAPPER_SENSORS_SOURCES
   compass.cpp
-  gps_display.cpp
-  gps_temporary_markers.cpp
-  gps_track_recorder.cpp
+  gnss_map_overlay.cpp
+  gnss_position_bridge.cpp
+  gnss_track_recorder.cpp
   sensors_settings_page.cpp
 )
 
