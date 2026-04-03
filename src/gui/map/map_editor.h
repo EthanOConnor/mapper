@@ -40,6 +40,7 @@ class QAction;
 class QByteArray;
 class QComboBox;
 class QDockWidget;
+class QEvent;
 class QFrame;
 class QKeyEvent;
 class QLabel;
@@ -185,6 +186,8 @@ public:
 	 * @see setEditingInProgress
 	 */
 	bool isEditingInProgress() const override;
+
+	bool eventFilter(QObject* object, QEvent* event) override;
 	
 	/**
 	 * Adds a floating dock widget to the main window.
@@ -515,6 +518,8 @@ public slots:
 	void hideTopActionBar();
 	/** For mobile UI: shows the top action bar again after hiding it. */
 	void showTopActionBar();
+	/** Repositions the mobile overlay widgets. */
+	void updateMobileOverlayLayout();
 	/** For mobile UI: shows the symbol selection screen. */
 	void mobileSymbolSelectorClicked();
 	/** Counterpart to mobileSymbolSelectorClicked(). */
@@ -866,6 +871,7 @@ private:
 	// For mobile UI
 	ActionGridBar* bottom_action_bar = nullptr;
 	ActionGridBar* top_action_bar = nullptr;
+	QWidget* mobile_overlay_parent = nullptr;
 	QToolButton* show_top_bar_button;
 	QAction* mobile_symbol_selector_action;
 	QMenu* mobile_symbol_button_menu;

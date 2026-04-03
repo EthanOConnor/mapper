@@ -1755,8 +1755,6 @@ void MapEditorController::createMobileGUI()
 	
 	bottom_action_bar->setToUseOverflowActionFrom(top_action_bar);
 	
-	top_action_bar->setParent(map_widget);
-	
 	auto* container_widget = new QWidget();
 	auto* layout = new QVBoxLayout();
 	layout->setContentsMargins(0, 0, 0, 0);
@@ -1765,6 +1763,18 @@ void MapEditorController::createMobileGUI()
 	layout->addWidget(bottom_action_bar);
 	container_widget->setLayout(layout);
 	window->setCentralWidget(container_widget);
+	
+	mobile_overlay_parent = container_widget;
+	mobile_overlay_parent->installEventFilter(this);
+	top_action_bar->setParent(mobile_overlay_parent);
+	top_action_bar->show();
+	show_top_bar_button->setParent(mobile_overlay_parent);
+	show_top_bar_button->hide();
+	if (compass_display)
+		compass_display->setParent(mobile_overlay_parent);
+	if (gnss_status_overlay)
+		gnss_status_overlay->setParent(mobile_overlay_parent);
+	updateMobileOverlayLayout();
 }
 
 void MapEditorController::detach()
@@ -1802,6 +1812,12 @@ void MapEditorController::detach()
 	
 	find_feature.reset(nullptr);
 	paint_feature.reset(nullptr);
+	
+	if (mobile_overlay_parent)
+	{
+		mobile_overlay_parent->removeEventFilter(this);
+		mobile_overlay_parent = nullptr;
+	}
 	
 	window->setCentralWidget(nullptr);
 	delete map_widget;
@@ -1890,6 +1906,17 @@ bool MapEditorController::keyPressEventFilter(QKeyEvent* event)
 bool MapEditorController::keyReleaseEventFilter(QKeyEvent* event)
 {
 	return map_widget->keyReleaseEventFilter(event);
+}
+
+bool MapEditorController::eventFilter(QObject* object, QEvent* event)
+{
+	if (object == mobile_overlay_parent
+	    && (event->type() == QEvent::Resize || event->type() == QEvent::Show))
+	{
+		updateMobileOverlayLayout();
+	}
+	
+	return QObject::eventFilter(object, event);
 }
 
 
@@ -3877,17 +3904,8 @@ void MapEditorController::enableGnssDisplay(bool enable)
 		// Show GNSS status overlay if session is active
 		if (gnss_session && gnss_status_overlay)
 		{
-			auto size = gnss_status_overlay->sizeHint();
-			// Position at top-right of map widget area
-			auto parent = gnss_status_overlay->parentWidget();
-			if (parent)
-			{
-				int x = parent->width() - size.width() - 4;
-				int y = (top_action_bar && top_action_bar->isVisible())
-				        ? top_action_bar->height() + 4 : 4;
-				gnss_status_overlay->setGeometry(x, y, size.width(), size.height());
-			}
 			gnss_status_overlay->show();
+			updateMobileOverlayLayout();
 		}
 
 		// Create gnss_track_recorder if we can determine a template track filename.
@@ -4077,13 +4095,9 @@ void MapEditorController::enableCompassDisplay(bool enable)
 	}
 	else if (enable)
 	{
-		auto size = compass_display->sizeHint();
-		if (top_action_bar->isVisible())
-			compass_display->setGeometry(0, top_action_bar->size().height(), size.width(), size.height());
-		else
-			compass_display->setGeometry(show_top_bar_button->size().width(), 0, size.width(), size.height());
 		connect(&Compass::getInstance(), &Compass::azimuthChanged, compass_display, &CompassDisplay::setAzimuth);
 		compass_display->show();
+		updateMobileOverlayLayout();
 	}
 	else
 	{
@@ -4133,18 +4147,64 @@ void MapEditorController::hideTopActionBar()
 {
 	top_action_bar->hide();
 	show_top_bar_button->show();
-	show_top_bar_button->raise();
-	
-	compass_display->move(show_top_bar_button->size().width(), 0);
+	updateMobileOverlayLayout();
 }
 
 void MapEditorController::showTopActionBar()
 {
 	show_top_bar_button->hide();
 	top_action_bar->show();
-	top_action_bar->raise();
+	updateMobileOverlayLayout();
+}
+
+void MapEditorController::updateMobileOverlayLayout()
+{
+	if (!mobile_overlay_parent)
+		return;
 	
-	compass_display->move(0, top_action_bar->size().height());
+	if (top_action_bar)
+	{
+		top_action_bar->setGeometry(0, 0, mobile_overlay_parent->width(), top_action_bar->sizeHint().height());
+		if (top_action_bar->isVisible())
+			top_action_bar->raise();
+	}
+	
+	if (show_top_bar_button)
+	{
+		auto size = show_top_bar_button->geometry().size();
+		if (!size.isValid() || size.isEmpty())
+			size = show_top_bar_button->sizeHint();
+		show_top_bar_button->setGeometry(0, 0, size.width(), size.height());
+		if (show_top_bar_button->isVisible())
+			show_top_bar_button->raise();
+	}
+	
+	if (compass_display && compass_display->isVisible())
+	{
+		auto size = compass_display->sizeHint();
+		int x = 0;
+		int y = 0;
+		if (top_action_bar && top_action_bar->isVisible())
+		{
+			y = top_action_bar->height();
+		}
+		else if (show_top_bar_button)
+		{
+			x = show_top_bar_button->width();
+		}
+		compass_display->setGeometry(x, y, size.width(), size.height());
+		compass_display->raise();
+	}
+	
+	if (gnss_status_overlay && gnss_status_overlay->isVisible())
+	{
+		auto size = gnss_status_overlay->sizeHint();
+		int x = mobile_overlay_parent->width() - size.width() - 4;
+		int y = (top_action_bar && top_action_bar->isVisible())
+		        ? top_action_bar->height() + 4 : 4;
+		gnss_status_overlay->setGeometry(x, y, size.width(), size.height());
+		gnss_status_overlay->raise();
+	}
 }
 
 void MapEditorController::mobileSymbolSelectorClicked()
