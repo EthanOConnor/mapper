@@ -56,10 +56,8 @@ endif()
 
 option(Mapper_DEBUG_TRANSLATIONS "Debug missing translations" OFF)
 
-# To improve developer experience, build clipper if it is not found
-set(Mapper_BUILD_CLIPPER "auto" CACHE STRING
-  "Build the Clipper package from source, alternatives: ON, OFF"
-)
+# Clipper2 is always built from vendored source (3rd-party/clipper2/).
+# The old Mapper_BUILD_CLIPPER option and FindPolyclipping module are removed.
 
 option(Mapper_USE_GDAL   "Use the GDAL library" ON)
 
@@ -159,22 +157,9 @@ add_custom_target(Mapper_prerequisites
 )
 set(Mapper_prerequisites_FOUND TRUE)
 
-if(Mapper_BUILD_CLIPPER STREQUAL "auto")
-	find_package(Polyclipping 6.1.3 MODULE)
-	if(Polyclipping_FOUND)
-		set_property(CACHE Mapper_BUILD_CLIPPER PROPERTY VALUE "OFF")
-	else()
-		set_property(CACHE Mapper_BUILD_CLIPPER PROPERTY VALUE "ON")
-	endif()
-	set_property(CACHE Mapper_BUILD_CLIPPER PROPERTY TYPE "BOOL")
-endif()
-if(Mapper_BUILD_CLIPPER)
-	add_subdirectory(3rd-party/clipper)
-	add_feature_info(Mapper_BUILD_CLIPPER 1 "vendored 6.4.2")
-	add_library(Polyclipping::Polyclipping ALIAS polyclipping)
-else()
-	find_package(Polyclipping 6.1.3 MODULE REQUIRED)
-endif()
+add_subdirectory(3rd-party/clipper2)
+add_feature_info(Clipper2 1 "vendored 2.0.1")
+add_library(Clipper2::Clipper2 ALIAS clipper2)
 
 find_package(PROJ 9.4 CONFIG REQUIRED)
 

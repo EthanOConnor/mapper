@@ -68,7 +68,7 @@ function(add_test_helper testname autorun)
 	  PROJ::proj
 	  Qt6::Test
 	  Qt6::Gui
-	  Polyclipping::Polyclipping
+	  Clipper2::Clipper2
 	)
 	if("${ARGN}" MATCHES "crs_template_implementation")
 		target_link_libraries(${testname} PRIVATE Qt6::Widgets)
@@ -183,6 +183,7 @@ add_unit_test(util_t ../src/util/util
 add_system_test(coord_xml_t MANUAL)
 
 # System tests
+add_system_test(boolean_tool_t)
 add_system_test(file_format_t)
 add_system_test(duplicate_equals_t)
 if(Mapper_USE_GDAL)

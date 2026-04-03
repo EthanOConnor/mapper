@@ -320,7 +320,7 @@ add_dependencies(Mapper_Common
 target_include_directories(Mapper_Common PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(Mapper_Common
   PUBLIC
-    Polyclipping::Polyclipping
+    Clipper2::Clipper2
     PROJ::proj
     Qt6::Widgets
 )

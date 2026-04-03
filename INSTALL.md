@@ -13,8 +13,8 @@ This document is about building OpenOrienteering Mapper from source code.
 - **Qt** >= 5.15 (https://www.qt.io/)
 - **PROJ** >= 9.4 (https://proj.org/)
 - **GDAL** >= 3.8 (https://gdal.org/) -- optional, enabled by default
-- **Clipper** (libpolyclipping) >= 6.1.3a -- built from embedded source if not found
 - **zlib** (https://zlib.net/)
+- **Clipper2** (https://github.com/AngusJohnson/Clipper2) -- built from embedded source
 
 
 ## Quick Start with CMake Presets
@@ -31,7 +31,7 @@ sudo apt-get install build-essential ninja-build \
   qtbase5-dev qtbase5-private-dev qttools5-dev qttools5-dev-tools \
   libqt5sensors5-dev libqt5serialport5-dev libqt5sql5-sqlite \
   qtpositioning5-dev qt5-image-formats-plugins \
-  libproj-dev libgdal-dev libpolyclipping-dev zlib1g-dev \
+  libproj-dev libgdal-dev zlib1g-dev \
   libcups2-dev doxygen graphviz
 ```
 

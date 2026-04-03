@@ -77,7 +77,7 @@ endforeach()
 # Software and data used directly by Mapper, or set by configuration
 set(third_party_components
   ${LICENSING_ATTRIBUTION}
-  libpolyclipping
+  libclipper2
   proj
   qtbase
   qtimageformats
@@ -133,13 +133,11 @@ set(explicit_copyright_potrace
   "${PROJECT_SOURCE_DIR}/3rd-party/cove/potrace/copyright"
   "3rd-party"
 )
-if(Mapper_BUILD_CLIPPER)
-	set(explicit_copyright_libpolyclipping
-	  "libpolyclipping-${CLIPPER_VERSION}.txt"
-	  "${PROJECT_SOURCE_DIR}/3rd-party/clipper/copyright"
-	  "3rd-party"
-	)
-endif()
+set(explicit_copyright_libclipper2
+  "libclipper2.txt"
+  "${PROJECT_SOURCE_DIR}/3rd-party/clipper2/LICENSE"
+  "3rd-party"
+)
 
 
 if(LICENSING_PROVIDER)
