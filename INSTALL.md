@@ -10,7 +10,7 @@ This document is about building OpenOrienteering Mapper from source code.
 
 ### Dependencies
 
-- **Qt** >= 5.15 (https://www.qt.io/)
+- **Qt** >= 6.8 (https://www.qt.io/)
 - **PROJ** >= 9.4 (https://proj.org/)
 - **GDAL** >= 3.8 (https://gdal.org/) -- optional, enabled by default
 - **zlib** (https://zlib.net/)
@@ -28,11 +28,11 @@ to see all available presets.
 Install dependencies:
 ```
 sudo apt-get install build-essential ninja-build \
-  qtbase5-dev qtbase5-private-dev qttools5-dev qttools5-dev-tools \
-  libqt5sensors5-dev libqt5serialport5-dev libqt5sql5-sqlite \
-  qtpositioning5-dev qt5-image-formats-plugins \
+  qt6-base-dev qt6-base-private-dev qt6-tools-dev qt6-tools-dev-tools \
+  qt6-l10n-tools qt6-sensors-dev qt6-serialport-dev \
+  qt6-positioning-dev qt6-image-formats-plugins \
   libproj-dev libgdal-dev zlib1g-dev \
-  libcups2-dev doxygen graphviz
+  libcups2-dev doxygen graphviz libegl-dev libgl-dev
 ```
 
 Build and test:
@@ -46,12 +46,12 @@ ctest --preset dev-linux
 
 Install dependencies with Homebrew:
 ```
-brew install qt@5 proj gdal ninja doxygen
+brew install qt proj gdal ninja doxygen
 ```
 
 Build and test:
 ```
-cmake --preset dev-macos -DCMAKE_PREFIX_PATH="$(brew --prefix qt@5)"
+cmake --preset dev-macos -DCMAKE_PREFIX_PATH="$(brew --prefix qt)"
 cmake --build --preset dev-macos
 ctest --preset dev-macos
 ```
@@ -64,13 +64,13 @@ pacman -S \
   mingw-w64-x86_64-toolchain \
   mingw-w64-x86_64-cmake \
   mingw-w64-x86_64-ninja \
-  mingw-w64-x86_64-qt5-base \
-  mingw-w64-x86_64-qt5-tools \
-  mingw-w64-x86_64-qt5-location \
-  mingw-w64-x86_64-qt5-sensors \
-  mingw-w64-x86_64-qt5-serialport \
-  mingw-w64-x86_64-qt5-imageformats \
-  mingw-w64-x86_64-qt5-translations \
+  mingw-w64-x86_64-qt6-base \
+  mingw-w64-x86_64-qt6-tools \
+  mingw-w64-x86_64-qt6-positioning \
+  mingw-w64-x86_64-qt6-sensors \
+  mingw-w64-x86_64-qt6-serialport \
+  mingw-w64-x86_64-qt6-imageformats \
+  mingw-w64-x86_64-qt6-translations \
   mingw-w64-x86_64-proj \
   mingw-w64-x86_64-gdal \
   mingw-w64-x86_64-doxygen
@@ -92,6 +92,30 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build build
 ctest --test-dir build --output-on-failure
 ```
+
+
+## Accelerating Builds with ccache
+
+CI uses [ccache](https://ccache.dev/) automatically. For local development,
+create a `CMakeUserPresets.json` (gitignored) that inherits from a dev preset:
+
+```json
+{
+    "version": 6,
+    "configurePresets": [
+        {
+            "name": "dev",
+            "inherits": "dev-macos",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER_LAUNCHER": "ccache",
+                "CMAKE_CXX_COMPILER_LAUNCHER": "ccache"
+            }
+        }
+    ]
+}
+```
+
+Then use `cmake --preset dev` instead of `cmake --preset dev-macos`.
 
 
 ## CI

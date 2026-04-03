@@ -347,6 +347,17 @@ target_compile_definitions(Mapper_Common PRIVATE
 target_compile_definitions(Mapper_Common INTERFACE
   MAPPER_COMMON_LIB
 )
+target_precompile_headers(Mapper_Common PRIVATE
+  <QCoreApplication>
+  <QDebug>
+  <QObject>
+  <QPointF>
+  <QRectF>
+  <QString>
+  <QWidget>
+  <memory>
+  <vector>
+)
 if(IOS)
 	find_library(UIKIT_FRAMEWORK UIKit REQUIRED)
 	target_link_libraries(Mapper_Common PRIVATE "${UIKIT_FRAMEWORK}")
@@ -402,13 +413,6 @@ if(IOS)
 		MACOSX_BUNDLE_BUNDLE_VERSION "${Mapper_VERSION}"
 		MACOSX_BUNDLE_SHORT_VERSION_STRING "${Mapper_VERSION}"
 		XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "org.openorienteering.mapper"
-	)
-elseif(APPLE AND NOT IOS)
-	add_custom_command(
-	  TARGET Mapper
-	  POST_BUILD
-	  COMMAND plutil -replace NSHighResolutionCapable -bool true
-	    $<TARGET_BUNDLE_DIR:Mapper>/Contents/Info.plist
 	)
 endif()
 

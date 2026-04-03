@@ -37,16 +37,64 @@ jobs:
           key: linux
 
       - name: Configure
-        run: >
-          cmake --preset ci-linux
-          -DCMAKE_C_COMPILER_LAUNCHER=ccache
-          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+        run: cmake --preset ci-linux
 
       - name: Build
         run: cmake --build --preset ci-linux --parallel
 
       - name: Test
-        run: ctest --preset ci-linux
+        run: >
+          ctest --preset ci-linux
+          --output-junit ${{ github.workspace }}/test-results.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-linux
+          path: test-results.xml
+          if-no-files-found: ignore
+          retention-days: 7
+
+  sanitizer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      ASAN_OPTIONS: "detect_leaks=1:suppressions=${{ github.workspace }}/build/dev-linux/suppress.txt"
+      UBSAN_OPTIONS: "print_stacktrace=1:suppressions=${{ github.workspace }}/build/dev-linux/suppress.txt"
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential ninja-build \
+            qt6-base-dev qt6-base-private-dev qt6-tools-dev qt6-tools-dev-tools \
+            qt6-l10n-tools qt6-sensors-dev qt6-serialport-dev \
+            qt6-positioning-dev qt6-image-formats-plugins qt6-5compat-dev \
+            libproj-dev libgdal-dev zlib1g-dev \
+            libcups2-dev doxygen graphviz libegl-dev libgl-dev
+
+      - name: Configure
+        run: cmake --preset dev-linux
+
+      - name: Build
+        run: cmake --build --preset dev-linux --parallel
+
+      - name: Test
+        run: >
+          ctest --preset dev-linux
+          --output-junit ${{ github.workspace }}/test-results.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-sanitizer
+          path: test-results.xml
+          if-no-files-found: ignore
+          retention-days: 7
 
   windows:
     runs-on: windows-2025
@@ -91,16 +139,24 @@ jobs:
           key: windows
 
       - name: Configure
-        run: >
-          cmake --preset ci-windows
-          -DCMAKE_C_COMPILER_LAUNCHER=ccache
-          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+        run: cmake --preset ci-windows
 
       - name: Build
         run: cmake --build --preset ci-windows --parallel
 
       - name: Test
-        run: ctest --preset ci-windows
+        run: >
+          ctest --preset ci-windows
+          --output-junit ${{ github.workspace }}/test-results.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-windows
+          path: test-results.xml
+          if-no-files-found: ignore
+          retention-days: 7
 
   macos:
     runs-on: macos-15
@@ -122,14 +178,23 @@ jobs:
         run: >
           cmake --preset ci-macos
           -DCMAKE_PREFIX_PATH="$(brew --prefix qt)"
-          -DCMAKE_C_COMPILER_LAUNCHER=ccache
-          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
         run: cmake --build --preset ci-macos --parallel
 
       - name: Test
-        run: ctest --preset ci-macos
+        run: >
+          ctest --preset ci-macos
+          --output-junit ${{ github.workspace }}/test-results.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-macos
+          path: test-results.xml
+          if-no-files-found: ignore
+          retention-days: 7
 
   android:
     runs-on: ubuntu-24.04
@@ -202,8 +267,6 @@ jobs:
           -DANDROID_STL=c++_shared
           -DMapper_USE_GDAL=OFF
           -DMapper_WITH_COVE=OFF
-          -DCMAKE_C_COMPILER_LAUNCHER=ccache
-          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
         run: cmake --build build/android-arm64 --parallel

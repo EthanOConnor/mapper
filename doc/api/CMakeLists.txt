@@ -51,7 +51,7 @@ set(API_DOCS_PATH "mapper" CACHE STRING
 if(DOXYGEN_EXECUTABLE MATCHES NOTFOUND)
 	message(STATUS "doxygen executable not found.")
 else()
-	set(url http://doc.qt.io/qt-5/)
+	set(url https://doc.qt.io/qt-6/)
 	foreach(file ${TAG_FILES})
 		file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/${file}.cmake"
 			 "file(DOWNLOAD \"${url}${file}\" \"${CMAKE_CURRENT_BINARY_DIR}/${file}\")\n")

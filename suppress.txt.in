@@ -4,13 +4,13 @@
 #
 # Cf. https://github.com/google/sanitizers/wiki/AddressSanitizerLeakSanitizer
 
-# Qt 5.2.1 issues
+# Qt 6 known issues
 leak:libfontconfig
-leak:libQt5Gui
+leak:libQt6Gui
 leak:libxcb
 leak:QArrayData::allocate
 leak:QObject
 leak:XIQueryDevice
 
-# Qt < 5.6.1 issue (tools_t)
+# Qt vptr issue (tools_t)
 vptr_check:QMouseEvent

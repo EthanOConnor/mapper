@@ -43,7 +43,7 @@ configure_file(test_config.h.in ${CMAKE_CURRENT_BINARY_DIR}/test_config.h @ONLY)
 # The autorun parameter controls whether the test will be run automatically
 # when executing Mapper-with-test.
 #
-function(add_test_helper testname autorun)
+function(add_test_helper testname autorun label)
 	unset(TEST_${testname}_SRCS)
 	set(manual_test 0)
 	foreach(arg ${ARGN})
@@ -76,6 +76,10 @@ function(add_test_helper testname autorun)
 	if(NOT manual_test)
 		configure_file(TESTNAME-RUN.cmake.in ${CMAKE_CURRENT_BINARY_DIR}/${testname}-RUN.cmake @ONLY)
 		add_test(${testname} ${CMAKE_COMMAND} -P ${testname}-RUN.cmake)
+		set_tests_properties(${testname} PROPERTIES
+		  LABELS "${label}"
+		  TIMEOUT 120
+		)
 		add_custom_command(OUTPUT ${testname}-RUN.stamp
 		  COMMAND ${CMAKE_COMMAND} -P ${testname}-RUN.cmake
 		  DEPENDS ${testname}
@@ -104,7 +108,7 @@ endfunction()
 #
 function(add_unit_test testname)
 	if(Mapper_DEVELOPMENT_BUILD)
-		add_test_helper("${testname}" 1 ${ARGN})
+		add_test_helper("${testname}" 1 "unit" ${ARGN})
 	elseif("${ARGN}" MATCHES "MANUAL")
 		add_system_test("${testname}" MANUAL)
 	else()
@@ -123,7 +127,7 @@ endfunction()
 # That is why it will be rebuild and run very often.
 #
 function(add_system_test testname)
-	add_test_helper("${testname}" ${Mapper_AUTORUN_SYSTEM_TESTS} ${ARGN})
+	add_test_helper("${testname}" ${Mapper_AUTORUN_SYSTEM_TESTS} "system" ${ARGN})
 	target_link_libraries(${testname} PRIVATE
 	  Mapper_Common
 	  Qt6::Widgets

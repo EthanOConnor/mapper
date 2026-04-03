@@ -164,6 +164,7 @@ set(CPACK_PACKAGE_FILE_NAME
     "OpenOrienteering-Mapper-${Mapper_VERSION_FILESYSTEM}-${_system_name}")
 set(CPACK_RESOURCE_FILE_LICENSE "${PROJECT_SOURCE_DIR}/COPYING")
 set(CPACK_STRIP_FILES "TRUE")
+set(CPACK_THREADS 0)
 
 set(CPACK_SOURCE_PACKAGE_FILE_NAME
     "openorienteering-mapper_${Mapper_VERSION_FILESYSTEM}-src")
@@ -246,7 +247,8 @@ elseif(UNIX AND EXISTS /usr/bin/dpkg AND EXISTS /usr/bin/lsb_release)
 	set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Kai Pastor <dg0yt@darc.de>")
 	set(CPACK_DEBIAN_SECTION            "graphics")
 	set(CPACK_DEBIAN_PACKAGE_HOMEPAGE   "https://www.openorienteering.org/apps/mapper/")
-	
+	set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS  ON)
+
 endif()
 
 if(CPACK_GENERATOR_DEFAULT)

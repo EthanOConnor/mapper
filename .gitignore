@@ -5,4 +5,5 @@ CMakeLists.txt.user*
 *.kdev4
 *~
 build*/
+CMakeUserPresets.json
 help/*.qhc
