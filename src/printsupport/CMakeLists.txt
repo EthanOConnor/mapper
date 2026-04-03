@@ -17,6 +17,9 @@
 #    along with OpenOrienteering.  If not, see <http://www.gnu.org/licenses/>.
 
 find_package(Qt6 REQUIRED COMPONENTS Gui PrintSupport)
+if(WIN32)
+	find_package(Qt6 REQUIRED COMPONENTS PrintSupportPrivate)
+endif()
 
 set(PRINTSUPPORT_SRCS
   printer_properties.h
@@ -42,3 +45,6 @@ target_include_directories(printsupport
 target_link_libraries(printsupport
   PUBLIC Qt6::PrintSupport Qt6::Gui
 )
+if(WIN32)
+	target_link_libraries(printsupport PRIVATE Qt6::PrintSupportPrivate)
+endif()
