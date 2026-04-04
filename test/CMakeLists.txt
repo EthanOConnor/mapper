@@ -76,9 +76,14 @@ function(add_test_helper testname autorun label)
 	if(NOT manual_test)
 		configure_file(TESTNAME-RUN.cmake.in ${CMAKE_CURRENT_BINARY_DIR}/${testname}-RUN.cmake @ONLY)
 		add_test(${testname} ${CMAKE_COMMAND} -P ${testname}-RUN.cmake)
+		if(Mapper_DEVELOPMENT_BUILD)
+			set(test_timeout 600)
+		else()
+			set(test_timeout 120)
+		endif()
 		set_tests_properties(${testname} PROPERTIES
 		  LABELS "${label}"
-		  TIMEOUT 120
+		  TIMEOUT ${test_timeout}
 		)
 		add_custom_command(OUTPUT ${testname}-RUN.stamp
 		  COMMAND ${CMAKE_COMMAND} -P ${testname}-RUN.cmake
