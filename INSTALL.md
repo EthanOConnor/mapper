@@ -69,6 +69,7 @@ pacman -S \
   mingw-w64-x86_64-qt6-positioning \
   mingw-w64-x86_64-qt6-sensors \
   mingw-w64-x86_64-qt6-serialport \
+  mingw-w64-x86_64-qt6-connectivity \
   mingw-w64-x86_64-qt6-imageformats \
   mingw-w64-x86_64-qt6-translations \
   mingw-w64-x86_64-proj \
@@ -145,7 +146,7 @@ cd build/release-linux && cpack -G DEB
 Platform-specific outputs:
 - DEB on Linux via CPack (system deps, no bundling)
 - DragNDrop/DMG on macOS via CPack (bundles Qt, PROJ, GDAL)
-- ZIP on Windows by staging the install tree (bundles Qt, PROJ, GDAL)
+- ZIP on Windows via CPack (bundles Qt, PROJ, GDAL)
 
 
 ## Binary Packages and Distribution
@@ -155,7 +156,6 @@ binary form creates certain legal obligations, such as the distribution of the
 corresponding source code and build instructions for GPL licensed binaries,
 and displaying copyright statements and disclaimers.
 
-macOS packages are built using CPack. Windows release artifacts are created by
-installing into a staging directory and zipping that tree. Desktop release
-artifacts bundle the required 3rd-party components such as Qt binaries and
-translations, and PROJ / GDAL binaries and data.
+Release artifacts for all desktop platforms are built using CPack. They bundle
+the required 3rd-party components such as Qt binaries and translations, and
+PROJ / GDAL binaries and data.
