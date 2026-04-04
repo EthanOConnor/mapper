@@ -3,8 +3,10 @@ name: CI
 on:
   push:
     branches: [master, full-speed-ahead, 'pr/*', 'int/*']
+    tags: ['v*']
   pull_request:
     branches: [master]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -69,6 +71,7 @@ jobs:
           retention-days: 7
 
   sanitizer:
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
