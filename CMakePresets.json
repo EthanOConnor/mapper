@@ -91,7 +91,8 @@
             "inherits": "ci-linux",
             "binaryDir": "${sourceDir}/build/release-linux",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Release"
+                "CMAKE_BUILD_TYPE": "Release",
+                "Mapper_MANUAL_QTHELP": "ON"
             }
         },
         {
@@ -102,7 +103,8 @@
             "cacheVariables": {
                 "Mapper_PACKAGE_QT": "ON",
                 "Mapper_PACKAGE_PROJ": "ON",
-                "Mapper_PACKAGE_GDAL": "ON"
+                "Mapper_PACKAGE_GDAL": "ON",
+                "Mapper_MANUAL_QTHELP": "ON"
             }
         },
         {

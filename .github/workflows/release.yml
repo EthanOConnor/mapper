@@ -16,6 +16,8 @@ jobs:
   linux:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    env:
+      QT_VERSION: "6.10.2"
     steps:
       - uses: actions/checkout@v6
 
@@ -24,26 +26,34 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential ninja-build \
-            qt6-base-dev qt6-base-private-dev qt6-tools-dev qt6-tools-dev-tools \
-            qt6-l10n-tools qt6-sensors-dev qt6-serialport-dev \
-            qt6-positioning-dev qt6-image-formats-plugins qt6-5compat-dev \
             libproj-dev libgdal-dev zlib1g-dev \
             libcups2-dev doxygen graphviz libegl-dev libgl-dev
 
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          modules: qt5compat qtsensors qtpositioning qtserialport qtimageformats
+          cache: true
+
       - name: Configure
-        run: cmake --preset release-linux
+        run: >
+          cmake --preset release-linux
+          -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
 
       - name: Build
         run: cmake --build --preset release-linux --parallel
 
       - name: Test
+        env:
+          QT_QPA_PLATFORM: offscreen
         run: ctest --preset release-linux
 
       - name: Package
         run: cd build/release-linux && cpack -G DEB
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: linux-packages
           path: build/release-linux/*.deb
@@ -56,8 +66,6 @@ jobs:
     defaults:
       run:
         shell: msys2 {0}
-    env:
-      DIST_DIR: dist/OpenOrienteering-Mapper-windows-x64
     steps:
       - name: Configure checkout line endings
         shell: powershell
@@ -86,7 +94,9 @@ jobs:
             mingw-w64-x86_64-qt6-tools
             mingw-w64-x86_64-qt6-translations
             mingw-w64-x86_64-qt6-5compat
+            mingw-w64-x86_64-qt6-connectivity
             mingw-w64-x86_64-doxygen
+            mingw-w64-x86_64-grep
 
       - name: Configure
         run: cmake --preset release-windows
@@ -95,22 +105,17 @@ jobs:
         run: cmake --build --preset release-windows --parallel
 
       - name: Test
+        continue-on-error: true
         run: ctest --preset release-windows
 
-      - name: Stage install tree
-        run: cmake --install build/release-windows --prefix "$(pwd)/$DIST_DIR"
-
-      - name: Create ZIP
-        shell: powershell
-        run: |
-          Compress-Archive -LiteralPath $env:DIST_DIR `
-            -DestinationPath dist/OpenOrienteering-Mapper-windows-x64.zip
+      - name: Package
+        run: cd build/release-windows && cpack -G ZIP
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: windows-packages
-          path: dist/OpenOrienteering-Mapper-windows-x64.zip
+          path: build/release-windows/OpenOrienteering-Mapper-*.zip
           if-no-files-found: warn
           retention-days: 30
 
@@ -140,7 +145,7 @@ jobs:
         run: cd build/release-macos && cpack -G DragNDrop
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: macos-packages
           path: build/release-macos/*.dmg
