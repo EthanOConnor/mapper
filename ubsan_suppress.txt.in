@@ -1,0 +1,7 @@
+# UndefinedBehaviorSanitizer suppressions
+# Set UBSAN_OPTIONS=suppressions=<path>/ubsan_suppress.txt
+#
+# Cf. https://clang.llvm.org/docs/UndefinedBehaviorSanitizer.html
+
+# Qt vptr issue (tools_t)
+vptr:QMouseEvent

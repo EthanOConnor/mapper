@@ -1,0 +1,12 @@
+# LeakSanitizer suppressions
+# Set LSAN_OPTIONS=suppressions=<path>/lsan_suppress.txt
+#
+# Cf. https://github.com/google/sanitizers/wiki/AddressSanitizerLeakSanitizer
+
+# Qt 6 known issues
+leak:libfontconfig
+leak:libQt6Gui
+leak:libxcb
+leak:QArrayData::allocate
+leak:QObject
+leak:XIQueryDevice

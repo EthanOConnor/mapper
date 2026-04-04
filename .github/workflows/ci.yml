@@ -74,8 +74,8 @@ jobs:
     env:
       QT_VERSION: "6.10.2"
       ASAN_OPTIONS: "detect_leaks=1"
-      UBSAN_OPTIONS: "print_stacktrace=1:suppressions=${{ github.workspace }}/build/dev-linux/suppress.txt"
-      LSAN_OPTIONS: "suppressions=${{ github.workspace }}/build/dev-linux/suppress.txt"
+      UBSAN_OPTIONS: "print_stacktrace=1:suppressions=${{ github.workspace }}/build/dev-linux/ubsan_suppress.txt"
+      LSAN_OPTIONS: "suppressions=${{ github.workspace }}/build/dev-linux/lsan_suppress.txt"
     steps:
       - uses: actions/checkout@v6
 
