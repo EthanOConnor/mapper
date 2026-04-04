@@ -116,6 +116,7 @@
                 "Mapper_PACKAGE_QT": "ON",
                 "Mapper_PACKAGE_PROJ": "ON",
                 "Mapper_PACKAGE_GDAL": "ON",
+                "Mapper_MANUAL_QTHELP": "ON",
                 "GDAL_DATA_DIR": "/mingw64/share/gdal",
                 "PROJ_DATA_DIR": "/mingw64/share/proj"
             }

@@ -148,24 +148,30 @@ if(Mapper_MANUAL_QTHELP)
 	#
 	
 	find_package(Qt6 REQUIRED COMPONENTS Core)
-	set(qcollectiongenerator_name qhelpgenerator)
 
 	if(NOT QtHelp_QHELPGENERATOR_EXECUTABLE)
-		# Qt6 puts tools in libexec/ or share/qt/libexec/ depending on platform.
-		# Use QT6_INSTALL_PREFIX from Qt6CoreConfigExtra or derive from Qt6_DIR.
-		set(_qt6_hints)
-		if(QT6_INSTALL_PREFIX)
-			list(APPEND _qt6_hints "${QT6_INSTALL_PREFIX}")
+		# Prefer Qt6's imported target (works reliably on all platforms
+		# including MSYS2 where the tool is in a non-standard location).
+		find_package(Qt6 COMPONENTS Help)
+		if(TARGET Qt6::qhelpgenerator)
+			get_target_property(QtHelp_QHELPGENERATOR_EXECUTABLE
+			  Qt6::qhelpgenerator IMPORTED_LOCATION)
 		endif()
-		# Qt6_DIR is typically <prefix>/lib/cmake/Qt6
-		get_filename_component(_qt6_from_dir "${Qt6_DIR}/../../.." ABSOLUTE)
-		list(APPEND _qt6_hints "${_qt6_from_dir}")
-		find_program(QtHelp_QHELPGENERATOR_EXECUTABLE
-		  NAMES ${qcollectiongenerator_name}
-		  HINTS ${_qt6_hints}
-		  PATH_SUFFIXES libexec bin share/qt/libexec
-		  DOC "The path of the Qt Help collection generator executable"
-		)
+		# Fallback: manual search in common Qt6 tool locations.
+		if(NOT QtHelp_QHELPGENERATOR_EXECUTABLE)
+			set(_qt6_hints)
+			if(QT6_INSTALL_PREFIX)
+				list(APPEND _qt6_hints "${QT6_INSTALL_PREFIX}")
+			endif()
+			get_filename_component(_qt6_from_dir "${Qt6_DIR}/../../.." ABSOLUTE)
+			list(APPEND _qt6_hints "${_qt6_from_dir}")
+			find_program(QtHelp_QHELPGENERATOR_EXECUTABLE
+			  NAMES qhelpgenerator
+			  HINTS ${_qt6_hints}
+			  PATH_SUFFIXES libexec bin share/qt/libexec
+			  DOC "The path of the Qt Help collection generator executable"
+			)
+		endif()
 		if(NOT QtHelp_QHELPGENERATOR_EXECUTABLE)
 			message(FATAL_ERROR "qhelpgenerator not found. Install Qt6 Help tools.")
 		endif()

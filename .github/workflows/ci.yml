@@ -222,6 +222,66 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  ios:
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      QT_VERSION: "6.10.2"
+      PROJ_VERSION: "9.6.2"
+      SQLITE_VERSION: "3.51.3"
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install host Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          cache: true
+
+      - name: Save host Qt path
+        run: echo "QT_HOST_PATH=$QT_ROOT_DIR" >> "$GITHUB_ENV"
+
+      - name: Install Qt for iOS
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          target: ios
+          modules: qt5compat qtsensors qtpositioning
+          cache: true
+
+      - name: Set up ccache
+        uses: hendrikmuhs/ccache-action@v1.2.22
+        with:
+          key: ios
+
+      - name: Cache mobile dependencies
+        id: cache-deps
+        uses: actions/cache@v4
+        with:
+          path: build/ios-deps-sim/install
+          key: ios-sim-deps-proj${{ env.PROJ_VERSION }}-sqlite${{ env.SQLITE_VERSION }}
+
+      - name: Cross-compile dependencies
+        if: steps.cache-deps.outputs.cache-hit != 'true'
+        run: |
+          ./scripts/build-mobile-deps.sh \
+            --target ios-simulator \
+            --prefix build/ios-deps-sim/install \
+            --no-gdal
+
+      - name: Configure
+        run: >
+          cmake --preset ios-simulator
+          -DCMAKE_PREFIX_PATH="${QT_ROOT_DIR};${{ github.workspace }}/build/ios-deps-sim/install"
+          -DCMAKE_FIND_ROOT_PATH="${QT_ROOT_DIR};${{ github.workspace }}/build/ios-deps-sim/install"
+          -DQT_HOST_PATH="$QT_HOST_PATH"
+          -DMapper_USE_GDAL=OFF
+          -DMapper_WITH_COVE=OFF
+          -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO
+
+      - name: Build
+        run: cmake --build build/ios-simulator --config Release --parallel
+
   android:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
