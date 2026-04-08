@@ -91,6 +91,7 @@ jobs:
             -DOGR_ENABLE_DRIVER_OSM=ON \
             -DOGR_ENABLE_DRIVER_SQLITE=ON \
             -DGDAL_ENABLE_DRIVER_WMS=ON \
+            -DGDAL_ENABLE_DRIVER_RAW=ON \
             -DGDAL_ENABLE_DRIVER_PNG=ON \
             -DGDAL_ENABLE_DRIVER_JPEG=ON \
             -DGDAL_USE_ARROW=OFF \
