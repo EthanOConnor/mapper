@@ -119,6 +119,12 @@ jobs:
       - name: Configure build
         run: |
           rm -rf "$BUILD_DIR" "$DIST_DIR"
+          # Derive a display version from a tag-shaped source_ref (e.g. v0.9.7-coc-0.3 -> 0.9.7-coc-0.3)
+          extra_args=()
+          ref="${{ inputs.source_ref }}"
+          if [[ "$ref" =~ ^v[0-9] ]]; then
+            extra_args+=("-DMapper_VERSION_DISPLAY=${ref#v}")
+          fi
           cmake -S . -B "$BUILD_DIR" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_TESTING=OFF \
@@ -132,7 +138,8 @@ jobs:
             -DMapper_MANUAL_QTHELP=OFF \
             -DMapper_MANUAL_PDF=OFF \
             -DGDAL_DATA_DIR=/mingw64/share/gdal \
-            -DPROJ_DATA_DIR=/mingw64/share/proj
+            -DPROJ_DATA_DIR=/mingw64/share/proj \
+            "${extra_args[@]}"
 
       - name: Build required targets
         run: |
