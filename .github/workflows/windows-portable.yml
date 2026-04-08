@@ -111,6 +111,53 @@ jobs:
           test -f "$DIST_DIR/mapper-gdal-info.txt"
           compgen -G "$DIST_DIR/Qt5*.dll" > /dev/null
 
+      - name: Smoke test Mapper startup
+        shell: powershell
+        run: |
+          $rootDir = Join-Path $env:GITHUB_WORKSPACE $env:DIST_DIR
+          $mapperExe = Join-Path $rootDir "Mapper.exe"
+          $stdoutPath = Join-Path $env:RUNNER_TEMP "mapper-startup.stdout.txt"
+          $stderrPath = Join-Path $env:RUNNER_TEMP "mapper-startup.stderr.txt"
+          Remove-Item $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
+
+          $env:QT_DEBUG_PLUGINS = "1"
+          $env:QT_LOGGING_RULES = "qt.qpa.*=true"
+          $startTime = (Get-Date).AddSeconds(-5)
+
+          $process = Start-Process `
+            -FilePath $mapperExe `
+            -WorkingDirectory $rootDir `
+            -PassThru `
+            -RedirectStandardOutput $stdoutPath `
+            -RedirectStandardError $stderrPath
+
+          Start-Sleep -Seconds 10
+          $process.Refresh()
+
+          if ($process.HasExited) {
+            Write-Host "Mapper.exe exited during startup smoke test with code $($process.ExitCode)."
+            if (Test-Path $stdoutPath) {
+              Write-Host "--- Mapper stdout ---"
+              Get-Content $stdoutPath
+            }
+            if (Test-Path $stderrPath) {
+              Write-Host "--- Mapper stderr ---"
+              Get-Content $stderrPath
+            }
+
+            $events = Get-WinEvent -FilterHashtable @{ LogName = "Application"; StartTime = $startTime } -ErrorAction SilentlyContinue |
+              Where-Object { $_.ProviderName -in @("Application Error", "Windows Error Reporting", "SideBySide") } |
+              Select-Object -First 20 TimeCreated, ProviderName, Id, LevelDisplayName, Message
+            if ($events) {
+              Write-Host "--- Recent Application log events ---"
+              $events | Format-List | Out-String -Width 4096 | Write-Host
+            }
+
+            throw "Mapper.exe failed startup smoke test."
+          }
+
+          Stop-Process -Id $process.Id -Force
+
       - name: Create portable ZIP
         shell: powershell
         run: |
