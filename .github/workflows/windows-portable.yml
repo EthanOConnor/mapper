@@ -53,6 +53,7 @@ jobs:
             mingw-w64-x86_64-toolchain
             mingw-w64-x86_64-cmake
             mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-gdb
             mingw-w64-x86_64-gdal
             mingw-w64-x86_64-proj
             mingw-w64-x86_64-qt5-base
@@ -112,6 +113,8 @@ jobs:
           compgen -G "$DIST_DIR/Qt5*.dll" > /dev/null
 
       - name: Smoke test Mapper startup
+        id: smoke_test
+        continue-on-error: true
         shell: powershell
         run: |
           $rootDir = Join-Path $env:GITHUB_WORKSPACE $env:DIST_DIR
@@ -131,10 +134,7 @@ jobs:
             -RedirectStandardOutput $stdoutPath `
             -RedirectStandardError $stderrPath
 
-          Start-Sleep -Seconds 10
-          $process.Refresh()
-
-          if ($process.HasExited) {
+          if ($process.WaitForExit(10000)) {
             Write-Host "Mapper.exe exited during startup smoke test with code $($process.ExitCode)."
             if (Test-Path $stdoutPath) {
               Write-Host "--- Mapper stdout ---"
@@ -153,10 +153,40 @@ jobs:
               $events | Format-List | Out-String -Width 4096 | Write-Host
             }
 
-            throw "Mapper.exe failed startup smoke test."
+            "MAPPER_SMOKE_FAILED=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            return
           }
 
           Stop-Process -Id $process.Id -Force
+
+      - name: Capture gdb backtrace for startup failure
+        if: ${{ env.MAPPER_SMOKE_FAILED == '1' }}
+        shell: powershell
+        run: |
+          $rootDir = Join-Path $env:GITHUB_WORKSPACE $env:DIST_DIR
+          $mapperExe = Join-Path $rootDir "Mapper.exe"
+          $gdbExe = "C:\msys64\mingw64\bin\gdb.exe"
+          if (-not (Test-Path $gdbExe)) {
+            throw "gdb.exe not found at $gdbExe"
+          }
+
+          & $gdbExe -batch `
+            -ex "set pagination off" `
+            -ex "set confirm off" `
+            -ex "set env QT_DEBUG_PLUGINS=1" `
+            -ex "set env QT_LOGGING_RULES=qt.qpa.*=true" `
+            -ex "catch throw" `
+            -ex "run" `
+            -ex "bt" `
+            -ex "thread apply all bt" `
+            -ex "info sharedlibrary" `
+            --args $mapperExe 2>&1
+
+      - name: Fail on startup smoke test failure
+        if: ${{ env.MAPPER_SMOKE_FAILED == '1' }}
+        shell: powershell
+        run: |
+          throw "Mapper.exe failed startup smoke test."
 
       - name: Create portable ZIP
         shell: powershell
