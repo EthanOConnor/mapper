@@ -165,7 +165,12 @@ jobs:
         run: |
           $rootDir = Join-Path $env:GITHUB_WORKSPACE $env:DIST_DIR
           $mapperExe = Join-Path $rootDir "Mapper.exe"
-          $gdbExe = "C:\msys64\mingw64\bin\gdb.exe"
+          $gdbCommand = Get-Command gdb -ErrorAction SilentlyContinue
+          if ($gdbCommand) {
+            $gdbExe = $gdbCommand.Source
+          } else {
+            $gdbExe = Join-Path $env:RUNNER_TEMP "msys64\mingw64\bin\gdb.exe"
+          }
           if (-not (Test-Path $gdbExe)) {
             throw "gdb.exe not found at $gdbExe"
           }
