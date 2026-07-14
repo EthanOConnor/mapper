@@ -130,7 +130,7 @@ public:
 	/**
 	 * @brief Draws all point handles for the given object.
 	 * 
-	 * @param painter QPainter object with correct transformation set.
+	 * @param painter Transient scene builder with the map transform applied.
 	 * @param widget Map widget which provides coordinate transformations.
 	 * @param object Object to draw point handles for.
 	 * @param hover_point Index of a point which should be drawn in 'active' state. Pass out-of-bounds value to disable.

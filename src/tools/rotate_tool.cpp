@@ -26,7 +26,6 @@
 #include <Qt>
 #include <QtMath>
 #include <QKeyEvent>
-#include <QPainter>
 #include <QCursor>
 #include <QLatin1String>
 #include <QLocale>
@@ -158,7 +157,7 @@ void RotateTool::drawImpl(render::OverlaySceneBuilder* painter, MapWidget* widge
 		painter->rotate(qRadiansToDegrees(current_rotation));
 		painter->translate(-center);
 	}
-	map()->drawSelection(painter, true, widget);
+	widget->drawSelection(painter, *map(), true);
 	painter->restore();
 	
 	Util::Marker::drawCenterMarker(painter, center);

@@ -128,6 +128,63 @@ void MapTest::printerConfigTest()
 	QVERIFY(!map.hasPrinterConfig());
 }
 
+void MapTest::presentationRequestsTest()
+{
+	Map map;
+	auto redraws = 0;
+	auto drawing_changes = 0;
+	auto drawing_clears = 0;
+	auto activity_changes = 0;
+	auto activity_clears = 0;
+	auto drawing_updates = 0;
+	auto template_updates = 0;
+	auto object_updates = 0;
+	QRectF received_rect;
+	auto received_border = 0;
+	auto received_update = false;
+
+	connect(&map, &Map::redrawRequested, [&] { ++redraws; });
+	connect(&map, &Map::drawingBoundingBoxChanged,
+	        [&](const QRectF& rect, int border, bool update) {
+			++drawing_changes;
+			received_rect = rect;
+			received_border = border;
+			received_update = update;
+		});
+	connect(&map, &Map::drawingBoundingBoxCleared, [&] { ++drawing_clears; });
+	connect(&map, &Map::activityBoundingBoxChanged,
+	        [&](const QRectF&, int, bool) { ++activity_changes; });
+	connect(&map, &Map::activityBoundingBoxCleared, [&] { ++activity_clears; });
+	connect(&map, &Map::drawingUpdateRequested,
+	        [&](const QRectF&, int) { ++drawing_updates; });
+	connect(&map, &Map::templateAreaDirty,
+	        [&](Template*, const QRectF&, int) { ++template_updates; });
+	connect(&map, &Map::objectAreaDirty,
+	        [&](const QRectF&) { ++object_updates; });
+
+	const QRectF area(1, 2, 3, 4);
+	map.requestRedraw();
+	map.setDrawingBoundingBox(area, 5, false);
+	map.clearDrawingBoundingBox();
+	map.setActivityBoundingBox(area, 6, true);
+	map.clearActivityBoundingBox();
+	map.updateDrawing(area, 7);
+	map.setTemplateAreaDirty(nullptr, area, 8);
+	map.setObjectAreaDirty(area);
+
+	QCOMPARE(redraws, 1);
+	QCOMPARE(drawing_changes, 1);
+	QCOMPARE(drawing_clears, 1);
+	QCOMPARE(activity_changes, 1);
+	QCOMPARE(activity_clears, 1);
+	QCOMPARE(drawing_updates, 1);
+	QCOMPARE(template_updates, 1);
+	QCOMPARE(object_updates, 1);
+	QCOMPARE(received_rect, area);
+	QCOMPARE(received_border, 5);
+	QVERIFY(!received_update);
+}
+
 void MapTest::specialColorsTest()
 {
 	QVERIFY(Map::getCoveringWhite() != nullptr);

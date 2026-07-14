@@ -38,7 +38,6 @@ class QDoubleSpinBox;
 class QLabel;
 class QListWidget;
 class QMouseEvent;
-class QPainter;
 class QPushButton;
 class QStackedWidget;
 class QTableWidget;

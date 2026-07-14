@@ -34,7 +34,6 @@
 #include <QLine>
 #include <QLineF>
 #include <QMouseEvent>
-#include <QPainter>
 #include <QPixmap>
 #include <QPointF>
 #include <QRectF>

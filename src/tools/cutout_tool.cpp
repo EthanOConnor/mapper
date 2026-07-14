@@ -91,7 +91,7 @@ void CutoutTool::initImpl()
 void CutoutTool::drawImpl(render::OverlaySceneBuilder* painter, MapWidget* widget)
 {
 	// Draw selection renderables
-	map()->drawSelection(painter, true, widget, nullptr, false);
+	widget->drawSelection(painter, *map(), true, nullptr, false);
 	
 	// Draw cutout shape renderables
 	drawSelectionOrPreviewObjects(painter, widget, true);

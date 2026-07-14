@@ -35,7 +35,6 @@
 #include <QLatin1String>
 #include <QLocale>
 #include <QMouseEvent>
-#include <QPainter>
 #include <QPoint>
 #include <QPointF>
 #include <QToolButton>

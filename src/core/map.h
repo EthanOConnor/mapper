@@ -62,7 +62,6 @@ class MapColorMap;
 class MapPrinterConfig;
 class MapRenderables;
 class MapView;
-class MapWidget;
 class Object;
 class PointSymbol;
 class RenderConfig;
@@ -74,7 +73,7 @@ class UndoStep;
 
 namespace render {
 class MapRenderSnapshot;
-class OverlaySceneBuilder;
+class RenderIR;
 }
 
 
@@ -268,26 +267,12 @@ public:
 	
 	
 	/**
-	 * Must be called to notify the map of new widgets displaying it.
-	 * Useful to notify the widgets about which parts of the map have changed
-	 * and need to be redrawn.
+	 * Requests a complete redraw from every presentation of this map.
 	 */
-	void addMapWidget(MapWidget* widget);
+	void requestRedraw();
 	
 	/**
-	 * Removes the map widget, see addMapWidget().
-	 */
-	void removeMapWidget(MapWidget* widget);
-	
-	/**
-	 * Redraws all map widgets completely - this can be slow!
-	 * Try to avoid this and do partial redraws instead, if possible.
-	 */
-	void updateAllMapWidgets();
-	
-	/**
-	 * Makes sure that the selected object(s) are visible in all map widgets
-	 * by moving the views in the widgets to the selected objects.
+	 * Requests that every presentation reveal the selected objects.
 	 */
 	void ensureVisibilityOfSelectedObjects(SelectionVisibility visibility);
 	
@@ -295,8 +280,8 @@ public:
 	// Current drawing
 	
 	/**
-	 * Sets the rect (given in map coordinates) as "dirty rect" for every
-	 * map widget showing this map, enlarged by the given pixel border.
+	 * Sets the rect (given in map coordinates) as the transient drawing area
+	 * for every presentation, enlarged by the given pixel border.
 	 * This means that the area covered by the rect will be redrawn by
 	 * the active tool. Use this if the current tool's display has changed.
 	 * 
@@ -643,13 +628,12 @@ public:
 	
 	/**
 	 * Marks the area defined by the given QRectF (in map coordinates) and
-	 * pixel border as "dirty", i.e. as needing a repaint, for the given template
-	 * in all map widgets.
+	 * pixel border as needing a repaint for the given template in every
+	 * presentation where it is visible.
 	 * 
 	 * For an explanation of the area and pixel border, see setDrawingBoundingBox().
 	 * 
-	 * Warning: does nothing if the template is not visible in a widget!
-	 * So make sure to call this and showing/hiding a template in the correct order!
+	 * Presentations where the template is hidden ignore the request.
 	 */
 	void setTemplateAreaDirty(Template* temp, const QRectF& area, int pixel_border);
 	
@@ -872,8 +856,7 @@ public:
 	void setObjectsDirty();
 	
 	/**
-	 * Marks the area given by map_coords_rect as "dirty" in all map widgets,
-	 * i.e. as needing to be redrawn because some object(s) changed there.
+	 * Requests redraw of the area because one or more objects changed there.
 	 */
 	void setObjectAreaDirty(const QRectF& map_coords_rect);
 	
@@ -1088,21 +1071,8 @@ public:
 	 */
 	void includeSelectionRect(QRectF& rect) const;
 	
-	/**
-	 * Records the selected objects into the transient viewport scene.
-	 *
-	 * @param force_min_size Enables minimum on-screen sizes.
-	 * @param widget The widget in which the drawing happens.
-	 *     Used to get view and viewport information.
-	 * @param replacement_renderables If given, draws these renderables instead
-	 *     Of the selection renderables. TODO: HACK
-	 * @param draw_normal If set to true, draws the objects like normal objects,
-	 *     otherwise draws transparent highlights.
-	 */
-	void drawSelection(render::OverlaySceneBuilder* painter, bool force_min_size,
-	                   MapWidget* widget,
-	                   MapRenderables* replacement_renderables = nullptr,
-	                   bool draw_normal = false);
+	/** Builds immutable render IR for the current object selection. */
+	std::shared_ptr<const render::RenderIR> buildSelectionIR(const RenderConfig& config) const;
 	
 	/**
 	 * Adds the given object to the selection.
@@ -1360,6 +1330,22 @@ public:
 	
 	
 signals:
+	/** Presentation invalidation requests emitted by document mutations. */
+	void redrawRequested();
+	void selectionVisibilityRequested(const QRectF& map_rect,
+	                                  OpenOrienteering::Map::SelectionVisibility visibility);
+	void drawingBoundingBoxChanged(const QRectF& map_rect, int pixel_border, bool do_update);
+	void drawingBoundingBoxCleared();
+	void activityBoundingBoxChanged(const QRectF& map_rect, int pixel_border, bool do_update);
+	void activityBoundingBoxCleared();
+	void drawingUpdateRequested(const QRectF& map_rect, int pixel_border);
+	void templateAreaDirty(OpenOrienteering::Template* temp,
+	                       const QRectF& map_rect,
+	                       int pixel_border);
+	void objectAreaDirty(const QRectF& map_rect);
+	void templateReplacementRequested(const OpenOrienteering::Template* old_template,
+	                                  OpenOrienteering::Template* new_template);
+
 	/**
 	 * Emitted when the map enters or leaves the state which is saved on map.
 	 */
@@ -1494,7 +1480,6 @@ private:
 	typedef std::vector<Symbol*> SymbolVector;
 	typedef std::vector<std::unique_ptr<Template>> TemplateVector;
 	typedef std::vector<MapPart*> PartVector;
-	typedef std::vector<MapWidget*> WidgetVector;
 	
 	class MapColorSet : public QSharedData
 	{
@@ -1569,7 +1554,6 @@ private:
 	Object* first_selected_object = nullptr;
 	QScopedPointer<UndoManager> undo_manager;
 	std::size_t current_part_index = 0;
-	WidgetVector widgets;
 	QScopedPointer<MapRenderables> renderables;
 	QScopedPointer<MapRenderables> selection_renderables;
 	

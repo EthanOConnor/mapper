@@ -27,7 +27,6 @@
 
 #include <QAction>
 #include <QBrush>
-#include <QPainter>
 #include <QPen>
 #include <QPixmap>
 #include <QPoint>

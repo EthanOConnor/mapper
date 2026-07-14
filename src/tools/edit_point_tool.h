@@ -41,7 +41,6 @@ class QFocusEvent;
 class QInputMethodEvent;
 class QKeyEvent;
 class QMouseEvent;
-class QPainter;
 class QRectF;
 class QToolButton;
 

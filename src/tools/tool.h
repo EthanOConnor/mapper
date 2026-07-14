@@ -148,7 +148,7 @@ public:
 	/**
 	 * @brief Returns the cursor which should be used for the tool in the editor windows.
 	 * 
-	 * @todo How to change the cursor for all map widgets while a tool is active?
+	 * @todo Define how an active tool communicates cursor changes to every presentation.
 	 */
 	virtual const QCursor& getCursor() const = 0;
 	

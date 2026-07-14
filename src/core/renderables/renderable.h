@@ -35,7 +35,6 @@ class Object;
 
 namespace render {
 class MapRenderSnapshot;
-class OverlaySceneBuilder;
 struct RenderRequest;
 struct SnapshotObjectBlock;
 struct SnapshotObject;
@@ -164,7 +163,7 @@ public:
 
 	explicit MapRenderables(Map* map);
 
-	void draw(render::OverlaySceneBuilder* painter, const RenderConfig& config) const;
+	std::shared_ptr<const render::RenderIR> buildIR(const RenderConfig& config) const;
 
 	void insertRenderablesOfObject(const Object* object);
 	void removeRenderablesOfObject(const Object* object, bool mark_area_as_dirty);

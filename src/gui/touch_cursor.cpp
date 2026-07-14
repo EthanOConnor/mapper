@@ -24,7 +24,6 @@
 #include <Qt>
 #include <QEvent>
 #include <QMouseEvent>
-#include <QPainter>
 #include <QPen>
 #include <QPixmap>
 #include <QRectF>
@@ -81,19 +80,22 @@ TouchCursor::MouseEventTranslation TouchCursor::mousePressEvent(const QMouseEven
 		return { MouseEventTranslation::Action::Replace, QEvent::MouseButtonPress, last_cursor_pos,
 		         event.button(), event.buttons() };
 	}
-	return { .action = MouseEventTranslation::Action::Discard };
+	return { MouseEventTranslation::Action::Discard, QEvent::None, {},
+	         Qt::NoButton, Qt::NoButton };
 }
 
 TouchCursor::MouseEventTranslation TouchCursor::mouseMoveEvent(const QMouseEvent& event)
 {
 	if (!(event.buttons() & Qt::LeftButton))
-		return { .action = MouseEventTranslation::Action::Discard };
+		return { MouseEventTranslation::Action::Discard, QEvent::None, {},
+		         Qt::NoButton, Qt::NoButton };
 
 	if (last_pressed_button != NoButton && !first_move_event_received)
 	{
 		first_move_event_received = true;
 		last_touch_pos = event.position();
-		return { .action = MouseEventTranslation::Action::Discard };
+		return { MouseEventTranslation::Action::Discard, QEvent::None, {},
+		         Qt::NoButton, Qt::NoButton };
 	}
 	
 	updateMapWidget(true);
@@ -124,7 +126,8 @@ TouchCursor::MouseEventTranslation TouchCursor::mouseReleaseEvent(const QMouseEv
 		return { MouseEventTranslation::Action::Replace, QEvent::MouseButtonRelease,
 		         map_widget->mapToViewport(cursor_coord), event.button(), event.buttons() };
 	}
-	return { .action = MouseEventTranslation::Action::Discard };
+	return { MouseEventTranslation::Action::Discard, QEvent::None, {},
+	         Qt::NoButton, Qt::NoButton };
 }
 
 TouchCursor::MouseEventTranslation TouchCursor::mouseDoubleClickEvent(const QMouseEvent& event)
@@ -134,7 +137,8 @@ TouchCursor::MouseEventTranslation TouchCursor::mouseDoubleClickEvent(const QMou
 		return { MouseEventTranslation::Action::Replace, QEvent::MouseButtonDblClick,
 		         map_widget->mapToViewport(cursor_coord), event.button(), event.buttons() };
 	}
-	return { .action = MouseEventTranslation::Action::Discard };
+	return { MouseEventTranslation::Action::Discard, QEvent::None, {},
+	         Qt::NoButton, Qt::NoButton };
 }
 
 void TouchCursor::paint(render::OverlaySceneBuilder* painter)

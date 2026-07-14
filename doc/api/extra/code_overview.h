@@ -85,8 +85,12 @@ The process to display map objects works like this:
   The constraint is that every renderable uses just one map color.
 - The ObjectRenderables are inserted into the MapRenderables of the map,
   where they are sorted by their color priority.
-- MapRenderables::draw() goes through all Renderables in order,
-  thus painting them with the correct color priority.
+- MapRenderables publishes an immutable MapRenderSnapshot. buildIR() converts
+  the requested view of that snapshot into backend-neutral RenderIR while
+  preserving the renderables' color-priority order.
+- Presentation code composes document, template, grid, and transient IR into a
+  FramePacket. The Vello screen backend or QPainter output/reference backend
+  consumes that packet without calling back into the document model.
 
 
 \section gui GUI

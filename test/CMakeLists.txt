@@ -19,12 +19,6 @@
 
 set(CMAKE_AUTOMOC ON)
 
-add_definitions(
-  -DQT_NO_CAST_FROM_ASCII
-  -DQT_NO_CAST_TO_ASCII
-  -DQT_USE_QSTRINGBUILDER
-)
-
 configure_file(test_config.h.in ${CMAKE_CURRENT_BINARY_DIR}/test_config.h @ONLY)
 
 
@@ -51,6 +45,16 @@ function(add_test_helper testname)
 	endforeach()
 	add_executable(${testname} ${testname}.cpp ${TEST_${testname}_SRCS})
 	mapper_target_defaults(${testname})
+	target_compile_definitions(${testname} PRIVATE
+	  QT_NO_CAST_FROM_ASCII
+	  QT_NO_CAST_TO_ASCII
+	  QT_USE_QSTRINGBUILDER
+	)
+	target_include_directories(${testname} PRIVATE
+	  "${PROJECT_BINARY_DIR}/src"
+	  "${PROJECT_SOURCE_DIR}/src"
+	  "${CMAKE_CURRENT_BINARY_DIR}"
+	)
 	target_link_libraries(${testname} PRIVATE
 	  ${PROJ_LIBRARIES}
 	  Qt6::Test
@@ -111,12 +115,6 @@ function(add_system_test testname)
 	  Qt6::Widgets
 	)
 endfunction()
-
-
-# Include generated files (moc output, build configuration)
-include_directories("${PROJECT_BINARY_DIR}/src")
-include_directories("${PROJECT_SOURCE_DIR}/src")
-include_directories("${CMAKE_CURRENT_BINARY_DIR}")
 
 
 # Unit tests

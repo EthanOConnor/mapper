@@ -575,7 +575,7 @@ void TemplateTrack::updateGeoreferencing()
 	{
 		projected_crs_spec.clear();
 		track.changeMapGeoreferencing(map->getGeoreferencing());
-		map->updateAllMapWidgets();
+		map->requestRedraw();
 	}
 }
 

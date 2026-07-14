@@ -26,7 +26,6 @@
 #include <QCursor>
 #include <QKeyEvent>
 #include <QLabel>
-#include <QPainter>
 #include <QPixmap>
 #include <QPoint>
 #include <QString>
@@ -171,7 +170,7 @@ void DrawPointGPSTool::drawImpl(render::OverlaySceneBuilder* painter, MapWidget*
 		painter->setWorldTransform(map_view->worldTransform(), true);
 		
 		RenderConfig config = { *map(), map_view->calculateViewedRect(widget->viewportToView(widget->rect())), map_view->calculateFinalZoomFactor(), RenderConfig::Tool, 0.5 };
-		renderables->draw(painter, config);
+		painter->append(*renderables->buildIR(config));
 		
 		painter->restore();
 	}

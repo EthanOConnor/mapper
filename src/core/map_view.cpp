@@ -213,11 +213,6 @@ void MapView::load(QXmlStreamReader& xml, int version)
 	emit visibilityChanged(MultipleFeatures, true);
 }
 
-void MapView::updateAllMapWidgets(VisibilityFeature change)
-{
-	emit visibilityChanged(change, true);
-}
-
 QPointF MapView::mapToView(const MapCoord& coords) const
 {
 	return map_to_view.map(MapCoordF(coords));

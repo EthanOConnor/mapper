@@ -167,7 +167,7 @@ void MapPart::addObject(Object* object, int pos)
 	object->update();
 	
 	if (objects.size() == 1 && map->getNumObjects() == 1)
-		map->updateAllMapWidgets();
+		map->requestRedraw();
 }
 
 void MapPart::deleteObject(int pos)
@@ -190,7 +190,7 @@ Object* MapPart::releaseObject(int pos)
 	objects.erase(objects.begin() + pos);
 	
 	if (objects.empty() && map->getNumObjects() == 0)
-		map->updateAllMapWidgets();
+		map->requestRedraw();
 
 	return object_to_return;
 }
@@ -243,7 +243,7 @@ std::unique_ptr<UndoStep> MapPart::importPart(const MapPart* other, const QHash<
 		                                // Not as long as observers listen to both...
 	}
 	if (first_objects)
-		map->updateAllMapWidgets();
+		map->requestRedraw();
 	
 	return std::unique_ptr<UndoStep>{undo_step};
 }

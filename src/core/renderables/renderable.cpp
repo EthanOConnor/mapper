@@ -22,7 +22,6 @@
 #include "core/map.h"
 #include "core/objects/object.h"
 #include "core/symbols/symbol.h"
-#include "render/overlay_scene.h"
 #include "render/qt_render_bridge.h"
 #include "render/render_snapshot.h"
 #include "util/util.h"
@@ -419,17 +418,15 @@ std::shared_ptr<const render::MapRenderSnapshot> MapRenderables::snapshot() cons
 	return published_snapshot;
 }
 
-void MapRenderables::draw(render::OverlaySceneBuilder* painter,
-	                      const RenderConfig& config) const
+std::shared_ptr<const render::RenderIR> MapRenderables::buildIR(
+	const RenderConfig& config) const
 {
-	if (!painter)
-		return;
-	painter->append(*snapshot()->buildIR({
+	return snapshot()->buildIR({
 		render::fromQRectF(config.bounding_box),
 		config.scaling,
 		config.options,
 		config.opacity,
-	}));
+	});
 }
 
 }  // namespace OpenOrienteering

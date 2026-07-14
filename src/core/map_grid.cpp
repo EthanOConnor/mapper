@@ -24,7 +24,7 @@
 #include <utility>
 
 #include <QtMath>
-#include <QPainter>
+#include <QColor>
 #include <QXmlStreamReader>
 
 #include "core/georeferencing.h"
@@ -91,41 +91,6 @@ const MapGrid& MapGrid::load(QXmlStreamReader& xml)
 	snapping_enabled = element.attribute<bool>(QLatin1String("snapping_enabled"));
 	
 	return *this;
-}
-
-void MapGrid::draw(QPainter* painter, const QRectF& bounding_box, Map* map, qreal scale_adjustment) const
-{
-	double final_horz_spacing, final_vert_spacing;
-	double final_horz_offset, final_vert_offset;
-	double final_rotation;
-	calculateFinalParameters(final_horz_spacing, final_vert_spacing, final_horz_offset, final_vert_offset, final_rotation, map);
-	
-	QPen pen(color);
-	if (qIsNull(scale_adjustment))
-	{
-		// zero-width cosmetic pen (effectively one pixel)
-		pen.setWidth(0);
-		pen.setCosmetic(true);
-	}
-	else
-	{
-		// 0.1 mm wide non-cosmetic pen
-		pen.setWidthF(qreal(0.1) / scale_adjustment);
-	}
-	painter->setPen(pen);
-	painter->setBrush(Qt::NoBrush);
-	painter->setOpacity(qAlpha(color) / 255.0);
-	
-	auto draw_line = std::function<void (const QPointF&, const QPointF&)>{ [painter](const QPointF& p1, const QPointF& p2) {
-		painter->drawLine(p1, p2);
-	} };
-	
-	if (display == AllLines)
-		Util::gridOperation(bounding_box, final_horz_spacing, final_vert_spacing, final_horz_offset, final_vert_offset, final_rotation, draw_line);
-	else if (display == HorizontalLines)
-		Util::hatchingOperation(bounding_box, final_vert_spacing, final_vert_offset, final_rotation - M_PI / 2, draw_line);
-	else // if (display == VerticalLines)
-		Util::hatchingOperation(bounding_box, final_horz_spacing, final_horz_offset, final_rotation, draw_line);
 }
 
 std::shared_ptr<const render::RenderIR> MapGrid::buildRenderIR(

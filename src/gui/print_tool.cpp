@@ -24,7 +24,6 @@
 #include "print_tool.h"
 
 #include <QMouseEvent>
-#include <QPainter>
 #include <QPainterPath>
 
 #include "core/map.h"

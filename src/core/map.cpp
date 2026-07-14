@@ -59,7 +59,6 @@
 #include "fileformats/file_format_registry.h"
 #include "fileformats/file_import_export.h"
 #include "fileformats/xml_file_format_p.h"
-#include "gui/map/map_widget.h"
 #include "templates/template.h"
 #include "undo/map_part_undo.h"
 #include "undo/object_undo.h"
@@ -475,8 +474,6 @@ void Map::init()
 	
 	parts.push_back(new MapPart(tr("default part"), this));
 	
-	widgets.clear();
-	
 	undo_manager->setClean();
 	
 	symbol_set_id = QString();
@@ -556,7 +553,7 @@ void Map::changeScale(unsigned int new_scale_denominator, double additional_stre
 	
 	setScaleDenominator(new_scale_denominator);
 	setOtherDirty();
-	updateAllMapWidgets();
+	requestRedraw();
 }
 
 void Map::rotateMap(double rotation, const MapCoord& center, bool adjust_georeferencing, bool adjust_declination, bool adjust_templates)
@@ -599,7 +596,7 @@ void Map::rotateMap(double rotation, const MapCoord& center, bool adjust_georefe
 	}
 	
 	setOtherDirty();
-	updateAllMapWidgets();
+	requestRedraw();
 }
 
 void Map::setMapNotes(const QString& text)
@@ -905,38 +902,10 @@ void Map::includeSelectionRect(QRectF& rect) const
 		rectIncludeSafe(rect, object->getExtent());
 }
 
-void Map::drawSelection(render::OverlaySceneBuilder* painter,
-	                    bool force_min_size,
-	                    MapWidget* widget,
-	                    MapRenderables* replacement_renderables,
-	                    bool draw_normal)
+std::shared_ptr<const render::RenderIR> Map::buildSelectionIR(
+	const RenderConfig& config) const
 {
-	if (!painter)
-		return;
-	auto* view = widget->getMapView();
-	painter->save();
-	widget->applyMapTransform(painter);
-	if (!replacement_renderables)
-		replacement_renderables = selection_renderables.data();
-
-	RenderConfig::Options options = RenderConfig::Screen | RenderConfig::HelperSymbols;
-	auto selection_opacity = qreal(1);
-	if (force_min_size)
-		options |= RenderConfig::ForceMinSize;
-	if (!draw_normal)
-	{
-		options |= RenderConfig::Highlighted;
-		selection_opacity = 0.4;
-	}
-	RenderConfig config = {
-		*this,
-		view->calculateViewedRect(widget->viewportToView(widget->rect())),
-		view->calculateFinalZoomFactor(),
-		options,
-		selection_opacity,
-	};
-	replacement_renderables->draw(painter, config);
-	painter->restore();
+	return selection_renderables->buildIR(config);
 }
 
 void Map::addObjectToSelection(Object* object, bool emit_selection_changed)
@@ -1031,21 +1000,9 @@ void Map::emitSelectionEdited()
 	emit selectedObjectEdited();
 }
 
-void Map::addMapWidget(MapWidget* widget)
+void Map::requestRedraw()
 {
-	widgets.push_back(widget);
-}
-
-void Map::removeMapWidget(MapWidget* widget)
-{
-	widgets.erase(std::remove(begin(widgets), end(widgets), widget), end(widgets));
-}
-
-
-void Map::updateAllMapWidgets()
-{
-	for (MapWidget* widget : widgets)
-		widget->updateEverything();
+	emit redrawRequested();
 }
 
 
@@ -1056,60 +1013,36 @@ void Map::ensureVisibilityOfSelectedObjects(SelectionVisibility visibility)
 		QRectF rect;
 		includeSelectionRect(rect);
 		
-		for (MapWidget* widget : widgets)
-		{
-			switch (visibility)
-			{
-			case FullVisibility:
-				widget->ensureVisibilityOfRect(rect, MapWidget::DiscreteZoom);
-				break;
-				
-			case PartialVisibility:
-				if (!widget->getMapView()->calculateViewedRect(widget->viewportToView(widget->geometry())).intersects(rect))
-					widget->ensureVisibilityOfRect(rect, MapWidget::DiscreteZoom);
-				break;
-				
-			case IgnoreVisibilty:
-				break; // Do nothing
-				
-			default:
-				Q_UNREACHABLE();
-			}
-		}
+		emit selectionVisibilityRequested(rect, visibility);
 	}
 }
 
 
 void Map::setDrawingBoundingBox(const QRectF& map_coords_rect, int pixel_border, bool do_update)
 {
-	for (MapWidget* widget : widgets)
-		widget->setDrawingBoundingBox(map_coords_rect, pixel_border, do_update);
+	emit drawingBoundingBoxChanged(map_coords_rect, pixel_border, do_update);
 }
 
 void Map::clearDrawingBoundingBox()
 {
-	for (MapWidget* widget : widgets)
-		widget->clearDrawingBoundingBox();
+	emit drawingBoundingBoxCleared();
 }
 
 
 void Map::setActivityBoundingBox(const QRectF& map_coords_rect, int pixel_border, bool do_update)
 {
-	for (MapWidget* widget : widgets)
-		widget->setActivityBoundingBox(map_coords_rect, pixel_border, do_update);
+	emit activityBoundingBoxChanged(map_coords_rect, pixel_border, do_update);
 }
 
 void Map::clearActivityBoundingBox()
 {
-	for (MapWidget* widget : widgets)
-		widget->clearActivityBoundingBox();
+	emit activityBoundingBoxCleared();
 }
 
 
 void Map::updateDrawing(const QRectF& map_coords_rect, int pixel_border)
 {
-	for (MapWidget* widget : widgets)
-		widget->updateDrawing(map_coords_rect, pixel_border);
+	emit drawingUpdateRequested(map_coords_rect, pixel_border);
 }
 
 
@@ -1791,11 +1724,7 @@ std::unique_ptr<Template> Map::setTemplate(int pos, std::unique_ptr<Template> te
 {
 	using std::swap;
 	auto const it = begin(templates) + pos;
-	for (auto* widget : widgets)
-	{
-		auto* view = widget->getMapView();
-		view->setTemplateVisibility(temp.get(), view->getTemplateVisibility(it->get()));
-	}
+	emit templateReplacementRequested(it->get(), temp.get());
 	(*it)->setTemplateAreaDirty();
 	swap(temp, *it);
 	emit templateChanged(pos, it->get());
@@ -1874,12 +1803,7 @@ void Map::deleteTemplate(int pos)
 
 void Map::setTemplateAreaDirty(Template* temp, const QRectF& area, int pixel_border)
 {
-	for (MapWidget* widget : widgets)
-	{
-		const MapView* map_view = widget->getMapView();
-		if (map_view->isTemplateVisible(temp))
-			widget->markTemplateAreaDirty(map_view->calculateViewBoundingBox(area), pixel_border);
-	}
+	emit templateAreaDirty(temp, area, pixel_border);
 }
 
 void Map::setTemplateAreaDirty(int pos)
@@ -2009,7 +1933,7 @@ void Map::addPart(MapPart* part, std::size_t index)
 	emit mapPartAdded(index, part);
 	
 	setOtherDirty();
-	updateAllMapWidgets();
+	requestRedraw();
 }
 
 void Map::removePart(std::size_t index)
@@ -2036,7 +1960,7 @@ void Map::removePart(std::size_t index)
 	delete part;
 	
 	setOtherDirty();
-	updateAllMapWidgets();
+	requestRedraw();
 }
 
 int Map::findPartIndex(const MapPart* part) const
@@ -2198,8 +2122,7 @@ QRectF Map::calculateExtent(bool include_helper_symbols, bool include_templates,
 
 void Map::setObjectAreaDirty(const QRectF& map_coords_rect)
 {
-	for (MapWidget* widget : widgets)
-		widget->markObjectAreaDirty(map_coords_rect);
+	emit objectAreaDirty(map_coords_rect);
 }
 
 void Map::findObjectsAt(
@@ -2351,12 +2274,7 @@ void Map::setGrid(const MapGrid &grid)
 	if (grid != this->grid)
 	{
 		this->grid = grid;
-		for (MapWidget* widget : widgets)
-		{
-			MapView* view = widget->getMapView();
-			if (view && view->isGridVisible())
-				view->updateAllMapWidgets();
-		}
+		requestRedraw();
 		setOtherDirty();
 	}
 }

@@ -31,7 +31,6 @@
 #include <QKeyEvent>
 #include <QLatin1String>
 #include <QLocale>
-#include <QPainter>
 #include <QPixmap>
 #include <QRectF>
 #include <QString>

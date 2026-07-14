@@ -152,8 +152,8 @@ GeoreferencingDialog::GeoreferencingDialog(
 	auto geographic_datum_label = new QLabel(tr("(Datum: WGS84)"));
 	int geographic_datum_label_width = geographic_datum_label->sizeHint().width();
 	
-	map_x_edit = Util::SpinBox::create<MapCoordF>(tr("mm"));
-	map_y_edit = Util::SpinBox::create<MapCoordF>(tr("mm"));
+	map_x_edit = Util::SpinBox::create<MapCoordF>();
+	map_y_edit = Util::SpinBox::create<MapCoordF>();
 	ref_point_button->setEnabled(controller);
 	auto map_ref_layout = new QHBoxLayout();
 	map_ref_layout->addWidget(map_x_edit, 1);
@@ -164,8 +164,8 @@ GeoreferencingDialog::GeoreferencingDialog(
 		map_ref_layout->addSpacing(geographic_datum_label_width - ref_point_button_width);
 	map_ref_layout->addWidget(ref_point_button, 0);
 	
-	easting_edit = Util::SpinBox::create<Util::RealMeters>(tr("m"));
-	northing_edit = Util::SpinBox::create<Util::RealMeters>(tr("m"));
+	easting_edit = Util::SpinBox::create<Util::RealMeters>();
+	northing_edit = Util::SpinBox::create<Util::RealMeters>();
 	auto projected_ref_layout = new QHBoxLayout();
 	projected_ref_layout->addWidget(easting_edit, 1);
 	projected_ref_layout->addWidget(new QLabel(tr("E", "west / east")), 0);

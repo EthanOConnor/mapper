@@ -41,7 +41,6 @@
 #include <QList>
 #include <QMimeData>
 #include <QMouseEvent>
-#include <QPainter>
 #include <QPointF>
 #include <QRectF>
 #include <QRgb>

@@ -33,7 +33,6 @@
 class QAction;
 class QEvent;
 class QKeyEvent;
-class QPainter;
 class QPointF;
 class QRectF;
 

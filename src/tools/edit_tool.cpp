@@ -29,7 +29,6 @@
 #include <QtGlobal>
 #include <QtMath>
 #include <QCursor>
-#include <QPainter>
 #include <QPainterPath>
 #include <QPen>
 #include <QPixmap>

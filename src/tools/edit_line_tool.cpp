@@ -484,7 +484,7 @@ void EditLineTool::drawImpl(render::OverlaySceneBuilder* painter, MapWidget* wid
 		}
 		
 		if (!highlight_renderables->empty())
-			map()->drawSelection(painter, true, widget, highlight_renderables.data(), true);
+			widget->drawSelection(painter, *map(), true, highlight_renderables.data(), true);
 	}
 	
 	// Box selection

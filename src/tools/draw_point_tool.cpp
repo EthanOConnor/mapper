@@ -32,7 +32,6 @@
 #include <QLatin1Char>
 #include <QLatin1String>
 #include <QLocale>
-#include <QPainter>
 #include <QPen>
 #include <QPixmap>
 #include <QPoint>
@@ -271,7 +270,7 @@ void DrawPointTool::drawImpl(render::OverlaySceneBuilder* painter, MapWidget* wi
 	painter->setWorldTransform(map_view->worldTransform(), true);
 	
 	RenderConfig config = { *map(), map_view->calculateViewedRect(widget->viewportToView(widget->rect())), map_view->calculateFinalZoomFactor(), RenderConfig::Tool, 0.5 };
-	renderables->draw(painter, config);
+	painter->append(*renderables->buildIR(config));
 	
 	painter->restore();
 	

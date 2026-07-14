@@ -27,7 +27,6 @@
 
 #include <QtGlobal>
 #include <QFlags>
-#include <QPainter>
 #include <QPoint>
 
 #include "core/map.h"
@@ -187,7 +186,7 @@ void DrawLineAndAreaTool::drawPreviewObjects(render::OverlaySceneBuilder* painte
 		painter->setWorldTransform(map_view->worldTransform(), true);
 		
 		RenderConfig config = { *map(), map_view->calculateViewedRect(widget->viewportToView(widget->rect())), map_view->calculateFinalZoomFactor(), RenderConfig::Tool, 0.5 };
-		renderables->draw(painter, config);
+		painter->append(*renderables->buildIR(config));
 		
 		painter->restore();
 	}

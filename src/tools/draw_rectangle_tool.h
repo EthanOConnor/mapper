@@ -38,7 +38,6 @@ class QAction;
 class QCursor;
 class QKeyEvent;
 class QMouseEvent;
-class QPainter;
 class QToolButton;
 
 namespace OpenOrienteering {

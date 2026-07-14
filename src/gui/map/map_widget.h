@@ -63,8 +63,10 @@ namespace presentation { class VelloCanvas; }
 
 class GPSDisplay;
 class GPSTemporaryMarkers;
+class Map;
 class MapEditorActivity;
 class MapEditorTool;
+class MapRenderables;
 class PieMenu;
 class Template;
 class TouchCursor;
@@ -153,6 +155,13 @@ public:
 	 * the widget with the settings of the used MapView.
 	 */
 	void applyMapTransform(render::OverlaySceneBuilder* painter) const;
+
+	/** Records the map selection or an editing preview in the transient scene. */
+	void drawSelection(render::OverlaySceneBuilder* painter,
+	                   const Map& map,
+	                   bool force_min_size,
+	                   const MapRenderables* replacement_renderables = nullptr,
+	                   bool draw_normal = false) const;
 	
 	// Coordinate transformations
 	

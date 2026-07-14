@@ -1442,7 +1442,7 @@ void MapEditorController::createMobileGUI()
 		symbol->setHidden(value);
 		if (!value && map->removeSymbolFromSelection(symbol, false))
 		    map->emitSelectionChanged();
-		map->updateAllMapWidgets();
+		map->requestRedraw();
 		map->setSymbolsDirty();
 		selectedSymbolsChanged();
 	});
@@ -2395,7 +2395,7 @@ void MapEditorController::editGeoreferencing()
 void MapEditorController::georeferencingDialogFinished()
 {
 	georeferencing_dialog.release()->deleteLater();
-	map->updateAllMapWidgets();
+	map->requestRedraw();
 	
 	bool gps_display_possible = map->getGeoreferencing().getState() == Georeferencing::Geospatial;
 	if (!gps_display_possible)

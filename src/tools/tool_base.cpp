@@ -489,7 +489,9 @@ void MapEditorToolBase::updatePreviewObjectsAsynchronously()
 
 void MapEditorToolBase::drawSelectionOrPreviewObjects(render::OverlaySceneBuilder* painter, MapWidget* widget, bool draw_opaque)
 {
-	map()->drawSelection(painter, true, widget, renderables->empty() ? nullptr : renderables.get(), draw_opaque);
+	widget->drawSelection(painter, *map(), true,
+	                      renderables->empty() ? nullptr : renderables.get(),
+	                      draw_opaque);
 }
 
 

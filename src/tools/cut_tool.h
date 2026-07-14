@@ -40,7 +40,6 @@ class QEvent;
 class QFocusEvent;
 class QKeyEvent;
 class QMouseEvent;
-class QPainter;
 class QRectF;
 
 namespace OpenOrienteering {

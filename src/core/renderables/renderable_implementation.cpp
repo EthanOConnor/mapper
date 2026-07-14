@@ -113,7 +113,9 @@ void CircleRenderable::appendTo(render::RenderIRBuilder& builder,
 		auto const radius = 0.5 / config.scaling;
 		bounds = { center.x() - radius, center.y() - radius, 2 * radius, 2 * radius };
 	}
-	builder.strokeEllipse(bounds, config.color, { .width = width }, config.object_id,
+	builder.strokeEllipse(bounds, config.color,
+	                      { .width = width, .dash_pattern = {}, .dash_offset = 0 },
+	                      config.object_id,
 	                      color_priority < 0 ? render::QualityHint::ForceAntialiasing
 	                                         : render::QualityHint::Default);
 }
@@ -442,6 +444,8 @@ void LineRenderable::appendTo(render::RenderIRBuilder& builder,
 			.cap = cap_style,
 			.join = join_style,
 			.miter_limit = LineSymbol::miterLimit(),
+			.dash_pattern = {},
+			.dash_offset = 0,
 		},
 		config.object_id,
 		color_priority < 0 ? render::QualityHint::ForceAntialiasing
@@ -618,6 +622,8 @@ void TextFramingRenderable::appendTo(render::RenderIRBuilder& builder,
 			.cap = render::LineCap::Flat,
 			.join = render::LineJoin::Miter,
 			.miter_limit = 0.5,
+			.dash_pattern = {},
+			.dash_offset = 0,
 		},
 		config.object_id,
 		render::QualityHint::Text

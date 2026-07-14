@@ -200,7 +200,7 @@ void TransformTest::testTransformCombined()
 	qreal scale_y = 2.5;
 	
 	QTransform qt;
-	// Template::applyTemplateTransform order: translate, rotate, scale
+	// Template placement order in renderer-neutral world space: translate, rotate, scale.
 	qt.translate(dx / 1000.0, dy / 1000.0);
 	qt.rotate(qreal(rotation));
 	qt.scale(scale_x, scale_y);
@@ -245,7 +245,7 @@ void TransformTest::testTransformRoundTrip()
 
 	TemplateTransform t = { dx, dy, qDegreesToRadians(rotation), scale_x, scale_y };
 	
-	// Template::applyTemplateTransform order: translate, rotate, scale
+	// Template placement order in renderer-neutral world space: translate, rotate, scale.
 	QTransform qt;
 	qt.translate(t.template_x / 1000.0, t.template_y / 1000.0);
 	qt.rotate(-t.template_rotation * (180 / M_PI));

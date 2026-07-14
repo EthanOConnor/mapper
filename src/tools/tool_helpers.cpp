@@ -34,7 +34,6 @@
 #include <QLatin1String>
 #include <QLineF>
 #include <QLocale>
-#include <QPainter>
 #include <QPainterPath>
 #include <QPen>
 #include <QPoint>

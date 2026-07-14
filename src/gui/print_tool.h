@@ -32,7 +32,6 @@
 
 class QCursor;
 class QMouseEvent;
-class QPainter;
 
 namespace OpenOrienteering {
 

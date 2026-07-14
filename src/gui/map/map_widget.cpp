@@ -164,7 +164,6 @@ void MapWidget::setMapView(MapView* view)
 		if (this->view)
 		{
 			auto* map = this->view->getMap();
-			map->removeMapWidget(this);
 			disconnect(map);
 			disconnect(this->view);
 			for (int i = 0; i < map->getNumTemplates(); ++i)
@@ -180,7 +179,48 @@ void MapWidget::setMapView(MapView* view)
 			connect(this->view, &MapView::panOffsetChanged, this, &MapWidget::setPanOffset);
 			
 			auto* map = this->view->getMap();
-			map->addMapWidget(this);
+			connect(map, &Map::redrawRequested,
+			        this, &MapWidget::updateEverything);
+			connect(map, &Map::selectionVisibilityRequested,
+			        this, [this](const QRectF& map_rect, Map::SelectionVisibility visibility) {
+				switch (visibility)
+				{
+				case Map::FullVisibility:
+					ensureVisibilityOfRect(map_rect, DiscreteZoom);
+					break;
+				case Map::PartialVisibility:
+					if (!this->view->calculateViewedRect(viewportToView(rect())).intersects(map_rect))
+						ensureVisibilityOfRect(map_rect, DiscreteZoom);
+					break;
+				case Map::IgnoreVisibilty:
+					break;
+				default:
+					Q_UNREACHABLE();
+				}
+			});
+			connect(map, &Map::drawingBoundingBoxChanged,
+			        this, &MapWidget::setDrawingBoundingBox);
+			connect(map, &Map::drawingBoundingBoxCleared,
+			        this, &MapWidget::clearDrawingBoundingBox);
+			connect(map, &Map::activityBoundingBoxChanged,
+			        this, &MapWidget::setActivityBoundingBox);
+			connect(map, &Map::activityBoundingBoxCleared,
+			        this, &MapWidget::clearActivityBoundingBox);
+			connect(map, &Map::drawingUpdateRequested,
+			        this, &MapWidget::updateDrawing);
+			connect(map, &Map::templateAreaDirty,
+			        this, [this](Template* temp, const QRectF& map_rect, int pixel_border) {
+				if (this->view->isTemplateVisible(temp))
+					markTemplateAreaDirty(this->view->calculateViewBoundingBox(map_rect), pixel_border);
+			});
+			connect(map, &Map::objectAreaDirty,
+			        this, &MapWidget::markObjectAreaDirty);
+			connect(map, &Map::templateReplacementRequested,
+			        this, [this](const Template* old_template, Template* new_template) {
+				this->view->setTemplateVisibility(
+					new_template,
+					this->view->getTemplateVisibility(old_template));
+			});
 			connect(map, &Map::colorAdded, this, &MapWidget::updatePlaceholder);
 			connect(map, &Map::colorDeleted, this, &MapWidget::updatePlaceholder);
 			connect(map, &Map::symbolAdded, this, &MapWidget::updatePlaceholder);
@@ -255,6 +295,40 @@ void MapWidget::applyMapTransform(render::OverlaySceneBuilder* painter) const
 		y_axis.x() - origin.x(), y_axis.y() - origin.y(),
 		origin.x(), origin.y()
 	));
+}
+
+void MapWidget::drawSelection(render::OverlaySceneBuilder* painter,
+	                          const Map& map,
+	                          bool force_min_size,
+	                          const MapRenderables* replacement_renderables,
+	                          bool draw_normal) const
+{
+	if (!painter)
+		return;
+
+	painter->save();
+	applyMapTransform(painter);
+
+	RenderConfig::Options options = RenderConfig::Screen | RenderConfig::HelperSymbols;
+	auto selection_opacity = qreal(1);
+	if (force_min_size)
+		options |= RenderConfig::ForceMinSize;
+	if (!draw_normal)
+	{
+		options |= RenderConfig::Highlighted;
+		selection_opacity = 0.4;
+	}
+	RenderConfig config = {
+		map,
+		view->calculateViewedRect(viewportToView(rect())),
+		view->calculateFinalZoomFactor(),
+		options,
+		selection_opacity,
+	};
+	painter->append(*(replacement_renderables
+		? replacement_renderables->buildIR(config)
+		: map.buildSelectionIR(config)));
+	painter->restore();
 }
 
 QRectF MapWidget::viewportToView(const QRect& input) const

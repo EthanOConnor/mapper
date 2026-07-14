@@ -269,6 +269,48 @@ target checks clean. Qt's sequential package targets produced both an unsigned
 arm64 release APK and release AAB with Java compilation and Android lint in the
 gate. No physical Android device was attached for the final surface smoke.
 
+### Final dependency cut
+
+Checkpoint 7 deletes the remaining migration-shaped drawing surface. `MapGrid`
+has only an IR builder. `MapRenderables` only builds immutable IR; it no longer
+accepts an overlay or painter. Selection and editing previews are composed by
+`MapWidget`, while `Map` exposes only the selected document IR. The obsolete
+QPainter declarations and includes left behind by the screen cutover are gone,
+as is the last transitional spin-box overload.
+
+Document mutation no longer stores or calls `MapWidget*`. `Map` emits typed
+redraw, dirty-area, selection-visibility, and template-visibility requests;
+each presentation subscribes while its `MapView` is attached. This removes the
+core-to-widget ownership inversion and also fixes the old partial-visibility
+calculation to use viewport-local bounds. A focused `Map` test exercises every
+presentation request without constructing a widget.
+
+The renderer-neutral contract is an explicit `Mapper::RenderIR` CMake target.
+It has no Qt or backend link dependency, and the full runtime depends on it in
+the ordinary forward direction. Source and test include paths and compile
+definitions are target-scoped; no directory-wide CMake build state remains.
+Static GDAL and ICU dependencies are resolved through their maintained imported
+targets, including the image/database primitives and ICU data archive required
+by the Android cross-link. This is intentionally the whole enforcement
+mechanism: target structure, normal compiler/linker failures, and focused tests,
+not a custom architecture checker.
+
+The final Debug and Release gates each pass 35 of 35 tests. Seven focused
+render/frame/raster/print/presentation tests pass under AddressSanitizer and
+UndefinedBehaviorSanitizer. Rust's test, clippy with warnings denied, and
+formatting checks are clean. The Android arm64 build compiles C++, Rust, and
+Java, runs Android lint, and produces both the unsigned release APK and release
+AAB. A physical-device surface smoke remains the only platform acceptance item
+that cannot be performed without hardware.
+
+The final Release retained-vector benchmark encodes the 10,736-command scene
+once and measures 300 synchronized 1024 x 768 render/readback samples at
+6.70 ms p50, 9.10 ms p95, and 10.06 ms maximum. The final Fishtrap raster gate
+reaches exact coverage in 3.33 s and measures 300 synchronized 2068 x 1906
+samples at 4.08 ms p50, 4.28 ms p95, and 6.22 ms maximum, with 25 retained
+images, 3.05 mean RGBA-channel delta, exact alpha, and five high-delta pixels.
+These agree with the checkpoint-4/5 baselines and show no final-cut regression.
+
 ## Lessons from the exploratory renderer
 
 These are constraints, not code to port:

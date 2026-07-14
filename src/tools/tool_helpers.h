@@ -37,7 +37,6 @@
 #include "core/path_coord.h"
 #include "tools/point_handles.h"
 
-class QPainter;
 class QPoint;
 class QPointF;
 class QRectF;

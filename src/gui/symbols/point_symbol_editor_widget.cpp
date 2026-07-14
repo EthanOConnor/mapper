@@ -44,7 +44,6 @@
 #include <QLocale>
 #include <QMenu>
 #include <QMouseEvent>
-#include <QPainter>
 #include <QPen>
 #include <QPixmap>
 #include <QPoint>

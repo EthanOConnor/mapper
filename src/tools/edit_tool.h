@@ -39,7 +39,6 @@
 #include "tools/tool_base.h"
 
 class QAction;
-class QPainter;
 class QPointF;
 class QRectF;
 

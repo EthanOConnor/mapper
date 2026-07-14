@@ -35,7 +35,6 @@ class QEvent;
 class QInputMethodEvent;
 class QKeyEvent;
 class QMouseEvent;
-class QPainter;
 class QRectF;
 class QToolBar;
 class QVariant;

@@ -33,7 +33,6 @@
 
 class QAction;
 class QEvent;
-class QPainter;
 class QRectF;
 
 namespace OpenOrienteering {

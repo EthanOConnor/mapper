@@ -353,29 +353,6 @@ namespace Util
 			return spinbox;
 		}
 		
-		/**
-		 * @deprecated Transitional method.
-		 * 
-		 * Creates and initializes a QDoubleSpinBox.
-		 * 
-		 * This method allows to initialize the most frequent options of
-		 * QDoubleSpinBox in a single call, determining the actual properties
-		 * via InputProperties<T>.
-		 * 
-		 * The unit of measurement is taken from the actual parameter. This is
-		 * meant to support the transition from code where the translation of
-		 * units still exists in the context of the client code, instead of
-		 * in the context UnitOfMeasurement.
-		 */
-		template< class T >
-		QDoubleSpinBox* create(const QString& unit)
-		{
-			typedef InputProperties<T> P;
-			auto* spinbox = create(P::decimals(), P::min(), P::max(), unit, P::step());
-			if (P::wrapping())
-				spinbox->setWrapping(true);
-			return spinbox;
-		}
 	}
 	
 	

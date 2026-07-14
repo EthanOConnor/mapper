@@ -129,18 +129,6 @@ public:
 	/** Loads the map view state from the current element of an xml stream. */
 	void load(QXmlStreamReader& xml, int version);
 	
-	/**
-	 * Redraws all map widgets completely.
-	 * 
-	 * Note that this calls QWidget::update() which does not cause an immediate
-	 * repaint; instead it schedules a paint event.
-	 * 
-	 * Completely repainting widgets can be slow.
-	 * Try to do partial updates instead, if possible.
-	 */
-	void updateAllMapWidgets(VisibilityFeature change = MultipleFeatures);
-	
-	
 	/** Converts the point (with origin at the center of the view) to map coordinates */
 	MapCoord viewToMap(const QPointF& point) const;
 	
@@ -179,12 +167,9 @@ public:
 	QRectF calculateViewBoundingBox(QRectF map_rect) const;
 	
 	/**
-	 * Returns a QTransform suitable for QPainter, so objects defined in
-	 * map coordinates will be drawn at their view coordinates. Append a
+	 * Returns the renderer-neutral map-to-view transform. Append a
 	 * viewport transformation to this to get a complete map-to-viewport transformation
 	 * which makes the view center appear at the viewport center.
-	 * 
-	 * Note: The transform is to be combined with the painter's existing transform.
 	 */
 	const QTransform& worldTransform() const;
 	

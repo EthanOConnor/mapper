@@ -27,7 +27,6 @@
 #include <Qt>
 #include <QtGlobal>
 #include <QBrush>
-#include <QPainter>
 #include <QPen>
 #include <QPoint>
 #include <QString>

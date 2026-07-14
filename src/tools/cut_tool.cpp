@@ -33,7 +33,6 @@
 #include <QGuiApplication>
 #include <QMessageBox>
 #include <QMouseEvent>
-#include <QPainter>
 #include <QPoint>
 #include <QString>
 
@@ -612,7 +611,7 @@ int CutTool::updateDirtyRectImpl(QRectF& rect)
 void CutTool::drawImpl(render::OverlaySceneBuilder* painter, MapWidget* widget)
 {
 	auto map = this->map();
-	map->drawSelection(painter, true, widget, nullptr);
+	widget->drawSelection(painter, *map, true, nullptr);
 	
 	if (editingInProgress())
 	{
@@ -636,7 +635,7 @@ void CutTool::drawImpl(render::OverlaySceneBuilder* painter, MapWidget* widget)
 		painter->setWorldTransform(map_view->worldTransform(), true);
 		
 		RenderConfig config = { *map, map_view->calculateViewedRect(widget->viewportToView(widget->rect())), map_view->calculateFinalZoomFactor(), RenderConfig::Tool, 0.5 };
-		renderables->draw(painter, config);
+		painter->append(*renderables->buildIR(config));
 		
 		painter->restore();
 	}

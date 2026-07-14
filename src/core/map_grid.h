@@ -26,7 +26,6 @@
 
 #include "render/render_ir.h"
 
-class QPainter;
 class QRectF;
 class QXmlStreamReader;
 class QXmlStreamWriter;
@@ -82,22 +81,11 @@ public:
 	/** Loads the grid in xml format from the given stream. */
 	const MapGrid& load(QXmlStreamReader& xml);
 	
-	/**
-	 * Draws the map grid.
-	 * 
-	 * @param painter The QPainter used for drawing.
-	 * @param bounding_box Bounding box of the area to draw the grid for, in
-	 *     map coordinates.
-	 * @param map Map to draw the grid for.
-	 * @param scale_adjustment If zero, uses a cosmetic pen (one pixel wide),
-	 *        otherwise this is the divisor used to create a 0.1 mm wide pen.
-	 */
-	void draw(QPainter* painter, const QRectF& bounding_box, Map* map, qreal scale_adjustment = 0) const;
+	/** Builds immutable render IR for the visible grid lines. */
 	std::shared_ptr<const render::RenderIR> buildRenderIR(const QRectF& bounding_box,
 	                                                     Map* map,
 	                                                     double view_scale,
 	                                                     render::Revision revision) const;
-	void draw(QPainter* painter, const QRectF& bounding_box, Map* map, bool) const = delete;
 	
 	/**
 	 * Calculates the "final" parameters with the following properties:

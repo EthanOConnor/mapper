@@ -37,6 +37,7 @@
 #include "core/objects/boolean_tool.h"
 #include "core/objects/object.h"
 #include "core/symbols/symbol.h"
+#include "gui/map/map_widget.h"
 #include "tools/draw_circle_tool.h"
 #include "tools/draw_line_and_area_tool.h"
 #include "tools/draw_path_tool.h"
@@ -167,7 +168,7 @@ void CutHoleTool::focusOutEvent(QFocusEvent* event)
 
 void CutHoleTool::draw(render::OverlaySceneBuilder* painter, MapWidget* widget)
 {
-	map()->drawSelection(painter, true, widget, nullptr);
+	widget->drawSelection(painter, *map(), true, nullptr);
 	
 	if (path_tool)
 		path_tool->draw(painter, widget);

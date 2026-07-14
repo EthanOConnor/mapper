@@ -27,7 +27,6 @@
 #include <QGuiApplication>
 #include <QKeyEvent>
 #include <QMouseEvent>
-#include <QPainter>
 #include <QPixmap>
 #include <QPointer>
 #include <QRectF>
@@ -460,7 +459,7 @@ void DrawTextTool::drawImpl(render::OverlaySceneBuilder* painter, MapWidget* wid
 	
 	float opacity = text_editor ? 1.0f : 0.5f;
 	RenderConfig config = { *map(), widget->getMapView()->calculateViewedRect(widget->viewportToView(widget->rect())), widget->getMapView()->calculateFinalZoomFactor(), RenderConfig::Tool, opacity };
-	renderables.draw(painter, config);
+	painter->append(*renderables.buildIR(config));
 	
 	if (text_editor)
 		text_editor->draw(painter, widget);

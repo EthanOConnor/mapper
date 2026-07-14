@@ -977,7 +977,7 @@ void SymbolRenderWidget::setSelectedSymbolVisibility(bool checked)
 	}
 	if (selection_changed)
 		map->emitSelectionChanged();
-	map->updateAllMapWidgets();
+	map->requestRedraw();
 	map->setSymbolsDirty();
 	emitGuarded_selectedSymbolsChanged();
 }

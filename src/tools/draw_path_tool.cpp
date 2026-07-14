@@ -35,7 +35,6 @@
 #include <QLineF>
 #include <QLocale>
 #include <QMouseEvent>
-#include <QPainter>
 #include <QPen>
 #include <QPixmap>
 #include <QPointF>
