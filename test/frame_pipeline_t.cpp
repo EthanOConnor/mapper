@@ -418,20 +418,12 @@ void FramePipelineTest::mapWidgetUsesTheFrameContract()
 		canvas->currentFrame() && canvas->lastResult()
 		&& canvas->lastResult()->completion.frame_id == canvas->currentFrame()->id
 		&& canvas->lastResult()->surface_sequence == canvas->surfaceState().sequence
-		&& (canvas->lastResult()->completion.status == render::FrameStatus::Presented
-		    || canvas->lastResult()->completion.status == render::FrameStatus::TargetUnavailable),
+		&& canvas->lastResult()->completion.status == render::FrameStatus::Presented,
 		30000
 	);
 	auto const first_frame = canvas->currentFrame();
 	QVERIFY(!first_frame->vector_passes.empty());
-	if (canvas->lastResult()->completion.status == render::FrameStatus::TargetUnavailable)
-	{
-		QCOMPARE(canvas->surfaceState().phase, presentation::SurfacePhase::Exposed);
-		QVERIFY2(canvas->lastError().empty(), canvas->lastError().c_str());
-#if defined(Q_OS_MACOS)
-		QCOMPARE(canvas->lastResult()->backend, std::uint8_t(2));
-#endif
-	}
+	QVERIFY2(canvas->lastError().empty(), canvas->lastError().c_str());
 
 	auto* object = fixture->map.getPart(0)->getObject(0);
 	QVERIFY(object);
@@ -443,8 +435,7 @@ void FramePipelineTest::mapWidgetUsesTheFrameContract()
 		canvas->lastResult()
 		&& canvas->lastResult()->completion.frame_id == canvas->currentFrame()->id
 		&& canvas->lastResult()->surface_sequence == canvas->surfaceState().sequence
-		&& (canvas->lastResult()->completion.status == render::FrameStatus::Presented
-		    || canvas->lastResult()->completion.status == render::FrameStatus::TargetUnavailable),
+		&& canvas->lastResult()->completion.status == render::FrameStatus::Presented,
 		30000
 	);
 }

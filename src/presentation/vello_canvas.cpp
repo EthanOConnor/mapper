@@ -6,6 +6,7 @@
 
 #include "presentation/vello_canvas.h"
 
+#include <algorithm>
 #include <utility>
 
 #include <QtGlobal>
@@ -32,7 +33,19 @@ VelloCanvas::VelloCanvas(QWidget* parent)
 	connect(&completion_timer_, &QTimer::timeout, this, &VelloCanvas::pollResults);
 	retry_timer_.setSingleShot(true);
 	retry_timer_.setInterval(100);
-	connect(&retry_timer_, &QTimer::timeout, surface_, &NativeSurfaceWindow::requestFrame);
+	// Target creation may fail while a newly exposed platform surface is still
+	// settling. Re-publish the lifecycle state so the renderer prepares that
+	// native target again; merely resubmitting the frame cannot recover it.
+	connect(&retry_timer_, &QTimer::timeout, surface_, &NativeSurfaceWindow::refreshState);
+	if (qEnvironmentVariableIsSet("OOM_RENDER_TIMING"))
+	{
+		bool parsed = false;
+		auto const configured = qEnvironmentVariableIntValue(
+			"OOM_RENDER_TIMING_WINDOW", &parsed
+		);
+		timing_window_ = parsed && configured > 0 ? configured : 120;
+		timing_samples_us_.reserve(std::size_t(timing_window_));
+	}
 
 	surface_->setStateHandler([this](auto const& state) {
 		surface_state_ = state;
@@ -55,15 +68,10 @@ VelloCanvas::~VelloCanvas()
 	renderer_.reset();
 }
 
-void VelloCanvas::setFrame(render::FramePacketPtr frame)
+void VelloCanvas::setFrame(render::FramePacketPtr frame, render::Color background)
 {
 	frame_ = std::move(frame);
-	submitCurrentFrame();
-}
-
-void VelloCanvas::setBackground(render::Color color)
-{
-	background_ = color;
+	background_ = background;
 	submitCurrentFrame();
 }
 
@@ -115,6 +123,35 @@ void VelloCanvas::pollResults()
 {
 	while (auto result = renderer_->takeResult())
 	{
+		if (timing_window_ > 0
+		    && result->completion.status == render::FrameStatus::Presented)
+		{
+			timing_samples_us_.push_back(result->render_cpu_us);
+			if (timing_samples_us_.size() == std::size_t(timing_window_))
+			{
+				auto sorted = timing_samples_us_;
+				std::ranges::sort(sorted);
+				auto total = std::uint64_t(0);
+				for (auto const sample : sorted)
+					total += sample;
+				auto const percentile = [&sorted](double fraction) {
+					auto const index = std::min(
+						sorted.size() - 1,
+						std::size_t(fraction * double(sorted.size() - 1))
+					);
+					return sorted[index];
+				};
+				qInfo().nospace()
+				        << "OOM_RENDER_TIMING frames=" << sorted.size()
+				        << " render_cpu_avg_ms="
+				        << (double(total) / double(sorted.size()) / 1000.0)
+				        << " render_cpu_p50_ms=" << (double(percentile(0.50)) / 1000.0)
+				        << " render_cpu_p95_ms=" << (double(percentile(0.95)) / 1000.0)
+				        << " render_cpu_max_ms=" << (double(sorted.back()) / 1000.0)
+				        << " scenes=" << result->scene_count;
+				timing_samples_us_.clear();
+			}
+		}
 		last_result_ = *result;
 		if (results_.size() == 64)
 			results_.pop_front();

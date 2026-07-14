@@ -30,11 +30,13 @@
 #include <QApplication>
 #include <QColor>
 #include <QContextMenuEvent>
+#include <QDir>
 #include <QEvent>
 #include <QFlags>
 #include <QFont>
 #include <QGestureEvent>
 #include <QKeyEvent>
+#include <QImage>
 #include <QLabel>
 #include <QLatin1String>
 #include <QList>
@@ -86,6 +88,8 @@ class QGesture;
 namespace OpenOrienteering {
 
 namespace {
+
+constexpr int render_validation_step_ms = 16;
 
 template<typename Handler>
 void dispatchTouchCursorEvent(const TouchCursor::MouseEventTranslation& translation,
@@ -246,6 +250,7 @@ void MapWidget::setMapView(MapView* view)
 		}
 		
 		update();
+		maybeStartRenderValidationDriver();
 	}
 }
 
@@ -581,6 +586,184 @@ void MapWidget::cancelPinching()
 	pinching = false;
 	pinching_factor = 1.0;
 	update();
+}
+
+void MapWidget::maybeStartRenderValidationDriver()
+{
+	if (render_validation_driver_started
+	    || !qEnvironmentVariableIsSet("OOM_RENDER_VALIDATION_DRIVER")
+	    || !view)
+	{
+		return;
+	}
+
+	render_validation_driver_started = true;
+	bool parsed_delay = false;
+	auto const configured_delay = qEnvironmentVariableIntValue(
+		"OOM_RENDER_VALIDATION_DELAY_MS", &parsed_delay
+	);
+	auto const start_delay = parsed_delay && configured_delay >= 0
+	                       ? configured_delay : 1500;
+	qInfo().nospace()
+	        << "OOM_RENDER_VALIDATION scheduled widget=" << width() << "x" << height()
+	        << " dpr=" << devicePixelRatioF()
+	        << " delay_ms=" << start_delay;
+	QTimer::singleShot(start_delay, this, &MapWidget::runRenderValidationDriverStep);
+}
+
+void MapWidget::captureRenderValidationFrame(const char* phase, int delay_ms)
+{
+	auto const output_dir = QString::fromLocal8Bit(
+		qgetenv("OOM_RENDER_VALIDATION_CAPTURE_DIR")
+	);
+	if (output_dir.isEmpty())
+		return;
+	auto const phase_label = QString::fromLatin1(phase);
+	QTimer::singleShot(delay_ms, this, [this, output_dir, phase_label]() {
+		auto const frame = vello_canvas->currentFrame();
+		if (!frame || !QDir().mkpath(output_dir))
+			return;
+		render::VelloRenderer renderer;
+		auto const rendered = renderer.renderOffscreen(frame);
+		if (!rendered)
+		{
+			qWarning().nospace()
+			        << "OOM_RENDER_VALIDATION_CAPTURE failed phase=" << phase_label
+			        << " reason=" << renderer.lastError();
+			return;
+		}
+		QImage image(
+			rendered->rgba8.data(), int(rendered->width), int(rendered->height),
+			QImage::Format_RGBA8888
+		);
+		auto const path = QDir(output_dir).filePath(
+			QStringLiteral("%1_%2.png")
+				.arg(render_validation_driver_step, 4, 10, QLatin1Char('0'))
+				.arg(phase_label)
+		);
+		auto const saved = image.save(path);
+		qInfo().nospace()
+		        << "OOM_RENDER_VALIDATION_CAPTURE phase=" << phase_label
+		        << " saved=" << saved
+		        << " path=" << path
+		        << " size=" << image.width() << "x" << image.height();
+	});
+}
+
+void MapWidget::runRenderValidationDriverStep()
+{
+	if (!view)
+		return;
+	if (!isVisible() || width() < 64 || height() < 64)
+	{
+		QTimer::singleShot(100, this, &MapWidget::runRenderValidationDriverStep);
+		return;
+	}
+
+	auto const center = rect().center();
+	auto const zoom_anchor = center + QPoint(width() / 5, -height() / 6);
+	auto const alternate_zoom_anchor = center + QPoint(-width() / 4, height() / 5);
+	auto const step = render_validation_driver_step++;
+	if (step == 0)
+	{
+		qInfo().nospace()
+		        << "OOM_RENDER_VALIDATION start widget=" << width() << "x" << height()
+		        << " dpr=" << devicePixelRatioF()
+		        << " zoom=" << view->getZoom();
+		captureRenderValidationFrame("start");
+	}
+	else if (step == 1)
+	{
+		startDragging(center);
+		qInfo() << "OOM_RENDER_VALIDATION phase=transient-pan";
+	}
+	else if (step >= 2 && step <= 61)
+	{
+		auto const t = double(step - 1) / 60.0;
+		updateDragging(center + QPoint(qRound(260.0 * t), qRound(-140.0 * t)));
+	}
+	else if (step == 62)
+	{
+		finishDragging(center + QPoint(260, -140));
+		qInfo().nospace()
+		        << "OOM_RENDER_VALIDATION phase=pan-commit zoom=" << view->getZoom();
+		captureRenderValidationFrame("pan-commit");
+	}
+	else if (step == 74)
+	{
+		startPinching(zoom_anchor);
+		qInfo() << "OOM_RENDER_VALIDATION phase=transient-pinch";
+	}
+	else if (step >= 75 && step <= 105)
+	{
+		auto const t = double(step - 74) / 31.0;
+		updatePinching(zoom_anchor, 1.0 + t);
+	}
+	else if (step == 106)
+	{
+		finishPinching(zoom_anchor, 2.0);
+		qInfo().nospace()
+		        << "OOM_RENDER_VALIDATION phase=pinch-commit zoom=" << view->getZoom();
+		captureRenderValidationFrame("pinch-commit");
+	}
+	else if (step == 125)
+	{
+		view->zoomSteps(2.0, viewportToView(zoom_anchor));
+		qInfo().nospace()
+		        << "OOM_RENDER_VALIDATION phase=cursor-zoom-in zoom=" << view->getZoom();
+		captureRenderValidationFrame("cursor-zoom-in");
+	}
+	else if (step == 145)
+	{
+		view->zoomSteps(-1.5, viewportToView(alternate_zoom_anchor));
+		qInfo().nospace()
+		        << "OOM_RENDER_VALIDATION phase=cursor-zoom-out zoom=" << view->getZoom();
+		captureRenderValidationFrame("cursor-zoom-out");
+	}
+	else if (step == 160)
+	{
+		startDragging(center);
+		qInfo() << "OOM_RENDER_VALIDATION phase=post-zoom-pan";
+	}
+	else if (step >= 161 && step <= 200)
+	{
+		auto const t = double(step - 160) / 40.0;
+		updateDragging(center + QPoint(qRound(-220.0 * t), qRound(110.0 * t)));
+	}
+	else if (step == 201)
+	{
+		finishDragging(center + QPoint(-220, 110));
+		qInfo().nospace()
+		        << "OOM_RENDER_VALIDATION phase=post-zoom-pan-commit zoom=" << view->getZoom();
+		captureRenderValidationFrame("post-zoom-pan-commit");
+	}
+	else if (step >= 230)
+	{
+		qInfo().nospace()
+		        << "OOM_RENDER_VALIDATION done zoom=" << view->getZoom()
+		        << " frame=" << (vello_canvas->currentFrame()
+		                          ? vello_canvas->currentFrame()->id : 0);
+		captureRenderValidationFrame("done");
+		if (qEnvironmentVariableIsSet("OOM_RENDER_VALIDATION_EXIT"))
+		{
+			QTimer::singleShot(500, qApp, []() {
+				if (auto* modal = QApplication::activeModalWidget())
+				{
+					modal->close();
+					QTimer::singleShot(1000, qApp, []() { QCoreApplication::quit(); });
+				}
+				else
+				{
+					QCoreApplication::quit();
+				}
+			});
+		}
+		return;
+	}
+
+	QTimer::singleShot(
+		render_validation_step_ms, this, &MapWidget::runRenderValidationDriverStep
+	);
 }
 
 void MapWidget::moveMap(int steps_x, int steps_y)
@@ -1023,8 +1206,9 @@ void MapWidget::paintEvent(QPaintEvent* event)
 			render::VectorPass::Space::Viewport,
 		});
 		auto frame = frame_planner.plan(request);
-		vello_canvas->setBackground(render::fromQColor(QColor(Qt::gray)));
-		vello_canvas->setFrame(std::move(frame));
+		vello_canvas->setFrame(
+			std::move(frame), render::fromQColor(QColor(Qt::gray))
+		);
 		return;
 	}
 
@@ -1134,10 +1318,12 @@ void MapWidget::paintEvent(QPaintEvent* event)
 
 	auto const snapshot = map->publishRenderSnapshot();
 	auto frame = frame_planner.plan(*snapshot, frame_request);
-	vello_canvas->setBackground(render::fromQColor(
-		show_help && no_contents ? QColor(Qt::gray) : QColor(Qt::white)
-	));
-	vello_canvas->setFrame(std::move(frame));
+	vello_canvas->setFrame(
+		std::move(frame),
+		render::fromQColor(
+			show_help && no_contents ? QColor(Qt::gray) : QColor(Qt::white)
+		)
+	);
 }
 
 void MapWidget::resizeEvent(QResizeEvent* event)

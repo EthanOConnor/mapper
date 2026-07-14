@@ -371,6 +371,10 @@ ISSprOM, ISSkiOM, MTBO, urban/sprint, dense contours, imported OCD, and raster
 templates. Reports publish ids, tags, hashes, and aggregate results, never
 private files.
 
+The repeatable interaction trace and the 2026-07-14 side-by-side evidence
+against `full-speed-ahead` are recorded in
+`test/manual/render-parity.md`.
+
 ## Acceptance thresholds
 
 ### Correctness

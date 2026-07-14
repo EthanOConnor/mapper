@@ -399,6 +399,9 @@ private:
 	void finishPinching(const QPoint& center, qreal factor);
 	/** Cancels a pinching interaction. */
 	void cancelPinching();
+	void maybeStartRenderValidationDriver();
+	void captureRenderValidationFrame(const char* phase, int delay_ms = 80);
+	void runRenderValidationDriverStep();
 	
 	/** Moves the map a given number of big "steps" in x and/or y direction. */
 	void moveMap(int steps_x, int steps_y);
@@ -444,6 +447,8 @@ private:
 	bool pinching;
 	qreal pinching_factor;
 	QPoint pinching_center;
+	bool render_validation_driver_started = false;
+	int render_validation_driver_step = 0;
 	bool render_context_update_scheduled;
 	
 	// Panning (operation)

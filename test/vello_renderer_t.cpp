@@ -218,7 +218,7 @@ ImageDifference compareImages(const QImage& actual, const QImage& expected)
 	};
 }
 
-std::optional<render::VelloFrameResult> waitForTerminalResult(
+std::optional<render::VelloFrameResult> waitForPresentedResult(
 	presentation::VelloCanvas& canvas, render::FrameId frame_id,
 	std::chrono::milliseconds timeout = std::chrono::seconds(20))
 {
@@ -237,8 +237,7 @@ std::optional<render::VelloFrameResult> waitForTerminalResult(
 			dropped_count += result->completion.status == render::FrameStatus::DroppedStale;
 			if (result->completion.frame_id == frame_id
 			    && result->surface_sequence == canvas.surfaceState().sequence
-			    && (result->completion.status == render::FrameStatus::Presented
-			        || result->completion.status == render::FrameStatus::TargetUnavailable))
+			    && result->completion.status == render::FrameStatus::Presented)
 				return result;
 		}
 		QTest::qWait(5);
@@ -417,10 +416,9 @@ void VelloRendererTest::nativeSurfaceLifecyclePresentsCurrentFrame()
 	auto const first = mapFrame(map, canvas.size());
 	QVERIFY(first);
 	canvas.setFrame(first);
-	auto const first_result = waitForTerminalResult(canvas, first->id);
+	auto const first_result = waitForPresentedResult(canvas, first->id);
 	QVERIFY2(first_result, canvas.lastError().c_str());
-	QVERIFY(first_result->completion.status == render::FrameStatus::Presented
-	        || first_result->completion.status == render::FrameStatus::TargetUnavailable);
+	QCOMPARE(first_result->completion.status, render::FrameStatus::Presented);
 	QCOMPARE(first_result->revision, first->revision);
 	QCOMPARE(first_result->surface_sequence, canvas.surfaceState().sequence);
 #if defined(Q_OS_MACOS)
@@ -438,10 +436,9 @@ void VelloRendererTest::nativeSurfaceLifecyclePresentsCurrentFrame()
 	host.show();
 	QVERIFY(QTest::qWaitForWindowExposed(&host, 15000));
 	QTRY_COMPARE(canvas.surfaceState().phase, presentation::SurfacePhase::Exposed);
-	auto const resumed = waitForTerminalResult(canvas, first->id);
+	auto const resumed = waitForPresentedResult(canvas, first->id);
 	QVERIFY2(resumed, canvas.lastError().c_str());
-	QVERIFY(resumed->completion.status == render::FrameStatus::Presented
-	        || resumed->completion.status == render::FrameStatus::TargetUnavailable);
+	QCOMPARE(resumed->completion.status, render::FrameStatus::Presented);
 	QCOMPARE(resumed->surface_sequence, canvas.surfaceState().sequence);
 }
 

@@ -12,6 +12,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include <QWidget>
 #include <QTimer>
@@ -33,8 +34,10 @@ public:
 	explicit VelloCanvas(QWidget* parent = nullptr);
 	~VelloCanvas() override;
 
-	void setFrame(render::FramePacketPtr frame);
-	void setBackground(render::Color color);
+	void setFrame(
+		render::FramePacketPtr frame,
+		render::Color background = { 65535, 65535, 65535, 65535 }
+	);
 	std::optional<render::VelloFrameResult> takeResult();
 	const std::optional<render::VelloFrameResult>& lastResult() const noexcept;
 	const render::FramePacketPtr& currentFrame() const noexcept;
@@ -56,6 +59,8 @@ private:
 	QTimer retry_timer_;
 	std::deque<render::VelloFrameResult> results_;
 	std::optional<render::VelloFrameResult> last_result_;
+	std::vector<std::uint64_t> timing_samples_us_;
+	int timing_window_ = 0;
 };
 
 }  // namespace OpenOrienteering::presentation
