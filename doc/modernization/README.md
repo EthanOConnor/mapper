@@ -136,6 +136,23 @@ resize, resource release, suspend, or shutdown. Completed status is tagged with
 a frame id; the caller never treats the previous frame's status as the current
 submission.
 
+Checkpoint 3 makes the contract concrete as an immutable `FramePacket`. It
+owns the camera, viewport/DPR, render request, ordered IR passes, document
+revision, and monotonic frame id. Pass isolation is explicit: an overprint
+separation is rendered to transparent intermediate storage before multiply
+composition, so knockout white can erase earlier marks within that separation.
+The QPainter implementation consumes this packet in the live `MapWidget` path
+and remains the exact reference for normal and overprint output.
+
+The corresponding `NativeSurfaceWindow` uses public Qt APIs only. It owns a
+render-only `QWindow`, emits sequenced unavailable/hidden/exposed/suspended
+state, reports logical and physical size, and exposes Qt's opaque `WId` plus
+the public XCB/Wayland application display handle where required. It contains
+no map, snapshot, cache, renderer, input forwarding, retry loop, or private
+`qpa` dependency. The existing QWidget remains the input authority; embedding
+and the bounded Rust render-thread channel happen with the real Vello consumer
+in checkpoint 4 rather than as unused transitional machinery here.
+
 ### Raster
 
 GDAL/source work happens on workers. Decoded tiles are immutable CPU data; the

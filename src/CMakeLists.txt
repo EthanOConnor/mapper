@@ -86,10 +86,14 @@ set(Mapper_Common_SRCS
   core/renderables/renderable_implementation.cpp
 
   # Immutable backend-neutral render description and QPainter reference path.
+  render/frame_pipeline.cpp
   render/render_ir.cpp
   render/render_snapshot.cpp
   render/qt_render_bridge.cpp
+  render/qpainter_frame_renderer.cpp
   render/qpainter_renderer.cpp
+
+  presentation/native_surface.cpp
   
   core/symbols/area_symbol.cpp
   core/symbols/combined_symbol.cpp

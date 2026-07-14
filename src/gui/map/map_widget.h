@@ -42,6 +42,7 @@
 
 #include "core/map_coord.h"
 #include "core/map_view.h"
+#include "render/frame_pipeline.h"
 
 class QContextMenuEvent;
 class QEvent;
@@ -508,6 +509,7 @@ private:
 	/** Map layer cache  */
 	QImage map_cache;
 	QRect map_cache_dirty_rect;
+	render::FramePlanner frame_planner;
 	
 	// Dirty regions for drawings (tools) and activities
 	/** Dirty rect for the current tool, in viewport coordinates (pixels). */

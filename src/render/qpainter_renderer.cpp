@@ -21,18 +21,15 @@
 #include <QPainterPath>
 #include <QPen>
 #include <QRawFont>
-#include <QRgb>
 
 #include "settings.h"
+#include "render/frame_pipeline.h"
+#include "render/qpainter_frame_renderer.h"
 #include "render/qt_render_bridge.h"
 
 namespace OpenOrienteering::render {
 
 namespace {
-
-#ifndef MAPPER_OVERPRINTING_CORRECTION
-#define MAPPER_OVERPRINTING_CORRECTION 2
-#endif
 
 void fixPenForPdf(QPen& pen, const QPainter& painter)
 {
@@ -380,57 +377,22 @@ void QPainterRenderer::drawOverprintingSimulation(QPainter& painter,
 	                                              const MapRenderSnapshot& snapshot,
 	                                              const RenderRequest& request) const
 {
-	auto* image = dynamic_cast<QImage*>(painter.device());
-	if (!image || image->format() != QImage::Format_ARGB32_Premultiplied)
+	auto const* device = painter.device();
+	if (!device)
 		return;
-	auto const hints = painter.renderHints();
-	auto const transform = painter.worldTransform();
-	painter.save();
-	painter.resetTransform();
 
-	QImage separation(image->size(), QImage::Format_ARGB32_Premultiplied);
-	for (auto color = snapshot.colors().rbegin(); color != snapshot.colors().rend(); ++color)
-	{
-		if (color->second.spot_method != SpotMethod::Spot)
-			continue;
-		separation.fill(Qt::transparent);
-		QPainter separation_painter(&separation);
-		separation_painter.setRenderHints(hints);
-		separation_painter.setWorldTransform(transform);
-		drawColorSeparation(separation_painter, snapshot, request, color->first, true);
-		separation_painter.end();
-		painter.setCompositionMode(QPainter::CompositionMode_Multiply);
-		painter.drawImage(0, 0, separation);
-	}
-
-	painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
-#if MAPPER_OVERPRINTING_CORRECTION > 0
-	separation.fill(Qt::transparent);
-	QPainter normal_painter(&separation);
-	normal_painter.setRenderHints(hints);
-	normal_painter.setWorldTransform(transform);
-	auto spot_request = request;
-	spot_request.options |= RenderConfig::RequireSpotColor;
-	draw(normal_painter, snapshot, spot_request);
-	normal_painter.end();
-	auto* pixel = reinterpret_cast<QRgb*>(separation.bits());
-	auto const* end = pixel + separation.sizeInBytes() / sizeof(QRgb);
-	for (; pixel < end; ++pixel)
-	{
-#if MAPPER_OVERPRINTING_CORRECTION == 1
-		*pixel = (*pixel >> 3) & 0x1f1f1f1f;
-#elif MAPPER_OVERPRINTING_CORRECTION == 2
-		*pixel = (*pixel >> 2) & 0x3f3f3f3f;
-#else
-		*pixel = (*pixel >> 1) & 0x7f7f7f7f;
-#endif
-	}
-	painter.drawImage(0, 0, separation);
-#endif
-	painter.restore();
-
-	if (request.options.testFlag(RenderConfig::Screen))
-		drawColorSeparation(painter, snapshot, request, MapColor::Reserved, true);
+	FramePlanner planner;
+	auto frame = planner.plan(snapshot, {
+		{
+			std::uint32_t(std::max(0, device->width())),
+			std::uint32_t(std::max(0, device->height())),
+			std::max(1.0, double(device->devicePixelRatioF())),
+			fromQTransform(painter.worldTransform()),
+		},
+		request,
+		true,
+	});
+	QPainterFrameRenderer().render(painter, *frame);
 }
 
 }  // namespace OpenOrienteering::render

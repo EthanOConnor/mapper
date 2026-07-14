@@ -21,6 +21,7 @@
 
 #include "map_widget.h"
 
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 
@@ -59,6 +60,8 @@
 #include "core/map.h"
 #include "core/renderables/renderable.h"
 #include "core/symbols/symbol.h"  // IWYU pragma: keep
+#include "render/qpainter_frame_renderer.h"
+#include "render/qt_render_bridge.h"
 #include "gui/touch_cursor.h"
 #include "gui/map/map_editor_activity.h"
 #include "gui/widgets/action_grid_bar.h"
@@ -1439,19 +1442,50 @@ void MapWidget::updateMapCache(bool use_background)
 	Map* map = view->getMap();
 	QRectF map_view_rect = view->calculateViewedRect(viewportToView(map_cache_dirty_rect));
 
-	RenderConfig config = { *map, map_view_rect, view->calculateFinalZoomFactor(), options, 1.0 };
-	
+	auto const render_request = render::RenderRequest {
+		render::fromQRectF(map_view_rect),
+		view->calculateFinalZoomFactor(),
+		options,
+		1,
+	};
+
+	// Derive the exact map-to-cache transform used by the existing view. The
+	// frame owns this camera, so backends do not reach back into MapView.
+	painter.save();
 	painter.translate(width() / 2.0, height() / 2.0);
 	painter.setWorldTransform(view->worldTransform(), true);
+	auto const world_to_viewport = render::fromQTransform(painter.worldTransform());
+	painter.restore();
+
+	auto const snapshot = map->publishRenderSnapshot();
+	bool simulate_overprinting = false;
 #ifndef Q_OS_ANDROID
-	if (view->isOverprintingSimulationEnabled())
-		map->drawOverprintingSimulation(&painter, config);
-	else
+	simulate_overprinting = view->isOverprintingSimulationEnabled();
 #endif
-		map->draw(&painter, config);
+	auto const frame = frame_planner.plan(*snapshot, {
+		{
+			std::uint32_t(std::max(0, width())),
+			std::uint32_t(std::max(0, height())),
+			std::max(1.0, double(devicePixelRatioF())),
+			world_to_viewport,
+		},
+		render_request,
+		simulate_overprinting,
+	});
+	auto const completion = render::QPainterFrameRenderer().render(painter, *frame);
+	if (completion.frame_id != frame->id
+	    || completion.status != render::FrameStatus::Presented)
+	{
+		qFatal("QPainter failed to render the requested map frame");
+	}
 	
 	if (view->isGridVisible())
+	{
+		painter.save();
+		painter.setWorldTransform(render::toQTransform(world_to_viewport), false);
 		map->drawGrid(&painter, map_view_rect);
+		painter.restore();
+	}
 	
 	// Finish drawing
 	painter.end();

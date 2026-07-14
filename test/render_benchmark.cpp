@@ -17,6 +17,7 @@
 #include "core/map.h"
 #include "core/map_part.h"
 #include "core/objects/object.h"
+#include "render/frame_pipeline.h"
 #include "render/qt_render_bridge.h"
 #include "render/render_snapshot.h"
 
@@ -77,13 +78,22 @@ int main(int argc, char** argv)
 		1,
 	};
 	map.publishRenderSnapshot()->buildIR(request);
+	render::FramePlanner frame_planner;
+	auto const frame_request = render::FrameRequest {
+		{ 2068, 1906, 1, {} },
+		request,
+		false,
+	};
+	frame_planner.plan(*map.publishRenderSnapshot(), frame_request);
 
 	std::vector<double> edit_and_publish;
 	std::vector<double> publish;
 	std::vector<double> record_ir;
+	std::vector<double> frame_plan;
 	edit_and_publish.reserve(iterations);
 	publish.reserve(iterations);
 	record_ir.reserve(iterations);
+	frame_plan.reserve(iterations);
 	std::size_t object_count = 0;
 	std::size_t command_count = 0;
 
@@ -96,12 +106,21 @@ int main(int argc, char** argv)
 		auto const published = Clock::now();
 		auto ir = snapshot->buildIR(request);
 		auto const recorded = Clock::now();
+		auto frame = frame_planner.plan(*snapshot, frame_request);
+		auto const planned = Clock::now();
 
 		edit_and_publish.push_back(milliseconds(published - started));
 		publish.push_back(milliseconds(published - edited));
 		record_ir.push_back(milliseconds(recorded - published));
+		frame_plan.push_back(milliseconds(planned - recorded));
 		object_count = snapshot->objectCount();
 		command_count = ir->commands.size();
+		if (frame->vector_passes.size() != 1
+		    || !frame->vector_passes.front().scene
+		    || frame->vector_passes.front().scene->commands.size() != command_count)
+		{
+			return 5;
+		}
 	}
 
 	std::cout << "{\n  \"iterations\": " << iterations
@@ -112,6 +131,8 @@ int main(int argc, char** argv)
 	printSeries("publish_only", publish);
 	std::cout << ",\n";
 	printSeries("record_ir", record_ir);
+	std::cout << ",\n";
+	printSeries("frame_plan", frame_plan);
 	std::cout << "\n}\n";
 	return 0;
 }
