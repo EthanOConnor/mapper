@@ -155,8 +155,6 @@ public:
 	 * - For dockwidget buttons, the QCommonStyle implementation is used instead
 	 *   of the QFusionStyle one.
 	 * 
-	 * In general:
-	 * - Icons are created with ScalingIconEngine.
 	 */
 	QIcon standardIcon(StandardPixmap standard_icon, const QStyleOption* option, const QWidget* widget) const override;
 	

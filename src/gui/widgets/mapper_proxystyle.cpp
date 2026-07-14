@@ -49,7 +49,6 @@
 #include <QWidget>
 
 #include "settings.h"
-#include "gui/scaling_icon_engine.h"
 #include "gui/widgets/segmented_button_layout.h"
 #include "gui/util_gui.h"
 
@@ -474,8 +473,6 @@ QIcon MapperProxyStyle::standardIcon(QStyle::StandardPixmap standard_icon, const
 	
 	if (icon.isNull())
 		icon = QProxyStyle::standardIcon(standard_icon, option, widget);
-	if (icon.actualSize(QSize(1000,1000)).width() < 1000)
-		icon = QIcon(new ScalingIconEngine(icon));
 	return icon;
 }
 
