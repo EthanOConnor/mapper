@@ -11,7 +11,8 @@ printer driver and device.
   size, and whether the driver uses a vendor or Microsoft class driver.
 - Use `examples/complete map.omap`, `examples/overprinting.omap`, and
   `test/data/issue-513-coords-outside-printable.omap`.
-- Test print preview, Microsoft Print to PDF, and one physical printer.
+- Test print preview, Microsoft Print to PDF, and one physical printer at
+  Mapper's configured 600 dpi output resolution.
 
 ## Checks
 
@@ -20,8 +21,11 @@ printer driver and device.
 2. Verify the printable-area origin and page margins against preview; no
    constant horizontal or vertical offset is allowed.
 3. Inspect thin curves, line patterns, text, clipping, transparency, and
-   overprint output for coordinate stair-stepping, dropped marks, or unexpected
-   full-page rasterization.
+   overprint output for coordinate stair-stepping, dropped marks, or an extra
+   driver resampling pass. Mapper intentionally sends the native Windows GDI
+   printer one full-page image composed at its configured resolution; preview,
+   PDF, image export, Direct2D, and non-Windows print engines remain vector
+   where their existing contracts permit it.
 4. Change paper size, orientation, resolution, copies, and a vendor-specific
    property. Reopen the dialog and verify the selected settings survive and the
    produced page matches them.
