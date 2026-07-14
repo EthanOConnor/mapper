@@ -94,9 +94,12 @@ jobs:
         run: cmake -E make_directory .vcpkg-cache
 
       - name: Install Rust tools
+        shell: bash
         run: |
           rustup toolchain install stable --profile minimal --component clippy,rustfmt
-          cargo install cargo-about --version 0.9.1 --locked --features cli
+          if ! cargo-about --version 2>/dev/null | grep -qx 'cargo-about 0.9.1'; then
+            cargo install cargo-about --version 0.9.1 --locked --features cli
+          fi
 
       - name: Check Rust renderer
         env:
@@ -238,12 +241,15 @@ jobs:
           echo "ANDROID_NDK_HOME=${sdk_root}/ndk/27.2.12479018" >> "$GITHUB_ENV"
 
       - name: Install Rust tools
+        shell: bash
         env:
           CARGO_TARGET_DIR: build/ci-android/cargo/checks
         run: |
           rustup toolchain install stable --profile minimal --component rustfmt
           rustup target add aarch64-linux-android
-          cargo install cargo-about --version 0.9.1 --locked --features cli
+          if ! cargo-about --version 2>/dev/null | grep -qx 'cargo-about 0.9.1'; then
+            cargo install cargo-about --version 0.9.1 --locked --features cli
+          fi
           cargo fmt --manifest-path src/render/vello/Cargo.toml -- --check
           NDK_BIN="${ANDROID_NDK_ROOT}/toolchains/llvm/prebuilt/linux-x86_64/bin"
           export CC_aarch64_linux_android="${NDK_BIN}/aarch64-linux-android28-clang"
