@@ -1,0 +1,26 @@
+{
+  "name": "openorienteering-mapper",
+  "version-semver": "0.9.7",
+  "builtin-baseline": "db4723bd0a99eab031f1a3dee4336dca43049c87",
+  "dependencies": [
+    {
+      "name": "gdal",
+      "default-features": false,
+      "features": [
+        "lzma",
+        "openjpeg",
+        "recommended-features",
+        "webp",
+        "zstd"
+      ]
+    },
+    "icu",
+    {
+      "name": "proj",
+      "default-features": false,
+      "features": [
+        "tiff"
+      ]
+    }
+  ]
+}

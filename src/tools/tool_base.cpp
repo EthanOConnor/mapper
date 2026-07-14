@@ -264,7 +264,7 @@ bool MapEditorToolBase::keyPressEvent(QKeyEvent* event)
 	// modifier flags that existed immediately before the event occurred.
 	// This is in contradiction to the documentation for QKeyEvent::modifiers(),
 	// but the documented behaviour of (parent) QInputEvent::modifiers().
-	// Qt5 doc says QKeyEvent::modifiers() "cannot always be trusted." ...
+	// Correct the modifier state for the key event currently being delivered.
 	switch (event->key())
 	{
 		case Qt::Key_Shift:
@@ -294,7 +294,7 @@ bool MapEditorToolBase::keyReleaseEvent(QKeyEvent* event)
 	// modifier flags that existed immediately before the event occurred.
 	// This is in contradiction to the documentation for QKeyEvent::modifiers(),
 	// but the documented behaviour of (parent) QInputEvent::modifiers().
-	// Qt5 doc says QKeyEvent::modifiers() "cannot always be trusted." ...
+	// Correct the modifier state for the key event currently being delivered.
 	switch (event->key())
 	{
 		case Qt::Key_Shift:

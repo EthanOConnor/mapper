@@ -50,7 +50,7 @@ inline
 qreal distanceSquared(QPointF a, const QPointF& b)
 {
 	a -= b;
-	return QPointF::dotProduct(a, a); // introduced in Qt 5.1
+	return QPointF::dotProduct(a, a);
 }
 
 

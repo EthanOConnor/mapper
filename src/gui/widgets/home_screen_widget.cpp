@@ -33,6 +33,7 @@
 #include <QPainter>
 #include <QScroller>
 #include <QSettings>
+#include <QStyle>
 #include <QVBoxLayout>
 
 #include "settings.h"
@@ -167,7 +168,7 @@ QWidget* HomeScreenWidgetDesktop::makeMenuWidget(HomeScreenController* controlle
 	  tr("Help"), QIcon(QString::fromLatin1(":/images/help.png")));
 	menu_layout->addWidget(button_help);
 	QAbstractButton* button_exit = makeButton(
-	  tr("Exit"), QIcon(QString::fromLatin1(":/qt-project.org/styles/commonstyle/images/standardbutton-close-32.png"))); // From Qt5
+	  tr("Exit"), style()->standardIcon(QStyle::SP_DialogCloseButton));
 	menu_layout->addWidget(button_exit);
 	
 	connect(button_new_map, &QAbstractButton::clicked, window, &MainWindow::showNewMapWizard);

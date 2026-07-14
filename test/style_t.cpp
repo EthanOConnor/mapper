@@ -24,6 +24,7 @@
 #include <QIcon>
 #include <QObject>
 #include <QSize>
+#include <QString>
 #include <QStyle>
 
 #include "gui/widgets/mapper_proxystyle.h"
@@ -39,8 +40,17 @@ class StyleTest : public QObject
 {
 Q_OBJECT
 private slots:
+	void resourceIconTest();
 	void standardIconTest();
 };
+
+void StyleTest::resourceIconTest()
+{
+	Q_INIT_RESOURCE(resources);
+	const QIcon icon(QStringLiteral(":/images/help.png"));
+	QVERIFY(!icon.isNull());
+	QVERIFY(!icon.pixmap(QSize(32, 32)).isNull());
+}
 
 /**
  * Tests standard icon behaviours of MapperProxyStyle

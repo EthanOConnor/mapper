@@ -35,7 +35,7 @@
 - <a href="https://github.com/OpenOrienteering/mapper">OpenOrienteering Mapper repository on GitHub</a>
 - <a href="https://github.com/OpenOrienteering/mapper/issues">OpenOrienteering Mapper issues</a>
 - <a href="https://github.com/OpenOrienteering/mapper/wiki">OpenOrienteering Mapper developer wiki</a>
-- <a href="http://doc.qt.io/qt-5">Qt 5 documentation</a>
+- <a href="https://doc.qt.io/qt-6/">Qt 6 documentation</a>
 - <a href="https://cmake.org/documentation/">CMake documentation</a>
 - <a href="http://www.stack.nl/~dimitri/doxygen/manual/">Doxygen documentation</a>
 

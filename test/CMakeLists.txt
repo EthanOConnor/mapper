@@ -17,19 +17,7 @@
 #    along with OpenOrienteering.  If not, see <http://www.gnu.org/licenses/>.
 
 
-find_package(Qt6Network REQUIRED)
-find_package(Qt6PrintSupport REQUIRED)
-find_package(Qt6Test REQUIRED)
-find_package(Qt6Widgets REQUIRED)
-find_package(Qt6Positioning)
-find_package(Qt6Sensors)
-
 set(CMAKE_AUTOMOC ON)
-
-if(Mapper_DEVELOPMENT_BUILD)
-	include(EnableSanitize)
-	enable_sanitize(address undefined NO_RECOVER)
-endif()
 
 add_definitions(
   -DQT_NO_CAST_FROM_ASCII

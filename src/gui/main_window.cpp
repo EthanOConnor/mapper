@@ -765,8 +765,7 @@ void MainWindow::saveWindowSettings()
 void MainWindow::loadWindowSettings()
 {
 #if defined(Q_OS_ANDROID)
-	// Always show the window on the whole available area on Android
-	// Qt 5.14 adds QWidget::screen().
+	// Always show the window on the whole available area on Android.
 	if (auto* screen = qApp->screenAt(geometry().center()))
 		resize(screen->availableGeometry().size());
 #else

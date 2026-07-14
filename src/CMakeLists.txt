@@ -373,7 +373,10 @@ if(ANDROID)
 		QT_ANDROID_VERSION_NAME "${Mapper_VERSION_DISPLAY}"
 	)
 
-	add_dependencies(Mapper Mapper-manual Mapper_translations)
+	add_dependencies(Mapper Mapper_translations)
+	if(TARGET Mapper-manual)
+		add_dependencies(Mapper Mapper-manual)
+	endif()
 	add_custom_command(TARGET Mapper POST_BUILD
 		COMMAND "${CMAKE_COMMAND}" -E make_directory
 			"${mapper_android_package_dir}/assets/doc"

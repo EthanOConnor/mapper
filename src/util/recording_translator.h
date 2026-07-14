@@ -30,15 +30,13 @@ namespace OpenOrienteering {
 
 /** A QTranslator variation that doesn't actually translate,
  *  but instead dumps (TODO: records) the strings to be translated.
- * 
- *  Note: This is for Qt5 only.
  */
 class RecordingTranslator : public QTranslator
 {
 Q_OBJECT
 public:
 	/** Constructs a new translator. */
-	explicit RecordingTranslator(QObject* parent = 0);
+	explicit RecordingTranslator(QObject* parent = nullptr);
 	
 	/** Destructs the translator. */
 	~RecordingTranslator() override;
@@ -47,10 +45,8 @@ public:
 	bool isEmpty() const override;
 	
 	/** Dumps the context, sourceText, disambiguation and n using qDebug().
-	 *  Return a null string. 
-	 *
-	 *  Note: This is the Qt5 signature of translate(). */
-	QString	translate(const char* context, const char* sourceText, const char* disambiguation = 0, int n = -1) const override;
+	 *  Return a null string. */
+	QString translate(const char* context, const char* sourceText, const char* disambiguation = nullptr, int n = -1) const override;
 };
 
 

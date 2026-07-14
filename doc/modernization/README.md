@@ -59,9 +59,14 @@ Feature work stays frozen until all are complete.
 7. Delete transitional paths and enforce the intended dependency direction by
    the structure of the build targets and focused tests.
 
-Each checkpoint must build and have focused verification. That creates useful
-recovery points without turning the campaign into incremental product delivery
-or a permanent migration architecture.
+Each checkpoint must build and have focused verification. Its final state is a
+dedicated commit with an annotated `modernization-checkpoint-N` tag recording
+the toolchain, verification commands, test totals, corpus ids, measurements,
+and genuine remaining failures. Preparatory commits may exist between tags,
+but work on checkpoint N+1 does not begin until checkpoint N is clean, buildable,
+tested, committed, and tagged. This creates useful recovery points without
+turning the campaign into incremental product delivery or a permanent migration
+architecture.
 
 ## Target architecture
 
@@ -180,10 +185,12 @@ Do not add a package for a tiny readable standard-library helper or pull in a
 second application framework. Prefer imported/package targets over copied
 source. A local patch needs a removal condition and a test.
 
-The development baseline is CMake 3.28+, C++20, Qt 6.8 LTS minimum (tested on
-Qt 6.11.1), current supported PROJ/GDAL, and Rust stable with committed
-`Cargo.lock`. Build properties are target-scoped; there are no global include
-directories, global definitions, or string-appended compiler flags.
+The development baseline is CMake 4.4.0, Ninja 1.13.0, C++23, Qt 6.11.1,
+PROJ 9.8.1, GDAL 3.13.1, ICU 78.3, and Rust stable with committed `Cargo.lock`.
+Distributable builds use the pinned vcpkg manifest; fast local builds may use
+system packages that satisfy the same minimums. Build properties are
+target-scoped; there are no global include directories, global definitions, or
+string-appended compiler flags.
 
 ## Corpus
 
@@ -243,7 +250,7 @@ upstream baseline without a reviewed correctness/quality reason.
 ### Platform and delivery
 
 - Clean preset builds on macOS, Windows, and Linux.
-- iOS and Android cross-build and real-device surface smoke.
+- Android arm64 cross-build and real-device surface smoke.
 - Qt 6 only: no Qt 5, Core5Compat, qmake, or old superbuild/Azure path.
 - Dependency/license inventory is available to packaging.
 - Existing navigation, editing, overlays, print/export, and lifecycle scenarios
@@ -254,4 +261,3 @@ upstream baseline without a reviewed correctness/quality reason.
 For each checkpoint, the commit, commands, test totals, corpus ids, benchmark
 samples, visual artifacts, and genuine remaining failures are recorded. A
 failure is not converted into a skip merely to close a checkpoint.
-

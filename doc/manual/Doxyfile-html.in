@@ -33,7 +33,6 @@ USE_MATHJAX            = NO
 GENERATE_HTML          = YES
 DISABLE_INDEX          = YES
 GENERATE_TREEVIEW      = NO
-HTML_TIMESTAMP         = NO
 SEARCHENGINE           = NO
 HTML_HEADER            = "@CMAKE_CURRENT_SOURCE_DIR@/header.html"
 HTML_FOOTER            = "@CMAKE_CURRENT_SOURCE_DIR@/footer.html"

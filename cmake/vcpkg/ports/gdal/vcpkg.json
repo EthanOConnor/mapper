@@ -1,0 +1,144 @@
+{
+  "name": "gdal",
+  "version-semver": "3.13.1",
+  "description": "GDAL is a translator library for raster and vector geospatial data formats.",
+  "homepage": "https://gdal.org/",
+  "license": "MIT",
+  "supports": "!uwp",
+  "dependencies": [
+    "json-c",
+    "libgeotiff",
+    {
+      "name": "pkgconf",
+      "host": true
+    },
+    {
+      "name": "proj",
+      "default-features": false,
+      "features": [
+        "tiff"
+      ]
+    },
+    {
+      "name": "tiff",
+      "default-features": false
+    },
+    {
+      "name": "vcpkg-cmake",
+      "host": true
+    },
+    {
+      "name": "vcpkg-cmake-config",
+      "host": true
+    },
+    {
+      "name": "vcpkg-pkgconfig-get-modules",
+      "host": true
+    },
+    "zlib"
+  ],
+  "features": {
+    "curl": {
+      "description": "Enable CURL network support",
+      "dependencies": [
+        {
+          "name": "curl",
+          "default-features": false,
+          "features": [
+            "ssl"
+          ]
+        }
+      ]
+    },
+    "expat": {
+      "description": "Use EXPAT",
+      "dependencies": [
+        "expat"
+      ]
+    },
+    "geos": {
+      "description": "Enable GEOS support",
+      "dependencies": [
+        "geos"
+      ]
+    },
+    "jpeg": {
+      "description": "Use JPEG compression",
+      "dependencies": [
+        "libjpeg-turbo"
+      ]
+    },
+    "lerc": {
+      "description": "Enable LERC support",
+      "dependencies": [
+        "lerc"
+      ]
+    },
+    "lzma": {
+      "description": "Use LZMA compression",
+      "dependencies": [
+        "liblzma"
+      ]
+    },
+    "openjpeg": {
+      "description": "Use OpenJPEG",
+      "dependencies": [
+        "openjpeg"
+      ]
+    },
+    "png": {
+      "description": "Use PNG compression",
+      "dependencies": [
+        "libpng"
+      ]
+    },
+    "qhull": {
+      "description": "Use Qhull",
+      "dependencies": [
+        "qhull"
+      ]
+    },
+    "recommended-features": {
+      "description": "GDAL's recommended dependency set",
+      "dependencies": [
+        {
+          "name": "gdal",
+          "default-features": false,
+          "features": [
+            "curl",
+            "expat",
+            "geos",
+            "jpeg",
+            "lerc",
+            "png",
+            "qhull",
+            "sqlite3"
+          ]
+        }
+      ]
+    },
+    "sqlite3": {
+      "description": "Enable SQLite support",
+      "dependencies": [
+        {
+          "name": "sqlite3",
+          "features": [
+            "rtree"
+          ]
+        }
+      ]
+    },
+    "webp": {
+      "description": "Enable WebP support",
+      "dependencies": [
+        "libwebp"
+      ]
+    },
+    "zstd": {
+      "description": "Use Zstandard compression",
+      "dependencies": [
+        "zstd"
+      ]
+    }
+  }
+}

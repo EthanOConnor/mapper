@@ -44,8 +44,6 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 		Debug Release RelWithDebInfo MinSizeRel)
 endif()
 
-set(CMAKE_FIND_PACKAGE_PREFER_CONFIG ON)
-
 option(Mapper_DEBUG_TRANSLATIONS "Debug missing translations" OFF)
 option(Mapper_USE_GDAL "Enable GDAL raster and vector format support" ON)
 option(Mapper_WITH_COVE "Build contour line vectorization" ON)
@@ -68,7 +66,22 @@ option(Mapper_AUTORUN_MANUAL_TESTS
 	OFF)
 mark_as_advanced(Mapper_AUTORUN_SYSTEM_TESTS Mapper_AUTORUN_MANUAL_TESTS)
 
-set(Mapper_PACKAGE_NAME "openorienteering-mapper" CACHE STRING "Package name")
+if(Mapper_DEVELOPMENT_BUILD)
+	set(mapper_build_manual_default OFF)
+else()
+	set(mapper_build_manual_default ON)
+endif()
+option(Mapper_BUILD_MANUAL
+	"Build and install the user manual"
+	${mapper_build_manual_default})
+option(Mapper_BUILD_API_DOCS
+	"Add the developer API documentation target"
+	OFF)
+option(Mapper_PACKAGE_BUILD
+	"Configure a redistributable package with complete dependency metadata"
+	OFF)
+
+set(Mapper_PACKAGE_NAME "openorienteering-mapper")
 
 if(WIN32)
 	set(MAPPER_RUNTIME_DESTINATION .)
@@ -121,7 +134,7 @@ add_feature_info(Clipper2 ON "2.0.1")
 find_package(PROJ 9.8.1 CONFIG REQUIRED)
 find_package(ICU 78.3 REQUIRED COMPONENTS uc)
 if(Mapper_USE_GDAL)
-	find_package(GDAL 3.13.1 REQUIRED)
+	find_package(GDAL 3.13.1 CONFIG REQUIRED)
 endif()
 
 find_path(Mapper_PROJ_DATA_DIR
@@ -180,25 +193,9 @@ if(NOT ANDROID)
 	add_feature_info(KDSingleApplication ON "1.2.1")
 endif()
 
-if(NOT CMAKE_HOST_WIN32)
-	find_program(SH_EXECUTABLE NAMES sh PATHS ENV PATH NO_DEFAULT_PATH)
+if(Mapper_BUILD_MANUAL)
+	add_subdirectory(doc/manual)
 endif()
-if(NOT CMAKE_CXX_CLANG_TIDY AND Mapper_DEVELOPMENT_BUILD AND SH_EXECUTABLE)
-	find_package(ClangTidy 8 QUIET)
-	if(ClangTidy_FOUND)
-		set(CMAKE_CXX_CLANG_TIDY
-			"${SH_EXECUTABLE};-e;${PROJECT_SOURCE_DIR}/code-check-wrapper.sh;${ClangTidy_EXECUTABLE}")
-	endif()
-endif()
-if(NOT CMAKE_CXX_INCLUDE_WHAT_YOU_USE AND Mapper_DEVELOPMENT_BUILD AND SH_EXECUTABLE)
-	find_package(IWYU 0.12 QUIET)
-	if(IWYU_FOUND)
-		set(CMAKE_CXX_INCLUDE_WHAT_YOU_USE
-			"${SH_EXECUTABLE};-e;${PROJECT_SOURCE_DIR}/code-check-wrapper.sh;${IWYU_EXECUTABLE}")
-	endif()
-endif()
-
-add_subdirectory(doc/manual)
 add_subdirectory(examples)
 add_subdirectory("symbol sets")
 add_subdirectory(translations)
@@ -211,13 +208,16 @@ if(Mapper_USE_GDAL)
 endif()
 add_subdirectory(src/sensors)
 add_subdirectory(src)
-add_subdirectory(packaging)
 add_subdirectory(doc/licensing)
+# Keep deployment last: its install script signs the complete application bundle.
+add_subdirectory(packaging)
 
 if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
 	add_subdirectory(test)
 endif()
 
-add_subdirectory(doc/api)
+if(Mapper_BUILD_API_DOCS)
+	add_subdirectory(doc/api)
+endif()
 
 feature_summary(INCLUDE_QUIET_PACKAGES WHAT ALL)

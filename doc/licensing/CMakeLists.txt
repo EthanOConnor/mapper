@@ -1,279 +1,156 @@
 #
-#    Copyright 2014-2019 Kai Pastor
-#    
+#    Copyright 2014-2026 The OpenOrienteering developers
+#
 #    This file is part of OpenOrienteering.
-# 
+#
 #    OpenOrienteering is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
 #    the Free Software Foundation, either version 3 of the License, or
 #    (at your option) any later version.
-# 
-#    OpenOrienteering is distributed in the hope that it will be useful,
-#    but WITHOUT ANY WARRANTY; without even the implied warranty of
-#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#    GNU General Public License for more details.
-# 
-#    You should have received a copy of the GNU General Public License
-#    along with OpenOrienteering.  If not, see <http://www.gnu.org/licenses/>.
+#
 
+message(STATUS "Configuring ${PROJECT_NAME} dependency notices")
 
-message(STATUS "Configuring ${PROJECT_NAME} licensing documentation")
+set(third_party_copyright)
+set(common_licenses)
 
+function(mapper_add_dependency_notice component label source filename)
+	if(NOT EXISTS "${source}")
+		message(FATAL_ERROR "Missing dependency notice: ${source}")
+	endif()
 
-# Show all available providers in Qt Creator
-set(known_providers )
-file(GLOB provider_files "${CMAKE_CURRENT_LIST_DIR}/*-licensing.cmake")
-foreach(file ${provider_files})
-	get_filename_component(name "${file}" NAME)
-	string(REPLACE "-licensing.cmake" "" provider "${name}")
-	list(APPEND known_providers "${provider}")
-	file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${name}.stamp"
-	  INPUT "${file}"
+	set(relative_path "3rd-party/${component}/${filename}")
+	list(APPEND third_party_copyright
+		"  <li><a href=\"${relative_path}\">${label}</a></li>")
+
+	file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/3rd-party/${component}")
+	configure_file(
+		"${source}"
+		"${CMAKE_CURRENT_BINARY_DIR}/${relative_path}"
+		COPYONLY
+	)
+	install(
+		FILES "${source}"
+		DESTINATION "${MAPPER_ABOUT_DESTINATION}/3rd-party/${component}"
+		RENAME "${filename}"
+	)
+
+	set(third_party_copyright "${third_party_copyright}" PARENT_SCOPE)
+endfunction()
+
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/common-licenses")
+configure_file(
+	"${PROJECT_SOURCE_DIR}/COPYING"
+	"${CMAKE_CURRENT_BINARY_DIR}/common-licenses/GPL-3.txt"
+	COPYONLY
+)
+install(
+	FILES "${PROJECT_SOURCE_DIR}/COPYING"
+	DESTINATION "${MAPPER_ABOUT_DESTINATION}/common-licenses"
+	RENAME GPL-3.txt
+)
+list(APPEND common_licenses
+	"  <li><a href=\"common-licenses/GPL-3.txt\">GNU General Public License version 3</a></li>")
+
+list(APPEND third_party_copyright
+	"  <li>Qt ${Qt6_VERSION} by The Qt Company and contributors: <a href=\"common-licenses/GPL-3.txt\">GNU General Public License version 3</a></li>")
+
+mapper_add_dependency_notice(
+	clipper2
+	"Clipper2 2.0.1"
+	"${CMAKE_CURRENT_SOURCE_DIR}/clipper2-2.0.1.txt"
+	LICENSE.txt
+)
+
+if(TARGET kdsingleapplication)
+	mapper_add_dependency_notice(
+		kdsingleapplication
+		"KDSingleApplication 1.2.1"
+		"${kdsingleapplication_SOURCE_DIR}/LICENSE.txt"
+		LICENSE.txt
+	)
+endif()
+
+if(TARGET cove)
+	mapper_add_dependency_notice(
+		potrace
+		"Potrace 1.16"
+		"${PROJECT_SOURCE_DIR}/3rd-party/cove/potrace/copyright"
+		copyright
+	)
+endif()
+
+# Official Qt binary archives contain one SPDX document per installed module.
+# Install those upstream-generated inventories rather than maintaining a local
+# list that can drift from the actual Qt deployment closure.
+file(GLOB qt_sboms CONFIGURE_DEPENDS "${QT_INSTALL_PREFIX}/sbom/*.spdx.json")
+foreach(qt_sbom IN LISTS qt_sboms)
+	get_filename_component(qt_sbom_name "${qt_sbom}" NAME)
+	mapper_add_dependency_notice(
+		qt
+		"Qt module SBOM: ${qt_sbom_name}"
+		"${qt_sbom}"
+		"${qt_sbom_name}"
 	)
 endforeach()
 
-# Select default provider
-if(ANDROID OR APPLE OR WIN32)
-	set(default_provider OFF)
-elseif(UNIX)
-	set(default_provider NOTFOUND)
-	execute_process(
-	  COMMAND sh -c ". /etc/os-release; echo \"$ID $ID_LIKE\""
-	  OUTPUT_VARIABLE system_ids
-	  OUTPUT_STRIP_TRAILING_WHITESPACE 
-	)
-	string(REPLACE " " ";" system_ids "${system_ids}")
-	foreach(system IN LISTS system_ids)
-		if(system IN_LIST known_providers)
-			set(default_provider "${system}")
-			break()
-		endif()
+# vcpkg installs the exact copyright file selected by every target dependency,
+# including transitives, under the configured triplet's share directory.
+set(vcpkg_notices)
+set(vcpkg_sboms)
+if(DEFINED VCPKG_INSTALLED_DIR AND DEFINED VCPKG_TARGET_TRIPLET)
+	file(GLOB vcpkg_notices CONFIGURE_DEPENDS
+		"${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/share/*/copyright")
+	foreach(vcpkg_notice IN LISTS vcpkg_notices)
+		get_filename_component(component_dir "${vcpkg_notice}" DIRECTORY)
+		get_filename_component(component "${component_dir}" NAME)
+		mapper_add_dependency_notice(
+			"vcpkg/${component}"
+			"${component}"
+			"${vcpkg_notice}"
+			copyright
+		)
+	endforeach()
+
+	file(GLOB vcpkg_sboms CONFIGURE_DEPENDS
+		"${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/share/*/vcpkg.spdx.json")
+	foreach(vcpkg_sbom IN LISTS vcpkg_sboms)
+		get_filename_component(component_dir "${vcpkg_sbom}" DIRECTORY)
+		get_filename_component(component "${component_dir}" NAME)
+		mapper_add_dependency_notice(
+			"vcpkg/${component}"
+			"${component} SBOM"
+			"${vcpkg_sbom}"
+			vcpkg.spdx.json
+		)
 	endforeach()
 endif()
 
-set(LICENSING_PROVIDER "${default_provider}" CACHE STRING
-  "Provider for 3rd-party licensing information (${known_providers};OFF)"
-)
-
-
-# Software and data used by Mapper, as given by configuration
-set(LICENSING_ATTRIBUTION "" CACHE STRING
-  "Third-party components for which attribution must be deployed"
-)
-
-# A way to remove attributions which is required by default.
-set(LICENSING_NO_ATTRIBUTION "" CACHE STRING
-  "Third-party components for which attribution shall not be deployed"
-)
-
-
-# Software and data used directly by Mapper, or set by configuration
-set(third_party_components
-  ${LICENSING_ATTRIBUTION}
-  clipper2
-  proj
-  qtbase
-  qtimageformats
-  qttranslations
-)
-if(TARGET Qt6::AndroidExtras)
-	list(APPEND third_party_components qtandroidextras)
+list(LENGTH qt_sboms qt_sbom_count)
+list(LENGTH vcpkg_notices vcpkg_notice_count)
+list(LENGTH vcpkg_sboms vcpkg_sbom_count)
+if(Mapper_PACKAGE_BUILD AND qt_sbom_count EQUAL 0)
+	message(FATAL_ERROR
+		"Package builds require the SPDX inventories from an official Qt binary installation")
 endif()
-if(TARGET Qt6::Positioning)
-	list(APPEND third_party_components qtlocation)
+if(Mapper_PACKAGE_BUILD AND vcpkg_notice_count EQUAL 0)
+	message(FATAL_ERROR
+		"Package builds require the managed vcpkg dependency notices")
 endif()
-if(TARGET Qt6::Sensors)
-	list(APPEND third_party_components qtsensors)
-	if(NOT TARGET Qt6::QGeoPositionInfoSourceFactorySerialNmea
-	   AND EXISTS "${Qt6Positioning_DIR}/Qt6Positioning_QGeoPositionInfoSourceFactorySerialNmea.cmake")
-		include("${Qt6Positioning_DIR}/Qt6Positioning_QGeoPositionInfoSourceFactorySerialNmea.cmake")
-	endif()
-	if(TARGET Qt6::QGeoPositionInfoSourceFactorySerialNmea)
-		find_package(Qt6SerialPort QUIET)
-	endif()
-endif()
-if(TARGET Qt6::SerialPort)
-	list(APPEND third_party_components qtserialport)
-endif()
-if(TARGET kdsingleapplication)
-	list(APPEND third_party_components kdsingleapplication)
-endif()
-if(TARGET mapper-gdal)
-	list(APPEND third_party_components gdal)
-endif()
-if(TARGET printsupport AND WIN32)
-	list(APPEND third_party_components zlib)
-endif()
-if(Mapper_PACKAGE_ASSISTANT)
-	list(APPEND third_party_components qttools)
-endif()
-if(TARGET cove)
-	list(APPEND third_party_components potrace)
+if(Mapper_PACKAGE_BUILD AND vcpkg_sbom_count EQUAL 0)
+	message(FATAL_ERROR
+		"Package builds require the managed vcpkg SPDX inventories")
 endif()
 
-message(STATUS "Direct third-party components: ${third_party_components}")
+message(STATUS
+	"Dependency inventory: ${qt_sbom_count} Qt SBOMs, ${vcpkg_notice_count} vcpkg notices, ${vcpkg_sbom_count} vcpkg SBOMs")
 
-
-# Licences used directly by Mapper
-set(common_license_names
-  GPL-3
-)
-
-# Required, because linked from About dialog
-set(explicit_copyright_GPL-3
-  "GPL-3.txt"
-  "${PROJECT_SOURCE_DIR}/COPYING"
-  "common-licenses"
-)
-if(TARGET kdsingleapplication)
-	set(explicit_copyright_kdsingleapplication
-	  "kdsingleapplication-1.2.1.txt"
-	  "${kdsingleapplication_SOURCE_DIR}/LICENSE.txt"
-	  "3rd-party"
-	)
-endif()
-set(explicit_copyright_potrace
-  "potrace-1.6.txt"
-  "${PROJECT_SOURCE_DIR}/3rd-party/cove/potrace/copyright"
-  "3rd-party"
-)
-set(explicit_copyright_clipper2
-  "clipper2-2.0.1.txt"
-  "${CMAKE_CURRENT_SOURCE_DIR}/clipper2-2.0.1.txt"
-  "3rd-party"
-)
-
-
-if(LICENSING_PROVIDER)
-	message(STATUS "Licensing information provided by: ${LICENSING_PROVIDER}")
-	set(third_party_copyright )
-	set(common_licenses )
-	unset(package)
-	unset(basename)
-	include("${LICENSING_PROVIDER}-licensing.cmake")
-else()
-	set(licensing_warning "
-This build is a configuration without an external provider of third-party \
-licensing and copyright information. It may not fulfill requirements for \
-redistribution of third-party components."
-	)
-	message(WARNING "${licensing_warning}")
-	set(third_party_copyright "<li>${licensing_warning}</li>")
-	set(common_licenses )
-endif()	
-
-
-
-function(add_copyright var name path)
-	if(name AND path MATCHES "file:///")
-		string(REPLACE "file:///" "/" file "${path}")
-		if(NOT EXISTS "${file}")
-			message(FATAL_ERROR "No such license file: ${file}")
-		endif()
-		list(APPEND ${var} "  <li><a href=\"${path}\">${name}</a></li>")
-	elseif(name AND path STREQUAL "-" AND ARGN)
-		list(APPEND ${var} "  <li>${name}: ${ARGN}</li>")
-	elseif(name AND path STREQUAL "-")
-		list(APPEND ${var} "  <li>${name}</li>")
-	elseif(name AND path AND ARGN)
-		set(target ${ARGN})
-		string(REPLACE ".txt" "" basename "${name}")
-		list(APPEND ${var} "  <li><a href=\"${target}/${name}\">${basename}</a></li>")
-		install(FILES "${path}"
-		  DESTINATION "${MAPPER_ABOUT_DESTINATION}/${target}"
-		  RENAME "${name}"
-		)
-		# Generate output for manual tests from build dir.
-		# As a side effect, make source visible in Qt Creator.
-		file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/${target}")
-		file(GENERATE
-		  OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${target}/${name}"
-		  INPUT  "${path}"
-		)
-	else()
-		message(FATAL_ERROR "Cannot create link for ${name}, ${path}, ${target}")
-	endif()
-	set(${var} "${${var}}" PARENT_SCOPE)
-endfunction()
-
-
-
-foreach(entry ${package_names})
-	set(entry "explicit_package_${entry}")
-	string(REPLACE ":" ";" entry ${entry})
-	set(${entry})
-endforeach()
-
-list(SORT third_party_components)
-if(LICENSING_NO_ATTRIBUTION)
-	string(REPLACE "," ";" LICENSING_NO_ATTRIBUTION "${LICENSING_NO_ATTRIBUTION}")
-	list(REMOVE_ITEM third_party_components ${LICENSING_NO_ATTRIBUTION})
-endif()
-list(REMOVE_DUPLICATES third_party_components)
-foreach(basename ${third_party_components})
-	if(LICENSING_PROVIDER AND NOT DEFINED explicit_copyright_${basename})
-		if(explicit_package_${basename})
-			set(package ${explicit_package_${basename}})
-		else()
-			set(package ${basename})
-		endif()
-		# Exact match
-		string(CONFIGURE "${copyright_pattern}" pattern @ONLY)
-		file(GLOB path ${pattern})
-		if(NOT path)
-			# Pattern match
-			string(REPLACE "/${package}/" "/${package}*/" pattern "${pattern}")
-			file(GLOB raw_path ${pattern})
-			set(path )
-			foreach(item ${raw_path})
-				if(NOT item MATCHES "${package}.*-"
-				   OR item MATCHES "${package}[0-9]*-[0-9]")
-					list(APPEND path ${item})
-				endif()
-			endforeach()
-		endif()
-		if(NOT path)
-			message(SEND_ERROR "No license file for ${basename} (${pattern})")
-		elseif(path MATCHES ";")
-			message(SEND_ERROR "Multiple matches for ${basename}: ${path}")
-		elseif(system_copyright_dir AND path MATCHES "^${system_copyright_dir}/")
-			set(explicit_copyright_${basename} "${basename}" "file://${path}")
-		else()
-			string(REGEX REPLACE "-[0-9]*$" "" name ${basename})
-			set(explicit_copyright_${basename} "${name}.txt" "${path}" "3rd-party")
-		endif()
-	endif()
-	if(explicit_copyright_${basename})
-		add_copyright(third_party_copyright ${explicit_copyright_${basename}})
-	endif()
-endforeach()
-
-list(SORT common_license_names)
-list(REMOVE_DUPLICATES common_license_names)
-foreach(basename ${common_license_names})
-	if(NOT DEFINED explicit_copyright_${basename})
-		string(CONFIGURE "${common_license_pattern}" pattern @ONLY)
-		file(GLOB path ${pattern})
-		if(NOT path)
-			message(SEND_ERROR "No license file for ${basename} (${pattern})")
-		elseif(path MATCHES ";")
-			message(SEND_ERROR "Multiple matches for ${basename}: ${path}")
-		elseif(system_copyright_dir AND path MATCHES "^${system_copyright_dir}/")
-			set(explicit_copyright_${basename} "${basename}" "file://${path}")
-		else()
-			set(explicit_copyright_${basename} "${basename}.txt" "${path}" "common-licenses")
-		endif()
-	endif()
-	if(explicit_copyright_${basename})
-		add_copyright(common_licenses ${explicit_copyright_${basename}})
-	endif()
-endforeach()
-
-
+list(SORT third_party_copyright)
 string(REPLACE ";" "\n" third_party_copyright "${third_party_copyright}")
 string(REPLACE ";" "\n" common_licenses "${common_licenses}")
 configure_file(licensing.html "${CMAKE_CURRENT_BINARY_DIR}/licensing.html" @ONLY)
 
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/licensing.html"
-  DESTINATION "${MAPPER_ABOUT_DESTINATION}"
+install(
+	FILES "${CMAKE_CURRENT_BINARY_DIR}/licensing.html"
+	DESTINATION "${MAPPER_ABOUT_DESTINATION}"
 )

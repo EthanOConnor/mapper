@@ -37,7 +37,7 @@ class PathObject;
  * Wraps some helper functions for boolean operations.
  * 
  * The implementation of the boolean operation tools is based on the Clipper
- * library (aka libpolyclipping) (http://www.angusj.com/delphi/clipper.php).
+ * library (https://github.com/AngusJohnson/Clipper2).
  * 
  * Because Clipper does not support bezier curves, areas are clipped as
  * polygonal approximations, and after clipping we try to rebuild the curves.
