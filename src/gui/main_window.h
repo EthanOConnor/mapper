@@ -541,7 +541,7 @@ private:
 	/// Canonical path to the currently open file or an empty string if the file was not saved yet ("untitled")
 	QString current_path;
 	/// The current file's format, as determined during opening the file.
-	const FileFormat* current_format;
+	const FileFormat* current_format = nullptr;
 	/// The actual path loaded by the editor. @see switchActualPath()
 	QString actual_path;
 	/// Does the main window display a file? If yes, new controllers will be opened in new main windows instead of replacing the active controller of this one

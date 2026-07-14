@@ -174,6 +174,14 @@ void ToolsTest::initTestCase()
 }
 
 
+void ToolsTest::newMapStartsWithoutFormat()
+{
+	auto* map = new Map;
+	TestMapEditor editor(map);  // taking ownership
+	QCOMPARE(editor.window->currentFormat(), nullptr);
+}
+
+
 void ToolsTest::editTool()
 {
 	// Initialization

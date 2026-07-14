@@ -71,6 +71,11 @@ QString displayName(QStringView path)
 {
 	if (isContentUri(path))
 	{
+#ifdef Q_OS_ANDROID
+		const auto provider_name = QFileInfo{path.toString()}.fileName();
+		if (!provider_name.isEmpty())
+			return provider_name;
+#endif
 		auto name = QUrl{path.toString()}.fileName(QUrl::FullyDecoded);
 		const auto separator = name.lastIndexOf(QLatin1Char('/'));
 		if (separator >= 0)

@@ -303,7 +303,8 @@ bool Exporter::doExport()
 				device_ = managed_file.get();
 			}
 		}
-		if (!device_->isOpen() && !device_->open(QIODevice::WriteOnly))
+		const auto open_mode = staged_file ? QIODevice::ReadWrite : QIODevice::WriteOnly;
+		if (!device_->isOpen() && !device_->open(open_mode))
 		{
 			addWarning(device_->errorString());
 			return false;
