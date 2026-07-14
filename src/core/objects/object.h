@@ -246,8 +246,8 @@ public:
 	 */
 	virtual bool intersectsBox(const QRectF& box) const = 0;
 	
-	/** Takes ownership of the renderables */
-	void takeRenderables();
+	/** Detaches mutable renderable lists from published immutable revisions. */
+	void detachRenderables();
 	
 	/** Deletes the renderables (and extent), undoing update() */
 	void clearRenderables();

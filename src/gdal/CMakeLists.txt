@@ -16,7 +16,6 @@
 #    You should have received a copy of the GNU General Public License
 #    along with OpenOrienteering.  If not, see <http://www.gnu.org/licenses/>.
 
-find_package(GDAL 3.13.1 REQUIRED)
 # Extra header to be shown in the IDE or to be translated
 set(MAPPER_GDAL_HEADERS
   ogr_file_format_p.h

@@ -34,6 +34,7 @@
 #include "symbol.h"
 
 class QRectF;
+class QPainterPath;
 class QXmlStreamReader;
 class QXmlStreamWriter;
 
@@ -200,6 +201,7 @@ public:
 			const QRectF& point_extent,
 			LineSymbol* line,
 			qreal rotation,
+			const QPainterPath* clipping_outline,
 			ObjectRenderables& output
 		) const;
 		
@@ -210,7 +212,7 @@ public:
 			qreal delta_offset,
 			LineSymbol* line,
 			qreal rotation,
-			const AreaRenderable& outline,
+			const QPainterPath* clipping_outline,
 			ObjectRenderables& output
 		) const;
 		
@@ -219,7 +221,7 @@ public:
 			MapCoordF first, MapCoordF second,
 			qreal delta_offset,
 			qreal rotation,
-			const AreaRenderable& outline,
+			const QPainterPath* clipping_outline,
 			ObjectRenderables& output
 		) const;
 		

@@ -14,6 +14,11 @@ function(mapper_define_build_options)
 		"$<$<COMPILE_LANG_AND_ID:CXX,AppleClang,Clang,GNU>:-Wall;-Wextra;-Wpedantic>"
 		"$<$<COMPILE_LANG_AND_ID:C,AppleClang,Clang,GNU>:-Wall;-Wextra;-Wpedantic>"
 	)
+	# Static GDAL and PROJ exports repeat some archive paths. Apple's linker
+	# rescans and de-duplicates them correctly but warns unless asked not to.
+	target_link_options(mapper-build-options INTERFACE
+		"$<$<LINK_LANG_AND_ID:CXX,AppleClang>:LINKER:-no_warn_duplicate_libraries>"
+	)
 
 	if(CMAKE_CXX_BYTE_ORDER STREQUAL "BIG_ENDIAN")
 		target_compile_definitions(mapper-build-options INTERFACE MAPPER_BIG_ENDIAN)

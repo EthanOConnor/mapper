@@ -790,6 +790,13 @@ bool Map::importFromIODevice(QIODevice& device)
 }
 
 
+std::shared_ptr<const render::MapRenderSnapshot> Map::publishRenderSnapshot()
+{
+	updateObjects();
+	return renderables->snapshot();
+}
+
+
 
 void Map::draw(QPainter* painter, const RenderConfig& config)
 {
@@ -1285,6 +1292,8 @@ int Map::findColorIndex(const MapColor* color) const
 void Map::setColorsDirty()
 {
 	colors_dirty = true;
+	renderables->invalidate();
+	selection_renderables->invalidate();
 	setHasUnsavedChanges(true);
 }
 
@@ -1659,6 +1668,8 @@ void Map::setSymbolsDirty()
 		QTimer::singleShot(0, this, &Map::updateSymbolIconZoom);
 	}
 	symbols_dirty = true;
+	renderables->invalidate();
+	selection_renderables->invalidate();
 	setHasUnsavedChanges(true);
 }
 

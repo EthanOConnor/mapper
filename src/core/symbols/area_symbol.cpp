@@ -28,6 +28,7 @@
 
 #include <QtMath>
 #include <QLatin1String>
+#include <QPainterPath>
 #include <QStringView>
 #include <QXmlStreamReader> // IWYU pragma: keep
 
@@ -41,6 +42,7 @@
 #include "core/symbols/point_symbol.h"
 #include "core/symbols/symbol.h"
 #include "core/virtual_coord_vector.h"
+#include "render/qt_render_bridge.h"
 #include "util/xml_stream_util.h"
 
 class QXmlStreamWriter;
@@ -237,7 +239,7 @@ void AreaSymbol::FillPattern::createLine<AreaSymbol::FillPattern::LinePattern>(
         qreal,
         LineSymbol* line,
         qreal,
-        const AreaRenderable&,
+        const QPainterPath*,
         ObjectRenderables& output ) const
 {
 	// out of inlining
@@ -252,11 +254,11 @@ void AreaSymbol::FillPattern::createLine<AreaSymbol::FillPattern::PointPattern>(
         qreal delta_offset,
         LineSymbol*,
         qreal rotation,
-        const AreaRenderable& outline,
+        const QPainterPath* clipping_outline,
         ObjectRenderables& output ) const
 {
 	// out of inlining
-	createPointPatternLine(first, second, delta_offset, rotation, outline, output);
+	createPointPatternLine(first, second, delta_offset, rotation, clipping_outline, output);
 }
 
 
@@ -274,6 +276,7 @@ void AreaSymbol::FillPattern::createRenderables(
         const QRectF& point_extent,
         LineSymbol* line,
         qreal rotation,
+        const QPainterPath* clipping_outline,
         ObjectRenderables& output ) const
 {
 	// Canvas is the entire rectangle which will be filled with renderables.
@@ -312,7 +315,7 @@ void AreaSymbol::FillPattern::createRenderables(
 		{
 			first = MapCoordF(cur, canvas.top());
 			second = MapCoordF(cur, canvas.bottom());
-			createLine<T>(first, second, delta_along_line_offset, line, delta_rotation, outline, output);
+			createLine<T>(first, second, delta_along_line_offset, line, delta_rotation, clipping_outline, output);
 		}
 	}
 	else if (qAbs(rotation - 0) < 0.0001)
@@ -323,7 +326,7 @@ void AreaSymbol::FillPattern::createRenderables(
 		{
 			first = MapCoordF(canvas.left(), cur);
 			second = MapCoordF(canvas.right(), cur);
-			createLine<T>(first, second, delta_along_line_offset, line, delta_rotation, outline, output);
+			createLine<T>(first, second, delta_along_line_offset, line, delta_rotation, clipping_outline, output);
 		}
 	}
 	else
@@ -370,7 +373,7 @@ void AreaSymbol::FillPattern::createRenderables(
 				// Create the renderable(s)
 				first = MapCoordF(start_x, start_y);
 				second = MapCoordF(end_x, end_y);
-				createLine<T>(first, second, delta_along_line_offset, line, delta_rotation, outline, output);
+				createLine<T>(first, second, delta_along_line_offset, line, delta_rotation, clipping_outline, output);
 				
 				// Move to next position
 				start_x += dist_x;
@@ -407,7 +410,7 @@ void AreaSymbol::FillPattern::createRenderables(
 				// Create the renderable(s)
 				first = MapCoordF(start_x, start_y);
 				second = MapCoordF(end_x, end_y);
-				createLine<T>(first, second, delta_along_line_offset, line, delta_rotation, outline, output);
+				createLine<T>(first, second, delta_along_line_offset, line, delta_rotation, clipping_outline, output);
 				
 				// Move to next position
 				start_x += dist_x;
@@ -432,12 +435,13 @@ void AreaSymbol::FillPattern::createRenderables(const AreaRenderable& outline, q
 	if (rotation < 0)
 		rotation = M_PI + rotation;
 	Q_ASSERT(rotation >= 0 && rotation <= M_PI);
+	auto const clipping_outline = render::toQPainterPath(*outline.renderPath());
 	
 	// Handle clipping
 	const auto old_clip_path = output.getClipPath();
 	if (!(flags & Option::AlternativeToClipping))
 	{
-		output.setClipPath(outline.painterPath());
+		output.setClipPath(outline.renderPath());
 	}
 	
 	switch (type)
@@ -452,7 +456,7 @@ void AreaSymbol::FillPattern::createRenderables(const AreaRenderable& outline, q
 			
 			auto margin = line_width_f / 2;
 			auto point_extent = QRectF{-margin, -margin, line_width_f, line_width_f};
-			createRenderables<LinePattern>(outline, delta_rotation, pattern_origin, point_extent, &line, rotation, output);
+			createRenderables<LinePattern>(outline, delta_rotation, pattern_origin, point_extent, &line, rotation, &clipping_outline, output);
 		}
 		break;
 	case PointPattern:
@@ -462,7 +466,7 @@ void AreaSymbol::FillPattern::createRenderables(const AreaRenderable& outline, q
 			point_object.setRotation(delta_rotation);
 			point_object.update();
 			auto point_extent = point_object.getExtent();
-			createRenderables<PointPattern>(outline, delta_rotation, pattern_origin, point_extent, nullptr, rotation, output);
+			createRenderables<PointPattern>(outline, delta_rotation, pattern_origin, point_extent, nullptr, rotation, &clipping_outline, output);
 		}
 		break;
 	}
@@ -475,7 +479,7 @@ void AreaSymbol::FillPattern::createPointPatternLine(
         MapCoordF first, MapCoordF second,
         qreal delta_offset,
         qreal rotation,
-        const AreaRenderable& outline,
+        const QPainterPath* clipping_outline,
         ObjectRenderables& output ) const
 {
 	auto direction = second - first;
@@ -494,11 +498,11 @@ void AreaSymbol::FillPattern::createPointPatternLine(
 	{
 	case Option::NoClippingIfCenterInside:
 		for (auto cur = start_length; cur < length; cur += step_length, coord += to_next)
-			point->createRenderablesIfCenterInside(coord, -rotation, outline.painterPath(), output);
+			point->createRenderablesIfCenterInside(coord, -rotation, clipping_outline, output);
 		break;
 	case Option::NoClippingIfCompletelyInside:
 		for (auto cur = start_length; cur < length; cur += step_length, coord += to_next)
-			point->createRenderablesIfCompletelyInside(coord, -rotation, outline.painterPath(), output);
+			point->createRenderablesIfCompletelyInside(coord, -rotation, clipping_outline, output);
 		break;
 	case Option::Default:
 #if 1
@@ -509,7 +513,7 @@ void AreaSymbol::FillPattern::createPointPatternLine(
 #endif
 	case Option::NoClippingIfPartiallyInside:
 		for (auto cur = start_length; cur < length; cur += step_length, coord += to_next)
-			point->createRenderablesIfPartiallyInside(coord, -rotation, outline.painterPath(), output);
+			point->createRenderablesIfPartiallyInside(coord, -rotation, clipping_outline, output);
 		break;
 	default:  
 		Q_UNREACHABLE();

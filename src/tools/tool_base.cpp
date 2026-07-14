@@ -520,7 +520,7 @@ void MapEditorToolBase::startEditing(Object* object)
 	
 	// Cache old renderables until the object is inserted into the map again
 	old_renderables->insertRenderablesOfObject(object);
-	object->takeRenderables();
+	object->detachRenderables();
 }
 
 
@@ -539,7 +539,7 @@ void MapEditorToolBase::startEditing(const std::set<Object*>& objects)
 		
 		// Cache old renderables until the object is inserted into the map again
 		old_renderables->insertRenderablesOfObject(object);
-		object->takeRenderables();
+		object->detachRenderables();
 	}
 }
 

@@ -190,6 +190,7 @@ add_system_test(map_printer_t)
 add_system_test(object_t)
 add_system_test(object_query_t)
 add_system_test(path_object_t)
+add_system_test(render_ir_t)
 add_system_test(style_t)
 add_system_test(symbol_set_t)
 add_system_test(symbol_t)
@@ -198,6 +199,16 @@ add_system_test(tools_t)
 add_system_test(track_t)  # Could be unit test, but needs Georeferencing
 add_system_test(transform_t)
 add_system_test(undo_manager_t)
+
+# Manual parity helper used to compare exact upstream and modernization
+# checkpoints without adding another product-facing export path.
+add_executable(render_reference EXCLUDE_FROM_ALL render_reference.cpp)
+mapper_target_defaults(render_reference)
+target_link_libraries(render_reference PRIVATE Mapper_Common Qt6::Widgets)
+
+add_executable(render_benchmark EXCLUDE_FROM_ALL render_benchmark.cpp)
+mapper_target_defaults(render_benchmark)
+target_link_libraries(render_benchmark PRIVATE Mapper_Common Qt6::Widgets)
 
 if(TARGET mapper-sensors)
 	add_system_test(sensors_t)

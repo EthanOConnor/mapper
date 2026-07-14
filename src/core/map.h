@@ -73,6 +73,10 @@ class TextSymbol;
 class UndoManager;
 class UndoStep;
 
+namespace render {
+class MapRenderSnapshot;
+}
+
 
 /**
  * The translator for color and symbol texts.
@@ -239,6 +243,14 @@ public:
 	 * Returns true if successful.
 	 */
 	bool importFromIODevice(QIODevice& device);
+
+	/**
+	 * Publishes the current immutable drawable revision.
+	 *
+	 * The returned snapshot owns or shares all of its data and may outlive
+	 * subsequent document edits. It never reads the Map while being rendered.
+	 */
+	std::shared_ptr<const render::MapRenderSnapshot> publishRenderSnapshot();
 	
 	
 	/**

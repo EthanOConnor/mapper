@@ -488,7 +488,7 @@ bool Object::update() const
 			map->setObjectAreaDirty(extent);
 	}
 	
-	output.deleteRenderables();
+	output.clear();
 	
 	extent = QRectF();
 	
@@ -650,14 +650,14 @@ int Object::isPointOnObject(const MapCoordF& coord, qreal tolerance, bool treat_
 	return path->isPointOnPath(coord, tolerance, treat_areas_as_paths, true);
 }
 
-void Object::takeRenderables()
+void Object::detachRenderables()
 {
-	output.takeRenderables();
+	output.detach();
 }
 
 void Object::clearRenderables()
 {
-	output.deleteRenderables();
+	output.clear();
 	extent = QRectF();
 }
 
