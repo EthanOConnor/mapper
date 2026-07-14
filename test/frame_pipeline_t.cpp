@@ -414,13 +414,16 @@ void FramePipelineTest::mapWidgetUsesTheFrameContract()
 	QVERIFY(canvas_widget);
 	auto* canvas = dynamic_cast<presentation::VelloCanvas*>(canvas_widget);
 	QVERIFY(canvas);
-	QTRY_VERIFY(canvas->currentFrame());
+	QTRY_VERIFY_WITH_TIMEOUT(
+		canvas->currentFrame() && canvas->lastResult()
+		&& canvas->lastResult()->completion.frame_id == canvas->currentFrame()->id
+		&& canvas->lastResult()->surface_sequence == canvas->surfaceState().sequence
+		&& (canvas->lastResult()->completion.status == render::FrameStatus::Presented
+		    || canvas->lastResult()->completion.status == render::FrameStatus::TargetUnavailable),
+		30000
+	);
 	auto const first_frame = canvas->currentFrame();
 	QVERIFY(!first_frame->vector_passes.empty());
-	QTRY_VERIFY(canvas->lastResult());
-	QTRY_COMPARE(canvas->lastResult()->completion.frame_id, first_frame->id);
-	QTRY_VERIFY(canvas->lastResult()->completion.status == render::FrameStatus::Presented
-	            || canvas->lastResult()->completion.status == render::FrameStatus::TargetUnavailable);
 	if (canvas->lastResult()->completion.status == render::FrameStatus::TargetUnavailable)
 	{
 		QCOMPARE(canvas->surfaceState().phase, presentation::SurfacePhase::Exposed);
@@ -436,6 +439,14 @@ void FramePipelineTest::mapWidgetUsesTheFrameContract()
 	widget.updateEverything();
 	QTRY_VERIFY(canvas->currentFrame()->id > first_frame->id);
 	QVERIFY(canvas->currentFrame()->revision >= first_frame->revision);
+	QTRY_VERIFY_WITH_TIMEOUT(
+		canvas->lastResult()
+		&& canvas->lastResult()->completion.frame_id == canvas->currentFrame()->id
+		&& canvas->lastResult()->surface_sequence == canvas->surfaceState().sequence
+		&& (canvas->lastResult()->completion.status == render::FrameStatus::Presented
+		    || canvas->lastResult()->completion.status == render::FrameStatus::TargetUnavailable),
+		30000
+	);
 }
 
 void FramePipelineTest::nativeSurfacePublishesOrderedLifecycle()

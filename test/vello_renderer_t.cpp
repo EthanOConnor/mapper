@@ -236,7 +236,9 @@ std::optional<render::VelloFrameResult> waitForTerminalResult(
 			++result_count;
 			dropped_count += result->completion.status == render::FrameStatus::DroppedStale;
 			if (result->completion.frame_id == frame_id
-			    && result->completion.status != render::FrameStatus::DroppedStale)
+			    && result->surface_sequence == canvas.surfaceState().sequence
+			    && (result->completion.status == render::FrameStatus::Presented
+			        || result->completion.status == render::FrameStatus::TargetUnavailable))
 				return result;
 		}
 		QTest::qWait(5);
@@ -280,6 +282,36 @@ void VelloRendererTest::typedEncoderRetainsImmutableScenes()
 	QVERIFY(renderer.submit(second, surface));
 	QCOMPARE(renderer.encodedSceneCount(), std::size_t(1));
 	QCOMPARE(renderer.cachedSceneCount(), std::size_t(1));
+}
+
+void VelloRendererTest::missingNativeTargetRequestsLifecycleRecovery()
+{
+	auto const frame = completeOperationFrame(3);
+	QVERIFY2(frame, "The platform's standard test font is required");
+	presentation::NativeSurfaceState surface;
+	surface.sequence = 1;
+	surface.phase = presentation::SurfacePhase::Exposed;
+	surface.native.window = 1;
+	surface.logical_width = 128;
+	surface.logical_height = 128;
+	surface.physical_width = 128;
+	surface.physical_height = 128;
+
+	render::VelloRenderer renderer;
+	QVERIFY(renderer.setSurface(surface));
+	QVERIFY(renderer.submit(frame, surface));
+	std::optional<render::VelloFrameResult> result;
+	QElapsedTimer elapsed;
+	elapsed.start();
+	while (!result && elapsed.elapsed() < 5000)
+	{
+		result = renderer.takeResult();
+		QTest::qWait(5);
+	}
+	QVERIFY2(result, renderer.lastError().c_str());
+	QCOMPARE(result->completion.frame_id, frame->id);
+	QCOMPARE(result->completion.status, render::FrameStatus::SurfaceLost);
+	QVERIFY(!renderer.lastError().empty());
 }
 
 void VelloRendererTest::offscreenGpuMatchesReference()

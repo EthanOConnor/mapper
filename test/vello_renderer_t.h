@@ -16,6 +16,7 @@ Q_OBJECT
 private slots:
 	void initTestCase();
 	void typedEncoderRetainsImmutableScenes();
+	void missingNativeTargetRequestsLifecycleRecovery();
 	void offscreenGpuMatchesReference();
 	void mapCorpusMatchesReference();
 	void nativeSurfaceLifecyclePresentsCurrentFrame();

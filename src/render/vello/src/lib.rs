@@ -1439,7 +1439,12 @@ fn process_frame(
         publish_result(
             result_tx,
             result_replace_rx,
-            frame_result(&frame, FRAME_ERROR, 0, started),
+            // Surface preparation happens on Qt's platform thread and target
+            // creation happens on this thread. An expose/resize burst can
+            // publish another state between those two operations. That is a
+            // lifecycle loss to refresh, not a corrupt frame or renderer
+            // failure to abort over.
+            frame_result(&frame, FRAME_SURFACE_LOST, 0, started),
         );
         return;
     }
