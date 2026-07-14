@@ -46,7 +46,7 @@ TagsWidget::TagsWidget(Map* map, MapView* main_view, MapEditorController* contro
 	react_to_changes = false;
 	
 	auto layout = new QVBoxLayout();
-	layout->setMargin(0);
+	layout->setContentsMargins(0, 0, 0, 0);
 	
 	tags_table = new QTableWidget(1, 2);
 	tags_table->setEditTriggers(QAbstractItemView::AllEditTriggers);

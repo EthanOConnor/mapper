@@ -35,7 +35,6 @@
 #include "gui/file_dialog.h"
 #include "gui/util_gui.h"
 #include "gui/symbols/symbol_setting_dialog.h"
-#include "util/backports.h"  // IWYU pragma: keep
 
 namespace OpenOrienteering {
 
@@ -177,7 +176,7 @@ void IconPropertiesWidget::updateWidgets()
 
 void IconPropertiesWidget::sizeEdited(int size)
 {
-	if (default_icon_display->pixmap()->width() != size
+	if (default_icon_display->pixmap().width() != size
 	    && dialog->getSourceMap())
 	{
 		auto icon = symbol->createIcon(*dialog->getSourceMap(), size);
@@ -188,7 +187,7 @@ void IconPropertiesWidget::sizeEdited(int size)
 
 void IconPropertiesWidget::copyClicked()
 {
-	auto icon = default_icon_display->pixmap()->toImage();
+	auto icon = default_icon_display->pixmap().toImage();
 	if (symbol->getCustomIcon() != icon)
 	{
 		symbol->setCustomIcon(icon);
@@ -209,7 +208,7 @@ void IconPropertiesWidget::saveClicked()
 	
 	auto icon = symbol->getCustomIcon();
 	if (icon.isNull() || sender() == save_default_button)
-		icon = default_icon_display->pixmap()->toImage();
+		icon = default_icon_display->pixmap().toImage();
 	
 	QImageWriter writer{path};
 	if (!writer.write(icon))

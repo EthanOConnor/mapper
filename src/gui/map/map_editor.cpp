@@ -78,7 +78,6 @@
 #include <QRectF>
 #include <QSettings>
 #include <QSignalBlocker>
-#include <QSignalMapper>
 #include <QSize>
 #include <QSizeGrip> // IWYU pragma: keep
 #include <QSizePolicy>
@@ -92,7 +91,7 @@
 #include <QWidget>
 
 #ifdef Q_OS_ANDROID
-#include <QtAndroidExtras/QAndroidJniObject>
+#include <QJniObject>
 #endif
 
 #include "settings.h"
@@ -167,7 +166,6 @@
 #include "undo/object_undo.h"
 #include "undo/undo.h"
 #include "undo/undo_manager.h"
-#include "util/backports.h" // IWYU pragma: keep
 
 #ifdef MAPPER_USE_GDAL
 #include "gdal/ogr_template.h"
@@ -261,8 +259,6 @@ MapEditorController::MapEditorController(OperatingMode mode, Map* map, MapView* 
 , mappart_merge_menu(nullptr)
 , mappart_move_menu(nullptr)
 , mappart_selector_box(nullptr)
-, mappart_merge_mapper(new QSignalMapper(this))
-, mappart_move_mapper(new QSignalMapper(this))
 {
 	this->mode = mode;
 	this->map = nullptr;
@@ -303,8 +299,6 @@ MapEditorController::MapEditorController(OperatingMode mode, Map* map, MapView* 
 	
 	actionsById[""] = new QAction(this); // dummy action
 	
-	connect(mappart_merge_mapper, QOverload<int>::of(&QSignalMapper::mapped), this, &MapEditorController::mergeCurrentMapPartTo);
-	connect(mappart_move_mapper, QOverload<int>::of(&QSignalMapper::mapped), this, &MapEditorController::reassignObjectsToMapPart);
 }
 
 MapEditorController::~MapEditorController()
@@ -719,7 +713,7 @@ void MapEditorController::attach(MainWindow* window)
 	connect(map, &Map::hasUnsavedChanged, window, &MainWindow::setHasUnsavedChanges);
 	
 #ifdef Q_OS_ANDROID
-	QAndroidJniObject::callStaticMethod<void>("org/openorienteering/mapper/MapperActivity",
+	QJniObject::callStaticMethod<void>("org/openorienteering/mapper/MapperActivity",
                                        "lockOrientation",
                                        "()V");
 #endif
@@ -757,7 +751,7 @@ void MapEditorController::attach(MainWindow* window)
 		statusbar_zoom_frame->setFrameStyle(QFrame::StyledPanel | QFrame::Sunken);
 #endif
 		auto* statusbar_zoom_frame_layout = new QHBoxLayout();
-		statusbar_zoom_frame_layout->setMargin(0);
+		statusbar_zoom_frame_layout->setContentsMargins(0, 0, 0, 0);
 		statusbar_zoom_frame_layout->setSpacing(0);
 		statusbar_zoom_frame_layout->addSpacing(1);
 		statusbar_zoom_frame_layout->addWidget(statusbar_zoom_icon);
@@ -913,17 +907,18 @@ void MapEditorController::assignKeyboardShortcuts()
 	findAction("invert-selection")->setShortcut(QKeySequence(tr("Ctrl+I")));
 	
 	findAction("showgrid")->setShortcut(QKeySequence(tr("G")));
-	findAction("zoomin")->setShortcuts(QList<QKeySequence>() << QKeySequence(Qt::Key_F7) << QKeySequence(Qt::Key_Plus) << QKeySequence(Qt::KeypadModifier + Qt::Key_Plus));
-	findAction("zoomout")->setShortcuts(QList<QKeySequence>() << QKeySequence(Qt::Key_F8) << QKeySequence(Qt::Key_Minus) << QKeySequence(Qt::KeypadModifier + Qt::Key_Minus));
+	findAction("zoomin")->setShortcuts(QList<QKeySequence>() << QKeySequence(Qt::Key_F7) << QKeySequence(Qt::Key_Plus) << QKeySequence(QKeyCombination{Qt::KeypadModifier, Qt::Key_Plus}));
+	findAction("zoomout")->setShortcuts(QList<QKeySequence>() << QKeySequence(Qt::Key_F8) << QKeySequence(Qt::Key_Minus) << QKeySequence(QKeyCombination{Qt::KeypadModifier, Qt::Key_Minus}));
 	findAction("hatchareasview")->setShortcut(QKeySequence(Qt::Key_F2));
 	findAction("baselineview")->setShortcut(QKeySequence(Qt::Key_F3));
 	findAction("hidealltemplates")->setShortcut(QKeySequence(Qt::Key_F10));
 	findAction("overprintsimulation")->setShortcut(QKeySequence(Qt::Key_F4));
 	findAction("fullscreen")->setShortcut(QKeySequence(Qt::Key_F11));
-	tags_window_act->setShortcut(QKeySequence(Qt::CTRL + Qt::SHIFT + Qt::Key_6));
-	color_window_act->setShortcut(QKeySequence(Qt::CTRL + Qt::SHIFT + Qt::Key_7));
-	symbol_window_act->setShortcut(QKeySequence(Qt::CTRL + Qt::SHIFT + Qt::Key_8));
-	template_window_act->setShortcut(QKeySequence(Qt::CTRL + Qt::SHIFT + Qt::Key_9));
+	const auto dock_shortcut_modifiers = Qt::ControlModifier | Qt::ShiftModifier;
+	tags_window_act->setShortcut(QKeySequence(QKeyCombination{dock_shortcut_modifiers, Qt::Key_6}));
+	color_window_act->setShortcut(QKeySequence(QKeyCombination{dock_shortcut_modifiers, Qt::Key_7}));
+	symbol_window_act->setShortcut(QKeySequence(QKeyCombination{dock_shortcut_modifiers, Qt::Key_8}));
+	template_window_act->setShortcut(QKeySequence(QKeyCombination{dock_shortcut_modifiers, Qt::Key_9}));
 	
 	findAction("editobjects")->setShortcut(QKeySequence(tr("E")));
 	findAction("editlines")->setShortcut(QKeySequence(tr("L")));
@@ -954,20 +949,18 @@ void MapEditorController::createActions()
 {
 	// Define all the actions, saving them into variables as necessary. Can also get them by ID.
 #ifdef QT_PRINTSUPPORT_LIB
-	auto* print_act_mapper = new QSignalMapper(this);
-	connect(print_act_mapper, QOverload<int>::of(&QSignalMapper::mapped), this, QOverload<int>::of(&MapEditorController::printClicked));
-	print_act = newAction("print", tr("Print..."), print_act_mapper, SLOT(map()), "print.png", QString{}, "file_menu.html");
-	print_act_mapper->setMapping(print_act, PrintWidget::PRINT_TASK);
-	export_image_act = newAction("export-image", tr("&Image"), print_act_mapper, SLOT(map()), nullptr, QString{}, "file_menu.html");
-	print_act_mapper->setMapping(export_image_act, PrintWidget::EXPORT_IMAGE_TASK);
-	export_kmz_act = newAction("export-kmz", tr("&KMZ"), print_act_mapper, SLOT(map()), nullptr, QString{}, "file_menu.html");
-	print_act_mapper->setMapping(export_kmz_act, PrintWidget::EXPORT_KMZ_TASK);
+	print_act = newAction("print", tr("Print..."), nullptr, nullptr, "print.png", QString{}, "file_menu.html");
+	connect(print_act, &QAction::triggered, this, [this] { printClicked(PrintWidget::PRINT_TASK); });
+	export_image_act = newAction("export-image", tr("&Image"), nullptr, nullptr, nullptr, QString{}, "file_menu.html");
+	connect(export_image_act, &QAction::triggered, this, [this] { printClicked(PrintWidget::EXPORT_IMAGE_TASK); });
+	export_kmz_act = newAction("export-kmz", tr("&KMZ"), nullptr, nullptr, nullptr, QString{}, "file_menu.html");
+	connect(export_kmz_act, &QAction::triggered, this, [this] { printClicked(PrintWidget::EXPORT_KMZ_TASK); });
 #ifndef MAPPER_USE_GDAL
 	export_kmz_act->setVisible(false);
 #endif
 	export_simple_course_act = newAction("export-simple-course", tr("Simple &course"), this, SLOT(exportSimpleCourse()), nullptr, QString{}, "file_menu.html");
-	export_pdf_act = newAction("export-pdf", tr("&PDF"), print_act_mapper, SLOT(map()), nullptr, QString{}, "file_menu.html");
-	print_act_mapper->setMapping(export_pdf_act, PrintWidget::EXPORT_PDF_TASK);
+	export_pdf_act = newAction("export-pdf", tr("&PDF"), nullptr, nullptr, nullptr, QString{}, "file_menu.html");
+	connect(export_pdf_act, &QAction::triggered, this, [this] { printClicked(PrintWidget::EXPORT_PDF_TASK); });
 #ifdef MAPPER_USE_GDAL
 	export_vector_act = newAction("export-vector", ::OpenOrienteering::ImportExport::tr("Geospatial vector data"), this, SLOT(exportVector()), nullptr, {}, "edit_menu.html");
 #else
@@ -988,14 +981,12 @@ void MapEditorController::createActions()
 	cut_act->setMenuRole(QAction::TextHeuristicRole);
 	copy_act = newAction("copy", tr("C&opy"), this, SLOT(copy()), "copy.png", QString{}, "edit_menu.html");
 	copy_act->setMenuRole(QAction::TextHeuristicRole);
-	auto* paste_act_mapper = new QSignalMapper(this);
-	connect(paste_act_mapper, QOverload<int>::of(&QSignalMapper::mapped), this, QOverload<int>::of(&MapEditorController::paste));
-	paste_act = newAction("paste", tr("&Paste"), paste_act_mapper, SLOT(map()), "paste", QString{}, "edit_menu.html");
+	paste_act = newAction("paste", tr("&Paste"), nullptr, nullptr, "paste", QString{}, "edit_menu.html");
 	paste_act->setMenuRole(QAction::TextHeuristicRole);
-	paste_act_mapper->setMapping(paste_act, 1);
-	paste_original_act = newAction("paste-original", tr("Paste at original location"), paste_act_mapper, SLOT(map()), "paste-at-location.png", QString{}, "edit_menu.html");
+	connect(paste_act, &QAction::triggered, this, [this] { paste(1); });
+	paste_original_act = newAction("paste-original", tr("Paste at original location"), nullptr, nullptr, "paste-at-location.png", QString{}, "edit_menu.html");
 	paste_original_act->setMenuRole(QAction::TextHeuristicRole);
-	paste_act_mapper->setMapping(paste_original_act, 0);
+	connect(paste_original_act, &QAction::triggered, this, [this] { paste(0); });
 	delete_act = newAction("delete", tr("Delete"), this, SLOT(deleteClicked()), "delete.png", QString{}, "toolbars.html#delete");
 	select_all_act = newAction("select-all", tr("Select all"), this, SLOT(selectAll()), nullptr, QString{}, "edit_menu.html");
 	select_nothing_act = newAction("select-nothing", tr("Select nothing"), this, SLOT(selectNothing()), nullptr, QString{}, "edit_menu.html");
@@ -1647,7 +1638,7 @@ void MapEditorController::createMobileGUI()
 	
 	auto* container_widget = new QWidget();
 	auto* layout = new QVBoxLayout();
-	layout->setMargin(0);
+	layout->setContentsMargins(0, 0, 0, 0);
 	layout->setSpacing(0);
 	layout->addWidget(map_widget, 1);
 	layout->addWidget(bottom_action_bar);
@@ -1688,7 +1679,7 @@ void MapEditorController::detach()
 	delete statusbar_cursorpos_label;
 	
 #ifdef Q_OS_ANDROID
-	QAndroidJniObject::callStaticMethod<void>("org/openorienteering/mapper/MapperActivity",
+	QJniObject::callStaticMethod<void>("org/openorienteering/mapper/MapperActivity",
                                        "unlockOrientation",
                                        "()V");
 #endif
@@ -2392,7 +2383,7 @@ void MapEditorController::showTagsWindow(bool show)
 
 void MapEditorController::editGeoreferencing()
 {
-	if (georeferencing_dialog.isNull())
+	if (!georeferencing_dialog)
 	{
 		auto* dialog = new GeoreferencingDialog(this); 
 		georeferencing_dialog.reset(dialog);
@@ -2403,7 +2394,7 @@ void MapEditorController::editGeoreferencing()
 
 void MapEditorController::georeferencingDialogFinished()
 {
-	georeferencing_dialog.take()->deleteLater();
+	georeferencing_dialog.release()->deleteLater();
 	map->updateAllMapWidgets();
 	
 	bool gps_display_possible = map->getGeoreferencing().getState() == Georeferencing::Geospatial;
@@ -3840,13 +3831,11 @@ void MapEditorController::updateMapPartsUI()
 			if (i != current)
 			{
 				auto* action = new QAction(part_name, this);
-				mappart_merge_mapper->setMapping(action, i);
-				connect(action, QOverload<bool>::of(&QAction::triggered), mappart_merge_mapper, QOverload<>::of(&QSignalMapper::map));
+				connect(action, &QAction::triggered, this, [this, i] { mergeCurrentMapPartTo(i); });
 				mappart_merge_menu->addAction(action);
 				
 				action = new QAction(part_name, this);
-				mappart_move_mapper->setMapping(action, i);
-				connect(action, QOverload<bool>::of(&QAction::triggered), mappart_move_mapper, QOverload<>::of(&QSignalMapper::map));
+				connect(action, &QAction::triggered, this, [this, i] { reassignObjectsToMapPart(i); });
 				mappart_move_menu->addAction(action);
 			}
 		}

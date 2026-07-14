@@ -29,7 +29,6 @@
 #include "core/map_coord.h"
 #include "fileformats/file_format.h"
 #include "templates/template.h"
-#include "util/backports.h"          // IWYU pragma: keep
 #include "util/matrix.h"
 #include "util/xml_stream_util.h"
 
@@ -66,7 +65,7 @@ PassPoint PassPoint::load(QXmlStreamReader& xml)
 	p.error = passpoint.attribute<double>(QLatin1String("error"));
 	while (xml.readNextStartElement())
 	{
-		QStringRef name = xml.name();
+		QStringView name = xml.name();
 		while (xml.readNextStartElement())
 		{
 			if (xml.name() == QLatin1String("coord"))

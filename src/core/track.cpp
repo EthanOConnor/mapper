@@ -34,7 +34,7 @@
 #include <QPoint>
 #include <QPointF>
 #include <QSaveFile>
-#include <QStringRef>
+#include <QStringView>
 #include <QXmlStreamAttributes>
 #include <QXmlStreamReader>
 #include <QXmlStreamWriter>
@@ -146,10 +146,6 @@ bool Track::saveTo(const QString& path) const
 	    && saveGpxTo(file)
 	    && file.commit())
 	{
-#ifdef Q_OS_ANDROID
-		// Make the MediaScanner aware of the *updated* file.
-		Android::mediaScannerScanFile(QFileInfo(path).absolutePath());
-#endif
 		return true;  // NOLINT : redundant boolean literal in conditional return statement
 	}
 	

@@ -399,11 +399,10 @@ private slots:
 		bool ok;
 		auto projected = georef.toProjectedCoords(LatLon(54.558203, -3.393209), &ok);
 		QVERIFY(ok);
-		auto expected = QPointF{310000, 519000};
-		if (QLineF(projected, expected).length() > 0.5)
-			QCOMPARE(projected, expected);
-		else
-			QVERIFY2(true, "SRS from GeoTIFF is okay");
+		const auto expected = QPointF{310000, 519000};
+		const auto error = QLineF(projected, expected).length();
+		QVERIFY2(error <= 1.0,
+		         qPrintable(QStringLiteral("GeoTIFF SRS error is %1 m").arg(error, 0, 'f', 3)));
 	}
 #endif
 	
@@ -756,7 +755,7 @@ private slots:
  */
 #ifndef Q_OS_MACOS
 namespace  {
-	auto Q_DECL_UNUSED qpa_selected = qputenv("QT_QPA_PLATFORM", "offscreen");  // clazy:exclude=non-pod-global-static
+	[[maybe_unused]] const auto qpa_selected = qputenv("QT_QPA_PLATFORM", "offscreen");  // clazy:exclude=non-pod-global-static
 }
 #endif
 

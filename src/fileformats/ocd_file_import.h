@@ -25,6 +25,7 @@
 
 #include <cstddef>
 #include <initializer_list>
+#include <optional>
 #include <vector>
 
 #include <QtGlobal>
@@ -44,9 +45,9 @@
 #include "fileformats/file_import_export.h"
 #include "fileformats/ocd_types.h"
 #include "fileformats/ocd_types_v8.h" // IWYU pragma: keep
+#include "util/encoding.h"
 
 class QChar;
-class QTextCodec;
 
 namespace OpenOrienteering {
 
@@ -123,9 +124,6 @@ public:
 	OcdFileImport(const QString& path, Map *map, MapView *view);
 	
 	~OcdFileImport() override;
-	
-	
-	void setCustom8BitEncoding(QTextCodec* encoding);
 	
 	
 	template< unsigned char N >
@@ -338,7 +336,7 @@ protected:
 	QByteArray buffer;
 	
 	/// Character encoding to use for 1-byte (narrow) strings
-	QTextCodec *custom_8bit_encoding;
+	std::optional<Util::TextEncoding> custom_8bit_encoding;
 	
 	/// Temporarily stores spot colors
 	std::vector<MapColor*> spot_colors;

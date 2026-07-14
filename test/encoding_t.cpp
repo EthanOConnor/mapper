@@ -24,7 +24,6 @@
 #include <QLatin1String>
 #include <QLocale>
 #include <QString>
-#include <QTextCodec>
 
 #include "util/encoding.h"
 
@@ -58,13 +57,19 @@ void EncodingTest::testCodepageForLanguage()
 }
 
 
-void EncodingTest::testCodecForName()
+void EncodingTest::testEncodingForName()
 {
-	QVERIFY(Util::codecForName("Windows-1250") == Util::codecForName("Windows-1250"));
-	QVERIFY(Util::codecForName("Windows-1250") != Util::codecForName("Windows-1251"));
-	QVERIFY(Util::codecForName("Windows-1250") == QTextCodec::codecForName("Windows-1250"));
-	QVERIFY(Util::codecForName("Windows-1250") != QTextCodec::codecForName("Windows-1251"));
-	QVERIFY(Util::codecForName("Default") == QTextCodec::codecForName(Util::codepageForLanguage(QLocale().name())));
+	const auto central_european = Util::encodingForName("Windows-1250");
+	const auto cyrillic = Util::encodingForName("Windows-1251");
+	QVERIFY(central_european);
+	QVERIFY(cyrillic);
+	QCOMPARE(*central_european, *Util::encodingForName("windows_1250"));
+	QVERIFY(*central_european != *cyrillic);
+	QCOMPARE(*Util::encodingForName("Default"),
+	         *Util::encodingForName(Util::codepageForLanguage(QLocale{}.name())));
+
+	const auto source = QString::fromUtf8("Příliš žluťoučký kůň");
+	QCOMPARE(central_european->decode(central_european->encode(source)), source);
 }
 
 

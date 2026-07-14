@@ -40,9 +40,9 @@ private slots:
 	void testCodepageForLanguage_data();
 	
 	/**
-	 * Tests Util::codecForName for some codecs and for "Default".
+	 * Tests ICU-backed legacy encodings and the locale default.
 	 */
-	void testCodecForName();
+	void testEncodingForName();
 	
 };
 

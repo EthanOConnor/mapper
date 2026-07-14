@@ -70,7 +70,7 @@ protected slots:
 	/**
 	 * @brief Displays a tooltip showing the link if it's an external document.
 	 */
-	void highlighted(const QString& link);
+	void highlighted(const QUrl& link);
 	
 protected:
 	/**

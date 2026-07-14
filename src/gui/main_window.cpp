@@ -40,7 +40,8 @@
 #include <QWhatsThis>
 
 #if defined(Q_OS_ANDROID)
-#  include <QtAndroid>
+#  include <QCoreApplication>
+#  include <QJniObject>
 #  include <QScreen>
 #  include <QTimer>
 #  include <QUrl>
@@ -65,7 +66,6 @@
 #include "gui/widgets/toast.h"
 #include "undo/undo_manager.h"
 #include "util/util.h"
-#include "util/backports.h"  // IWYU pragma: keep
 #include "util/mapper_service_proxy.h"
 
 
@@ -164,16 +164,17 @@ void MainWindow::applicationStateChanged()
 	// The Android app may be started or resumed when the user triggers a suitable "intent".
 	if (QGuiApplication::applicationState() == Qt::ApplicationActive)
 	{
-		auto activity = QtAndroid::androidActivity();
-		auto intent_path = activity.callObjectMethod<jstring>("takeIntentPath").toString();
-		if (!intent_path.isEmpty())
+		auto activity = QNativeInterface::QAndroidApplication::context();
+		auto intent_uri = activity.callObjectMethod<jstring>("takeIntentUri").toString();
+		if (!intent_uri.isEmpty())
 		{
-			const auto local_file = QUrl(intent_path).toLocalFile();
+			const auto intent_url = QUrl{intent_uri};
+			const auto selected_file = intent_url.isLocalFile() ? intent_url.toLocalFile() : intent_uri;
 			if (!hasOpenedFile())
 			{
-				openPathLater(local_file);
+				openPathLater(selected_file);
 			}
-			else if (currentPath() != local_file)
+			else if (currentPath() != selected_file)
 			{
 				showStatusBarMessage(tr("You must close the current file before you can open another one."));
 			}
@@ -1370,7 +1371,7 @@ void MainWindow::linkClicked(const QString &link)
 	else if (link.compare(QLatin1String("about:"), Qt::CaseInsensitive) == 0)
 		showAbout();
 	else if (link.startsWith(QLatin1String("examples:"), Qt::CaseInsensitive))
-		openPathLater(QLatin1String("data:/examples/") + link.midRef(9));
+		openPathLater(QLatin1String("data:/examples/") + QStringView{link}.mid(9));
 	else
 		QDesktopServices::openUrl(link);
 }

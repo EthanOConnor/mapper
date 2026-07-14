@@ -28,7 +28,6 @@
 
 #include "test_config.h"  // IWYU pragma: keep
 
-#include "util/backports.h"  // IWYU pragma: keep
 
 namespace OpenOrienteering {}
 using namespace OpenOrienteering;
@@ -185,10 +184,10 @@ private slots:
 		switch(source->error())
 		{
 		case QGeoPositionInfoSource::NoError:
-			QWARN("startUpdates(): QGeoPositionInfoSource::NoError");  // and no position yet!
+			qWarning("startUpdates(): QGeoPositionInfoSource::NoError");  // and no position yet!
 			break;
 		case QGeoPositionInfoSource::AccessError:
-			QWARN("startUpdates(): QGeoPositionInfoSource::AccessError");
+			qWarning("startUpdates(): QGeoPositionInfoSource::AccessError");
 			break;
 		case QGeoPositionInfoSource::ClosedError:
 			QFAIL("startUpdates(): QGeoPositionInfoSource::ClosedError");
@@ -246,7 +245,7 @@ private slots:
  */
 #ifndef Q_OS_MACOS
 namespace  {
-	auto Q_DECL_UNUSED qpa_selected = qputenv("QT_QPA_PLATFORM", "offscreen");  // clazy:exclude=non-pod-global-static
+	[[maybe_unused]] const auto qpa_selected = qputenv("QT_QPA_PLATFORM", "offscreen");  // clazy:exclude=non-pod-global-static
 }
 #endif
 

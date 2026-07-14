@@ -23,6 +23,7 @@
 #include <QGeoPositionInfoSourceFactory>
 #include <QObject>
 #include <QString>
+#include <QVariantMap>
 
 class QGeoAreaMonitorSource;
 class QGeoPositionInfoSource;
@@ -37,7 +38,7 @@ namespace OpenOrienteering
 class NmeaPositionPlugin : public QObject, public QGeoPositionInfoSourceFactory 
 {
 	Q_OBJECT
-	Q_PLUGIN_METADATA(IID "org.qt-project.qt.position.sourcefactory/5.0"
+	Q_PLUGIN_METADATA(IID "org.qt-project.qt.position.sourcefactory/6.0"
 	                  FILE "nmea_position_plugin.json")
 	Q_INTERFACES(QGeoPositionInfoSourceFactory)
 	
@@ -50,9 +51,9 @@ public:
 	NmeaPositionPlugin& operator=(const NmeaPositionPlugin&) = delete;
 	NmeaPositionPlugin&& operator=(NmeaPositionPlugin&&) = delete;
 	
-	QGeoAreaMonitorSource* areaMonitor(QObject* parent) override;
-	QGeoPositionInfoSource* positionInfoSource(QObject* parent) override;
-	QGeoSatelliteInfoSource* satelliteInfoSource(QObject* parent) override;
+	QGeoAreaMonitorSource* areaMonitor(QObject* parent, const QVariantMap& parameters) override;
+	QGeoPositionInfoSource* positionInfoSource(QObject* parent, const QVariantMap& parameters) override;
+	QGeoSatelliteInfoSource* satelliteInfoSource(QObject* parent, const QVariantMap& parameters) override;
 };
 
 

@@ -310,15 +310,6 @@ bool Exporter::doExport()
 			addWarning(managed_file->errorString());
 			success = false;
 		}
-#ifdef Q_OS_ANDROID
-		// Make the MediaScanner aware of the *updated* file.
-		auto* file_device = qobject_cast<QFileDevice*>(device_);
-		if (success && file_device)
-		{
-			const auto file_info = QFileInfo(file_device->fileName());
-			Android::mediaScannerScanFile(file_info.absolutePath());
-		}
-#endif
 	}
 	catch (std::exception &e)
 	{

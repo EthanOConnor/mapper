@@ -16,12 +16,7 @@
 #    You should have received a copy of the GNU General Public License
 #    along with OpenOrienteering.  If not, see <http://www.gnu.org/licenses/>.
 
-find_package(GDAL MODULE REQUIRED)
-find_package(Qt5Core REQUIRED)
-find_package(Qt5Gui REQUIRED)
-find_package(Qt5Widgets REQUIRED)
-set(CMAKE_AUTOMOC ON)
- 
+find_package(GDAL 3.13.1 REQUIRED)
 # Extra header to be shown in the IDE or to be translated
 set(MAPPER_GDAL_HEADERS
   ogr_file_format_p.h
@@ -42,6 +37,7 @@ set(MAPPER_GDAL_SOURCES
 mapper_translations_sources(${MAPPER_GDAL_HEADERS} ${MAPPER_GDAL_SOURCES})
 
 add_library(mapper-gdal STATIC ${MAPPER_GDAL_HEADERS} ${MAPPER_GDAL_SOURCES} "${PROJECT_BINARY_DIR}/gdal/mapper-osmconf.ini")
+mapper_target_defaults(mapper-gdal)
 
 target_compile_definitions(mapper-gdal PRIVATE
   QT_NO_CAST_FROM_ASCII
@@ -51,10 +47,9 @@ target_compile_definitions(mapper-gdal PRIVATE
 
 target_compile_definitions(mapper-gdal INTERFACE MAPPER_USE_GDAL)
 
-target_include_directories(mapper-gdal SYSTEM PRIVATE ${GDAL_INCLUDE_DIRS})
 target_include_directories(mapper-gdal PRIVATE "${PROJECT_SOURCE_DIR}/src")
 
-target_link_libraries(mapper-gdal ${GDAL_LIBRARIES} Qt5::Core Qt5::Gui Qt5::Widgets Mapper_Common)
+target_link_libraries(mapper-gdal PRIVATE GDAL::GDAL Qt6::Core Qt6::Gui Qt6::Widgets Mapper_Common)
 
 set_target_properties(mapper-gdal PROPERTIES PREFIX "")
 
@@ -71,6 +66,5 @@ add_custom_command(OUTPUT "${PROJECT_BINARY_DIR}/gdal/mapper-osmconf.ini"
 # Utility to dump GDAL format information
 
 add_executable(mapper-gdal-info mapper_gdal_info.cpp)
-target_include_directories(mapper-gdal-info SYSTEM PRIVATE ${GDAL_INCLUDE_DIRS})
-target_link_libraries(mapper-gdal-info ${GDAL_LIBRARIES})
-
+mapper_target_defaults(mapper-gdal-info)
+target_link_libraries(mapper-gdal-info PRIVATE GDAL::GDAL)

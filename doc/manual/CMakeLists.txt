@@ -143,19 +143,19 @@ if(Mapper_MANUAL_QTHELP)
 	# Qt Help generation
 	#
 	
-	# Qt provides a broken Qt5::qcollectiongenerator when crosscompiling.
-	if (CMAKE_CROSSCOMPILING AND NOT TARGET Qt5::qcollectiongenerator)
-		find_program(Qt5Help_QCOLLECTIONGENERATOR_EXECUTABLE
-		  NAMES qhelpgenerator-qt5 qhelpgenerator
+	# Qt provides a broken Qt6::qcollectiongenerator when crosscompiling.
+	if (CMAKE_CROSSCOMPILING AND NOT TARGET Qt6::qcollectiongenerator)
+		find_program(Qt6Help_QCOLLECTIONGENERATOR_EXECUTABLE
+		  NAMES qhelpgenerator-qt6 qhelpgenerator
 		  DOC "The path of the Qt Help collection generator executable"
 		)
-		add_executable(Qt5::qhelpgenerator IMPORTED)
-		set_target_properties(Qt5::qhelpgenerator PROPERTIES
-		  IMPORTED_LOCATION ${Qt5Help_QCOLLECTIONGENERATOR_EXECUTABLE}
+		add_executable(Qt6::qhelpgenerator IMPORTED)
+		set_target_properties(Qt6::qhelpgenerator PROPERTIES
+		  IMPORTED_LOCATION ${Qt6Help_QCOLLECTIONGENERATOR_EXECUTABLE}
 		)
-	elseif(NOT Qt5Help_QCOLLECTIONGENERATOR_EXECUTABLE)
-		find_package(Qt5Help REQUIRED)
-		set(Qt5Help_QCOLLECTIONGENERATOR_EXECUTABLE Qt5::qhelpgenerator)
+	elseif(NOT Qt6Help_QCOLLECTIONGENERATOR_EXECUTABLE)
+		find_package(Qt6Help REQUIRED)
+		set(Qt6Help_QCOLLECTIONGENERATOR_EXECUTABLE Qt6::qhelpgenerator)
 	endif()
 	
 	# Reproducible builds need a modification to the help collection file.
@@ -181,7 +181,7 @@ if(Mapper_MANUAL_QTHELP)
 	add_custom_command( 
 	  OUTPUT    "${Mapper_HELP_COLLECTION}"
 	            "${Mapper_COMPRESSED_HELP}"
-	  COMMAND   "${Qt5Help_QCOLLECTIONGENERATOR_EXECUTABLE}" Manual.qhcp
+	  COMMAND   "${Qt6Help_QCOLLECTIONGENERATOR_EXECUTABLE}" Manual.qhcp
 	            -o "${Mapper_HELP_COLLECTION}"
 	  ${source_date_commands}
 	  MAIN_DEPENDENCY "html/index.qhp"

@@ -20,6 +20,8 @@
 
 #include "gdal_settings_page.h"
 
+#include <utility>
+
 // IWYU pragma: no_include <type_traits>
 
 #include <QtGlobal>
@@ -40,7 +42,6 @@
 #include "gdal/gdal_manager.h"
 #include "gdal/ogr_file_format.h"
 #include "gui/util_gui.h"
-#include "util/backports.h"  // IWYU pragma: keep
 
 
 namespace OpenOrienteering {
@@ -137,7 +138,7 @@ void GdalSettingsPage::apply()
 			manager.setParameterValue(key, value.trimmed());
 		}
 	}
-	for (const auto& key : qAsConst(old_parameters))
+	for (const auto& key : std::as_const(old_parameters))
 	{
 		if (!new_parameters.contains(key))
 		{
@@ -169,7 +170,7 @@ void GdalSettingsPage::updateWidgets()
 	
 	QSignalBlocker block(parameters);
 	auto row = 0;
-	for (const auto& item : qAsConst(options))
+	for (const auto& item : std::as_const(options))
 	{
 		auto key_item = new QTableWidgetItem(item);
 		parameters->setItem(row, 0, key_item);

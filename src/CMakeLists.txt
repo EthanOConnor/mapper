@@ -17,16 +17,6 @@
 #    You should have received a copy of the GNU General Public License
 #    along with OpenOrienteering.  If not, see <http://www.gnu.org/licenses/>.
 
-find_package(Qt5Core REQUIRED)
-find_package(Qt5Widgets REQUIRED)
-
-if(ANDROID)
-	find_package(Qt5AndroidExtras REQUIRED)
-else()
-	find_package(Qt5Network REQUIRED)
-	find_package(Qt5PrintSupport REQUIRED)
-endif()
-
 set(CMAKE_AUTOMOC ON)
 
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}")
@@ -67,10 +57,11 @@ set(SCALING_ICON_ENGINE_DEFINITIONS
 )
 set(SCALING_ICON_ENGINE_LINK_LIBRARIES
   PUBLIC
-    Qt5::Gui
+    Qt6::Gui
 )
 
 add_library(scaling-icon-engine STATIC  ${SCALING_ICON_ENGINE_SOURCES})
+mapper_target_defaults(scaling-icon-engine)
 target_compile_definitions(scaling-icon-engine  ${SCALING_ICON_ENGINE_DEFINITIONS})
 target_link_libraries(scaling-icon-engine  ${SCALING_ICON_ENGINE_LINK_LIBRARIES})
 
@@ -78,7 +69,10 @@ target_link_libraries(scaling-icon-engine  ${SCALING_ICON_ENGINE_LINK_LIBRARIES}
 # Resources (from project root)
 
 list(APPEND Mapper_RESOURCES "${PROJECT_SOURCE_DIR}/resources.qrc")
-qt5_add_resources(Mapper_RESOURCES_RCC ${Mapper_RESOURCES} OPTIONS -no-compress)
+if(ANDROID)
+	list(APPEND Mapper_RESOURCES "${PROJECT_BINARY_DIR}/examples/examples.qrc")
+endif()
+qt_add_resources(Mapper_RESOURCES_RCC ${Mapper_RESOURCES} OPTIONS -no-compress)
 
 
 # Mapper common: static library of full runtime 
@@ -89,7 +83,6 @@ set(Mapper_Common_SRCS
   mapper_resource.cpp
   settings.cpp
   
-  core/app_permissions.cpp
   core/autosave.cpp
   core/crs_template.cpp
   core/crs_template_implementation.cpp
@@ -282,7 +275,6 @@ set(Mapper_Common_SRCS
 
 # Extra header to be shown in the IDE or to be translated
 set(Mapper_Common_HEADERS
-  core/image_transparency_fixup.h
   core/objects/object_operations.h
   core/renderables/renderable.h
   core/renderables/renderable_implementation.h
@@ -301,7 +293,6 @@ set(Mapper_Common_HEADERS
   
   templates/world_file.h
   
-  util/backports.h
 )
 
 add_library(Mapper_Common STATIC
@@ -309,26 +300,31 @@ add_library(Mapper_Common STATIC
   ${Mapper_Common_HEADERS}   # for IDE
   ${Mapper_RESOURCES_RCC}
 )
-add_dependencies(Mapper_Common
-  Mapper_prerequisites
+mapper_target_defaults(Mapper_Common)
+qt_add_resources(Mapper_Common "mapper-translations"
+	PREFIX "/translations"
+	BASE "${PROJECT_BINARY_DIR}/translations"
+	FILES ${translations_qm}
 )
 target_link_libraries(Mapper_Common
-  Polyclipping::Polyclipping
+  PUBLIC
+  Clipper2::Clipper2
   ${PROJ_LIBRARIES}
-  Qt5::Widgets
+  Qt6::Widgets
+  PRIVATE
+  ICU::uc
 )
 foreach(lib
   cove
   mapper-config
   mapper-gdal
   mapper-sensors
-  printsupport
   scaling-icon-engine
-  Qt5::AndroidExtras
-  Qt5::Network
+  Qt6::Network
+  Qt6::PrintSupport
 )
 	if(TARGET ${lib})
-		target_link_libraries(Mapper_Common ${lib})
+		target_link_libraries(Mapper_Common PUBLIC ${lib})
 	endif()
 endforeach()
 target_compile_definitions(Mapper_Common PRIVATE
@@ -358,15 +354,16 @@ if(WIN32)
 	list(APPEND Mapper_SRCS ${CMAKE_CURRENT_BINARY_DIR}/resources.rc)
 endif()
 
-if(ANDROID)
-	add_library(Mapper SHARED ${Mapper_SRCS})
-else()
-	add_executable(Mapper WIN32 MACOSX_BUNDLE ${Mapper_SRCS})
-	target_compile_definitions(Mapper PRIVATE MAPPER_USE_QTSINGLEAPPLICATION)
-	target_link_libraries(Mapper QtSingleApplication)
+qt_add_executable(Mapper WIN32 MACOSX_BUNDLE ${Mapper_SRCS})
+
+if(NOT ANDROID)
+	target_compile_definitions(Mapper PRIVATE MAPPER_USE_KDSINGLEAPPLICATION)
+	target_link_libraries(Mapper PRIVATE KDAB::kdsingleapplication)
 endif()
 
+mapper_target_defaults(Mapper)
 target_link_libraries(Mapper
+  PRIVATE
   Mapper_Common
 )
 target_compile_definitions(Mapper PRIVATE
@@ -374,62 +371,74 @@ target_compile_definitions(Mapper PRIVATE
   QT_NO_CAST_TO_ASCII
   QT_USE_QSTRINGBUILDER
 )
-if(APPLE)
-	add_custom_command(
-	  TARGET Mapper
-	  POST_BUILD
-	  COMMAND plutil -replace NSHighResolutionCapable -bool true
-	    $<TARGET_BUNDLE_DIR:Mapper>/Contents/Info.plist
+if(ANDROID)
+	set(mapper_android_package_dir "${CMAKE_CURRENT_BINARY_DIR}/android-package")
+	file(COPY "${PROJECT_SOURCE_DIR}/packaging/android/"
+		DESTINATION "${mapper_android_package_dir}")
+	file(COPY "${Mapper_PROJ_DATA_DIR}/"
+		DESTINATION "${mapper_android_package_dir}/assets/proj")
+	if(Mapper_USE_GDAL)
+		file(COPY "${Mapper_GDAL_DATA_DIR}/"
+			DESTINATION "${mapper_android_package_dir}/assets/gdal")
+		configure_file(
+			"${PROJECT_SOURCE_DIR}/src/gdal/mapper-osmconf.ini"
+			"${mapper_android_package_dir}/assets/gdal/mapper-osmconf.ini"
+			COPYONLY)
+	endif()
+	configure_file(
+		"${PROJECT_SOURCE_DIR}/images/mapper-icon/Mapper-512.png"
+		"${mapper_android_package_dir}/res/drawable/icon.png"
+		COPYONLY)
+
+	set_target_properties(Mapper PROPERTIES
+		QT_ANDROID_APP_NAME "OpenOrienteering Mapper"
+		QT_ANDROID_APP_ICON "@drawable/icon"
+		QT_ANDROID_MIN_SDK_VERSION 28
+		QT_ANDROID_PACKAGE_NAME "org.openorienteering.mapper"
+		QT_ANDROID_PACKAGE_SOURCE_DIR "${mapper_android_package_dir}"
+		QT_ANDROID_TARGET_SDK_VERSION 36
+		QT_ANDROID_VERSION_CODE "${Mapper_VERSION_CODE}"
+		QT_ANDROID_VERSION_NAME "${Mapper_VERSION_DISPLAY}"
+	)
+
+	add_dependencies(Mapper Mapper-manual Mapper_translations)
+	add_custom_command(TARGET Mapper POST_BUILD
+		COMMAND "${CMAKE_COMMAND}" -E make_directory
+			"${mapper_android_package_dir}/assets/doc"
+		COMMAND "${CMAKE_COMMAND}" -E copy_directory
+			"${PROJECT_BINARY_DIR}/doc/manual/html"
+			"${mapper_android_package_dir}/assets/doc/manual"
+		COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+			"${PROJECT_BINARY_DIR}/doc/licensing/licensing.html"
+			"${mapper_android_package_dir}/assets/doc/licensing.html"
+		COMMAND "${CMAKE_COMMAND}" -E copy_directory
+			"${PROJECT_BINARY_DIR}/doc/licensing/common-licenses"
+			"${mapper_android_package_dir}/assets/doc/common-licenses"
+		COMMAND "${CMAKE_COMMAND}" -E copy_directory
+			"${PROJECT_BINARY_DIR}/doc/licensing/3rd-party"
+			"${mapper_android_package_dir}/assets/doc/3rd-party"
+		COMMENT "Staging Mapper assets for Android"
+		VERBATIM
 	)
 endif()
 
 install(TARGETS Mapper
   RUNTIME DESTINATION "${MAPPER_RUNTIME_DESTINATION}"
   BUNDLE DESTINATION "${MAPPER_RUNTIME_DESTINATION}"   # macOS
-  LIBRARY DESTINATION "${MAPPER_RUNTIME_DESTINATION}"  # Android
+  LIBRARY DESTINATION "${MAPPER_LIBRARY_DESTINATION}"
 )
-
-
-# Java sources for Android
-# This target's sources will be build with the APK.
-
-add_custom_target(Mapper_Android SOURCES
-  android/java/org/openorienteering/mapper/MapperActivity.java
-  android/java/org/openorienteering/mapper/MapperService.java
-)
-
-
-# Workaround Qt private include dir issue
-# Cf. https://bugreports.qt.io/browse/QTBUG-37417
-
-set(PRIVATE_MODULES Core Gui)
-if(WIN32)
-	list(APPEND PRIVATE_MODULES PrintSupport)
-endif()
-foreach(module ${PRIVATE_MODULES})
-	set(qt_module Qt${module})
-	set(qt5_module Qt5${module})
-	if("${${qt5_module}_PRIVATE_INCLUDE_DIRS}" STREQUAL "")
-		foreach(base_dir ${${qt5_module}_INCLUDE_DIRS})
-			if("${base_dir}" MATCHES "/${qt_module}\$")
-				list(APPEND ${qt5_module}_PRIVATE_INCLUDE_DIRS "${base_dir}/${${qt5_module}_VERSION}/${qt_module}")
-			endif()
-		endforeach()
-	endif()
-	target_include_directories(Mapper_Common SYSTEM PRIVATE ${${qt5_module}_PRIVATE_INCLUDE_DIRS})
-endforeach()
 
 
 # Workaround for "assistant" not being in PATH.
 # https://github.com/OpenOrienteering/mapper/issues/2446
 
 if(NOT CMAKE_CROSSCOMPILING AND NOT WIN32 AND NOT APPLE AND NOT ANDROID)
-	find_package(Qt5Help)
-	if(TARGET Qt5::qhelpgenerator)
-		get_target_property(help_program Qt5::qhelpgenerator IMPORTED_LOCATION)
+	find_package(Qt6Help)
+	if(TARGET Qt6::qhelpgenerator)
+		get_target_property(help_program Qt6::qhelpgenerator IMPORTED_LOCATION)
 		if(help_program)
-			get_filename_component(qt5_bin_dir "${help_program}" DIRECTORY)
-			set_source_files_properties("gui/util_gui.cpp" PROPERTIES COMPILE_DEFINITIONS "ASSISTANT_DIR=\"${qt5_bin_dir}\"")
+			get_filename_component(qt_bin_dir "${help_program}" DIRECTORY)
+			set_source_files_properties("gui/util_gui.cpp" PROPERTIES COMPILE_DEFINITIONS "ASSISTANT_DIR=\"${qt_bin_dir}\"")
 		endif()
 	endif()
 endif()

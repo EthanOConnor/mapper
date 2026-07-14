@@ -22,7 +22,9 @@
 
 #if defined(Q_OS_ANDROID)
 #  include <jni.h>
-#  include <QAndroidJniObject>
+#  include <QCoreApplication>
+#  include <QJniObject>
+#  include <QLocationPermission>
 #endif
 #if defined(QT_POSITIONING_LIB)
 #  include <QGeoCoordinate>
@@ -53,7 +55,6 @@
 #include "gui/util_gui.h"
 #include "gui/map/map_widget.h"
 #include "sensors/compass.h"
-#include "util/backports.h"  // IWYU pragma: keep
 
 #if defined(MAPPER_USE_FAKE_POSITION_PLUGIN)
 #include "sensors/fake_position_source.h"
@@ -142,8 +143,7 @@ GPSDisplay::GPSDisplay(MapWidget* widget, const Georeferencing& georeferencing, 
 	source->setPreferredPositioningMethods(QGeoPositionInfoSource::SatellitePositioningMethods);
 	source->setUpdateInterval(1000);
 	connect(source, &QGeoPositionInfoSource::positionUpdated, this, &GPSDisplay::positionUpdated, Qt::QueuedConnection);
-	connect(source, QOverload<QGeoPositionInfoSource::Error>::of(&QGeoPositionInfoSource::error), this, &GPSDisplay::error);
-	connect(source, &QGeoPositionInfoSource::updateTimeout, this, &GPSDisplay::updateTimeout);
+	connect(source, &QGeoPositionInfoSource::errorOccurred, this, &GPSDisplay::error);
 #endif
 
 	widget->setGPSDisplay(this);
@@ -161,10 +161,10 @@ bool GPSDisplay::checkGPSEnabled()
 	static bool translation_initialized = false;
 	if (!translation_initialized)
 	{
-		QAndroidJniObject gps_disabled_string = QAndroidJniObject::fromString(tr("GPS is disabled in the device settings. Open settings now?"));
-		QAndroidJniObject yes_string = QAndroidJniObject::fromString(tr("Yes"));
-		QAndroidJniObject no_string  = QAndroidJniObject::fromString(tr("No"));
-		QAndroidJniObject::callStaticMethod<void>(
+		QJniObject gps_disabled_string = QJniObject::fromString(tr("GPS is disabled in the device settings. Open settings now?"));
+		QJniObject yes_string = QJniObject::fromString(tr("Yes"));
+		QJniObject no_string  = QJniObject::fromString(tr("No"));
+		QJniObject::callStaticMethod<void>(
 			"org/openorienteering/mapper/MapperActivity",
 			"setTranslatableStrings",
 			"(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V",
@@ -174,7 +174,7 @@ bool GPSDisplay::checkGPSEnabled()
 		translation_initialized = true;
 	}
 	
-	QAndroidJniObject::callStaticMethod<void>("org/openorienteering/mapper/MapperActivity",
+	QJniObject::callStaticMethod<void>("org/openorienteering/mapper/MapperActivity",
                                        "checkGPSEnabled",
                                        "()V");
 #endif
@@ -186,6 +186,25 @@ void GPSDisplay::startUpdates()
 #if defined(QT_POSITIONING_LIB)
 	if (source)
 	{
+#if defined(Q_OS_ANDROID)
+		QLocationPermission permission;
+		permission.setAccuracy(QLocationPermission::Precise);
+		permission.setAvailability(QLocationPermission::WhenInUse);
+		auto* application = QCoreApplication::instance();
+		switch (application->checkPermission(permission))
+		{
+		case Qt::PermissionStatus::Undetermined:
+			application->requestPermission(permission, this, [this](const QPermission& result) {
+				if (result.status() == Qt::PermissionStatus::Granted)
+					startUpdates();
+			});
+			return;
+		case Qt::PermissionStatus::Denied:
+			return;
+		case Qt::PermissionStatus::Granted:
+			break;
+		}
+#endif
 		checkGPSEnabled();
 		source->startUpdates();
 	}
@@ -403,17 +422,6 @@ void GPSDisplay::error()
 		}
 	}
 #endif
-}
-
-void GPSDisplay::updateTimeout()
-{
-	// Lost satellite fix
-	if (!tracking_lost)
-	{
-		tracking_lost = true;
-		emit positionUpdatesInterrupted();
-		updateMapWidget();
-	}
 }
 
 MapCoordF GPSDisplay::calcLatestGPSCoord(bool& ok)

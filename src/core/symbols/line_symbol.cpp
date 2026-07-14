@@ -31,12 +31,12 @@
 #include <QtNumeric>
 #include <QCoreApplication>
 #include <QLatin1String>
-#include <QStringRef>
+#include <QPainterPath>
+#include <QPainterPathStroker>
+#include <QStringView>
 #include <QXmlStreamAttributes>
 #include <QXmlStreamReader>
 #include <QXmlStreamWriter>
-
-#include <private/qbezier_p.h>
 
 #include "core/map.h"
 #include "core/map_color.h"
@@ -118,6 +118,82 @@ void LineSymbolBorder::scale(double factor)
 
 
 namespace {
+
+struct CubicSegment
+{
+	QPointF start;
+	QPointF control1;
+	QPointF control2;
+	QPointF end;
+};
+
+std::vector<CubicSegment> offsetCubic(
+	const QPointF& start,
+	const QPointF& control1,
+	const QPointF& control2,
+	const QPointF& end,
+	double offset,
+	double curve_threshold)
+{
+	if (qFuzzyIsNull(offset))
+		return {{start, control1, control2, end}};
+
+	QPainterPath path;
+	path.moveTo(start);
+	path.cubicTo(control1, control2, end);
+
+	QPainterPathStroker stroker;
+	stroker.setWidth(2.0 * std::abs(offset));
+	stroker.setCapStyle(Qt::FlatCap);
+	stroker.setJoinStyle(Qt::BevelJoin);
+	stroker.setCurveThreshold(curve_threshold);
+	const auto outline = stroker.createStroke(path);
+
+	std::vector<CubicSegment> right_side;
+	std::vector<CubicSegment> left_side_reverse;
+	if (outline.elementCount() == 0)
+		return {};
+
+	auto current = QPointF{outline.elementAt(0)};
+	auto* side = &right_side;
+	for (int i = 1; i < outline.elementCount();)
+	{
+		const auto element = outline.elementAt(i);
+		if (element.type == QPainterPath::CurveToElement
+		    && i + 2 < outline.elementCount())
+		{
+			const auto data1 = outline.elementAt(i + 1);
+			const auto data2 = outline.elementAt(i + 2);
+			if (data1.type != QPainterPath::CurveToDataElement
+			    || data2.type != QPainterPath::CurveToDataElement)
+				return {};
+
+			side->push_back({current, QPointF{element}, QPointF{data1}, QPointF{data2}});
+			current = QPointF{data2};
+			i += 3;
+			continue;
+		}
+
+		if (element.type != QPainterPath::LineToElement)
+			return {};
+
+		if (side == &left_side_reverse)
+			break;
+
+		side = &left_side_reverse;
+		current = QPointF{element};
+		++i;
+	}
+
+	if (offset > 0.0)
+		return right_side;
+
+	std::vector<CubicSegment> left_side;
+	left_side.reserve(left_side_reverse.size());
+	for (auto i = left_side_reverse.rbegin(); i != left_side_reverse.rend(); ++i)
+		left_side.push_back({i->end, i->control2, i->control1, i->start});
+	return left_side;
+}
 
 bool equalDimensions(const LineSymbolBorder& lhs, const LineSymbolBorder& rhs)
 {
@@ -497,8 +573,6 @@ void LineSymbol::createBorderLines(
 void LineSymbol::shiftCoordinates(const VirtualPath& path, double main_shift, double border_shift, LineSymbol::JoinStyle join_style, MapCoordVector& out_flags, MapCoordVectorF& out_coords)
 {
 	const float curve_threshold = 0.03f;	// TODO: decrease for export/print?
-	const int MAX_OFFSET = 16;
-	QBezier offsetCurves[MAX_OFFSET];
 	
 	double miter_limit = 2.0 * miterLimit(); // needed more than once
 	if (miter_limit <= 0.0)
@@ -721,49 +795,30 @@ void LineSymbol::shiftCoordinates(const VirtualPath& path, double main_shift, do
 		if (flags_i.isCurveStart())
 		{
 			Q_ASSERT(i+2 < path.last_index);
-			
-			// Use QBezierCopy code to shift the curve, but set start and end point manually to get the correct end points (because of line joins)
+
+			// Offset the curve through Qt's public stroking API, but retain the
+			// explicitly calculated line-join endpoints.
 			// TODO: it may be necessary to remove some of the generated curves in the case an outer point is moved inwards
-			if (shift > 0.0)
+			const auto offset_curves = offsetCubic(path.coords[i],
+			                                             path.coords[i+1],
+			                                             path.coords[i+2],
+			                                             path.coords[i+3],
+			                                             shift,
+			                                             curve_threshold);
+			for (auto j = offset_curves.cbegin(); j != offset_curves.cend(); ++j)
 			{
-				QBezier bezier = QBezier::fromPoints(path.coords[i+3], path.coords[i+2], path.coords[i+1], coords_i);
-				auto count = bezier.shifted(offsetCurves, MAX_OFFSET, qAbs(shift), curve_threshold);
-				for (auto j = count - 1; j >= 0; --j)
+				out_flags.back().setCurveStart(true);
+
+				out_flags.emplace_back();
+				out_coords.emplace_back(j->control1);
+
+				out_flags.emplace_back();
+				out_coords.emplace_back(j->control2);
+
+				if (std::next(j) != offset_curves.cend())
 				{
-					out_flags.back().setCurveStart(true);
-					
 					out_flags.emplace_back();
-					out_coords.emplace_back(offsetCurves[j].pt3());
-					
-					out_flags.emplace_back();
-					out_coords.emplace_back(offsetCurves[j].pt2());
-					
-					if (j > 0)
-					{
-						out_flags.emplace_back();
-						out_coords.emplace_back(offsetCurves[j].pt1());
-					}
-				}
-			}
-			else
-			{
-				QBezier bezier = QBezier::fromPoints(path.coords[i], path.coords[i+1], path.coords[i+2], path.coords[i+3]);
-				int count = bezier.shifted(offsetCurves, MAX_OFFSET, qAbs(shift), curve_threshold);
-				for (int j = 0; j < count; ++j)
-				{
-					out_flags.back().setCurveStart(true);
-					
-					out_flags.emplace_back();
-					out_coords.emplace_back(offsetCurves[j].pt2());
-					
-					out_flags.emplace_back();
-					out_coords.emplace_back(offsetCurves[j].pt3());
-					
-					if (j < count - 1)
-					{
-						out_flags.emplace_back();
-						out_coords.emplace_back(offsetCurves[j].pt4());
-					}
+					out_coords.emplace_back(j->end);
 				}
 			}
 			

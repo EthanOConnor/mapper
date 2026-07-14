@@ -217,7 +217,7 @@ QVariant TemplateTableModel::mapData(const QModelIndex &index, int role) const
 	if (role == Qt::BackgroundRole)
 	{
 #ifdef Q_OS_ANDROID
-		auto background_color = paletteColor(view, QPalette::Background);
+		auto background_color = paletteColor(view, QPalette::Window);
 		auto r = (128 + 5 * background_color.red()) / 6;
 		auto g = (128 + 5 * background_color.green()) / 6;
 		auto b = (128 + 5 * background_color.blue()) / 6;
@@ -231,8 +231,8 @@ QVariant TemplateTableModel::mapData(const QModelIndex &index, int role) const
 	if (role == Qt::ForegroundRole)
 	{
 		if (visibility.visible)
-			return QBrush(paletteColor(view, QPalette::Foreground));
-		return QBrush(QPalette().color(QPalette::Disabled, QPalette::Foreground));
+			return QBrush(paletteColor(view, QPalette::WindowText));
+		return QBrush(QPalette().color(QPalette::Disabled, QPalette::WindowText));
 	}
 	
 	switch (combined(index.column(), Qt::ItemDataRole(role)))
@@ -264,7 +264,7 @@ QVariant TemplateTableModel::templateData(Template* temp, const QModelIndex &ind
 	if (role == Qt::BackgroundRole)
 	{
 #ifdef Q_OS_ANDROID
-		return QBrush(paletteColor(view, QPalette::Background));
+		return QBrush(paletteColor(view, QPalette::Window));
 #else
 		return QBrush(paletteColor(view, QPalette::Base));
 #endif
@@ -280,9 +280,9 @@ QVariant TemplateTableModel::templateData(Template* temp, const QModelIndex &ind
 				text_color = text_color.darker();
 		}
 		else if (visibility.visible)
-			text_color = paletteColor(view, QPalette::Foreground);
+			text_color = paletteColor(view, QPalette::WindowText);
 		else
-			text_color = QPalette().color(QPalette::Disabled, QPalette::Foreground);
+			text_color = QPalette().color(QPalette::Disabled, QPalette::WindowText);
 		return QBrush(text_color);
 	}
 	

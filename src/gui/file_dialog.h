@@ -23,6 +23,7 @@
 
 #include <QFileDialog>
 #include <QString>
+#include <QStringView>
 
 class QWidget;
 
@@ -35,20 +36,12 @@ namespace OpenOrienteering {
 namespace FileDialog {
 	
 	/**
-	 * Returns true if upper case extensions have to be added explicitly
-	 * to filters in file dialogs.
-	 */
-	bool needUpperCaseExtensions();
-	
-	
-	/**
 	 * Adjusts filter and options for file dialogs.
 	 * 
-	 * Adds upper case version of the extension when needed.
 	 * Sets QFileDialog::HideNameFilterDetails when the length of any particular
 	 * filter exceeds a certain threshold.
 	 */
-	void adjustParameters(QString& filter, QFileDialog::Options& options);
+	void adjustParameters(QStringView filter, QFileDialog::Options& options);
 	
 	
 	/**

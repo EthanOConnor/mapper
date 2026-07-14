@@ -32,7 +32,7 @@
 #include <QLatin1String>
 #include <QPointF>
 #include <QRectF>
-#include <QStringRef>
+#include <QStringView>
 #include <QTransform>
 #include <QXmlStreamAttributes>
 #include <QXmlStreamReader>

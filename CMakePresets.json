@@ -1,0 +1,140 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 4,
+    "minor": 4,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "Mapper_MANUAL_QTHELP": "OFF"
+      }
+    },
+    {
+      "name": "dev-macos",
+      "displayName": "macOS development",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "Mapper_DEVELOPMENT_BUILD": "ON"
+      }
+    },
+    {
+      "name": "dev-macos-sanitize",
+      "displayName": "macOS development with ASan and UBSan",
+      "inherits": "dev-macos",
+      "cacheVariables": {
+        "Mapper_ENABLE_SANITIZERS": "ON"
+      }
+    },
+    {
+      "name": "ci-macos",
+      "displayName": "macOS CI",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "Mapper_DEVELOPMENT_BUILD": "OFF",
+        "Mapper_PACKAGE_QT": "OFF",
+        "Mapper_PACKAGE_PROJ": "OFF",
+        "Mapper_PACKAGE_GDAL": "OFF",
+        "Mapper_PACKAGE_ASSISTANT": "OFF"
+      }
+    },
+    {
+      "name": "dev-linux",
+      "displayName": "Linux development",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "Mapper_DEVELOPMENT_BUILD": "ON"
+      }
+    },
+    {
+      "name": "ci-linux",
+      "displayName": "Linux CI",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "Mapper_DEVELOPMENT_BUILD": "OFF",
+        "Mapper_PACKAGE_QT": "OFF",
+        "Mapper_PACKAGE_PROJ": "OFF",
+        "Mapper_PACKAGE_GDAL": "OFF",
+        "Mapper_PACKAGE_ASSISTANT": "OFF"
+      }
+    },
+    {
+      "name": "dev-windows",
+      "displayName": "Windows development",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "Mapper_DEVELOPMENT_BUILD": "ON"
+      }
+    },
+    {
+      "name": "ci-windows",
+      "displayName": "Windows CI",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "Mapper_DEVELOPMENT_BUILD": "OFF",
+        "Mapper_PACKAGE_QT": "OFF",
+        "Mapper_PACKAGE_PROJ": "OFF",
+        "Mapper_PACKAGE_GDAL": "OFF",
+        "Mapper_PACKAGE_ASSISTANT": "OFF"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "dev-macos", "configurePreset": "dev-macos" },
+    { "name": "dev-macos-sanitize", "configurePreset": "dev-macos-sanitize" },
+    { "name": "ci-macos", "configurePreset": "ci-macos" },
+    { "name": "dev-linux", "configurePreset": "dev-linux" },
+    { "name": "ci-linux", "configurePreset": "ci-linux" },
+    { "name": "dev-windows", "configurePreset": "dev-windows" },
+    { "name": "ci-windows", "configurePreset": "ci-windows" }
+  ],
+  "testPresets": [
+    {
+      "name": "dev-macos",
+      "configurePreset": "dev-macos",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "dev-macos-sanitize",
+      "configurePreset": "dev-macos-sanitize",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "ci-macos",
+      "configurePreset": "ci-macos",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "dev-linux",
+      "configurePreset": "dev-linux",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "ci-linux",
+      "configurePreset": "ci-linux",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "dev-windows",
+      "configurePreset": "dev-windows",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "ci-windows",
+      "configurePreset": "ci-windows",
+      "output": { "outputOnFailure": true }
+    }
+  ]
+}

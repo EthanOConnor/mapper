@@ -29,7 +29,6 @@
 class QAbstractButton;
 class QCommandLinkButton;
 class QPushButton;
-class QSignalMapper;
 class QVBoxLayout;
 class QWidget;
 
@@ -99,14 +98,12 @@ public:
 	}
 	
 private slots:
-	void buttonClicked(QWidget* button);
 	void buttonClicked(QAbstractButton* button);
 	
 private:
-	QAbstractButton* clicked_button;
-	QVBoxLayout* layout;
-	QDialogButtonBox* button_box;
-	QSignalMapper* signal_mapper;
+	QAbstractButton* clicked_button = nullptr;
+	QVBoxLayout* layout = nullptr;
+	QDialogButtonBox* button_box = nullptr;
 };
 
 

@@ -412,6 +412,10 @@ public:
 class PathPartVector : public std::vector<PathPart> 
 {
 public:
+	PathPartVector() = default;
+	PathPartVector(const PathPartVector&) = delete;
+	PathPartVector(PathPartVector&&) noexcept = default;
+
 	/**
 	 * This is dangerous when copying objects (which own a PathPartVector).
 	 * 
@@ -422,6 +426,7 @@ public:
 	 * Other use cases may consider using std::vector<PathPart>.
 	 */
 	PathPartVector& operator=(const PathPartVector&) = delete;
+	PathPartVector& operator=(PathPartVector&&) noexcept = default;
 	
 	/**
 	 * Returns true if the part's end_index is lower than index.

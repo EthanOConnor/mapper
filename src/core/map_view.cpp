@@ -29,7 +29,7 @@
 #include <Qt>
 #include <QLatin1String>
 #include <QString>
-#include <QStringRef>
+#include <QStringView>
 #include <QXmlStreamReader>
 
 #include "core/map.h"

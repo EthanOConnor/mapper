@@ -72,7 +72,6 @@
 #include "gui/map/map_widget.h"
 #include "gui/util_gui.h"
 #include "gui/widgets/color_dropdown.h"
-#include "util/backports.h"  // IWYU pragma: keep
 #include "util/scoped_signals_blocker.h"
 
 
@@ -241,7 +240,7 @@ PointSymbolEditorWidget::PointSymbolEditorWidget(MapEditorController* controller
 	left_layout->addLayout(element_buttons_layout);
 	
 	auto* right_layout = new QVBoxLayout();
-	right_layout->setMargin(0);
+	right_layout->setContentsMargins(0, 0, 0, 0);
 	
 	right_layout->addWidget(current_element_label);
 	right_layout->addWidget(element_properties_widget);

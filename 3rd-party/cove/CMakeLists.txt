@@ -1,14 +1,9 @@
-project(Cove)
-
-find_package(${Mapper_QT} ${Mapper_QT_VERSION} COMPONENTS Core Widgets Concurrent REQUIRED)
-
-set(CMAKE_CXX_STANDARD 14)
-
 add_library(cove-potrace STATIC
     potrace/curve.c
     potrace/potracelib.c
     potrace/trace.c
 )
+target_compile_features(cove-potrace PRIVATE c_std_99)
 target_include_directories(cove-potrace INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_compile_definitions(cove-potrace PRIVATE NOMINMAX)
 
@@ -25,6 +20,7 @@ add_library(cove-vectorizer STATIC
     libvectorizer/ProgressObserver.h
     libvectorizer/Vectorizer.cpp
 )
+target_compile_features(cove-vectorizer PRIVATE cxx_std_23)
 target_include_directories(cove-vectorizer
   PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/libvectorizer"
@@ -32,7 +28,7 @@ target_include_directories(cove-vectorizer
     "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 target_link_libraries(cove-vectorizer PRIVATE cove-potrace)
-target_link_libraries(cove-vectorizer PUBLIC Qt5::Gui Qt5::Concurrent)
+target_link_libraries(cove-vectorizer PUBLIC Qt6::Gui Qt6::Concurrent)
 
 set(Cove_SRCS
     app/classificationconfigform.cpp
@@ -55,10 +51,8 @@ target_include_directories(cove
   INTERFACE
     "${CMAKE_CURRENT_SOURCE_DIR}"
 )
-if(${CMAKE_VERSION} VERSION_LESS 3.8)
-	target_include_directories(cove PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
-endif()
-target_link_libraries(cove cove-vectorizer Qt5::Widgets)
+target_compile_features(cove PRIVATE cxx_std_23)
+target_link_libraries(cove PRIVATE cove-vectorizer Qt6::Widgets)
 set_target_properties(cove
   PROPERTIES
     AUTOMOC ON

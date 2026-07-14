@@ -36,7 +36,6 @@
 #include <QVBoxLayout>
 
 #include "settings.h"
-#include "core/app_permissions.h"
 #include "core/storage_location.h" // IWYU pragma: keep
 #include "fileformats/file_format_registry.h"
 #include "gui/home_screen_controller.h"
@@ -378,13 +377,13 @@ void HomeScreenWidgetMobile::adjustTitlePixmapSize()
 	auto scaled_width = qRound(title_pixmap.devicePixelRatio() * label_size.width());
 	if (title_pixmap.width() > scaled_width)
 	{
-		if (title_label->pixmap()->width() != scaled_width)
+		if (title_label->pixmap().width() != scaled_width)
 		{
 			label_size.setHeight(title_pixmap.height());
 			title_label->setPixmap(title_pixmap.scaled(label_size, Qt::KeepAspectRatio, Qt::SmoothTransformation));
 		}
 	}
-	else if (title_label->pixmap()->width() != title_pixmap.width())
+	else if (title_label->pixmap().width() != title_pixmap.width())
 	{
 		title_label->setPixmap(title_pixmap);
 	}
@@ -438,7 +437,9 @@ void HomeScreenWidgetMobile::itemClicked(QListWidgetItem* item)
 	}
 	else if (hint == StorageLocation::HintNoAccess)
 	{
-		AppPermissions::requestPermission(AppPermissions::StorageAccess, this, &HomeScreenWidgetMobile::permissionRequestDone);
+		QMessageBox::warning(this,
+		                     ::OpenOrienteering::MainWindow::tr("Warning"),
+		                     StorageLocation::fileHintTextTemplate(hint).arg(file_path));
 	}
 	else if (QFileInfo(file_path).isDir())
 	{
@@ -457,28 +458,6 @@ void HomeScreenWidgetMobile::itemClicked(QListWidgetItem* item)
 		QApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 100 /* ms */);
 		controller->getWindow()->openPath(file_path);
 		setEnabled(true);
-	}
-}
-
-void HomeScreenWidgetMobile::permissionRequestDone()
-{
-	auto* item = file_list_widget->currentItem();
-	if (AppPermissions::checkPermission(AppPermissions::StorageAccess) == AppPermissions::Granted
-	    && item != nullptr)
-	{
-		// We only handle permissions for top-level storage locations.
-		auto path = item->data(pathRole()).toString();
-		StorageLocation::refresh();
-		const auto locations = StorageLocation::knownLocations();
-		for (const auto& location : *locations)
-		{
-			if (QFileInfo(location.path()).filePath() == path)
-			{
-				item->setData(hintRole(), location.hint());
-				itemClicked(item);
-				break;
-			}
-		}
 	}
 }
 

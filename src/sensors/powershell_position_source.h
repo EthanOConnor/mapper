@@ -68,7 +68,7 @@ public:
 	
 	QGeoPositionInfoSource::Error error() const override;
 	
-	using QGeoPositionInfoSource::error;  // the signal
+	using QGeoPositionInfoSource::errorOccurred;  // the signal
 
 private:
 	/**

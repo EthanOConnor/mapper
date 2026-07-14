@@ -19,8 +19,6 @@
  
 message(STATUS "Configuring ${PROJECT_NAME} translations")
 
-find_package(Qt5LinguistTools REQUIRED)
-
 # Translation files which are updated by lupdate.
 set(Mapper_translations
   OpenOrienteering_bg.ts
@@ -163,7 +161,8 @@ add_custom_command(OUTPUT "${hu_ts}"
   WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
 )
 
-qt5_add_translation(translations_qm ${Mapper_translations_for_qt} ${map_symbols_translations} ${qt_translations})
+qt_add_translation(translations_qm ${Mapper_translations_for_qt} ${map_symbols_translations} ${qt_translations})
+set(translations_qm ${translations_qm} PARENT_SCOPE)
 
 # A target which builds all translations.
 add_custom_target(Mapper_translations ALL
@@ -192,25 +191,13 @@ if(APPLE)
 	endforeach()
 endif()
 
-# For super-builds (e.g. cross-compilation), wait for the Qt build.
-add_dependencies(Mapper_translations Mapper_prerequisites)
-
-
-
-# We need lupdate >= 5.6.1 for updates from source
-if(TARGET ${Qt5_LUPDATE_EXECUTABLE})
-	get_property(Qt5_LUPDATE_EXECUTABLE TARGET ${Qt5_LUPDATE_EXECUTABLE} PROPERTY IMPORTED_LOCATION)
+set(Qt6_LUPDATE_EXECUTABLE Qt6::lupdate)
+if(TARGET ${Qt6_LUPDATE_EXECUTABLE})
+	get_property(Qt6_LUPDATE_EXECUTABLE TARGET ${Qt6_LUPDATE_EXECUTABLE} PROPERTY IMPORTED_LOCATION)
 endif()
-execute_process(
-  COMMAND "${Qt5_LUPDATE_EXECUTABLE}" -version
-  OUTPUT_VARIABLE lupdate_version
-)
-string(REGEX REPLACE "^.*([0-9]\\.1?[0-9]\\.[0-9]).*" "\\1" lupdate_version "${lupdate_version}")
-if(lupdate_version VERSION_LESS 5.6.1)
-	message(AUTHOR_WARNING "lupdate version ${lupdate_version} is less than 5.6.1. Updates disabled.")
-else()
-	# A target which updates all translations.
-	add_custom_target(Mapper_translations_update
+
+# A target which updates all translations.
+add_custom_target(Mapper_translations_update
 	  # SOURCES are displayed in Qt Creator
 	  SOURCES
 	    ${Mapper_translations_template}
@@ -227,8 +214,8 @@ else()
 	  "${PROJECT_SOURCE_DIR}/packaging/translations.cpp\n"
 	)
 	
-	# One target for each translation.
-	foreach(translation ${Mapper_translations} ${Mapper_translations_template})
+# One target for each translation.
+foreach(translation ${Mapper_translations} ${Mapper_translations_template})
 		set(lupdate_options -locations absolute)
 		get_filename_component(ts_filename ${translation} NAME_WE)
 		if("${ts_filename}" STREQUAL "OpenOrienteering_en")
@@ -256,15 +243,14 @@ else()
 		
 		add_custom_target(Mapper_${ts_filename}_update
 		  ${pre_lupdate}
-		  COMMAND "${Qt5_LUPDATE_EXECUTABLE}" ${lupdate_options} "@${listfile}" -ts "${CMAKE_CURRENT_SOURCE_DIR}/${translation}"
+		  COMMAND "${Qt6_LUPDATE_EXECUTABLE}" ${lupdate_options} "@${listfile}" -ts "${CMAKE_CURRENT_SOURCE_DIR}/${translation}"
 		  COMMAND sed -e "/<context>/N;/<name>Q[A-Z]/,/<.context>/d" -i -- "${CMAKE_CURRENT_SOURCE_DIR}/${translation}"
 		  ${post_lupdate}
 		  COMMAND rm -f "${CMAKE_CURRENT_SOURCE_DIR}/${translation}--"
 		  VERBATIM
 		)
-		add_dependencies(Mapper_translations_update Mapper_${ts_filename}_update)
-	endforeach()
-endif()
+	add_dependencies(Mapper_translations_update Mapper_${ts_filename}_update)
+endforeach()
 
 #
 # A macro for collecting translations sources.

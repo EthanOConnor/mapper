@@ -67,43 +67,36 @@ set(LICENSING_NO_ATTRIBUTION "" CACHE STRING
 )
 
 
-# Import the targets of all found packages into this scope.
-get_cmake_property(packages PACKAGES_FOUND)
-foreach(package ${packages})
-	find_package("${package}" QUIET)
-endforeach()
-
-
 # Software and data used directly by Mapper, or set by configuration
 set(third_party_components
   ${LICENSING_ATTRIBUTION}
-  libpolyclipping
+  clipper2
   proj
   qtbase
   qtimageformats
   qttranslations
 )
-if(TARGET Qt5::AndroidExtras)
+if(TARGET Qt6::AndroidExtras)
 	list(APPEND third_party_components qtandroidextras)
 endif()
-if(TARGET Qt5::Positioning)
+if(TARGET Qt6::Positioning)
 	list(APPEND third_party_components qtlocation)
 endif()
-if(TARGET Qt5::Sensors)
+if(TARGET Qt6::Sensors)
 	list(APPEND third_party_components qtsensors)
-	if(NOT TARGET Qt5::QGeoPositionInfoSourceFactorySerialNmea
-	   AND EXISTS "${Qt5Positioning_DIR}/Qt5Positioning_QGeoPositionInfoSourceFactorySerialNmea.cmake")
-		include("${Qt5Positioning_DIR}/Qt5Positioning_QGeoPositionInfoSourceFactorySerialNmea.cmake")
+	if(NOT TARGET Qt6::QGeoPositionInfoSourceFactorySerialNmea
+	   AND EXISTS "${Qt6Positioning_DIR}/Qt6Positioning_QGeoPositionInfoSourceFactorySerialNmea.cmake")
+		include("${Qt6Positioning_DIR}/Qt6Positioning_QGeoPositionInfoSourceFactorySerialNmea.cmake")
 	endif()
-	if(TARGET Qt5::QGeoPositionInfoSourceFactorySerialNmea)
-		find_package(Qt5SerialPort QUIET)
+	if(TARGET Qt6::QGeoPositionInfoSourceFactorySerialNmea)
+		find_package(Qt6SerialPort QUIET)
 	endif()
 endif()
-if(TARGET Qt5::SerialPort)
+if(TARGET Qt6::SerialPort)
 	list(APPEND third_party_components qtserialport)
 endif()
-if(TARGET QtSingleApplication)
-	list(APPEND third_party_components qtsingleapplication)
+if(TARGET kdsingleapplication)
+	list(APPEND third_party_components kdsingleapplication)
 endif()
 if(TARGET mapper-gdal)
 	list(APPEND third_party_components gdal)
@@ -132,23 +125,23 @@ set(explicit_copyright_GPL-3
   "${PROJECT_SOURCE_DIR}/COPYING"
   "common-licenses"
 )
-set(explicit_copyright_qtsingleapplication
-  "qtsingleapplication.txt"
-  "${PROJECT_SOURCE_DIR}/3rd-party/qtsingleapplication/copyright"
-  "3rd-party"
-)
+if(TARGET kdsingleapplication)
+	set(explicit_copyright_kdsingleapplication
+	  "kdsingleapplication-1.2.1.txt"
+	  "${kdsingleapplication_SOURCE_DIR}/LICENSE.txt"
+	  "3rd-party"
+	)
+endif()
 set(explicit_copyright_potrace
   "potrace-1.6.txt"
   "${PROJECT_SOURCE_DIR}/3rd-party/cove/potrace/copyright"
   "3rd-party"
 )
-if(Mapper_BUILD_CLIPPER)
-	set(explicit_copyright_libpolyclipping
-	  "libpolyclipping-${CLIPPER_VERSION}.txt"
-	  "${PROJECT_SOURCE_DIR}/3rd-party/clipper/copyright"
-	  "3rd-party"
-	)
-endif()
+set(explicit_copyright_clipper2
+  "clipper2-2.0.1.txt"
+  "${CMAKE_CURRENT_SOURCE_DIR}/clipper2-2.0.1.txt"
+  "3rd-party"
+)
 
 
 if(LICENSING_PROVIDER)

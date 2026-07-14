@@ -152,9 +152,6 @@ protected slots:
 	/** This slot reacts to changes of the target combobox. */
 	void targetChanged(int index) const;
 	
-	/** Opens a dialog to change printer properties. */
-	void propertiesClicked();
-	
 	/** This slot reacts to changes of the paper size combobox. */
 	void paperSizeChanged(int index) const;
 	
@@ -287,7 +284,6 @@ private:
 	QDialogButtonBox* button_box;
 	
 	QComboBox* target_combo;
-	QToolButton* printer_properties_button;
 	QComboBox* paper_size_combo;
 	QWidget*   page_orientation_widget;
 	QButtonGroup* page_orientation_group;

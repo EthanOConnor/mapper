@@ -29,6 +29,7 @@
 #include <QtPlugin>  // IWYU pragma: keep
 #include <QApplication>
 #include <QCoreApplication>
+#include <QFileInfo>
 #include <QGuiApplication>
 #include <QLatin1String>
 #include <QList>
@@ -43,9 +44,8 @@
 #include <QTranslator>
 #include <QWidget>
 
-#ifdef MAPPER_USE_QTSINGLEAPPLICATION
-#include <QtSingleApplication>
-#include <QFileInfo>
+#ifdef MAPPER_USE_KDSINGLEAPPLICATION
+#include <kdsingleapplication.h>
 #endif
 
 #include "global.h"
@@ -96,24 +96,28 @@ QStringList firstRemoved(QStringList&& input)
 }
 
 
-#ifdef MAPPER_USE_QTSINGLEAPPLICATION
+#ifdef MAPPER_USE_KDSINGLEAPPLICATION
 
-void resetActivationWindow(QtSingleApplication& app)
+void connectPrimaryInstance(KDSingleApplication& app)
 {
-	const auto* const old_window = app.activationWindow();
-	app.setActivationWindow(nullptr);
-	
 	if (!QCoreApplication::closingDown())
 	{
 		const auto top_level_widgets = QApplication::topLevelWidgets();
 		for (auto* widget : top_level_widgets)
 		{	
-			auto* const new_window = qobject_cast<MainWindow*>(widget);
-			if (new_window && new_window != old_window)
+			auto* const window = qobject_cast<MainWindow*>(widget);
+			if (window)
 			{
-				app.setActivationWindow(new_window);
-				QObject::connect(new_window, &QObject::destroyed, &app, [&app]() { resetActivationWindow(app); });
-				QObject::connect(&app, &QtSingleApplication::messageReceived, new_window, &MainWindow::openPathLater);
+				QObject::connect(&app, &KDSingleApplication::messageReceived, window,
+					[window](const QByteArray& message)
+					{
+						window->openPathLater(QString::fromUtf8(message));
+						window->showNormal();
+						window->raise();
+						window->activateWindow();
+					});
+				QObject::connect(window, &QObject::destroyed, &app,
+					[&app]() { QTimer::singleShot(0, &app, [&app]() { connectPrimaryInstance(app); }); });
 				break;
 			}
 		}
@@ -125,19 +129,19 @@ void resetActivationWindow(QtSingleApplication& app)
 
 int main(int argc, char** argv)
 {
-#ifdef MAPPER_USE_QTSINGLEAPPLICATION
-	// Create single-instance application.
-	// Use "oo-mapper" instead of the executable as identifier, in case we launch from different paths.
-	QtSingleApplication qapp(QString::fromLatin1("oo-mapper"), argc, argv);
-	if (qapp.isRunning()) {
+	QApplication qapp(argc, argv);
+
+#ifdef MAPPER_USE_KDSINGLEAPPLICATION
+	// Use a stable identifier so launches from different paths share an instance.
+	KDSingleApplication single_app(QStringLiteral("oo-mapper"));
+	if (!single_app.isPrimaryInstance())
+	{
 		// Send a message to activate the running app, and optionally open a file
 		auto const arguments = firstRemoved(QCoreApplication::arguments());
 		for (auto const& arg : arguments)
-			qapp.sendMessage(QFileInfo(arg).absoluteFilePath());
+			single_app.sendMessage(QFileInfo(arg).absoluteFilePath().toUtf8());
 		return 0;
 	}
-#else
-	QApplication qapp(argc, argv);
 #endif
 	
 #ifdef Q_OS_ANDROID
@@ -193,7 +197,7 @@ int main(int argc, char** argv)
 	// applied correctly before the app runs. So we postpone these steps
 	// via the event loop.
 	// OTOH the app crashes on Android if we don't set style early enough.
-	QTimer::singleShot(0, qApp, [&qapp]() {
+	QTimer::singleShot(0, qApp, [&]() {
 #ifndef __clang_analyzer__
 		// No leak: QApplication takes ownership.
 		QApplication::setStyle(new MapperProxyStyle());
@@ -215,8 +219,8 @@ int main(int argc, char** argv)
 		
 		first_window->applicationStateChanged();
 		
-#ifdef MAPPER_USE_QTSINGLEAPPLICATION
-		resetActivationWindow(qapp);
+#ifdef MAPPER_USE_KDSINGLEAPPLICATION
+		connectPrimaryInstance(single_app);
 #endif
 		
 		first_window->setVisible(true);

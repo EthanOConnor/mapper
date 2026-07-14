@@ -19,14 +19,48 @@
 
 #include "encoding.h"
 
+#include <cstdint>
+#include <limits>
+#include <memory>
+#include <stdexcept>
+#include <utility>
+
 #include <QByteArray>
 #include <QLocale>
 #include <QString>
-#include <QStringRef>
-#include <QTextCodec>
+#include <QStringView>
+
+#include <unicode/ucnv.h>
 
 
 namespace {
+
+struct ConverterDeleter
+{
+	void operator()(UConverter* converter) const noexcept
+	{
+		ucnv_close(converter);
+	}
+};
+
+using Converter = std::unique_ptr<UConverter, ConverterDeleter>;
+
+Converter openConverter(QByteArrayView name)
+{
+	const QByteArray null_terminated_name{name};
+	UErrorCode status = U_ZERO_ERROR;
+	Converter converter{ucnv_open(null_terminated_name.constData(), &status)};
+	if (U_FAILURE(status))
+		return {};
+	return converter;
+}
+
+int32_t checkedSize(qsizetype size)
+{
+	if (size > std::numeric_limits<int32_t>::max())
+		throw std::length_error{"Text is too large for ICU conversion"};
+	return static_cast<int32_t>(size);
+}
 
 struct LanguageMapping
 {
@@ -57,7 +91,7 @@ namespace OpenOrienteering {
 
 const char* Util::codepageForLanguage(const QString& language_name)
 {
-	const auto language = language_name.leftRef(2).toLatin1();
+	const auto language = QStringView{language_name}.first(2).toLatin1();
 	for (const auto& mapping : mappings)
 	{
 		auto len = qstrlen(mapping.languages);
@@ -71,12 +105,80 @@ const char* Util::codepageForLanguage(const QString& language_name)
 }
 
 
-QTextCodec* Util::codecForName(const char* name)
+Util::TextEncoding::TextEncoding(QByteArray canonical_name)
+ : canonical_name{std::move(canonical_name)}
+{}
+
+QByteArray Util::TextEncoding::encode(QStringView text) const
 {
-	if  (qstrcmp(name, "Default") == 0)
-		return QTextCodec::codecForName(Util::codepageForLanguage(QLocale().name()));
-	else
-		return QTextCodec::codecForName(name);
+	auto converter = openConverter(canonical_name);
+	if (!converter)
+		return {};
+
+	UErrorCode status = U_ZERO_ERROR;
+	ucnv_setFallback(converter.get(), false);
+	ucnv_setSubstChars(converter.get(), "?", 1, &status);
+	if (U_FAILURE(status))
+		return {};
+
+	const auto source_size = checkedSize(text.size());
+	const auto* source = reinterpret_cast<const UChar*>(text.utf16());
+	status = U_ZERO_ERROR;
+	const auto output_size = ucnv_fromUChars(converter.get(), nullptr, 0, source, source_size, &status);
+	if (status != U_BUFFER_OVERFLOW_ERROR && U_FAILURE(status))
+		return {};
+
+	QByteArray output{output_size, Qt::Uninitialized};
+	status = U_ZERO_ERROR;
+	ucnv_fromUChars(converter.get(), output.data(), output.size(), source, source_size, &status);
+	return U_SUCCESS(status) ? output : QByteArray{};
+}
+
+QString Util::TextEncoding::decode(QByteArrayView bytes) const
+{
+	auto converter = openConverter(canonical_name);
+	if (!converter)
+		return {};
+
+	const auto source_size = checkedSize(bytes.size());
+	UErrorCode status = U_ZERO_ERROR;
+	const auto output_size = ucnv_toUChars(converter.get(), nullptr, 0, bytes.data(), source_size, &status);
+	if (status != U_BUFFER_OVERFLOW_ERROR && U_FAILURE(status))
+		return {};
+
+	QString output{output_size, Qt::Uninitialized};
+	status = U_ZERO_ERROR;
+	ucnv_toUChars(
+	  converter.get(), reinterpret_cast<UChar*>(output.data()), output.size(),
+	  bytes.data(), source_size, &status);
+	return U_SUCCESS(status) ? output : QString{};
+}
+
+std::optional<Util::TextEncoding> Util::encodingForName(QByteArrayView name)
+{
+	QByteArray resolved_name{name};
+	if (name == QByteArrayView{"Default"})
+		resolved_name = codepageForLanguage(QLocale{}.name());
+
+	auto converter = openConverter(resolved_name);
+	if (!converter)
+		return std::nullopt;
+
+	UErrorCode status = U_ZERO_ERROR;
+	const auto* canonical_name = ucnv_getName(converter.get(), &status);
+	if (U_FAILURE(status) || !canonical_name)
+		return std::nullopt;
+	return TextEncoding{QByteArray{canonical_name}};
+}
+
+QList<QByteArray> Util::availableEncodingNames()
+{
+	QList<QByteArray> names;
+	const auto count = ucnv_countAvailable();
+	names.reserve(count);
+	for (int32_t i = 0; i < count; ++i)
+		names.emplaceBack(ucnv_getAvailableName(i));
+	return names;
 }
 
 

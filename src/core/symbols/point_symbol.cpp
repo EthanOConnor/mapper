@@ -33,7 +33,7 @@
 #include <QPainterPath>
 #include <QRectF>
 #include <QString>
-#include <QStringRef>
+#include <QStringView>
 #include <QXmlStreamAttributes>
 #include <QXmlStreamReader>
 #include <QXmlStreamWriter>
@@ -612,7 +612,7 @@ bool PointSymbol::loadImpl(QXmlStreamReader& xml, const Map& map, SymbolDictiona
 	int num_elements = attributes.value(QLatin1String("elements")).toInt();
 	
 	elements.reserve(qMin(num_elements, 10)); // 10 is not a limit
-	for (int i = 0; xml.readNextStartElement(); ++i)
+	while (xml.readNextStartElement())
 	{
 		if (xml.name() == QLatin1String("element"))
 		{

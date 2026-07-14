@@ -56,7 +56,6 @@
 #include "gui/util_gui.h"
 #include "gui/symbols/symbol_setting_dialog.h"
 #include "gui/widgets/color_dropdown.h"
-#include "util/backports.h"  // IWYU pragma: keep
 
 
 namespace OpenOrienteering {
@@ -112,7 +111,7 @@ TextSymbolSettings::TextSymbolSettings(TextSymbol* symbol, SymbolSettingDialog* 
 	layout->addRow(tr("Font size:"), font_size_edit);
 	
 	auto letter_size_layout = new QHBoxLayout();
-	letter_size_layout->setMargin(0);
+	letter_size_layout->setContentsMargins(0, 0, 0, 0);
 	
 	letter_size_layout->addWidget(new QLabel(::OpenOrienteering::DetermineFontSizeDialog::tr("Letter:")));
 	//: "A" is the default letter which is used for determining letter height.

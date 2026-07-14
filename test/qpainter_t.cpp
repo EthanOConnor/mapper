@@ -24,11 +24,6 @@
 #include <QtTest>
 #include <QRgb>
 
-#include "core/image_transparency_fixup.h"
-
-using namespace OpenOrienteering;
-
-
 QPainterTest::QPainterTest(QObject* parent)
 : QObject(parent),
   white_img(makeImage(Qt::white)),
@@ -80,16 +75,7 @@ void QPainterTest::multiplyComposition()
 	QCOMPARE(compose(white_img, white_img, multiply).pixel(0,0), qRgba(255, 255, 255, 255));
 	QCOMPARE(compose(black_img, black_img, multiply).pixel(0,0), qRgba(0, 0, 0, 255));
 	
-#if QT_VERSION < QT_VERSION_CHECK(5, 15, 9) || (QT_VERSION >= QT_VERSION_CHECK(6, 0, 0) && QT_VERSION < QT_VERSION_CHECK(6, 2, 4))
-	QEXPECT_FAIL("", "CompositionMode_Multiply incorrectly composes full transparency.", Continue);
-#endif
 	QCOMPARE(compose(trans_img, trans_img, multiply).pixel(0,0), qRgba(0, 0, 0, 0));
-	
-	// ImageTransparencyFixup fixes the particular issue.
-	QImage result = compose(trans_img, trans_img, multiply);
-	ImageTransparencyFixup fixup(&result);
-	fixup();
-	QCOMPARE(result.pixel(0,0), qRgba(0, 0, 0, 0)); // Now correct!
 }
 
 void QPainterTest::darkenComposition()
@@ -108,16 +94,7 @@ void QPainterTest::darkenComposition()
 	QCOMPARE(compose(white_img, white_img, darken).pixel(0,0), qRgba(255, 255, 255, 255));
 	QCOMPARE(compose(black_img, black_img, darken).pixel(0,0), qRgba(0, 0, 0, 255));
 	
-#if QT_VERSION < QT_VERSION_CHECK(5, 15, 9) || (QT_VERSION >= QT_VERSION_CHECK(6, 0, 0) && QT_VERSION < QT_VERSION_CHECK(6, 2, 4))
-	QEXPECT_FAIL("", "CompositionMode_Darken incorrectly composes full transparency.", Continue);
-#endif
 	QCOMPARE(compose(trans_img, trans_img, darken).pixel(0,0), qRgba(0, 0, 0, 0));
-	
-	// ImageTransparencyFixup fixes the particular issue.
-	QImage result = compose(trans_img, trans_img, darken);
-	ImageTransparencyFixup fixup(&result);
-	fixup();
-	QCOMPARE(result.pixel(0,0), qRgba(0, 0, 0, 0)); // Now correct!
 }
 
 template <typename ColorT>

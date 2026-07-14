@@ -8,7 +8,6 @@ while read WORD; do SKIP_LIST="${SKIP_LIST:+$SKIP_LIST,}$WORD"; done \
   packaging/linux/Mapper.desktop
   src/gdal/mapper-osmconf.ini
   src/printsupport/qt-5.5.1
-  src/printsupport/qt-5.12.4
 END_SKIP_LIST
 
 codespell -q 7 \

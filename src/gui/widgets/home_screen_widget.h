@@ -188,7 +188,6 @@ protected:
 	void itemClicked(QListWidgetItem* item);
 	
 	/** Rechecks the current selected item. */
-	void permissionRequestDone();
 	
 	/** Triggers title image adjustment on resize events. */
 	void resizeEvent(QResizeEvent* event) override;

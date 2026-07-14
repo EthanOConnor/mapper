@@ -50,7 +50,7 @@ class MapEditorController;
 class MapWidget;
 class PathObject;
 class SnappingToolHelper;
-class SnappingToolHelperSnapInfo;
+struct SnappingToolHelperSnapInfo;
 class Symbol;
 
 

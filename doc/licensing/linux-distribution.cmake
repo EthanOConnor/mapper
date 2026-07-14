@@ -35,7 +35,7 @@
 # basename[:package_name] 
 
 list(APPEND easy_dependencies
-  libpolyclipping
+  clipper2
   proj
   qtbase
   qtimageformats
@@ -44,7 +44,7 @@ list(APPEND easy_dependencies
   qtlocation
   qtsensors
   qtserialport
-  # qtsingleapplication : Linked statically, attribution required!
+  # kdsingleapplication: Linked statically, attribution required.
   # gdal dependencies
     # libarmadillo4
     # libatomic1
@@ -101,11 +101,10 @@ foreach(dependency ${easy_dependencies})
 	if(NOT explicit_copyright_${dependency})
 		set(explicit_copyright_${dependency} "${dependency}" "-")
 		if(dependency MATCHES "^qt")
-			find_package(Qt5Core)
-			list(APPEND explicit_copyright_${dependency} "${Qt5Core_VERSION}")
-		elseif(dependency STREQUAL "libpolyclipping")
-			find_package(Polyclipping)
-			list(APPEND explicit_copyright_${dependency} "${POLYCLIPPING_VERSION}")
+			find_package(Qt6Core)
+			list(APPEND explicit_copyright_${dependency} "${Qt6Core_VERSION}")
+		elseif(dependency STREQUAL "clipper2")
+			list(APPEND explicit_copyright_${dependency} "2.0.1")
 		elseif(dependency STREQUAL "proj" AND PROJ_VERSION)
 			list(APPEND explicit_copyright_${dependency} "${PROJ_VERSION}")
 		elseif(dependency STREQUAL "zlib")

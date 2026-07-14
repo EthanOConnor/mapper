@@ -433,7 +433,7 @@ public:
 	 * Otherwise it will apply the BoundsOffset() and throw a std::range_error
 	 * if the adjusted coordinates are out of bounds for qint32.
 	 */
-	MapCoord(QStringRef& text);
+	MapCoord(QStringView& text);
 	
 	
 	/** Saves the MapCoord in xml format to the stream. */

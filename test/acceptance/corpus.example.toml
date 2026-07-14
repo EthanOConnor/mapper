@@ -1,0 +1,29 @@
+version = 1
+
+# Copy to corpus.local.toml and use local absolute paths. The local manifest is
+# ignored by Git. Reports identify private files by id and hash, never by path.
+
+[[asset]]
+id = "dense-contours"
+kind = "map"
+path = "/absolute/path/to/dense-contours.omap"
+tags = ["real", "isom", "dense-vector", "text", "interaction"]
+
+[[asset]]
+id = "heavy-raster"
+kind = "raster"
+path = "/absolute/path/to/heavy-raster.tif"
+tags = ["real", "geotiff", "large", "pyramid", "rotation"]
+
+[[asset]]
+id = "legacy-ocd"
+kind = "map"
+path = "/absolute/path/to/legacy.ocd"
+tags = ["real", "ocd", "import", "legacy"]
+
+[[asset]]
+id = "reference-print"
+kind = "pdf"
+path = "/absolute/path/to/reference.pdf"
+tags = ["real", "print", "pdf"]
+

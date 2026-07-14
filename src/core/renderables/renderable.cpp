@@ -34,7 +34,6 @@
 #include <QRgb>
 #include <QTransform>
 
-#include "core/image_transparency_fixup.h"
 #include "core/map_color.h"
 #include "core/map.h"
 #include "core/objects/object.h"
@@ -315,7 +314,6 @@ void MapRenderables::drawOverprintingSimulation(QPainter* painter, const RenderC
 {
 	// NOTE: painter must be a QPainter on a QImage of Format_ARGB32_Premultiplied.
 	QImage* image = static_cast<QImage*>(painter->device());
-	ImageTransparencyFixup image_fixup(image);
 	
 	QPainter::RenderHints hints = painter->renderHints();
 	QTransform t = painter->worldTransform();
@@ -344,7 +342,6 @@ void MapRenderables::drawOverprintingSimulation(QPainter* painter, const RenderC
 			// Add this separation to the composition with multiplication.
 			painter->setCompositionMode(QPainter::CompositionMode_Multiply);
 			painter->drawImage(0, 0, separation);
-			image_fixup();
 			
 #if MAPPER_OVERPRINTING_CORRECTION == -1
 			// Add some opacity to the multiplication, but not for black,
@@ -545,7 +542,7 @@ void MapRenderables::drawColorSeparation(QPainter* painter, const RenderConfig& 
 				}
 				else if (use_color)
 				{
-					qreal c, m, y, k;
+					float c, m, y, k;
 					color.getCmykF(&c, &m, &y, &k);
 					color.setCmykF(c*drawing_color.factor, m*drawing_color.factor, y*drawing_color.factor, k*drawing_color.factor, 1.0);
 				}

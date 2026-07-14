@@ -25,6 +25,7 @@
 #include <QtGlobal>
 #include <QApplication>
 #include <QCursor>
+#include <QEnterEvent>
 #include <QHideEvent>
 #include <QLabel>
 #include <QLatin1Char>
@@ -116,7 +117,7 @@ void SymbolToolTip::reset()
 		shortcut->setEnabled(false);
 }
 
-void SymbolToolTip::enterEvent(QEvent* event)
+void SymbolToolTip::enterEvent(QEnterEvent* event)
 {
 	Q_UNUSED(event);
     hide();

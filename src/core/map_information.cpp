@@ -292,10 +292,10 @@ QString MapInformation::makeTextReport(int indent) const
 {
 	QString text_report;
 	
-	auto actual_indent = [indent](int level) {
-		return level * indent;
+	auto actual_indent = [indent](int level) -> qsizetype {
+		return static_cast<qsizetype>(level) * indent;
 	};
-	auto max_item_length = std::accumulate(tree_items.begin(), tree_items.end(), 0, [actual_indent](auto acc, const auto& item) {
+	auto max_item_length = std::accumulate(tree_items.begin(), tree_items.end(), qsizetype{0}, [actual_indent](auto acc, const auto& item) {
 		return std::max(acc, actual_indent(item.level) + item.label.length());
 	});
 	

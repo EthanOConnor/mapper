@@ -26,6 +26,7 @@
 #include <cstddef>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <unordered_map>
 #include <vector>
 
@@ -34,10 +35,10 @@
 #include <QCoreApplication>
 #include <QLocale>
 #include <QString>
-#include <QTextCodec>
 
 #include "core/map_coord.h"
 #include "fileformats/file_import_export.h"
+#include "util/encoding.h"
 
 
 template< class Format > class OcdFile;
@@ -99,11 +100,11 @@ class OcdFileExport : public Exporter
 	struct ExportableString
 	{
 		const QString& string;
-		const QTextCodec* custom_8bit_encoding;
+		const Util::TextEncoding* custom_8bit_encoding;
 		
 		operator QByteArray() const
 		{
-			return custom_8bit_encoding ? custom_8bit_encoding->fromUnicode(string) : string.toUtf8();
+			return custom_8bit_encoding ? custom_8bit_encoding->encode(string) : string.toUtf8();
 		}
 		
 		operator QString() const noexcept
@@ -115,7 +116,7 @@ class OcdFileExport : public Exporter
 	
 	ExportableString toOcdString(const QString& string) const
 	{
-		return { string, custom_8bit_encoding };
+		return {string, custom_8bit_encoding ? &*custom_8bit_encoding : nullptr};
 	}
 	
 	
@@ -141,7 +142,7 @@ protected:
 protected:
 	
 	template< class Encoding >
-	QTextCodec* determineEncoding();
+	std::optional<Util::TextEncoding> determineEncoding();
 	
 	
 	template< class Format >
@@ -316,7 +317,7 @@ private:
 	QLocale locale;
 	
 	/// Character encoding to use for 1-byte (narrow) strings
-	QTextCodec *custom_8bit_encoding = nullptr;
+	std::optional<Util::TextEncoding> custom_8bit_encoding;
 	
 	MapCoord area_offset;
 	

@@ -21,7 +21,7 @@
 
 #include <QtGlobal>
 #include <QLatin1String>
-#include <QStringRef>
+#include <QStringView>
 #include <QXmlStreamReader>
 
 #include "core/map.h"
@@ -34,9 +34,6 @@ namespace literal
 	const QLatin1String change("change");
 	const QLatin1String type("type");
 	const QLatin1String part("part");
-	const QLatin1String add("add");
-	const QLatin1String remove("remove");
-	const QLatin1String modify("modify");
 	const QLatin1String name("name");
 }
 

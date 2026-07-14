@@ -22,13 +22,13 @@
 #include "tool_base.h"
 
 #include <algorithm>
-#include <cstdlib>  // IWYU pragma: keep
 #include <iterator>
 #include <type_traits>
 
 #include <QtGlobal>
 #include <QCoreApplication>  // IWYU pragma: keep
 #include <QMouseEvent>
+#include <QRandomGenerator>
 #include <QTimer>
 #include <QEvent>
 #include <QKeyEvent>
@@ -660,28 +660,32 @@ void MapEditorToolBase::updateConstrainedPositions()
 
 void MapEditorToolBase::generateNextSimulatedEvent()
 {
-	auto next_pos = cur_pos + QPoint{qRound(10.0 - 20.0 * qrand() / RAND_MAX),
-	                                 qRound(10.0 - 20.0 * qrand() / RAND_MAX)};
+	auto* random = QRandomGenerator::global();
+	auto next_pos = cur_pos + QPoint{random->bounded(21) - 10, random->bounded(21) - 10};
+	const auto global_position = mapWidget()->mapToGlobal(QPointF{next_pos});
 	switch (simulation_state)
 	{
 	case 1:
 		{
 			qDebug("generateNextSimulatedEvent(): MouseButtonPress @ %d,%d", next_pos.x(), next_pos.y());
-			QMouseEvent press(QEvent::MouseButtonPress, next_pos, Qt::LeftButton, Qt::NoButton, active_modifiers);
+			QMouseEvent press(QEvent::MouseButtonPress, next_pos, global_position,
+			                  Qt::LeftButton, Qt::NoButton, active_modifiers);
 			qApp->sendEvent(mapWidget(), &press);
 		}
 		break;
 	case 2:
 		{
 			qDebug("generateNextSimulatedEvent(): MouseMove @ %d,%d", next_pos.x(), next_pos.y());
-			QMouseEvent move(QEvent::MouseMove, next_pos, Qt::NoButton, Qt::LeftButton, active_modifiers);
+			QMouseEvent move(QEvent::MouseMove, next_pos, global_position,
+			                 Qt::NoButton, Qt::LeftButton, active_modifiers);
 			qApp->sendEvent(mapWidget(), &move);
 		}
 		break;
 	case 3:
 		{
 			qDebug("generateNextSimulatedEvent(): MouseButtonRelease @ %d,%d", next_pos.x(), next_pos.y());
-			QMouseEvent release(QEvent::MouseButtonRelease, next_pos, Qt::LeftButton, Qt::LeftButton, active_modifiers);
+			QMouseEvent release(QEvent::MouseButtonRelease, next_pos, global_position,
+			                    Qt::LeftButton, Qt::LeftButton, active_modifiers);
 			qApp->sendEvent(mapWidget(), &release);
 		}
 		Q_FALLTHROUGH();

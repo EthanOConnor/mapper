@@ -43,7 +43,7 @@
 #include <QPrinter>
 #include <QRectF>
 #include <QStringList>
-#include <QStringRef>
+#include <QStringView>
 #include <QTextStream>
 #include <QXmlStreamAttributes>
 #include <QXmlStreamReader>
@@ -65,7 +65,6 @@
 #include "fileformats/xml_file_format_p.h"
 #include "templates/template.h"
 #include "undo/undo_manager.h"
-#include "util/backports.h"  // IWYU pragma: keep
 
 
 using namespace OpenOrienteering;
@@ -1168,7 +1167,7 @@ void SymbolSetTool::processTestData()
  */
 #ifndef Q_OS_MACOS
 namespace {
-	auto Q_DECL_UNUSED qpa_selected = qputenv("QT_QPA_PLATFORM", "offscreen");  // clazy:exclude=non-pod-global-static
+	[[maybe_unused]] const auto qpa_selected = qputenv("QT_QPA_PLATFORM", "offscreen");  // clazy:exclude=non-pod-global-static
 }
 #endif
 

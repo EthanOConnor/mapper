@@ -33,6 +33,7 @@
 #include <QMetaObject>
 #include <QObject>
 #include <QString>
+#include <QTimeZone>
 
 #include "global.h"
 #include "test_config.h"
@@ -48,7 +49,7 @@ class TrackTest : public QObject
 {
 	Q_OBJECT
 	
-	QDateTime base_datetime = QDateTime::fromMSecsSinceEpoch(0, Qt::UTC).addYears(40);
+	QDateTime base_datetime = QDateTime::fromMSecsSinceEpoch(0, QTimeZone{QTimeZone::UTC}).addYears(40);
 	
 private slots:
 	void initTestCase()
@@ -117,7 +118,8 @@ private slots:
 		QVERIFY(actual_track.saveTo(filename_tmp));
 		
 		auto readAll = [](QFile&& file) -> QByteArray {
-			file.open(QIODevice::ReadOnly | QIODevice::Text);
+			if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+				return {};
 			return file.readAll();
 		};
 		const auto raw_tmp = readAll(QFile(filename_tmp));
@@ -146,7 +148,7 @@ private slots:
  */
 #ifndef Q_OS_MACOS
 namespace  {
-	auto Q_DECL_UNUSED qpa_selected = qputenv("QT_QPA_PLATFORM", "offscreen");  // clazy:exclude=non-pod-global-static
+	[[maybe_unused]] const auto qpa_selected = qputenv("QT_QPA_PLATFORM", "offscreen");  // clazy:exclude=non-pod-global-static
 }
 #endif
 

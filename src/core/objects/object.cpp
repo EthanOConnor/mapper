@@ -34,15 +34,13 @@
 #include <QtNumeric>
 #include <QFlags>
 #include <QLatin1String>
+#include <QPainterPath>
 #include <QPoint>
 #include <QPointF>
-#include <QScopedPointer>
-#include <QStringRef>
+#include <QStringView>
 #include <QTransform>
 #include <QXmlStreamReader>
 #include <QXmlStreamWriter>
-
-#include <private/qbezier_p.h>
 
 #include "settings.h"
 #include "core/map.h"
@@ -1575,10 +1573,12 @@ void PathObject::changePathBounds(
 void PathObject::calcBezierPointDeletionRetainingShapeFactors(MapCoord p0, MapCoord p1, MapCoord p2, MapCoord q0, MapCoord q1, MapCoord q2, MapCoord q3, double& out_pfactor, double& out_qfactor)
 {
 	// Heuristic for the split parameter sp (zero to one)
-	QBezier p_curve = QBezier::fromPoints(QPointF(p0), QPointF(p1), QPointF(p2), QPointF(q0));
-	double p_length = p_curve.length(PathCoord::bezierError());
-	QBezier q_curve = QBezier::fromPoints(QPointF(q0), QPointF(q1), QPointF(q2), QPointF(q3));
-	double q_length = q_curve.length(PathCoord::bezierError());
+	QPainterPath p_curve{QPointF{p0}};
+	p_curve.cubicTo(QPointF{p1}, QPointF{p2}, QPointF{q0});
+	const double p_length = p_curve.length();
+	QPainterPath q_curve{QPointF{q0}};
+	q_curve.cubicTo(QPointF{q1}, QPointF{q2}, QPointF{q3});
+	const double q_length = q_curve.length();
 	double sp = p_length / qMax(1e-08, p_length + q_length);
 	
 	// Least squares curve fitting with the constraint that handles are on the same line as before.
@@ -1913,12 +1913,14 @@ void PathObject::calcBezierPointDeletionRetainingShapeFactors(MapCoord p0, MapCo
 double PathObject::calcBezierPointDeletionRetainingShapeCost(MapCoord p0, MapCoordF p1, MapCoordF p2, MapCoord p3, PathObject* reference)
 {
 	constexpr int num_test_points = 20;
-	QBezier curve = QBezier::fromPoints(QPointF(p0), QPointF(p1), QPointF(p2), QPointF(p3));
+	QPainterPath curve{QPointF{p0}};
+	curve.cubicTo(QPointF{p1}, QPointF{p2}, QPointF{p3});
+	curve.setCachingEnabled(true);
 	
 	auto cost = 0.0;
 	for (int i = 1; i <= num_test_points; ++i)
 	{
-		auto point = MapCoordF { curve.pointAt(i / (num_test_points + 1.0)) };
+		auto point = MapCoordF { curve.pointAtPercent(i / (num_test_points + 1.0)) };
 		auto closest = reference->findClosestPointTo(point);
 		cost += closest.distance_squared;
 	}
@@ -2231,7 +2233,7 @@ PathPart::size_type PathObject::convertRangeToCurves(const PathPart& part, PathP
 bool PathObject::simplify(PathObject** undo_duplicate, double threshold)
 {
 	// A copy for reference and undo while this is modified.
-	QScopedPointer<PathObject> original(new PathObject(*this));
+	std::unique_ptr<PathObject> original{new PathObject(*this)};
 	
 	// original_indices provides a mapping from this object's indices to the
 	// equivalent original object indices in order to extract the relevant
@@ -2431,7 +2433,7 @@ bool PathObject::simplify(PathObject** undo_duplicate, double threshold)
 	bool removed_a_point = (coords.size() != original->coords.size());
 	if (removed_a_point && undo_duplicate)
 	{
-		*undo_duplicate = original.take();
+		*undo_duplicate = original.release();
 	}
 	
 	return removed_a_point;

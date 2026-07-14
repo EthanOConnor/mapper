@@ -21,8 +21,10 @@
 #ifndef OPENORIENTEERING_TOUCH_CURSOR_H
 #define OPENORIENTEERING_TOUCH_CURSOR_H
 
+#include <QEvent>
 #include <QPoint>
 #include <QPointF>
+#include <Qt>
 
 #include "core/map_coord.h"
 class QMouseEvent;
@@ -39,6 +41,22 @@ class MapWidget;
 class TouchCursor
 {
 public:
+	struct MouseEventTranslation
+	{
+		enum class Action
+		{
+			PassThrough,
+			Discard,
+			Replace
+		};
+
+		Action action = Action::PassThrough;
+		QEvent::Type type = QEvent::None;
+		QPointF position;
+		Qt::MouseButton button = Qt::NoButton;
+		Qt::MouseButtons buttons = Qt::NoButton;
+	};
+
 	/** List of IDs for controls attached to the cursor. */
 	enum ControlID
 	{
@@ -51,28 +69,24 @@ public:
 	TouchCursor(MapWidget* map_widget);
 	
 	/**
-	 * Notifies the cursor of the event, possibly modifying it.
-	 * Attention: the event type may be changed to a mouse move event.
+	 * Translates a physical press into the virtual cursor event to dispatch.
 	 */
-	void mousePressEvent(QMouseEvent* event);
+	[[nodiscard]] MouseEventTranslation mousePressEvent(const QMouseEvent& event);
 	
 	/**
-	 * Notifies the cursor of the event, possibly modifying it.
-	 * Returns true if the map widget should further process event.
+	 * Translates a physical move into the virtual cursor event to dispatch.
 	 */
-	bool mouseMoveEvent(QMouseEvent* event);
+	[[nodiscard]] MouseEventTranslation mouseMoveEvent(const QMouseEvent& event);
 	
 	/**
-	 * Notifies the cursor of the event, possibly modifying it.
-	 * Returns true if the map widget should further process event.
+	 * Translates a physical release into the virtual cursor event to dispatch.
 	 */
-	bool mouseReleaseEvent(QMouseEvent* event);
+	[[nodiscard]] MouseEventTranslation mouseReleaseEvent(const QMouseEvent& event);
 	
 	/**
-	 * Notifies the cursor of the event, possibly modifying it.
-	 * Returns true if the map widget should further process event.
+	 * Translates a physical double-click into the virtual cursor event to dispatch.
 	 */
-	bool mouseDoubleClickEvent(QMouseEvent* event);
+	[[nodiscard]] MouseEventTranslation mouseDoubleClickEvent(const QMouseEvent& event);
 	
 	/** Paints the cursor. */
 	void paint(QPainter* painter);
@@ -85,7 +99,7 @@ private:
 	 * Checks if a touch at pos is inside a control. If yes, returns true and
 	 * sets out_id to the ID of the touched control.
 	 */
-	bool touchedControl(const QPoint& pos, ControlID* out_id);
+	bool touchedControl(const QPointF& pos, ControlID* out_id);
 	
 	/** Returns the touch point offset from the cursor in pixels. */
 	float touchPosOffsetPx() const;
@@ -102,7 +116,7 @@ private:
 	ControlID last_pressed_button;
 	MapCoordF cursor_coord;
 	QPointF last_cursor_pos;
-	QPoint last_touch_pos;
+	QPointF last_touch_pos;
 	MapWidget* map_widget;
 };
 

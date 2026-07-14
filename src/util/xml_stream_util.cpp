@@ -33,13 +33,13 @@
 #include <QIODevice>
 #include <QLatin1Char>
 #include <QScopedValueRollback>
-#include <QTextCodec>
 // IWYU pragma: no_include <qxmlstream.h>
 
 #include "core/map_coord.h"
 #include "fileformats/file_format.h"
 #include "fileformats/file_import_export.h"
 #include "fileformats/xml_file_format.h"
+#include "util/encoding.h"
 #include "util/key_value_container.h"
 
 
@@ -91,22 +91,22 @@ bool XmlRecoveryHelper::operator() ()
 		auto raw_data = stream->readAll();
 		
 		// Determine the encoding
-		QTextCodec* codec = nullptr;
+		std::optional<Util::TextEncoding> encoding;
 		for (QXmlStreamReader probe(raw_data); !probe.atEnd(); probe.readNext())
 		{
 			if (probe.tokenType() == QXmlStreamReader::StartDocument)
 			{
-				codec = QTextCodec::codecForName(probe.documentEncoding().toLatin1());
+				encoding = Util::encodingForName(probe.documentEncoding().toLatin1());
 				break;
 			}
 		}
-		if (Q_UNLIKELY(!codec))
+		if (Q_UNLIKELY(!encoding))
 		{
 			return false;
 		}
 		
 		// Convert to QString, and release the raw data
-		auto data = codec->toUnicode(raw_data);
+		auto data = encoding->decode(raw_data);
 		raw_data = {};
 		
 		// Loop until the current element is fixed
@@ -146,7 +146,7 @@ bool XmlRecoveryHelper::operator() ()
 		// Restore the XML stream state with the modified data.
 		// We must use a QIODevice again, for later recovery attempts.
 		auto buffer = new QBuffer(stream); // buffer will live as long as the original stream
-		buffer->setData(codec->fromUnicode(data));
+		buffer->setData(encoding->encode(data));
 		buffer->open(QIODevice::ReadOnly);
 		
 		xml.clear();
@@ -239,7 +239,7 @@ void XmlElementReader::read(MapCoordVector& coords)
 			}
 			else if (token == QXmlStreamReader::Characters && !xml.isWhitespace())
 			{
-				QStringRef text = xml.text();
+				QStringView text = xml.text();
 				try
 				{
 					while (text.length())
@@ -302,7 +302,7 @@ void XmlElementReader::readForText(MapCoordVector& coords)
 			}
 			else if (token == QXmlStreamReader::Characters && !xml.isWhitespace())
 			{
-				QStringRef text = xml.text();
+				QStringView text = xml.text();
 				try
 				{
 					while (text.length())

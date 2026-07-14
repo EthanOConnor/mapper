@@ -37,7 +37,6 @@
 #include <QtTest>
 #include <QBuffer>
 #include <QByteArray>
-#include <QByteRef>
 #include <QChar>
 #include <QCoreApplication>
 #include <QDir>
@@ -57,7 +56,7 @@
 #include <QSizeF>
 #include <QString>
 #include <QStringList>
-#include <QStringRef>
+#include <QStringView>
 #include <QTemporaryDir>
 #include <QVariant>
 
@@ -93,7 +92,6 @@
 #include "templates/template.h"
 #include "undo/undo.h"
 #include "undo/undo_manager.h"
-#include "util/backports.h"  // IWYU pragma: keep
 
 #ifdef MAPPER_USE_GDAL
 #  include "gdal/gdal_manager.h"
@@ -116,7 +114,7 @@ namespace QTest
 		const auto& page_format = t;
 		QByteArray ba = "";
 		ba += qPrintable(QPageSize::key(page_format.page_size));
-		ba += (page_format.orientation == MapPrinterPageFormat::Landscape) ? " landscape (" : " portrait (";
+		ba += (page_format.orientation == QPageLayout::Landscape) ? " landscape (" : " portrait (";
 		ba += QByteArray::number(page_format.paper_dimensions.width(), 'f', 2) + "x";
 		ba += QByteArray::number(page_format.paper_dimensions.height(), 'f', 2) + "), ";
 		ba += QByteArray::number(page_format.page_rect.left(), 'f', 2) + ",";
@@ -232,8 +230,8 @@ namespace
 		COMPARE_AREA_SYMBOL_PATTERN_PROPERTY(line_offset);
 		
 		// OCD treats all patterns as rotatable.
-		COMPARE_SYMBOL_PROPERTY(actual_pattern.flags,
-		                        expected_pattern.flags | AreaSymbol::FillPattern::Rotatable,
+		COMPARE_SYMBOL_PROPERTY(actual_pattern.flags.toInt(),
+		                        (expected_pattern.flags | AreaSymbol::FillPattern::Rotatable).toInt(),
 		                        symbol
 		)
 		
@@ -342,7 +340,7 @@ namespace
 			         expected.getCurrentPart()->findObjectIndex(expected.getFirstSelectedObject()));
 			if (actual.getCurrentPart()->getNumObjects() != expected.getCurrentPart()->getNumObjects())
 			{
-				for (auto object_index : qAsConst(actual.selectedObjects()))
+				for (auto object_index : actual.selectedObjects())
 				{
 					QVERIFY(actual.isObjectSelected(actual.getCurrentPart()->getObject(expected.getCurrentPart()->findObjectIndex(object_index))));
 				}
@@ -648,7 +646,7 @@ void FileFormatTest::mapCoordFromString()
 	QFETCH(flags_type, flags);
 	
 	bool no_exception = true;
-	auto ref = QStringRef{&input};
+	auto ref = QStringView{input};
 	MapCoord coord;
 	try {
 		coord = MapCoord(ref);
@@ -1172,8 +1170,8 @@ void FileFormatTest::iofCourseExportTest()
 	QVERIFY(!exported.data().isEmpty());
 	
 	QString const expected_filepath = QStringLiteral("testdata:/export/iof-3.0-course.xml");
-	QFile expected_file = {expected_filepath};
-	expected_file.open(QIODevice::ReadOnly | QIODevice::Text);
+	QFile expected_file{expected_filepath};
+	QVERIFY(expected_file.open(QIODevice::ReadOnly | QIODevice::Text));
 	auto const expected_data = expected_file.readAll();
 	QVERIFY(!expected_data.isEmpty());
 	
@@ -1321,7 +1319,7 @@ void FileFormatTest::ocdTextImportTest()
 		
 		// Must not read behind the reserved space.
 		auto num_reserved = int(ocd_object.num_text * sizeof(Ocd::OcdPoint32) / sizeof(QChar));
-		std::fill(tail, first + std::max(num_reserved, string.length()) + 1, QChar::Space);
+		std::fill(tail, first + std::max(qsizetype{num_reserved}, string.length()) + 1, QChar::Space);
 		QVERIFY(ocd_v8_import.getObjectText(ocd_object).length() <= num_reserved);
 		
 		// With zero at the end of the reserved space, the output must begin with the expected text.
@@ -1345,7 +1343,7 @@ void FileFormatTest::ocdTextImportTest()
 		
 		// Must not read behind the reserved space.
 		auto num_reserved = int(ocd_object.num_text * sizeof(Ocd::OcdPoint32) / sizeof(QChar));
-		std::fill(tail, first + std::max(num_reserved, string.length()) + 1, QChar::Space);
+		std::fill(tail, first + std::max(qsizetype{num_reserved}, string.length()) + 1, QChar::Space);
 		QVERIFY(ocd_v12_import.getObjectText(ocd_object).length() <= num_reserved);
 		
 		// With zero at the end of the reserved space, the output must begin with the expected text.
@@ -2055,7 +2053,7 @@ void FileFormatTest::shpExportTest()
  */
 #ifndef Q_OS_MACOS
 namespace  {
-	auto const Q_DECL_UNUSED qpa_selected = qputenv("QT_QPA_PLATFORM", "offscreen");  // clazy:exclude=non-pod-global-static
+	[[maybe_unused]] const auto qpa_selected = qputenv("QT_QPA_PLATFORM", "offscreen");  // clazy:exclude=non-pod-global-static
 }
 #endif
 

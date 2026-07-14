@@ -24,7 +24,6 @@
 #include "print_widget.h"
 
 #include <limits>
-#include <memory>
 // IWYU pragma: no_include <type_traits>
 
 #include <Qt>
@@ -50,18 +49,21 @@
 #include <QLineEdit>
 #include <QMargins>
 #include <QMessageBox>
+#include <QPageLayout>
 #include <QPageSize>
 #include <QPainter>
+#include <QPdfWriter>
 #include <QPointF>
 #include <QPrinter>
 #include <QPrinterInfo>
+#include <QPrintDialog>
 #include <QPrintPreviewDialog>
 #include <QProgressDialog>
 #include <QPushButton>
 #include <QRadioButton>
 #include <QRectF>
-#include <QRegExp>
-#include <QRegExpValidator>
+#include <QRegularExpression>
+#include <QRegularExpressionValidator>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSettings>
@@ -69,7 +71,7 @@
 #include <QSizeF>
 #include <QSpacerItem>
 #include <QSpinBox>
-#include <QStringRef>
+#include <QStringView>
 #include <QStyle>
 #include <QStyleOption>
 #include <QToolButton>
@@ -78,8 +80,6 @@
 #include <QVariant>
 #include <QXmlStreamReader>
 #include <QXmlStreamWriter>
-
-#include <printer_properties.h>
 
 #include "core/georeferencing.h"
 #include "core/map.h"
@@ -96,7 +96,6 @@
 #include "gui/map/map_widget.h"
 #include "templates/template.h" // IWYU pragma: keep
 #include "templates/world_file.h"
-#include "util/backports.h"  // IWYU pragma: keep
 #include "util/scoped_signals_blocker.h"
 
 #ifdef MAPPER_USE_GDAL
@@ -146,24 +145,13 @@ PrintWidget::PrintWidget(Map* map, MainWindow* main_window, MapView* main_view, 
 	target_combo->setMinimumWidth(1); // Not zero, but not as long as the items
 	layout->addRow(Util::Headline::create(tr("Printer:")), target_combo);
 	
-	if (PlatformPrinterProperties::dialogSupported())
-	{
-		printer_properties_button = new QToolButton();
-		printer_properties_button->setText(tr("Properties"));
-		layout->addRow(nullptr, printer_properties_button);
-	}
-	else 
-	{
-		printer_properties_button = nullptr;
-	}
-	
 	paper_size_combo = new QComboBox();
 	layout->addRow(tr("Page format:"), paper_size_combo);
 	
 	auto page_size_widget = new QWidget();
 	auto page_size_layout = new QHBoxLayout();
 	page_size_widget->setLayout(page_size_layout);
-	page_size_layout->setMargin(0);
+	page_size_layout->setContentsMargins({});
 	page_width_edit = Util::SpinBox::create(1, 0.1, 1000.0, tr("mm"), 1.0);
 	page_width_edit->setEnabled(false);
 	page_size_layout->addWidget(page_width_edit, 1);
@@ -182,8 +170,8 @@ PrintWidget::PrintWidget(Map* map, MainWindow* main_window, MapView* main_view, 
 	auto landscape_button = new QRadioButton(tr("Landscape"));
 	page_orientation_layout->addWidget(landscape_button);
 	page_orientation_group = new QButtonGroup(this);
-	page_orientation_group->addButton(portrait_button, QPrinter::Portrait);
-	page_orientation_group->addButton(landscape_button, QPrinter::Landscape);
+	page_orientation_group->addButton(portrait_button, QPageLayout::Portrait);
+	page_orientation_group->addButton(landscape_button, QPageLayout::Landscape);
 	layout->addRow(tr("Page orientation:"), page_orientation_widget);
 	
 	copies_edit = Util::SpinBox::create(1, 99999);
@@ -221,7 +209,7 @@ PrintWidget::PrintWidget(Map* map, MainWindow* main_window, MapView* main_view, 
 	auto mode_widget = new QWidget();
 	auto mode_layout = new QHBoxLayout();
 	mode_widget->setLayout(mode_layout);
-	mode_layout->setMargin(0);
+	mode_layout->setContentsMargins({});
 	
 	vector_mode_button = createPrintModeButton(QIcon(QString::fromLatin1(":/images/print-mode-vector.png")), tr("Vector\ngraphics"));
 	raster_mode_button = createPrintModeButton(QIcon(QString::fromLatin1(":/images/print-mode-raster.png")), tr("Raster\ngraphics"));
@@ -248,7 +236,9 @@ PrintWidget::PrintWidget(Map* map, MainWindow* main_window, MapView* main_view, 
 	
 	dpi_combo = new QComboBox();
 	dpi_combo->setEditable(true);
-	dpi_combo->setValidator(new QRegExpValidator(QRegExp(QLatin1String("^[1-9]\\d{0,4}$|^[1-9]\\d{0,4} ")+tr("dpi")+QLatin1Char('$')), dpi_combo));
+	dpi_combo->setValidator(new QRegularExpressionValidator(
+	  QRegularExpression{QLatin1String("^[1-9]\\d{0,4}$|^[1-9]\\d{0,4} ") + tr("dpi") + QLatin1Char{'$'}},
+	  dpi_combo));
 	// TODO: Implement spinbox-style " dpi" suffix
 	layout->addRow(tr("Resolution:"), dpi_combo);
 	
@@ -340,11 +330,9 @@ PrintWidget::PrintWidget(Map* map, MainWindow* main_window, MapView* main_view, 
 	setLayout(outer_layout);
 	
 	connect(target_combo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &PrintWidget::targetChanged);
-	if (printer_properties_button)
-		connect(printer_properties_button, &QAbstractButton::clicked, this, &PrintWidget::propertiesClicked, Qt::QueuedConnection);
 	connect(paper_size_combo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &PrintWidget::paperSizeChanged);
 	connect(page_width_edit, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &PrintWidget::paperDimensionsChanged);
-	connect(page_orientation_group, QOverload<int>::of(&QButtonGroup::buttonClicked), this, &PrintWidget::pageOrientationChanged);
+	connect(page_orientation_group, &QButtonGroup::idClicked, this, &PrintWidget::pageOrientationChanged);
 	connect(page_height_edit, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &PrintWidget::paperDimensionsChanged);
 	
 	connect(top_edit, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &PrintWidget::printAreaMoved);
@@ -353,7 +341,7 @@ PrintWidget::PrintWidget(Map* map, MainWindow* main_window, MapView* main_view, 
 	connect(height_edit, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &PrintWidget::printAreaResized);
 	connect(overlap_edit, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &PrintWidget::overlapEdited);
 	
-	connect(mode_button_group, QOverload<QAbstractButton*>::of(&QButtonGroup::buttonClicked), this, &PrintWidget::printModeChanged);
+	connect(mode_button_group, &QButtonGroup::buttonClicked, this, &PrintWidget::printModeChanged);
 	connect(dpi_combo->lineEdit(), &QLineEdit::textEdited, this, &PrintWidget::resolutionEdited);
 	connect(dpi_combo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &PrintWidget::resolutionEdited);
 	connect(different_scale_check, &QAbstractButton::clicked, this, &PrintWidget::differentScaleClicked);
@@ -656,9 +644,6 @@ void PrintWidget::setTarget(const QPrinterInfo* target)
 	print_button->setDefault(is_printer);
 	export_button->setVisible(!is_printer);
 	export_button->setDefault(!is_printer);
-	if (printer_properties_button)
-		printer_properties_button->setEnabled(is_printer);
-
 	bool is_image_target = target == MapPrinter::imageTarget();
 	bool is_raster_target = target == MapPrinter::imageTarget() || target == MapPrinter::kmzTarget();
 	vector_mode_button->setEnabled(!is_raster_target);
@@ -702,19 +687,6 @@ void PrintWidget::targetChanged(int index) const
 	}
 }
 
-// slot
-void PrintWidget::propertiesClicked()
-{
-	if (map_printer && map_printer->isPrinter())
-	{
-		std::shared_ptr<void> buffer; // must not be destroyed before printer.
-		auto printer = map_printer->makePrinter();
-		Q_ASSERT(printer->outputFormat() == QPrinter::NativeFormat);
-		if (PlatformPrinterProperties::execDialog(printer.get(), buffer, this) == QDialog::Accepted)
-			map_printer->takePrinterSettings(printer.get());
-	}
-}
-
 void PrintWidget::updatePaperSizes(const QPrinterInfo* target) const
 {
 	QString prev_paper_size_name = paper_size_combo->currentText();
@@ -729,7 +701,7 @@ void PrintWidget::updatePaperSizes(const QPrinterInfo* target) const
 	if (size_list.isEmpty())
 		size_list = defaultPageSizes();
 	
-	for (auto const & size : qAsConst(size_list))
+	for (const auto& size : size_list)
 	{
 		if (size.id() == QPageSize::Custom)
 			have_custom_size = true; // add it once after all other entries
@@ -789,9 +761,9 @@ void PrintWidget::paperDimensionsChanged() const
 // slot
 void PrintWidget::pageOrientationChanged(int id) const
 {
-	if (id == QPrinter::Portrait || id == QPrinter::Landscape)
+	if (id == QPageLayout::Portrait || id == QPageLayout::Landscape)
 	{
-		map_printer->setPageOrientation((id == QPrinter::Portrait) ? MapPrinterPageFormat::Portrait : MapPrinterPageFormat::Landscape);
+		map_printer->setPageOrientation(static_cast<QPageLayout::Orientation>(id));
 	}
 }
 
@@ -1045,7 +1017,7 @@ void PrintWidget::updateResolutions(const QPrinterInfo* target) const
 	static QString dpi_template(QLatin1String("%1 ") + tr("dpi"));
 	QStringList resolutions;
 	resolutions.reserve(supported_resolutions.size());
-	for (auto resolution : qAsConst(supported_resolutions))
+	for (auto resolution : supported_resolutions)
 		resolutions << dpi_template.arg(resolution);
 	
 	QString dpi_text = dpi_combo->currentText();
@@ -1072,8 +1044,9 @@ void PrintWidget::updateColorMode()
 void PrintWidget::resolutionEdited()
 {
 	auto resolution_text = dpi_combo->currentText();
-	auto index_of_space = resolution_text.indexOf(QLatin1Char(' '));
-	auto dpi_value = resolution_text.leftRef(index_of_space).toInt();
+	const QStringView resolution_view{resolution_text};
+	const auto index_of_space = resolution_view.indexOf(QLatin1Char{' '});
+	const auto dpi_value = resolution_view.first(index_of_space < 0 ? resolution_view.size() : index_of_space).toInt();
 	if (dpi_value > 0)
 	{
 		auto pos = dpi_combo->lineEdit()->cursorPosition();
@@ -1356,25 +1329,13 @@ bool PrintWidget::exportWorldFile(const QString& path) const
 	const auto xskew  = mm_to_world.m12() / pixel_per_mm;
 	const auto yskew  = mm_to_world.m21() / pixel_per_mm;
 	const auto top_left = georef.toProjectedCoords(MapCoord{map_printer->getPrintArea().topLeft()});
-	const QTransform pixel_to_world(xscale, yskew, 0, xskew, yscale, 0, top_left.x(), top_left.y());
+	const QTransform pixel_to_world(xscale, yskew, xskew, yscale, top_left.x(), top_left.y());
 	const WorldFile world_file(pixel_to_world);
 	return world_file.save(WorldFile::pathForImage(path));
 }
 
 void PrintWidget::exportToPdf()
 {
-	auto printer = map_printer->makePrinter();
-	if (!printer)
-	{
-		QMessageBox::warning(this, tr("Error"), tr("Failed to prepare the PDF export."));
-		return;
-	}
-	
-	printer->setOutputFormat(QPrinter::PdfFormat);
-	printer->setNumCopies(copies_edit->value());
-	printer->setCreator(main_window->appName());
-	printer->setDocName(QFileInfo(main_window->currentPath()).baseName());
-	
 	static const QString filter_template(QString::fromLatin1("%1 (%2)"));
 	QStringList filters = { filter_template.arg(tr("PDF"), QString::fromLatin1("*.pdf")),
 	                        tr("All files (*.*)") };
@@ -1387,13 +1348,15 @@ void PrintWidget::exportToPdf()
 	{
 		path.append(QLatin1String(".pdf"));
 	}
-	printer->setOutputFileName(path);
-	
+	auto writer = map_printer->makePdfWriter(path);
+	writer->setCreator(main_window->appName());
+	writer->setTitle(QFileInfo(main_window->currentPath()).baseName());
+
 	PrintProgressDialog progress(map_printer, main_window);
 	progress.setWindowTitle(tr("Export map ..."));
 	
 	// Export the map
-	if (!map_printer->printMap(printer.get()))
+	if (!map_printer->printMap(writer.get(), copies_edit->value()))
 	{
 		QFile(path).remove();
 		QMessageBox::warning(this, tr("Error"), tr("Failed to finish the PDF export."));
@@ -1419,9 +1382,21 @@ void PrintWidget::print()
 		return;
 	}
 	
-	printer->setNumCopies(copies_edit->value());
+	printer->setCopyCount(copies_edit->value());
 	printer->setCreator(main_window->appName());
 	printer->setDocName(QFileInfo(main_window->currentPath()).baseName());
+
+	QPrintDialog dialog(printer.get(), this);
+	dialog.setOption(QAbstractPrintDialog::PrintToFile, false);
+	dialog.setOption(QAbstractPrintDialog::PrintSelection, false);
+	dialog.setOption(QAbstractPrintDialog::PrintPageRange, false);
+	dialog.setOption(QAbstractPrintDialog::PrintCurrentPage, false);
+	dialog.setOption(QAbstractPrintDialog::PrintShowPageSize);
+	dialog.setOption(QAbstractPrintDialog::PrintCollateCopies);
+	if (dialog.exec() != QDialog::Accepted)
+		return;
+
+	map_printer->takePrinterSettings(printer.get());
 	
 	PrintProgressDialog progress(map_printer, main_window);
 	progress.setWindowTitle(tr("Printing Progress"));

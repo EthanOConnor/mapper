@@ -17,12 +17,12 @@
 #    along with OpenOrienteering.  If not, see <http://www.gnu.org/licenses/>.
 
 
-find_package(Qt5Network REQUIRED)
-find_package(Qt5PrintSupport REQUIRED)
-find_package(Qt5Test REQUIRED)
-find_package(Qt5Widgets REQUIRED)
-find_package(Qt5Positioning)
-find_package(Qt5Sensors)
+find_package(Qt6Network REQUIRED)
+find_package(Qt6PrintSupport REQUIRED)
+find_package(Qt6Test REQUIRED)
+find_package(Qt6Widgets REQUIRED)
+find_package(Qt6Positioning)
+find_package(Qt6Sensors)
 
 set(CMAKE_AUTOMOC ON)
 
@@ -64,14 +64,15 @@ function(add_test_helper testname autorun)
 		endif()
 	endforeach()
 	add_executable(${testname} ${testname}.cpp ${TEST_${testname}_SRCS})
+	mapper_target_defaults(${testname})
 	target_link_libraries(${testname} PRIVATE
 	  ${PROJ_LIBRARIES}
-	  Qt5::Test
-	  Qt5::Gui
-	  Polyclipping::Polyclipping
+	  Qt6::Test
+	  Qt6::Gui
+	  Clipper2::Clipper2
 	)
 	if("${ARGN}" MATCHES "crs_template_implementation")
-		target_link_libraries(${testname} PRIVATE Qt5::Widgets)
+		target_link_libraries(${testname} PRIVATE Qt6::Widgets)
 	endif()
 	if(NOT manual_test)
 		configure_file(TESTNAME-RUN.cmake.in ${CMAKE_CURRENT_BINARY_DIR}/${testname}-RUN.cmake @ONLY)
@@ -126,7 +127,7 @@ function(add_system_test testname)
 	add_test_helper("${testname}" ${Mapper_AUTORUN_SYSTEM_TESTS} ${ARGN})
 	target_link_libraries(${testname} PRIVATE
 	  Mapper_Common
-	  Qt5::Widgets
+	  Qt6::Widgets
 	)
 endfunction()
 
@@ -143,6 +144,7 @@ add_unit_test(autosave_t MANUAL ../src/core/autosave
 	../src/settings
 )
 add_unit_test(encoding_t ../src/util/encoding)
+target_link_libraries(encoding_t PRIVATE ICU::uc)
 add_unit_test(georef_ocd_mapping_t
 	../src/settings
 	../src/gui/util_gui
@@ -153,6 +155,7 @@ add_unit_test(georef_ocd_mapping_t
 	../src/fileformats/ocd_georef_fields
 	../src/fileformats/file_format
 	../src/util/key_value_container
+	../src/util/encoding
 	../src/util/xml_stream_util
 	../src/core/map_coord
 )
@@ -166,14 +169,16 @@ add_unit_test(georeferencing_t ../src/core/georeferencing
 	../src/mapper_resource
 	../src/fileformats/file_format
 	../src/util/key_value_container
+	../src/util/encoding
 	../src/util/xml_stream_util
 	../src/core/map_coord
 )
+target_link_libraries(georef_ocd_mapping_t PRIVATE ICU::uc)
+target_link_libraries(georeferencing_t PRIVATE ICU::uc)
 if (Mapper_USE_GDAL)
 	# cf. src/gdal/CMakeLists.txt
 	target_compile_definitions(georeferencing_t PRIVATE MAPPER_TEST_GDAL)
-	target_include_directories(georeferencing_t SYSTEM PRIVATE ${GDAL_INCLUDE_DIRS})
-	target_link_libraries(georeferencing_t PRIVATE ${GDAL_LIBRARIES})
+	target_link_libraries(georeferencing_t PRIVATE GDAL::GDAL)
 endif()
 add_unit_test(grid_t ../src/util/util)
 add_unit_test(key_value_container_t ../src/util/key_value_container)
@@ -210,7 +215,7 @@ add_system_test(undo_manager_t)
 if(TARGET mapper-sensors)
 	add_system_test(sensors_t)
 	target_link_libraries(sensors_t  PRIVATE mapper-sensors)
-	foreach(lib Qt5::Positioning Qt5::Sensors)
+	foreach(lib Qt6::Positioning Qt6::Sensors)
 		if(TARGET ${lib})
 			target_link_libraries(sensors_t  PRIVATE ${lib})
 		endif()

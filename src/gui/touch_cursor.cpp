@@ -48,104 +48,93 @@ TouchCursor::TouchCursor(MapWidget* map_widget)
 	// nothing
 }
 
-void TouchCursor::mousePressEvent(QMouseEvent* event)
+TouchCursor::MouseEventTranslation TouchCursor::mousePressEvent(const QMouseEvent& event)
 {
-	if (event->button() != Qt::LeftButton)
-		return;
-	last_touch_pos = event->pos();
+	if (event.button() != Qt::LeftButton)
+		return {};
+	last_touch_pos = event.position();
 	first_move_event_received = false;
 	
 	ControlID control_id = NoButton;
-	if (!visible || !touchedControl(event->pos(), &control_id))
+	if (!visible || !touchedControl(event.position(), &control_id))
 	{
 		// Jump to position
 		updateMapWidget(false);
 		
-		QPoint cursor_pos = event->pos() - QPoint(0, touchPosOffsetPx());
+		QPointF cursor_pos = event.position() - QPointF(0, touchPosOffsetPx());
 		last_cursor_pos = cursor_pos;
 		cursor_coord = map_widget->viewportToMapF(cursor_pos);
 		visible = true;
 		
 		updateMapWidget(false);
 		
-		*event = QMouseEvent(
-			QEvent::MouseMove, cursor_pos,
-			Qt::NoButton, event->buttons() & ~Qt::LeftButton, event->modifiers());
 		last_pressed_button = NoButton;
+		return { MouseEventTranslation::Action::Replace, QEvent::MouseMove, cursor_pos,
+		         Qt::NoButton, event.buttons() & ~Qt::LeftButton };
 	}
 	else if (control_id == LeftButton)
 	{
-		*event = QMouseEvent(
-			QEvent::MouseButtonPress, map_widget->mapToViewport(cursor_coord),
-			event->button(), event->buttons(), event->modifiers());
 		left_button_pressed = true;
 		last_pressed_button = LeftButton;
 		
 		last_cursor_pos = map_widget->mapToViewport(cursor_coord);
+		return { MouseEventTranslation::Action::Replace, QEvent::MouseButtonPress, last_cursor_pos,
+		         event.button(), event.buttons() };
 	}
+	return { .action = MouseEventTranslation::Action::Discard };
 }
 
-bool TouchCursor::mouseMoveEvent(QMouseEvent* event)
+TouchCursor::MouseEventTranslation TouchCursor::mouseMoveEvent(const QMouseEvent& event)
 {
-	if (!(event->buttons() & Qt::LeftButton))
-		return false;
+	if (!(event.buttons() & Qt::LeftButton))
+		return { .action = MouseEventTranslation::Action::Discard };
 
 	if (last_pressed_button != NoButton && !first_move_event_received)
 	{
 		first_move_event_received = true;
-		last_touch_pos = event->pos();
-		return false;
+		last_touch_pos = event.position();
+		return { .action = MouseEventTranslation::Action::Discard };
 	}
 	
 	updateMapWidget(true);
 	
 	QPointF cursor_pos;
 	if (last_pressed_button == LeftButton)
-		cursor_pos = last_cursor_pos + (event->pos() - last_touch_pos);
+		cursor_pos = last_cursor_pos + (event.position() - last_touch_pos);
 	else
-		cursor_pos = event->pos() - QPoint(0, touchPosOffsetPx());
-	last_touch_pos = event->pos();
+		cursor_pos = event.position() - QPointF(0, touchPosOffsetPx());
+	last_touch_pos = event.position();
 	last_cursor_pos = cursor_pos;
 	cursor_coord = map_widget->viewportToMapF(cursor_pos);
 		
-	*event = QMouseEvent(
-		QEvent::MouseMove, cursor_pos,
-		left_button_pressed ? event->button() : Qt::NoButton,
-		left_button_pressed ? event->buttons() : (event->buttons() & ~Qt::LeftButton),
-		event->modifiers());
-	
 	updateMapWidget(true);
-	return true;
+	return { MouseEventTranslation::Action::Replace, QEvent::MouseMove, cursor_pos,
+	         left_button_pressed ? event.button() : Qt::NoButton,
+	         left_button_pressed ? event.buttons() : (event.buttons() & ~Qt::LeftButton) };
 }
 
-bool TouchCursor::mouseReleaseEvent(QMouseEvent* event)
+TouchCursor::MouseEventTranslation TouchCursor::mouseReleaseEvent(const QMouseEvent& event)
 {
-	if (event->button() != Qt::LeftButton)
-		return true;
+	if (event.button() != Qt::LeftButton)
+		return {};
 	
 	if (left_button_pressed)
 	{
-		*event = QMouseEvent(
-			QEvent::MouseButtonRelease, map_widget->mapToViewport(cursor_coord),
-			event->button(), event->buttons(), event->modifiers());
 		left_button_pressed = false;
-		return true;
+		return { MouseEventTranslation::Action::Replace, QEvent::MouseButtonRelease,
+		         map_widget->mapToViewport(cursor_coord), event.button(), event.buttons() };
 	}
-	else
-		return false;
+	return { .action = MouseEventTranslation::Action::Discard };
 }
 
-bool TouchCursor::mouseDoubleClickEvent(QMouseEvent* event)
+TouchCursor::MouseEventTranslation TouchCursor::mouseDoubleClickEvent(const QMouseEvent& event)
 {
 	if (last_pressed_button == LeftButton)
 	{
-		*event = QMouseEvent(
-			QEvent::MouseButtonDblClick, map_widget->mapToViewport(cursor_coord),
-			event->button(), event->buttons(), event->modifiers());
-		return true;
+		return { MouseEventTranslation::Action::Replace, QEvent::MouseButtonDblClick,
+		         map_widget->mapToViewport(cursor_coord), event.button(), event.buttons() };
 	}
-	else
-		return false;
+	return { .action = MouseEventTranslation::Action::Discard };
 }
 
 void TouchCursor::paint(QPainter* painter)
@@ -176,7 +165,7 @@ void TouchCursor::paint(QPainter* painter)
 	painter->drawEllipse(cursor_pos + QPointF(0, touchPosOffsetPx()), controlRingRadiusPx(), controlRingRadiusPx());
 }
 
-bool TouchCursor::touchedControl(const QPoint& pos, TouchCursor::ControlID* out_id)
+bool TouchCursor::touchedControl(const QPointF& pos, TouchCursor::ControlID* out_id)
 {
 	QPointF cursor_pos = map_widget->mapToViewport(cursor_coord);
 	QPointF control_ring_center = cursor_pos + QPointF(0, touchPosOffsetPx());

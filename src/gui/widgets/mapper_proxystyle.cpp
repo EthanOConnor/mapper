@@ -65,7 +65,7 @@ namespace  {
  * This function helps to customize the style for classes like
  * "QDockWidgetTitleButton" or "MapEditorDockWidget".
  */
-bool Q_DECL_UNUSED isDockWidgetRelated(const QWidget* widget)
+[[maybe_unused]] bool isDockWidgetRelated(const QWidget* widget)
 {
 	if (widget == nullptr)
 		return false;
@@ -82,7 +82,7 @@ int buttonSizePixel(const Settings& settings)
 }
 
 // Cf. qt_defaultDpiX in qfont.cpp
-int defaultDpi()
+[[maybe_unused]] int defaultDpi()
 {
 	if (auto* screen = QGuiApplication::primaryScreen())
 		return qRound(screen->logicalDotsPerInchX());

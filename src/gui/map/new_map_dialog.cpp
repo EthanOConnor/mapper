@@ -41,7 +41,6 @@
 #include <QListWidget>
 #include <QListWidgetItem>
 #include <QPushButton>
-#include <QRegExp>
 #include <QSettings>
 #include <QSpacerItem>
 #include <QStringList>
@@ -114,7 +113,7 @@ NewMapDialog::NewMapDialog(QWidget* parent) : QDialog(parent, Qt::WindowSystemMe
 	symbol_set_matching->setChecked(matching);
 	connect(scale_combo, &QComboBox::editTextChanged, this, &NewMapDialog::updateSymbolSetList);
 	connect(symbol_set_list, &QListWidget::itemDoubleClicked, this, &NewMapDialog::symbolSetDoubleClicked);
-	connect(symbol_set_matching, &QCheckBox::stateChanged, this, &NewMapDialog::updateSymbolSetList);
+	connect(symbol_set_matching, &QCheckBox::checkStateChanged, this, &NewMapDialog::updateSymbolSetList);
 	connect(button_box, &QDialogButtonBox::rejected, this, &QDialog::reject);
 	connect(button_box, &QDialogButtonBox::accepted, this, &NewMapDialog::createClicked);
 	updateSymbolSetList();
@@ -303,7 +302,10 @@ void NewMapDialog::loadSymbolSetDir(const QDir& symbol_set_dir)
 		for (auto format : FileFormats.formats())
 		{
 			if (format->supportsFileOpen())
-				symbol_set_filters << QStringList(format->fileExtensions()).replaceInStrings(QRegExp(QString(QLatin1Char{'^'})), QString::fromLatin1("*."));
+			{
+				for (const auto& extension : format->fileExtensions())
+					symbol_set_filters.append(QStringLiteral("*.") + extension);
+			}
 		}
 		subdir.setNameFilters(symbol_set_filters);
 		

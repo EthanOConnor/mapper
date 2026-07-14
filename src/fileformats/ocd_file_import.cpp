@@ -46,9 +46,8 @@
 #include <QLatin1Char>
 #include <QLatin1String>
 #include <QPointF>
-#include <QStringRef>
-#include <QTextCodec>
-#include <QTextDecoder>
+#include <QStringDecoder>
+#include <QStringView>
 #include <QVariant>
 
 #include "settings.h"
@@ -87,11 +86,11 @@ namespace OpenOrienteering {
 
 namespace {
 
-static QTextCodec* codecFromSettings()
+static std::optional<Util::TextEncoding> encodingFromSettings()
 {
 	const auto& settings = Settings::getInstance();
 	const auto name = settings.getSetting(Settings::General_Local8BitEncoding).toByteArray();
-	return Util::codecForName(name);
+	return Util::encodingForName(name);
 }	
 
 
@@ -106,28 +105,23 @@ OcdFileImport::OcdImportedPathObject::~OcdImportedPathObject() = default;
 
 OcdFileImport::OcdFileImport(const QString& path, Map* map, MapView* view)
  : Importer { path, map, view }
- , custom_8bit_encoding { codecFromSettings() }
+ , custom_8bit_encoding { encodingFromSettings() }
 {
 	if (!custom_8bit_encoding)
 	{
-		addWarning(tr("Encoding '%1' is not available. Check the settings."));
-		custom_8bit_encoding = QTextCodec::codecForLocale();
+		addWarning(tr("Encoding '%1' is not available. Check the settings.")
+		           .arg(Settings::getInstance().getSetting(Settings::General_Local8BitEncoding).toString()));
+		custom_8bit_encoding = Util::encodingForName(Util::codepageForLanguage(QLocale{}.name()));
 	}
 }
 
 OcdFileImport::~OcdFileImport() = default;
 
 
-void OcdFileImport::setCustom8BitEncoding(QTextCodec* encoding)
-{
-	custom_8bit_encoding = encoding;
-}
-
-
 template< unsigned char N >
 QString OcdFileImport::convertOcdString(const Ocd::PascalString<N>& src) const
 {
-	return custom_8bit_encoding->toUnicode(src.data, src.length);
+	return custom_8bit_encoding->decode(QByteArrayView{src.data, src.length});
 }
 
 template< unsigned char N >
@@ -147,7 +141,7 @@ template< >
 QString OcdFileImport::convertOcdString< Ocd::Custom8BitEncoding >(const char* src, uint len) const
 {
 	len = qMin(uint(std::numeric_limits<int>::max()), qstrnlen(src, len));
-	return custom_8bit_encoding->toUnicode(src, int(len));
+	return custom_8bit_encoding->decode(QByteArrayView{src, len});
 }
 
 template< >
@@ -174,11 +168,8 @@ QString OcdFileImport::convertOcdString(const QChar* src, uint maxlen) const
 			--maxlen;
 		}
 	}
-	/// \todo Create and use static decoder
-	QTextCodec* utf16 = QTextCodec::codecForName("UTF-16LE");
-	FILEFORMAT_ASSERT(utf16);
-	auto decoder = std::unique_ptr<QTextDecoder>(utf16->makeDecoder(QTextCodec::ConvertInvalidToNull));
-	return decoder->toUnicode(reinterpret_cast<const char*>(src), 2*int(last - src));
+	QStringDecoder decoder{QStringConverter::Utf16LE, QStringConverter::Flag::ConvertInvalidToNull};
+	return decoder(QByteArrayView{reinterpret_cast<const char*>(src), 2 * (last - src)});
 }
 
 
@@ -358,7 +349,7 @@ void OcdFileImport::importGeoreferencing(const OcdFile< F >& file)
 
 namespace {
 
-void tryParamConvert(int& out, const QStringRef& param_value)
+void tryParamConvert(int& out, QStringView param_value)
 {
 	bool ok;
 	auto value = qRound(param_value.toFloat(&ok));
@@ -383,7 +374,7 @@ void OcdFileImport::importGeoreferencing(const QString& param_string)
 	while (parameters.readNext())
 	{
 		bool ok;
-		QStringRef param_value = parameters.value();
+		QStringView param_value = parameters.value();
 		switch (parameters.key())
 		{
 		case 'm':
@@ -567,7 +558,7 @@ void OcdFileImport::importSpotColor(const QString& param_string)
 	{
 		float f_value;
 		bool ok;
-		QStringRef param_value = parameters.value();
+		QStringView param_value = parameters.value();
 		switch (parameters.key())
 		{
 		case 'n':
@@ -642,7 +633,7 @@ void OcdFileImport::importColor(const QString& param_string)
 		float f_value;
 		int i_value;
 		bool ok;
-		QStringRef param_value = parameters.value();
+		QStringView param_value = parameters.value();
 		switch (parameters.key())
 		{
 		case 'n':
@@ -889,7 +880,7 @@ void OcdFileImport::importTemplate(const QString& param_string)
 	{
 		double value;
 		bool ok;
-		QStringRef param_value = parameters.value();
+		QStringView param_value = parameters.value();
 		switch (parameters.key())
 		{
 		case 'x':
@@ -1019,7 +1010,7 @@ void OcdFileImport::importView(const QString& param_string)
 	
 	while (parameters.readNext())
 	{
-		QStringRef param_value = parameters.value();
+		QStringView param_value = parameters.value();
 		switch (parameters.key())
 		{
 		case 'x':

@@ -23,11 +23,9 @@
 #include <QAbstractTextDocumentLayout>
 #include <QApplication>
 #include <QPainter>
-#include <QSignalMapper>
 #include <QSpinBox>
 #include <QTextDocument>
 
-#include "util/backports.h"  // IWYU pragma: keep
 #include "gui/util_gui.h"
 
 
@@ -107,10 +105,10 @@ QWidget* SpinBoxDelegate::createEditor(QWidget* parent, const QStyleOptionViewIt
 	spinbox->setParent(parent);
 	
 	// Commit each change immediately when returning to event loop
-	QSignalMapper* signal_mapper = new QSignalMapper(spinbox);
-	signal_mapper->setMapping(spinbox, spinbox);
-	connect(spinbox, QOverload<int>::of(&QSpinBox::valueChanged), signal_mapper, QOverload<>::of(&QSignalMapper::map), Qt::QueuedConnection);
-	connect(signal_mapper, QOverload<QWidget*>::of(&QSignalMapper::mapped), this, &QItemDelegate::commitData);
+	auto* delegate = const_cast<SpinBoxDelegate*>(this);
+	connect(spinbox, QOverload<int>::of(&QSpinBox::valueChanged), delegate, [delegate, spinbox] {
+		emit delegate->commitData(spinbox);
+	}, Qt::QueuedConnection);
 	
 	return spinbox;
 }

@@ -68,7 +68,6 @@
 #include "sensors/gps_temporary_markers.h"
 #include "templates/template.h"
 #include "tools/tool.h"
-#include "util/backports.h" // IWYU pragma: keep
 #include "util/util.h"
 
 class QGesture;
@@ -81,6 +80,38 @@ class QGesture;
 
 
 namespace OpenOrienteering {
+
+namespace {
+
+template<typename Handler>
+void dispatchTouchCursorEvent(const TouchCursor::MouseEventTranslation& translation,
+                              QMouseEvent* source,
+                              const QWidget& target,
+                              Handler&& handler)
+{
+	using Action = TouchCursor::MouseEventTranslation::Action;
+	if (translation.action == Action::Discard)
+		return;
+	if (translation.action == Action::PassThrough)
+	{
+		handler(source);
+		return;
+	}
+
+	QMouseEvent translated {
+		translation.type,
+		translation.position,
+		target.mapToGlobal(translation.position),
+		translation.button,
+		translation.buttons,
+		source->modifiers(),
+		source->pointingDevice()
+	};
+	translated.setTimestamp(source->timestamp());
+	handler(&translated);
+}
+
+}  // namespace
 
 MapWidget::MapWidget(bool show_help, bool force_antialiasing, QWidget* parent)
  : QWidget(parent)
@@ -133,7 +164,7 @@ void MapWidget::setMapView(MapView* view)
 			disconnect(map);
 			disconnect(this->view);
 		}
-		
+
 		this->view = view;
 		
 		if (view)
@@ -785,7 +816,7 @@ bool MapWidget::event(QEvent* event)
 	case QEvent::TouchUpdate:
 	case QEvent::TouchEnd:
 	case QEvent::TouchCancel:
-		if (static_cast<QTouchEvent*>(event)->touchPoints().count() >= 2)
+		if (static_cast<QTouchEvent*>(event)->points().count() >= 2)
 			return true;
 		break;
 		
@@ -993,12 +1024,14 @@ void MapWidget::mousePressEvent(QMouseEvent* event)
 	current_pressed_buttons = event->buttons();
 	if (touch_cursor && tool && tool->usesTouchCursor())
 	{
-		touch_cursor->mousePressEvent(event);
-		if (event->type() == QEvent::MouseMove)
-		{
-			_mouseMoveEvent(event);
-			return;
-		}
+		auto translation = touch_cursor->mousePressEvent(*event);
+		dispatchTouchCursorEvent(translation, event, *this, [this](QMouseEvent* translated) {
+			if (translated->type() == QEvent::MouseMove)
+				_mouseMoveEvent(translated);
+			else
+				_mousePressEvent(translated);
+		});
+		return;
 	}
 	_mousePressEvent(event);
 }
@@ -1025,7 +1058,7 @@ void MapWidget::_mousePressEvent(QMouseEvent* event)
 	else if (event->button() == Qt::RightButton)
 	{
 		if (!context_menu->isEmpty())
-			context_menu->popup(event->globalPos());
+			context_menu->popup(event->globalPosition().toPoint());
 	}
 }
 
@@ -1033,8 +1066,11 @@ void MapWidget::mouseMoveEvent(QMouseEvent* event)
 {
 	if (touch_cursor && tool && tool->usesTouchCursor())
 	{
-		if (!touch_cursor->mouseMoveEvent(event))
-			return;
+		auto translation = touch_cursor->mouseMoveEvent(*event);
+		dispatchTouchCursorEvent(translation, event, *this, [this](QMouseEvent* translated) {
+			_mouseMoveEvent(translated);
+		});
+		return;
 	}
 	_mouseMoveEvent(event);
 }
@@ -1069,8 +1105,11 @@ void MapWidget::mouseReleaseEvent(QMouseEvent* event)
 	last_mouse_release_time = QTime::currentTime();
 	if (touch_cursor && tool && tool->usesTouchCursor())
 	{
-		if (!touch_cursor->mouseReleaseEvent(event))
-			return;
+		auto translation = touch_cursor->mouseReleaseEvent(*event);
+		dispatchTouchCursorEvent(translation, event, *this, [this](QMouseEvent* translated) {
+			_mouseReleaseEvent(translated);
+		});
+		return;
 	}
 	_mouseReleaseEvent(event);
 }
@@ -1095,8 +1134,11 @@ void MapWidget::mouseDoubleClickEvent(QMouseEvent* event)
 {
 	if (touch_cursor && tool && tool->usesTouchCursor())
 	{
-		if (!touch_cursor->mouseDoubleClickEvent(event))
-			return;
+		auto translation = touch_cursor->mouseDoubleClickEvent(*event);
+		dispatchTouchCursorEvent(translation, event, *this, [this](QMouseEvent* translated) {
+			_mouseDoubleClickEvent(translated);
+		});
+		return;
 	}
 	_mouseDoubleClickEvent(event);
 }
@@ -1114,13 +1156,14 @@ void MapWidget::_mouseDoubleClickEvent(QMouseEvent* event)
 
 void MapWidget::wheelEvent(QWheelEvent* event)
 {
-	if (event->orientation() == Qt::Vertical)
+	const auto vertical_delta = event->angleDelta().y();
+	if (vertical_delta != 0)
 	{
 		if (view)
 		{
-			auto degrees = event->delta() / 8.0;
+			auto degrees = vertical_delta / 8.0;
 			auto num_steps = degrees / 15.0;
-			auto cursor_pos_view = viewportToView(event->pos());
+			auto cursor_pos_view = viewportToView(event->position());
 			bool preserve_cursor_pos = (event->modifiers() & Qt::ControlModifier) == 0;
 			if (num_steps < 0 && !Settings::getInstance().getSettingCached(Settings::MapEditor_ZoomOutAwayFromCursor).toBool())
 				preserve_cursor_pos = !preserve_cursor_pos;
@@ -1137,7 +1180,16 @@ void MapWidget::wheelEvent(QWheelEvent* event)
 			// Send a mouse move event to the current tool as zooming out can move the mouse position on the map
 			if (tool)
 			{
-				QMouseEvent mouse_event{ QEvent::HoverMove, event->pos(), Qt::NoButton, QApplication::mouseButtons(), Qt::NoModifier };
+				QMouseEvent mouse_event {
+					QEvent::MouseMove,
+					event->position(),
+					event->globalPosition(),
+					Qt::NoButton,
+					QApplication::mouseButtons(),
+					event->modifiers(),
+					event->pointingDevice()
+				};
+				mouse_event.setTimestamp(event->timestamp());
 				tool->mouseMoveEvent(&mouse_event, view->viewToMapF(cursor_pos_view), this);
 			}
 		}

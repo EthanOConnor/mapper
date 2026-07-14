@@ -45,7 +45,7 @@
 #include <QWaitCondition>
 
 #ifdef Q_OS_ANDROID
-#include <QtAndroidExtras/QAndroidJniObject>
+#include <QJniObject>
 #endif
 
 #else  // no Qt Sensors lib
@@ -260,7 +260,7 @@ public:
 		magnetometer.setReturnGeoValues(true);
 		
 		// Check if a gyroscope is available
-		gyro_available = ! QSensor::sensorsForType(QGyroscope::type).empty();
+		gyro_available = !QSensor::sensorsForType(QGyroscope::sensorType).empty();
 		if (gyro_available)
 			gyroscope.addFilter(this);
 		
@@ -457,7 +457,7 @@ private:
 			p->latest_azimuth = 180 * azimuth / M_PI;
 #ifdef Q_OS_ANDROID
 			// Adjust for display rotation
-			jint orientation = QAndroidJniObject::callStaticMethod<jint>(
+			jint orientation = QJniObject::callStaticMethod<jint>(
 			                    "org/openorienteering/mapper/MapperActivity",
                                 "getDisplayRotation");
 			switch (orientation)
@@ -535,6 +535,11 @@ class CompassPrivate
 
 
 // Emit vtable once, in this translation unit
+void CompassPrivateDeleter::operator()(CompassPrivate* compass) const
+{
+	delete compass;
+}
+
 Compass::~Compass() = default;
 
 Compass& Compass::getInstance()

@@ -20,6 +20,7 @@
 #ifndef COVE_CONCURRENCY_H
 #define COVE_CONCURRENCY_H
 
+#include <atomic>
 #include <memory>
 #include <type_traits>
 #include <utility>
@@ -27,7 +28,6 @@
 
 #include <QtConcurrent>
 #include <QtGlobal>
-#include <QAtomicInteger>
 #include <QFuture>
 #include <QThread>
 #include <QThreadPool>
@@ -54,8 +54,8 @@ class Progress final : public ProgressObserver
 private:
 	struct Data
 	{
-		QAtomicInteger<int> percentage = 0;
-		QAtomicInteger<int> canceled = 0;
+		std::atomic<int> percentage = 0;
+		std::atomic<bool> canceled = false;
 	};
 	std::shared_ptr<Data> const data;
 	
@@ -139,7 +139,11 @@ template <typename ResultType, typename FunctorType, typename ... Input>
 Job<ResultType> run(const FunctorType& functor, Input&& ... args)
 {
 	Progress progress;
-	auto future = QtConcurrent::run(functor, &FunctorType::operator(), std::forward<Input>(args)..., progress);
+	auto future = QtConcurrent::run(
+		[functor, progress, ...bound_args = std::forward<Input>(args)]() mutable -> ResultType
+		{
+			return functor(bound_args..., progress);
+		});
 	return {std::move(future), progress};
 }
 

@@ -36,7 +36,6 @@
 #include <QtGlobal>
 #include <QtMath>
 #include <QChar>
-#include <QCharRef>
 #include <QDir>
 #include <QFileInfo>
 #include <QFlags>
@@ -49,9 +48,8 @@
 #include <QPointF>
 #include <QRectF>
 #include <QString>
-#include <QTextCodec>
-#include <QTextDecoder>
-#include <QTextEncoder>
+#include <QStringDecoder>
+#include <QStringEncoder>
 #include <QTextStream>
 #include <QTransform>
 #include <QVarLengthArray>
@@ -95,11 +93,11 @@ namespace OpenOrienteering {
 namespace {
 
 /// \todo De-duplicate (ocd_file_import.cpp)
-static QTextCodec* codecFromSettings()
+static std::optional<Util::TextEncoding> encodingFromSettings()
 {
 	const auto& settings = Settings::getInstance();
 	const auto name = settings.getSetting(Settings::General_Local8BitEncoding).toByteArray();
-	return Util::codecForName(name);
+	return Util::encodingForName(name);
 }
 
 
@@ -525,7 +523,7 @@ QString stringForSpotColor(int i, const MapColor& color)
 	out << color.getSpotColorName()
 	    << "\tn" << i
 	    << "\tv1"
-	    << fixed << qSetRealNumberPrecision(1)
+	    << Qt::fixed << qSetRealNumberPrecision(1)
 	    << "\tc" << qRound(cmyk.c * 200)/2.0
 	    << "\tm" << qRound(cmyk.m * 200)/2.0
 	    << "\ty" << qRound(cmyk.y * 200)/2.0
@@ -612,21 +610,21 @@ OcdFileExport::~OcdFileExport() = default;
 
 
 template<class Encoding>
-QTextCodec* OcdFileExport::determineEncoding()
+std::optional<Util::TextEncoding> OcdFileExport::determineEncoding()
 {
-	return nullptr;
+	return std::nullopt;
 }
 
 
 template<>
-QTextCodec* OcdFileExport::determineEncoding<Ocd::Custom8BitEncoding>()
+std::optional<Util::TextEncoding> OcdFileExport::determineEncoding<Ocd::Custom8BitEncoding>()
 {
-	auto encoding = codecFromSettings();
+	auto encoding = encodingFromSettings();
 	if (!encoding)
 	{
 		addWarning(::OpenOrienteering::OcdFileExport::tr("Encoding '%1' is not available. Check the settings.")
 		           .arg(Settings::getInstance().getSetting(Settings::General_Local8BitEncoding).toString()));
-		encoding = QTextCodec::codecForLocale();
+		encoding = Util::encodingForName(Util::codepageForLanguage(QLocale{}.name()));
 	}
 	return encoding;
 }
@@ -698,7 +696,7 @@ bool OcdFileExport::exportImplementation()
 	if (custom_8bit_encoding)
 	{
 		addParameterString = [&file, this](qint32 string_type, const QString& string) {
-			file.strings().insert(string_type, custom_8bit_encoding->fromUnicode(string));
+			file.strings().insert(string_type, custom_8bit_encoding->encode(string));
 		};
 	}
 	else
@@ -806,7 +804,8 @@ void OcdFileExport::exportSetup(OcdFile<Ocd::FormatV8>& file)
 	}
 	
 	{	
-		auto notes = custom_8bit_encoding->fromUnicode(map->getMapNotes());
+		FILEFORMAT_ASSERT(custom_8bit_encoding);
+		auto notes = custom_8bit_encoding->encode(map->getMapNotes());
 		if (!notes.isEmpty())
 		{
 			auto size = notes.size() + 1;
@@ -953,7 +952,7 @@ void OcdFileExport::exportGeoreferencing()
 	
 	QString string_1039;
 	QTextStream out(&string_1039, QIODevice::Append);
-	out << fixed
+	out << Qt::fixed
 	    << "\tm" << fields.m
 	    << qSetRealNumberPrecision(4)
 	    << "\tg" << grid_spacing_map
@@ -3101,24 +3100,21 @@ QByteArray OcdFileExport::exportTextData(const TextObject* object, int chunk_siz
 		text.prepend(QLatin1Char('\n'));
 	text.replace(QLatin1Char('\n'), QLatin1String("\r\n"));
 	
-	// Suppress byte order mark by using QTextCodec::IgnoreHeader.
-	static auto encoding_2byte = QTextCodec::codecForName("UTF-16LE");
-	auto encoder = encoding_2byte->makeEncoder(QTextCodec::IgnoreHeader);
-	auto encoded_text = encoder->fromUnicode(text);
+	QStringEncoder encoder{QStringConverter::Utf16LE};
+	QByteArray encoded_text = encoder(text);
 	
 	// A trailing zero is required.
 	if (encoded_text.size() + 2 > max_size)
 	{
 		// Truncate safely by decoding truncated encoded data.
-		auto decoder = encoding_2byte->makeDecoder();
-		auto truncated_text = decoder->toUnicode(encoded_text.constData(), max_size - 2);
-		delete decoder;
+		QStringDecoder decoder{QStringConverter::Utf16LE};
+		QString truncated_text = decoder(QByteArrayView{encoded_text}.first(max_size - 2));
 		if (QChar(truncated_text.back()).isHighSurrogate())
 			truncated_text.chop(1);
 		addTextTruncationWarning(text, truncated_text.length());
-		encoded_text = encoder->fromUnicode(truncated_text);
+		QStringEncoder truncated_encoder{QStringConverter::Utf16LE};
+		encoded_text = truncated_encoder(truncated_text);
 	}
-	delete encoder;
 	
 	auto text_size = encoded_text.size();
 	FILEFORMAT_ASSERT(text_size + 2 <= max_size);

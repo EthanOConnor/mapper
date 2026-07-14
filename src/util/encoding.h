@@ -20,12 +20,35 @@
 #ifndef OPENORIENTEERING_UTIL_ENCODING_H
 #define OPENORIENTEERING_UTIL_ENCODING_H
 
-class QString;
-class QTextCodec;
+#include <optional>
+
+#include <QByteArray>
+#include <QByteArrayView>
+#include <QList>
+#include <QString>
+#include <QStringView>
 
 namespace OpenOrienteering {
 
 namespace Util {
+
+/** A validated ICU character encoding. */
+class TextEncoding final
+{
+public:
+	QByteArray encode(QStringView text) const;
+	QString decode(QByteArrayView bytes) const;
+
+	const QByteArray& name() const noexcept { return canonical_name; }
+	bool operator==(const TextEncoding&) const = default;
+
+private:
+	explicit TextEncoding(QByteArray canonical_name);
+
+	QByteArray canonical_name;
+
+	friend std::optional<TextEncoding> encodingForName(QByteArrayView name);
+};
 
 /**
  * Determines the name of the 8-bit legacy codepage for a language.
@@ -41,13 +64,15 @@ namespace Util {
 const char* codepageForLanguage(const QString& language_name);
 
 /**
- * Determines the codec for a given name.
+ * Determines the encoding for a given name.
  * 
- * This function wraps QTextCodec::codecForName. Other than that function,
- * it will try to lookup the codepage name for the current locale if the
- * name is "Default" (case sensitive). It may return nullptr.
+ * ICU aliases are accepted. If the name is "Default" (case sensitive), the
+ * legacy codepage associated with the current locale is used.
  */
-QTextCodec* codecForName(const char* name);
+std::optional<TextEncoding> encodingForName(QByteArrayView name);
+
+/** Returns the canonical names of all ICU encodings available at runtime. */
+QList<QByteArray> availableEncodingNames();
 
 
 }  // namespace Util

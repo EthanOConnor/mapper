@@ -101,7 +101,7 @@ void PolygonTest::saveResults(const cove::PolygonList& polys,
                               const QString& filename) const
 {
 	QFile file(filename);
-	file.open(QIODevice::WriteOnly);
+	QVERIFY2(file.open(QIODevice::WriteOnly), qPrintable(file.errorString()));
 	QDataStream out(&file);
 
 	for (auto const& poly : polys)
@@ -154,8 +154,8 @@ void PolygonTest::compareResults(const cove::PolygonList& polys,
 		auto as_string = [](auto const& list) {
 			return std::accumulate(begin(list) + 1, end(list),
 			                       QByteArray::number(list.front()).rightJustified(10),
-			                       [](auto& accumulated, auto& current) {
-				return accumulated + ' ' + (QByteArray::number(current).rightJustified(5));
+			                       [](auto accumulated, const auto& current) {
+				return accumulated + ' ' + QByteArray::number(current).rightJustified(5);
 			});
 		};
 		QCOMPARE(as_string(errors), as_string(max_errors));

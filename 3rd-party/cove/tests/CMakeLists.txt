@@ -1,8 +1,3 @@
-find_package(${Mapper_QT} ${Mapper_QT_VERSION} COMPONENTS Core Gui Test REQUIRED)
-
-set(CMAKE_CXX_STANDARD 14)
-set(CMAKE_AUTOMOC ON)
-
 configure_file(test_config.h.in test_config.h)
 add_library(cove-test-config INTERFACE)
 target_include_directories(cove-test-config INTERFACE "${CMAKE_CURRENT_BINARY_DIR}")
@@ -14,10 +9,6 @@ add_test(
   NAME cove-ParallelImageProcessingTest
   COMMAND cove-ParallelImageProcessingTest
 )
-if(${CMAKE_VERSION} VERSION_LESS 3.8)
-	target_include_directories(cove-ParallelImageProcessingTest PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
-endif()
-
 add_executable(cove-PolygonTest
   PolygonTest.cpp
 )
@@ -45,11 +36,11 @@ foreach(target
   cove-PolygonTest
   cove-PolygonBenchmark
 )
+	target_compile_features(${target} PRIVATE cxx_std_23)
 	target_link_libraries(${target}
 	  PRIVATE
 	    cove-vectorizer
-	    Qt5::Test
-	    Qt5::Gui
+	    Qt6::Test
+	    Qt6::Gui
 	)
 endforeach()
-

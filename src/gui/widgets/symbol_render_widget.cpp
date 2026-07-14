@@ -46,7 +46,6 @@
 #include "core/symbols/text_symbol.h"
 #include "gui/symbols/symbol_setting_dialog.h"
 #include "gui/widgets/symbol_tooltip.h"
-#include "util/backports.h"  // IWYU pragma: keep
 #include "util/overriding_shortcut.h"
 
 
@@ -691,7 +690,7 @@ void SymbolRenderWidget::dragMoveEvent(QDragMoveEvent* event)
 	if (event->mimeData()->hasFormat(MimeType::OpenOrienteeringSymbolIndex()))
 	{
 		int row, pos_in_row;
-		if (!dropPosition(event->pos(), row, pos_in_row))
+		if (!dropPosition(event->position().toPoint(), row, pos_in_row))
 		{
 			if (last_drop_pos >= 0 && last_drop_row >= 0)
 			{
@@ -729,7 +728,7 @@ void SymbolRenderWidget::dropEvent(QDropEvent* event)
 	if (event->proposedAction() == Qt::MoveAction)
 	{
 		int row, pos_in_row;
-		if (!dropPosition(event->pos(), row, pos_in_row))
+		if (!dropPosition(event->position().toPoint(), row, pos_in_row))
 			return;
 		
 		int pos = row * icons_per_row + pos_in_row;

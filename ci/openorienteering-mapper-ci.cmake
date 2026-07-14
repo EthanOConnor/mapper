@@ -98,7 +98,7 @@ superbuild_package(
     >
       "-DIOF_3_XSD_FILE=${Mapper_CI_IOF_3_XSD_FILE}"
     $<$<BOOL:@ANDROID@>:
-      "-DCMAKE_DISABLE_FIND_PACKAGE_Qt5PrintSupport=TRUE"
+      "-DCMAKE_DISABLE_FIND_PACKAGE_Qt6PrintSupport=TRUE"
       "-DMAPPER_APP_ID=${Mapper_CI_APP_ID}"
       "-DKEYSTORE_URL=${KEYSTORE_URL}"
       "-DKEYSTORE_ALIAS=${KEYSTORE_ALIAS}"
@@ -109,10 +109,10 @@ superbuild_package(
       >
     >
     $<$<NOT:$<BOOL:@Mapper_CI_ENABLE_POSITIONING@>>:
-      "-DCMAKE_DISABLE_FIND_PACKAGE_Qt5Positioning:BOOL=TRUE"
-      "-UQt5Positioning_DIR"
-      "-DCMAKE_DISABLE_FIND_PACKAGE_Qt5Sensors:BOOL=TRUE"
-      "-UQt5Sensors_DIR"
+      "-DCMAKE_DISABLE_FIND_PACKAGE_Qt6Positioning:BOOL=TRUE"
+      "-UQt6Positioning_DIR"
+      "-DCMAKE_DISABLE_FIND_PACKAGE_Qt6Sensors:BOOL=TRUE"
+      "-UQt6Sensors_DIR"
     >
     $<$<BOOL:@CMAKE_CROSSCOMPILING@>:
       "-DCMAKE_PROGRAM_PATH=@HOST_DIR@/bin"

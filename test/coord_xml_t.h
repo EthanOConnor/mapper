@@ -70,7 +70,7 @@ private slots:
 	void readHumanReadableStream();
 	void readHumanReadableStream_data();
 	
-	/** Reads a simple human readable format by means of QStringRef. */
+	/** Reads a simple human readable format by means of QStringView. */
 	void readHumanReadableStringRef();
 	void readHumanReadableStringRef_data();
 	

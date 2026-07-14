@@ -25,10 +25,8 @@
 #include <QDialogButtonBox>
 #include <QFlags>
 #include <QLabel>
-#include <QSignalMapper>
 #include <QVBoxLayout>
 
-#include "util/backports.h"  // IWYU pragma: keep
 
 
 namespace OpenOrienteering {
@@ -53,29 +51,25 @@ TaskDialog::TaskDialog(QWidget* parent, const QString& title, const QString& tex
 		layout->addWidget(button_box);
 	setLayout(layout);
 	
-	signal_mapper = new QSignalMapper(this);
-	connect(signal_mapper, QOverload<QWidget*>::of(&QSignalMapper::mapped), this, QOverload<QWidget*>::of(&TaskDialog::buttonClicked));
-	connect(button_box, &QDialogButtonBox::clicked, this, QOverload<QWidget*>::of(&TaskDialog::buttonClicked));
+	if (button_box)
+		connect(button_box, &QDialogButtonBox::clicked, this, &TaskDialog::buttonClicked);
 }
 
 QCommandLinkButton* TaskDialog::addCommandButton(const QString& text, const QString& description)
 {
 	QCommandLinkButton* button = new QCommandLinkButton(text, description);
-	signal_mapper->setMapping(button, button);
-	connect(button, QOverload<bool>::of(&QAbstractButton::clicked), signal_mapper, QOverload<>::of(&QSignalMapper::map));
+	connect(button, &QAbstractButton::clicked, this, [this, button] {
+		buttonClicked(button);
+	});
 	
 	layout->insertWidget(layout->count() - (button_box ? 1 : 0), button);
 	return button;
 }
 
-void TaskDialog::buttonClicked(QWidget* button)
-{
-	buttonClicked(static_cast<QAbstractButton*>(button));
-}
 void TaskDialog::buttonClicked(QAbstractButton* button)
 {
 	clicked_button = button;
-	if (button_box->buttonRole(clicked_button) == QDialogButtonBox::RejectRole)
+	if (button_box && button_box->buttonRole(clicked_button) == QDialogButtonBox::RejectRole)
 		reject();
 	else
 		accept();

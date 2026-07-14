@@ -74,7 +74,6 @@
 #include "gui/util_gui.h"
 #include "gui/symbols/symbol_replacement.h"
 #include "gui/widgets/symbol_dropdown.h"
-#include "util/backports.h"  // IWYU pragma: keep
 
 // IWYU pragma: no_forward_declare QColor
 // IWYU pragma: no_forward_declare QFormLayout
@@ -242,11 +241,13 @@ bool SymbolReplacementDialog::saveCrtFile()
 	{
 		updateMappingFromTable();
 		QSaveFile crt_file(filepath);
-		crt_file.open(QIODevice::WriteOnly | QIODevice::Text);
-		QTextStream stream{ &crt_file };
-		symbol_rules.writeCrt(stream);
-		if (crt_file.commit())
-			return true;
+		if (crt_file.open(QIODevice::WriteOnly | QIODevice::Text))
+		{
+			QTextStream stream{ &crt_file };
+			symbol_rules.writeCrt(stream);
+			if (crt_file.commit())
+				return true;
+		}
 		
 		/// \todo Reused translation, consider generalized context
 		QMessageBox::warning(this, ::OpenOrienteering::Map::tr("Error"),

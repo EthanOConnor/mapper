@@ -63,10 +63,9 @@ protected:
 	/**
 	 * Adds all known pages to the dialog.
 	 * 
-	 * This function is called from the constructor. It may be overridden to
-	 * provide dialogs with different pages.
+	 * This function is called from the constructor.
 	 */
-	virtual void addPages();
+	void addPages();
 	
 	/**
 	 * Adds a single page to the dialog.

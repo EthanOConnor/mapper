@@ -39,22 +39,22 @@ static_assert(!std::is_move_assignable<Progress>::value, "Concurrency::Progress 
 
 int Progress::getPercentage() const noexcept
 {
-	return data->percentage.load();
+	return data->percentage.load(std::memory_order_relaxed);
 }
 
 void Progress::setPercentage(int percentage)
 {
-	data->percentage.store(percentage);
+	data->percentage.store(percentage, std::memory_order_relaxed);
 }
 
 bool Progress::isInterruptionRequested() const
 {
-	return bool(data->canceled.load());
+	return data->canceled.load(std::memory_order_relaxed);
 }
 
 void Progress::requestInterruption() noexcept
 {
-	data->canceled.store(int(true));
+	data->canceled.store(true, std::memory_order_relaxed);
 }
 
 
@@ -78,4 +78,3 @@ static_assert(!std::is_move_assignable<Job<ArbitraryResultType>>::value, "Concur
 }  // namespace Concurrency
 
 }  // cove
-

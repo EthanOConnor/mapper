@@ -49,10 +49,6 @@
 #include "core/symbols/text_symbol.h"
 #include "util/util.h"
 
-#ifdef QT_PRINTSUPPORT_LIB
-#  include "advanced_pdf_printer.h"
-#endif
-
 // IWYU pragma: no_forward_declare QFontMetricsF
 
 
@@ -73,8 +69,7 @@ inline void fixPenForPdf(QPen& pen, const QPainter& painter)
 {
 #ifdef QT_PRINTSUPPORT_LIB
 	auto engine = painter.paintEngine()->type();
-	if (Q_UNLIKELY(engine == QPaintEngine::Pdf
-	               || engine == AdvancedPdfPrinter::paintEngineType()))
+		if (Q_UNLIKELY(engine == QPaintEngine::Pdf))
 	{
 		const auto miter_limit = pen.miterLimit();
 		pen.setMiterLimit(qSqrt(1.0 + miter_limit * miter_limit * 4));

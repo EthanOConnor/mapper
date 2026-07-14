@@ -27,6 +27,7 @@
 
 #include <QtGlobal>
 #include <QObject>
+#include <QPageLayout>
 #include <QPageSize>
 #include <QRectF>
 #include <QSizeF>
@@ -43,6 +44,8 @@ template <class Key, class T>
 class QHash;
 class QImage;
 class QPainter;
+class QPagedPaintDevice;
+class QPdfWriter;
 class QPrinter;
 class QRectF;
 class QSizeF;
@@ -60,9 +63,6 @@ class Template;
 class MapPrinterPageFormat
 {
 public:
-	/** Copy of QPrinter::Orientation because QPrinter is not available for Android */
-	enum Orientation { Portrait, Landscape };
-	
 	/** Constructs a new page format.
 	 * 
 	 *  The format is initialized as a custom page format with a page rectangle
@@ -89,7 +89,7 @@ public:
 #endif
 	
 	/** The orientation of the paper. */
-	Orientation orientation;
+	QPageLayout::Orientation orientation;
 	
 	/** The printable page rectangle in mm. */
 	QRectF page_rect;
@@ -211,8 +211,6 @@ public:
 	 *  to the current page size. */
 	bool single_page_print_area;
 	
-	/** Platform-dependent data. */
-	std::shared_ptr<void> native_data;
 };
 
 
@@ -344,6 +342,9 @@ public:
 	
 	/** Creates a printer configured according to the current settings. */
 	std::unique_ptr<QPrinter> makePrinter() const;
+
+	/** Creates a PDF writer configured according to the current settings. */
+	std::unique_ptr<QPdfWriter> makePdfWriter(const QString& filename) const;
 	
 	/** Takes the settings from the given printer, 
 	 *  and generates signals for changing properties. */
@@ -355,6 +356,11 @@ public:
 	 *
 	 *  @return true on success, false on error. */
 	bool printMap(QPrinter* printer);
+
+	/** Prints the map to a PDF writer.
+	 *
+	 *  @return true on success, false on error. */
+	bool printMap(QPdfWriter* writer, int copy_count = 1);
 	
 	/** Draws a single page to the painter.
 	 * 
@@ -371,8 +377,8 @@ public:
 	
 	void drawPage(QPainter* device_painter, const QRectF& page_extent, const QTransform& page_extent_transform, QImage* page_buffer = nullptr) const;
 	
-	/** Draws the separations as distinct pages to the printer. */
-	void drawSeparationPages(QPrinter* printer, QPainter* device_painter, const QRectF& page_extent) const;
+	/** Draws the separations as distinct pages to a paged paint device. */
+	void drawSeparationPages(QPagedPaintDevice* device, QPainter* device_painter, const QRectF& page_extent) const;
 	
 	/** Returns the current configuration. */
 	const MapPrinterConfig& config() const
@@ -395,7 +401,7 @@ public slots:
 	void setCustomPageSize(const QSizeF& dimensions);
 	
 	/** Sets the page orientation. */
-	void setPageOrientation(MapPrinterPageFormat::Orientation orientation);
+	void setPageOrientation(QPageLayout::Orientation orientation);
 	
 	/** Sets the overlapping of the pages at the margins. */
 	void setOverlap(qreal h_overlap, qreal v_overlap);
@@ -483,6 +489,9 @@ protected:
 	
 	/** Updates the scale adjustment and page breaks. */
 	void mapScaleChanged();
+
+	/** Renders all configured pages to an active painter. */
+	bool printPages(QPagedPaintDevice* device, QPainter* painter, int copy_count);
 	
 	Map& map;
 	const MapView* view;
