@@ -456,6 +456,17 @@ void FramePipelineTest::nativeSurfacePublishesOrderedLifecycle()
 	QVERIFY(states.back().native.window != 0);
 #if defined(Q_OS_MACOS)
 	QCOMPARE(states.back().native.platform, NativePlatform::AppKit);
+#elif defined(Q_OS_WIN)
+	QCOMPARE(states.back().native.platform, NativePlatform::Win32);
+#elif defined(Q_OS_LINUX)
+	auto const platform_name = QGuiApplication::platformName().toLower();
+	if (platform_name == QLatin1String("xcb"))
+		QCOMPARE(states.back().native.platform, NativePlatform::Xcb);
+	else if (platform_name.contains(QLatin1String("wayland")))
+		QCOMPARE(states.back().native.platform, NativePlatform::Wayland);
+	else
+		QFAIL(qPrintable(QStringLiteral("Unsupported native test platform: %1")
+		                 .arg(platform_name)));
 #else
 	QCOMPARE(states.back().native.platform, NativePlatform::Unknown);
 #endif
