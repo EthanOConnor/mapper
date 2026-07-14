@@ -428,7 +428,7 @@ int DrawTextTool::updateDirtyRectImpl(QRectF& rect)
 	return 1;
 }
 
-void DrawTextTool::drawImpl(QPainter* painter, MapWidget* widget)
+void DrawTextTool::drawImpl(render::OverlaySceneBuilder* painter, MapWidget* widget)
 {
 	painter->save();
 	

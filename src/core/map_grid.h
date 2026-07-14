@@ -24,6 +24,8 @@
 
 #include <QRgb>
 
+#include "render/render_ir.h"
+
 class QPainter;
 class QRectF;
 class QXmlStreamReader;
@@ -91,6 +93,10 @@ public:
 	 *        otherwise this is the divisor used to create a 0.1 mm wide pen.
 	 */
 	void draw(QPainter* painter, const QRectF& bounding_box, Map* map, qreal scale_adjustment = 0) const;
+	std::shared_ptr<const render::RenderIR> buildRenderIR(const QRectF& bounding_box,
+	                                                     Map* map,
+	                                                     double view_scale,
+	                                                     render::Revision revision) const;
 	void draw(QPainter* painter, const QRectF& bounding_box, Map* map, bool) const = delete;
 	
 	/**

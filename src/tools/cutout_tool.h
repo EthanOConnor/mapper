@@ -74,7 +74,7 @@ public:
 	
 	
 protected:
-	void drawImpl(QPainter* painter, MapWidget* widget) override;
+	void drawImpl(render::OverlaySceneBuilder* painter, MapWidget* widget) override;
 	
 	bool keyPress(QKeyEvent* event) override;
 	

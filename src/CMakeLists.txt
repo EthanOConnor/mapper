@@ -96,12 +96,13 @@ set(Mapper_Common_SRCS
 
   # Immutable backend-neutral render description and QPainter reference path.
   render/frame_pipeline.cpp
+	  render/overlay_scene.cpp
   render/render_ir.cpp
   render/render_snapshot.cpp
   render/qt_render_bridge.cpp
   render/qpainter_frame_renderer.cpp
   render/qpainter_renderer.cpp
-  render/raster_layer_planner.cpp
+  render/template_layer_planner.cpp
   render/vello_renderer.cpp
 
   presentation/native_surface.cpp
@@ -310,6 +311,9 @@ target_link_libraries(Mapper_Common
   PRIVATE
   ICU::uc
 )
+if(ANDROID)
+	target_link_libraries(Mapper_Common PRIVATE android)
+endif()
 foreach(lib
   cove
   mapper-config

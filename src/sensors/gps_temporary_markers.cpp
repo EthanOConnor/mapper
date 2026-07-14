@@ -85,7 +85,7 @@ void GPSTemporaryMarkers::clear()
 	updateMapWidget();
 }
 
-void GPSTemporaryMarkers::paint(QPainter* painter)
+void GPSTemporaryMarkers::paint(render::OverlaySceneBuilder* painter)
 {
 	painter->save();
 	widget->applyMapTransform(painter);

@@ -79,6 +79,7 @@ public:
 	                  std::size_t object_count);
 
 	Revision revision() const noexcept;
+	std::uint64_t identity() const noexcept;
 	const std::map<int, SnapshotColor>& colors() const noexcept;
 	std::size_t objectCount() const noexcept;
 	ObjectId maxObjectId() const noexcept;
@@ -100,6 +101,7 @@ private:
 	                       const RenderRequest& request) const;
 
 	Revision revision_;
+	std::uint64_t identity_ = 0;
 	std::map<int, SnapshotColor> colors_;
 	std::vector<SnapshotObjectBlockPtr> object_blocks_;
 	std::map<int, SnapshotObjectIds> color_objects_;

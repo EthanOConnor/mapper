@@ -122,7 +122,7 @@ protected:
 	void includePreviewRects(QRectF& rect);
 	
 	/** Draws the preview objects. */
-	void drawPreviewObjects(QPainter* painter, MapWidget* widget);
+	void drawPreviewObjects(render::OverlaySceneBuilder* painter, MapWidget* widget);
 	
 	
 	std::vector<PointSymbol*> preview_point_symbols;

@@ -147,7 +147,7 @@ bool RotateTool::keyRelease(QKeyEvent* event)
 }
 
 
-void RotateTool::drawImpl(QPainter* painter, MapWidget* widget)
+void RotateTool::drawImpl(render::OverlaySceneBuilder* painter, MapWidget* widget)
 {
 	const auto center = widget->mapToViewport(rotation_center);
 	

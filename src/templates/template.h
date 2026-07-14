@@ -42,7 +42,6 @@ class QByteArray;
 class QColor;
 class QDir;
 class QFileInfo;
-class QPainter;
 class QPointF;
 class QRectF;
 class QTransform;
@@ -69,15 +68,13 @@ struct ViewRenderContext
  * Transformation parameters for non-georeferenced templates,
  * transforming template coordinates to map coordinates.
  * 
- * The parameters are applied to painter in the order
+ * The parameters compose in the order
  * 1. translate
  * 2. rotate
  * 3. scale.
  * 
  * So this order is also chosen for the member variables, and
  * thus used in list initialization.
- * 
- * \see Template::applyTemplateTransform()
  * 
  * Coordinate transformations use the opposite order for the
  * same effect.
@@ -382,17 +379,6 @@ public:
 	virtual void updateRenderContext(const ViewRenderContext& context);
 	
 	/** 
-	 * Draws the template using the given painter with the given opacity.
-	 * 
-	 * The painter transformation is set to use template coordinates.
-	 * The clip rect is in template coordinates.
-	 * The scale is the combined view & template scale. It can be used to give
-	 * a minimum size to elements.
-	 */
-    virtual void drawTemplate(QPainter* painter, const QRectF& clip_rect, double scale, bool on_screen, qreal opacity) const = 0;
-	
-	
-	/** 
 	 * Calculates the template's bounding box in map coordinates.
 	 */
 	virtual QRectF calculateTemplateBoundingBox() const;
@@ -446,16 +432,6 @@ public:
 	
 	
 	// Transformation related methods for non-georeferenced templates only
-	
-	/**
-	 * Changes the painter's transformation so it can be used to draw in template coordinates.
-	 * 
-	 * The previous transformation of the painter must be the map transformation.
-	 * 
-	 * \note For non-georeferenced templates only, or if the template
-	 *       transformation has been set by the template nevertheless.
-	 */
-	void applyTemplateTransform(QPainter* painter) const;
 	
 	/**
 	 * Returns the extent of the template in template coordinates.

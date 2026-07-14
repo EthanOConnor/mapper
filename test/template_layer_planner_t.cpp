@@ -4,27 +4,31 @@
  *    This file is part of OpenOrienteering.
  */
 
-#include "raster_layer_planner_t.h"
+#include "template_layer_planner_t.h"
 
 #include <algorithm>
 #include <memory>
 #include <variant>
 
 #include <QtTest>
+#include <QDir>
 #include <QImage>
 #include <QPainter>
 #include <QVector>
 
 #include "global.h"
+#include "test_config.h"
 #include "core/map.h"
 #include "core/map_view.h"
 #include "presentation/native_surface.h"
 #include "render/frame_pipeline.h"
 #include "render/qpainter_frame_renderer.h"
 #include "render/qt_render_bridge.h"
-#include "render/raster_layer_planner.h"
+#include "render/template_layer_planner.h"
 #include "render/vello_renderer.h"
 #include "templates/template_image.h"
+#include "templates/template_map.h"
+#include "templates/template_track.h"
 
 using namespace OpenOrienteering;
 
@@ -100,7 +104,7 @@ std::unique_ptr<SyntheticRasterTemplate> singleTile(
 render::FramePacketPtr frameFor(
 	const render::MapRenderSnapshot& snapshot,
 	render::FramePlanner& planner,
-	render::RasterLayerPlan raster)
+	render::TemplateLayerPlan raster)
 {
 	render::FrameRequest request {
 		{ 16, 16, 1, { 1, 0, 0, 1, 8, 8 } },
@@ -116,7 +120,7 @@ render::FramePacketPtr frameFor(
 render::FramePacketPtr scaledFrameFor(
 	const render::MapRenderSnapshot& snapshot,
 	render::FramePlanner& planner,
-	render::RasterLayerPlan raster)
+	render::TemplateLayerPlan raster)
 {
 	render::FrameRequest request {
 		{ 64, 40, 1, { 3.2, 0, 0, 3.2, 32.25, 20.35 } },
@@ -169,13 +173,13 @@ QImage renderVello(const render::FramePacketPtr& frame)
 
 }  // namespace
 
-void RasterLayerPlannerTest::initTestCase()
+void TemplateLayerPlannerTest::initTestCase()
 {
 	Q_INIT_RESOURCE(resources);
 	doStaticInitializations();
 }
 
-void RasterLayerPlannerTest::preservesLayerOrderAndRetainedScenes()
+void TemplateLayerPlannerTest::preservesLayerOrderAndRetainedScenes()
 {
 	Map map;
 	MapView view { &map };
@@ -185,8 +189,8 @@ void RasterLayerPlannerTest::preservesLayerOrderAndRetainedScenes()
 	view.setTemplateVisibility(map.getTemplate(0), { 1, true });
 	view.setTemplateVisibility(map.getTemplate(1), { 0.5f, true });
 
-	render::RasterLayerPlanner raster_planner;
-	auto first = raster_planner.plan(map, view, { -8, -8, 16, 16 }, 1);
+	render::TemplateLayerPlanner template_planner;
+	auto first = template_planner.plan(map, view, { -8, -8, 16, 16 }, 1);
 	QVERIFY(first.complete);
 	QCOMPARE(first.newly_resident_images, std::size_t(2));
 	QCOMPARE(first.below_map.size(), std::size_t(1));
@@ -198,7 +202,7 @@ void RasterLayerPlannerTest::preservesLayerOrderAndRetainedScenes()
 	auto const below_scene = first.below_map.front().scene;
 	auto const above_scene = first.above_map.front().scene;
 
-	auto second = raster_planner.plan(map, view, { -8, -8, 16, 16 }, 1);
+	auto second = template_planner.plan(map, view, { -8, -8, 16, 16 }, 1);
 	QCOMPARE(second.newly_resident_images, std::size_t(0));
 	QCOMPARE(second.below_map.front().scene, below_scene);
 	QCOMPARE(second.above_map.front().scene, above_scene);
@@ -223,7 +227,47 @@ void RasterLayerPlannerTest::preservesLayerOrderAndRetainedScenes()
 	QVERIFY(std::abs(actual.blue() - expected.blue()) <= 2);
 }
 
-void RasterLayerPlannerTest::boundsImageAdmissionAndPreservesVelloIdentity()
+void TemplateLayerPlannerTest::recordsVectorMapAndTrackTemplates()
+{
+	auto const test_dir = QDir(QString::fromUtf8(MAPPER_TEST_SOURCE_DIR));
+	Map map;
+	MapView view { &map };
+	auto map_template = std::make_unique<TemplateMap>(
+		test_dir.absoluteFilePath(QStringLiteral("../examples/overprinting.omap")), &map
+	);
+	map_template->setTemplateState(Template::Unloaded);
+	QVERIFY(map_template->loadTemplateFile());
+	auto track_template = std::make_unique<TemplateTrack>(
+		test_dir.absoluteFilePath(QStringLiteral("data/templates/template-track.gpx")), &map
+	);
+	track_template->setTemplateState(Template::Unloaded);
+	QVERIFY(track_template->loadTemplateFile());
+	map.addTemplate(0, std::move(map_template));
+	map.addTemplate(1, std::move(track_template));
+	map.setFirstFrontTemplate(1);
+	view.setTemplateVisibility(map.getTemplate(0), { 1, true });
+	view.setTemplateVisibility(map.getTemplate(1), { 1, true });
+
+	auto visible = map.getTemplate(0)->calculateTemplateBoundingBox()
+	             .united(map.getTemplate(1)->calculateTemplateBoundingBox());
+	QVERIFY(visible.isValid());
+	render::TemplateLayerPlanner planner;
+	auto plan = planner.plan(map, view, render::fromQRectF(visible), 4);
+	QVERIFY(plan.complete);
+	QCOMPARE(plan.newly_resident_images, std::size_t(0));
+	QCOMPARE(plan.below_map.size(), std::size_t(1));
+	QCOMPARE(plan.above_map.size(), std::size_t(1));
+	QVERIFY(plan.below_map.front().scene);
+	QVERIFY(!plan.below_map.front().scene->commands.empty());
+	QVERIFY(plan.above_map.front().scene);
+	QVERIFY(!plan.above_map.front().scene->commands.empty());
+	QVERIFY(std::ranges::none_of(
+		plan.below_map.front().scene->commands,
+		[](auto const& command) { return std::holds_alternative<render::DrawImage>(command); }
+	));
+}
+
+void TemplateLayerPlannerTest::boundsImageAdmissionAndPreservesVelloIdentity()
 {
 	Map map;
 	MapView view { &map };
@@ -241,7 +285,7 @@ void RasterLayerPlannerTest::boundsImageAdmissionAndPreservesVelloIdentity()
 	auto const snapshot = map.publishRenderSnapshot();
 	QVERIFY(snapshot);
 
-	render::RasterLayerPlanner raster_planner;
+	render::TemplateLayerPlanner template_planner;
 	render::FramePlanner frame_planner;
 	render::VelloRenderer renderer;
 	presentation::NativeSurfaceState surface;
@@ -255,7 +299,7 @@ void RasterLayerPlannerTest::boundsImageAdmissionAndPreservesVelloIdentity()
 	QVERIFY(renderer.setSurface(surface));
 
 	{
-		auto first = raster_planner.plan(map, view, { -8, -8, 16, 16 }, 1);
+		auto first = template_planner.plan(map, view, { -8, -8, 16, 16 }, 1);
 		QVERIFY(!first.complete);
 		QCOMPARE(first.newly_resident_images, std::size_t(4));
 		QCOMPARE(first.below_map.size(), std::size_t(1));
@@ -265,7 +309,7 @@ void RasterLayerPlannerTest::boundsImageAdmissionAndPreservesVelloIdentity()
 		QCOMPARE(renderer.cachedImageCount(), std::size_t(4));
 	}
 
-	auto second = raster_planner.plan(map, view, { -8, -8, 16, 16 }, 1);
+	auto second = template_planner.plan(map, view, { -8, -8, 16, 16 }, 1);
 	QVERIFY(second.complete);
 	QCOMPARE(second.newly_resident_images, std::size_t(2));
 	QCOMPARE(second.below_map.size(), std::size_t(1));
@@ -277,13 +321,13 @@ void RasterLayerPlannerTest::boundsImageAdmissionAndPreservesVelloIdentity()
 		QCOMPARE(renderer.cachedImageCount(), std::size_t(6));
 	}
 
-	auto third = raster_planner.plan(map, view, { -8, -8, 16, 16 }, 1);
+	auto third = template_planner.plan(map, view, { -8, -8, 16, 16 }, 1);
 	QVERIFY(third.complete);
 	QCOMPARE(third.newly_resident_images, std::size_t(0));
 	QCOMPARE(third.below_map.front().scene, complete_scene);
 }
 
-void RasterLayerPlannerTest::marksFallbackLayersIncomplete()
+void TemplateLayerPlannerTest::marksFallbackLayersIncomplete()
 {
 	Map map;
 	MapView view { &map };
@@ -295,14 +339,14 @@ void RasterLayerPlannerTest::marksFallbackLayersIncomplete()
 	map.setFirstFrontTemplate(1);
 	view.setTemplateVisibility(map.getTemplate(0), { 1, true });
 
-	render::RasterLayerPlanner planner;
+	render::TemplateLayerPlanner planner;
 	auto const plan = planner.plan(map, view, { -8, -8, 16, 16 }, 1);
 	QVERIFY(!plan.complete);
 	QCOMPARE(plan.below_map.size(), std::size_t(1));
 	QCOMPARE(imageCommandCount(plan.below_map.front()), std::size_t(1));
 }
 
-void RasterLayerPlannerTest::preservesTransparentGuttersWithoutTileSeams()
+void TemplateLayerPlannerTest::preservesTransparentGuttersWithoutTileSeams()
 {
 	QImage source(16, 8, QImage::Format_RGBA8888);
 	for (int y = 0; y < source.height(); ++y)
@@ -343,8 +387,8 @@ void RasterLayerPlannerTest::preservesTransparentGuttersWithoutTileSeams()
 	whole_map.setFirstFrontTemplate(1);
 	whole_view.setTemplateVisibility(whole_map.getTemplate(0), { 1, true });
 
-	render::RasterLayerPlanner tiled_planner;
-	render::RasterLayerPlanner whole_planner;
+	render::TemplateLayerPlanner tiled_planner;
+	render::TemplateLayerPlanner whole_planner;
 	auto tiled_plan = tiled_planner.plan(tiled_map, tiled_view, { -10, -7, 20, 14 }, 3.2);
 	auto whole_plan = whole_planner.plan(whole_map, whole_view, { -10, -7, 20, 14 }, 3.2);
 	QVERIFY(tiled_plan.complete);
@@ -383,4 +427,4 @@ void RasterLayerPlannerTest::preservesTransparentGuttersWithoutTileSeams()
 	}
 }
 
-QTEST_MAIN(RasterLayerPlannerTest)
+QTEST_MAIN(TemplateLayerPlannerTest)

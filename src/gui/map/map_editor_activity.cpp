@@ -30,7 +30,7 @@ void MapEditorActivity::init()
 	// nothing
 }
 
-void MapEditorActivity::draw(QPainter*, MapWidget*)
+void MapEditorActivity::draw(render::OverlaySceneBuilder*, MapWidget*)
 {
 	// nothing
 }

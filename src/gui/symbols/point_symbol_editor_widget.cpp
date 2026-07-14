@@ -1078,7 +1078,7 @@ void PointSymbolEditorActivity::update()
 	map->setActivityBoundingBox(rect, cross_radius + 1);
 }
 
-void PointSymbolEditorActivity::draw(QPainter* painter, MapWidget* map_widget)
+void PointSymbolEditorActivity::draw(render::OverlaySceneBuilder* painter, MapWidget* map_widget)
 {
 	auto midpoint = map_widget->mapToViewport(symbol_editor->object_origin_coord).toPoint();
 	

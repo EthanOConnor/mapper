@@ -57,6 +57,9 @@
 #include "core/map_grid.h"
 #include "core/map_view.h"
 #include "core/renderables/renderable.h"
+#include "render/qpainter_frame_renderer.h"
+#include "render/qt_render_bridge.h"
+#include "render/render_snapshot.h"
 #include "templates/template.h"
 #include "util/xml_stream_util.h"
 
@@ -66,6 +69,35 @@
 namespace OpenOrienteering {
 
 namespace {
+
+#if defined(QT_PRINTSUPPORT_LIB)
+bool renderFramePasses(QPainter* painter,
+	                   const std::vector<render::VectorPass>& passes,
+	                   const render::RenderRequest& request,
+	                   const QTransform& camera,
+	                   const QRectF& clip,
+	                   double device_pixel_ratio = 1)
+{
+	if (!painter || passes.empty())
+		return true;
+	render::FramePacket frame;
+	frame.id = 1;
+	frame.view = {
+		std::uint32_t(std::max(0, painter->device()->width())),
+		std::uint32_t(std::max(0, painter->device()->height())),
+		device_pixel_ratio,
+		render::fromQTransform(camera),
+	};
+	frame.render_request = request;
+	frame.vector_passes = passes;
+	painter->save();
+	painter->setWorldTransform(camera, false);
+	painter->setClipRect(clip, Qt::ReplaceClip);
+	auto const result = render::QPainterFrameRenderer().render(*painter, frame);
+	painter->restore();
+	return result.status == render::FrameStatus::Presented;
+}
+#endif
 
 namespace literal {
 
@@ -958,6 +990,33 @@ void MapPrinter::drawPage(QPainter* device_painter, const QRectF& page_extent, c
 	                          | QPainter::SmoothPixmapTransform;
 	
 	const auto page_region_used = page_extent.intersected(print_area);
+	const auto output_scaling = units_per_mm * scale_adjustment;
+	const auto output_request = render::RenderRequest {
+		render::fromQRectF(page_region_used),
+		output_scaling,
+		RenderConfig::NoOptions,
+		1,
+	};
+	auto const snapshot = map.publishRenderSnapshot();
+	auto template_layers = render::TemplateLayerPlan {};
+	if (options.show_templates)
+	{
+		template_layers = template_layer_planner.plan(
+			map, view, render::fromQRectF(page_region_used), output_scaling, false
+		);
+		if (!template_layers.complete)
+		{
+			device_painter->end();
+			return;
+		}
+	}
+	auto cameraFor = [&page_extent_transform](QPainter* painter) {
+		painter->save();
+		painter->setTransform(page_extent_transform, true);
+		auto const camera = painter->worldTransform();
+		painter->restore();
+		return camera;
+	};
 	
 	
 	/*
@@ -1050,10 +1109,12 @@ void MapPrinter::drawPage(QPainter* device_painter, const QRectF& page_extent, c
 		page_painter->save();
 		
 		page_painter->setRenderHints(render_hints);
-		page_painter->setTransform(page_extent_transform, /*combine*/ true);
-		page_painter->setClipRect(page_region_used, Qt::ReplaceClip);
-		
-		map.drawTemplates(page_painter, page_region_used, 0, first_front_template - 1, view, false);
+		if (!renderFramePasses(page_painter, template_layers.below_map,
+		                       output_request, cameraFor(page_painter), page_region_used))
+		{
+			device_painter->end();
+			return;
+		}
 		
 		page_painter->restore();
 	}
@@ -1098,21 +1159,26 @@ void MapPrinter::drawPage(QPainter* device_painter, const QRectF& page_extent, c
 		page_painter->save();  // Modified via map_painter, or when drawing the map_buffer
 		
 		map_painter->setRenderHints(render_hints);
-		map_painter->setTransform(page_extent_transform, /*combine*/ true);
-		map_painter->setClipRect(page_region_used, Qt::ReplaceClip);
-		
-		RenderConfig config = { map, page_region_used, units_per_mm * scale_adjustment, RenderConfig::NoOptions, 1.0 };
-		
-		if (rasterModeSelected() && options.simulate_overprinting)
+		auto map_request = output_request;
+		if (view && !map_buffer_painter.isActive())
+			map_request.opacity = view->effectiveMapVisibility().opacity;
+		auto const camera = cameraFor(map_painter);
+		render::FrameRequest request {
+			{
+				std::uint32_t(std::max(0, map_painter->device()->width())),
+				std::uint32_t(std::max(0, map_painter->device()->height())),
+				1,
+				render::fromQTransform(camera),
+			},
+			map_request,
+			rasterModeSelected() && options.simulate_overprinting,
+		};
+		auto const frame = frame_planner.plan(*snapshot, request);
+		if (!renderFramePasses(map_painter, frame->vector_passes,
+		                       map_request, camera, page_region_used))
 		{
-			map.drawOverprintingSimulation(map_painter, config);
-		}
-		else
-		{
-			if (view && !map_buffer_painter.isActive())
-				config.opacity = view->effectiveMapVisibility().opacity;
-		
-			map.draw(map_painter, config);
+			device_painter->end();
+			return;
 		}
 			
 		if (map_buffer_painter.isActive())
@@ -1138,24 +1204,14 @@ void MapPrinter::drawPage(QPainter* device_painter, const QRectF& page_extent, c
 		page_painter->save();
 		
 		page_painter->setRenderHints(render_hints);
-		page_painter->setTransform(page_extent_transform, /*combine*/ true);
-		page_painter->setClipRect(page_region_used, Qt::ReplaceClip);
-		
-		const auto& map_grid = map.getGrid();
-		if (map_grid.hasAlpha() && !use_buffer_for_map && engineMayRasterize())
+		auto grid_scene = map.getGrid().buildRenderIR(
+			page_region_used, &map, output_scaling, snapshot->revision()
+		);
+		if (!renderFramePasses(page_painter, { { std::move(grid_scene) } },
+		                       output_request, cameraFor(page_painter), page_region_used))
 		{
-			const auto rgba = map_grid.getColor();
-			const auto alpha = qAlpha(rgba);
-			const auto opaque = [alpha](auto component) {
-				return 255 - alpha * (255 - component) / 255;
-			};
-			auto grid_copy = map_grid;
-			grid_copy.setColor(qRgb(opaque(qRed(rgba)), opaque(qGreen(rgba)), opaque(qBlue(rgba))));
-			grid_copy.draw(page_painter, print_area, &map, scale_adjustment); // Maybe replace by page_region_used?
-		}
-		else
-		{
-			map_grid.draw(page_painter, print_area, &map, scale_adjustment); // Maybe replace by page_region_used?
+			device_painter->end();
+			return;
 		}
 		
 		page_painter->restore();
@@ -1189,10 +1245,12 @@ void MapPrinter::drawPage(QPainter* device_painter, const QRectF& page_extent, c
 		page_painter->save();  // Modified via painter, or when drawing the local_buffer
 		
 		painter->setRenderHints(render_hints);
-		painter->setTransform(page_extent_transform, /*combine*/ true);
-		painter->setClipRect(page_region_used, Qt::ReplaceClip);
-		
-		map.drawTemplates(painter, page_region_used, first_front_template, map.getNumTemplates() - 1, view, false);
+		if (!renderFramePasses(painter, template_layers.above_map,
+		                       output_request, cameraFor(painter), page_region_used))
+		{
+			device_painter->end();
+			return;
+		}
 		
 		if (local_buffer_painter.isActive())
 		{
@@ -1246,6 +1304,13 @@ void MapPrinter::drawSeparationPages(QPagedPaintDevice* device, QPainter* device
 	// Translate and clip for margins and print area
 	device_painter->translate(-page_extent.left(), -page_extent.top());
 	device_painter->setClipRect(page_extent.intersected(print_area).adjusted(-10, 10, 10, 10), Qt::ReplaceClip);
+	auto const snapshot = map.publishRenderSnapshot();
+	auto const request = render::RenderRequest {
+		render::fromQRectF(page_extent),
+		scale,
+		RenderConfig::NoOptions,
+		1,
+	};
 	
 	bool need_new_page = false;
 	for (int i = map.getNumColors() - 1; i >= 0; --i)
@@ -1258,8 +1323,16 @@ void MapPrinter::drawSeparationPages(QPagedPaintDevice* device, QPainter* device
 					device->newPage();
 			}
 			
-			RenderConfig config = { map, page_extent, scale, RenderConfig::NoOptions, 1.0 };
-			map.drawColorSeparation(device_painter, config, color);
+			auto scene = snapshot->buildColorSeparationIR(
+				request, color->getPriority(), false
+			);
+			if (!renderFramePasses(
+				    device_painter, { { std::move(scene) } }, request,
+				    device_painter->worldTransform(), page_extent))
+			{
+				device_painter->end();
+				return;
+			}
 			need_new_page = true;
 		}
 	}

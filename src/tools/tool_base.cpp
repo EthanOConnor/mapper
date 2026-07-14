@@ -316,7 +316,7 @@ bool MapEditorToolBase::keyReleaseEvent(QKeyEvent* event)
 	return keyRelease(event);
 }
 
-void MapEditorToolBase::draw(QPainter* painter, MapWidget* widget)
+void MapEditorToolBase::draw(render::OverlaySceneBuilder* painter, MapWidget* widget)
 {
 	drawImpl(painter, widget);
 	if (angle_helper->isActive())
@@ -354,7 +354,7 @@ void MapEditorToolBase::objectSelectionChanged()
 	objectSelectionChangedImpl();
 }
 
-void MapEditorToolBase::drawImpl(QPainter* painter, MapWidget* widget)
+void MapEditorToolBase::drawImpl(render::OverlaySceneBuilder* painter, MapWidget* widget)
 {
 	drawSelectionOrPreviewObjects(painter, widget);
 }
@@ -487,7 +487,7 @@ void MapEditorToolBase::updatePreviewObjectsAsynchronously()
 	}
 }
 
-void MapEditorToolBase::drawSelectionOrPreviewObjects(QPainter* painter, MapWidget* widget, bool draw_opaque)
+void MapEditorToolBase::drawSelectionOrPreviewObjects(render::OverlaySceneBuilder* painter, MapWidget* widget, bool draw_opaque)
 {
 	map()->drawSelection(painter, true, widget, renderables->empty() ? nullptr : renderables.get(), draw_opaque);
 }

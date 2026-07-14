@@ -160,7 +160,7 @@ bool DrawPointGPSTool::keyPress(QKeyEvent* event)
 	return false;
 }
 
-void DrawPointGPSTool::drawImpl(QPainter* painter, MapWidget* widget)
+void DrawPointGPSTool::drawImpl(render::OverlaySceneBuilder* painter, MapWidget* widget)
 {
 	if (preview_object)
 	{

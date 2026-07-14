@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <vector>
 
 #include <QWindow>
 
@@ -20,7 +21,7 @@ enum class NativePlatform : std::uint8_t
 	AppKit,
 	UIKit,
 	Win32,
-	AndroidView,
+	AndroidNdk,
 	Wayland,
 	Xcb,
 };
@@ -78,6 +79,7 @@ public:
 	void setFrameRequestHandler(FrameRequestHandler handler);
 	const NativeSurfaceState& surfaceState() const noexcept;
 	void requestFrame();
+	void refreshState();
 
 protected:
 	bool event(QEvent* event) override;
@@ -88,6 +90,11 @@ protected:
 
 private:
 	void publishState();
+#if defined(Q_OS_ANDROID)
+	void refreshAndroidNativeWindow(bool retire_if_missing);
+	void retireAndroidNativeWindow();
+	void scheduleAndroidSurfaceRefresh();
+#endif
 
 	StateHandler state_handler_;
 	FrameRequestHandler frame_request_handler_;
@@ -95,6 +102,11 @@ private:
 	std::uint64_t next_sequence_ = 1;
 	bool platform_surface_available_ = false;
 	bool suspended_ = false;
+#if defined(Q_OS_ANDROID)
+	void* android_native_window_ = nullptr;
+	std::vector<void*> retired_android_native_windows_;
+	bool android_refresh_pending_ = false;
+#endif
 };
 
 }  // namespace OpenOrienteering::presentation

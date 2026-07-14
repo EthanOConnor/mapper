@@ -95,7 +95,7 @@ void BoxZoomTool::updateStatusText()
 void BoxZoomTool::objectSelectionChangedImpl()
 {}
 
-void BoxZoomTool::drawImpl(QPainter* painter, MapWidget* widget)
+void BoxZoomTool::drawImpl(render::OverlaySceneBuilder* painter, MapWidget* widget)
 {
 	drawSelectionOrPreviewObjects(painter, widget, false);
 

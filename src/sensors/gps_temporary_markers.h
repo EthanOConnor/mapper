@@ -27,7 +27,7 @@
 #include <QPointF>
 #include <QString>
 
-class QPainter;
+#include "render/overlay_scene.h"
 // IWYU pragma: no_forward_declare QPointF
 
 namespace OpenOrienteering {
@@ -55,7 +55,7 @@ public:
 	void clear();
 	
 	/// This is called from the MapWidget drawing code to draw the markers.
-	void paint(QPainter* painter);
+	void paint(render::OverlaySceneBuilder* painter);
 	
 public slots:
 	void newGPSPosition(const OpenOrienteering::MapCoordF& coord, float accuracy);

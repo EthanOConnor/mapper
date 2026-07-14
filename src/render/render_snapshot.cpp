@@ -7,6 +7,8 @@
 #include "render/render_snapshot.h"
 
 #include <algorithm>
+#include <atomic>
+#include <limits>
 #include <utility>
 
 #include <QColor>
@@ -16,6 +18,15 @@
 namespace OpenOrienteering::render {
 
 namespace {
+
+std::uint64_t nextSnapshotIdentity()
+{
+	static std::atomic<std::uint64_t> next { 1 };
+	auto const identity = next.fetch_add(1, std::memory_order_relaxed);
+	if (identity == std::numeric_limits<std::uint64_t>::max())
+		qFatal("Render snapshot identity space exhausted");
+	return identity;
+}
 
 Color highlighted(Color original)
 {
@@ -46,6 +57,7 @@ MapRenderSnapshot::MapRenderSnapshot(Revision revision,
 	                                 std::map<int, SnapshotObjectIds> color_objects,
 	                                 std::size_t object_count)
  : revision_(revision)
+ , identity_(nextSnapshotIdentity())
  , colors_(std::move(colors))
  , object_blocks_(std::move(object_blocks))
  , color_objects_(std::move(color_objects))
@@ -57,6 +69,11 @@ MapRenderSnapshot::MapRenderSnapshot(Revision revision,
 Revision MapRenderSnapshot::revision() const noexcept
 {
 	return revision_;
+}
+
+std::uint64_t MapRenderSnapshot::identity() const noexcept
+{
+	return identity_;
 }
 
 const std::map<int, SnapshotColor>& MapRenderSnapshot::colors() const noexcept

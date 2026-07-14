@@ -176,7 +176,7 @@ void DrawLineAndAreaTool::includePreviewRects(QRectF& rect)
 	}
 }
 
-void DrawLineAndAreaTool::drawPreviewObjects(QPainter* painter, MapWidget* widget)
+void DrawLineAndAreaTool::drawPreviewObjects(render::OverlaySceneBuilder* painter, MapWidget* widget)
 {
 	if (preview_path || preview_points_shown)
 	{

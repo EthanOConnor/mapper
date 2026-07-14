@@ -95,7 +95,7 @@ protected:
 	void updatePreview();
 	void updatePreviewText();
 	int updateDirtyRectImpl(QRectF& rect) override;
-	void drawImpl(QPainter* painter, MapWidget* widget) override;
+	void drawImpl(render::OverlaySceneBuilder* painter, MapWidget* widget) override;
 	void updateStatusText() override;
 	
 	const Symbol* drawing_symbol;

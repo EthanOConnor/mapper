@@ -31,7 +31,6 @@
 #include "templates/template_map.h"
 
 class QByteArray;
-class QPainter;
 class QRectF;
 class QWidget;
 class QXmlStreamReader;
@@ -111,9 +110,8 @@ public:
 	
 	
 	bool canChangeTemplateGeoreferenced() const override;
+	bool includesChildTemplates() const noexcept override;
 	
-	
-	void drawTemplate(QPainter* painter, const QRectF& clip_rect, double scale, bool on_screen, qreal opacity) const override;
 	
 	QRectF getTemplateExtent() const override;
 	

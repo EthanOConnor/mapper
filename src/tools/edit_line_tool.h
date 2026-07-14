@@ -79,7 +79,7 @@ protected:
 	void initImpl() override;
 	void objectSelectionChangedImpl() override;
 	int updateDirtyRectImpl(QRectF& rect) override;
-	void drawImpl(QPainter* painter, MapWidget* widget) override;
+	void drawImpl(render::OverlaySceneBuilder* painter, MapWidget* widget) override;
 	
 	/** In addition to the base class implementation, updates the status text. */
 	void updatePreviewObjects() override;

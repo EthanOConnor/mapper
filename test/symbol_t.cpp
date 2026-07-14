@@ -49,6 +49,8 @@
 #include "core/symbols/line_symbol.h"
 #include "core/symbols/point_symbol.h"
 #include "core/symbols/symbol.h"
+#include "render/qpainter_renderer.h"
+#include "render/qt_render_bridge.h"
 
 using namespace OpenOrienteering;
 
@@ -278,7 +280,13 @@ private slots:
 		painter.scale(pixel_per_mm, pixel_per_mm);
 		painter.translate(-extent.topLeft());
 		painter.setClipRect(extent);
-		map.draw(&painter, RenderConfig{map, extent, pixel_per_mm, RenderConfig::DisableAntialiasing, 1});
+		auto const snapshot = map.publishRenderSnapshot();
+		render::QPainterRenderer().draw(painter, *snapshot, {
+			render::fromQRectF(extent),
+			pixel_per_mm,
+			RenderConfig::DisableAntialiasing,
+			1,
+		});
 		painter.end();
 		
 		auto image_filename = QFileInfo{map_filename}.absoluteFilePath();

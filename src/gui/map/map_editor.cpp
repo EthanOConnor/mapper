@@ -4352,7 +4352,7 @@ EditorDockWidget::EditorDockWidget(const QString& title, QAction* action, MapEdi
 #ifdef Q_OS_ANDROID
 	size_grip = new QSizeGrip(this);
 	size_grip->resize(size_grip->sizeHint());
-	size_grip->setVisible(isTopLevel());
+	size_grip->setVisible(isFloating());
 	connect(this, &QDockWidget::topLevelChanged, size_grip, &QWidget::setVisible);
 #endif
 }
@@ -4384,7 +4384,7 @@ void EditorDockWidget::resizeEvent(QResizeEvent* event)
 	size_grip->move(rect().bottomRight() - size_grip->rect().bottomRight() - QPoint{fw, fw});
 	size_grip->raise();
 	
-	if (isTopLevel())
+	if (isFloating())
 	{
 		auto const frame = frameGeometry();
 		auto const old_frame = QRect{pos(), event->oldSize() + frame.size() - size()};

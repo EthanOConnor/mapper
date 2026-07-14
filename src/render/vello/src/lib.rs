@@ -6,9 +6,10 @@ use std::time::Instant;
 
 use flume::{Receiver, Sender, TryRecvError, TrySendError};
 use raw_window_handle::{
-    AppKitDisplayHandle, AppKitWindowHandle, RawDisplayHandle, RawWindowHandle, UiKitDisplayHandle,
-    UiKitWindowHandle, WaylandDisplayHandle, WaylandWindowHandle, Win32WindowHandle,
-    WindowsDisplayHandle, XcbDisplayHandle, XcbWindowHandle,
+    AndroidDisplayHandle, AndroidNdkWindowHandle, AppKitDisplayHandle, AppKitWindowHandle,
+    RawDisplayHandle, RawWindowHandle, UiKitDisplayHandle, UiKitWindowHandle, WaylandDisplayHandle,
+    WaylandWindowHandle, Win32WindowHandle, WindowsDisplayHandle, XcbDisplayHandle,
+    XcbWindowHandle,
 };
 use vello::kurbo::{Affine, BezPath, Cap, Ellipse, Join, Rect, Stroke};
 use vello::peniko::{
@@ -154,6 +155,8 @@ mod ffi {
             path: &[PathElement],
             color: Color,
             stroke: Stroke,
+            dashes: &[f64],
+            dash_offset: f64,
         );
         fn scene_fill_ellipse(scene: &mut SceneBuilder, bounds: Rect, color: Color);
         fn scene_stroke_ellipse(
@@ -198,6 +201,7 @@ mod ffi {
             blend: u8,
             opacity: f64,
             isolated: bool,
+            transform: Transform,
         );
 
         fn new_renderer() -> Box<Renderer>;
@@ -215,7 +219,7 @@ const SURFACE_EXPOSED: u8 = 2;
 const PLATFORM_APPKIT: u8 = 1;
 const PLATFORM_UIKIT: u8 = 2;
 const PLATFORM_WIN32: u8 = 3;
-const PLATFORM_ANDROID_VIEW: u8 = 4;
+const PLATFORM_ANDROID_NDK: u8 = 4;
 const PLATFORM_WAYLAND: u8 = 5;
 const PLATFORM_XCB: u8 = 6;
 
@@ -258,6 +262,7 @@ struct FramePass {
     blend: u8,
     opacity: f32,
     isolated: bool,
+    transform: Affine,
 }
 
 struct OffscreenRequest {
@@ -471,9 +476,17 @@ fn scene_stroke_path(
     elements: &[ffi::PathElement],
     brush: ffi::Color,
     style: ffi::Stroke,
+    dashes: &[f64],
+    dash_offset: f64,
 ) {
     scene.command_count += 1;
-    if let (Some(path), Some(stroke)) = (path(elements), stroke(style)) {
+    let valid_dashes =
+        dash_offset.is_finite() && dashes.iter().all(|value| value.is_finite() && *value > 0.0);
+    if let (Some(path), Some(mut stroke)) = (path(elements), stroke(style))
+        && valid_dashes
+    {
+        stroke.dash_pattern.extend_from_slice(dashes);
+        stroke.dash_offset = dash_offset;
         scene
             .scene
             .stroke(&stroke, scene.transform(), color(brush, 1.0), None, &path);
@@ -744,7 +757,11 @@ fn frame_add_pass(
     blend: u8,
     opacity: f64,
     isolated: bool,
+    transform: ffi::Transform,
 ) {
+    let Some(transform) = finite_transform(transform) else {
+        return;
+    };
     if !opacity.is_finite() || opacity <= 0.0 {
         return;
     }
@@ -753,6 +770,7 @@ fn frame_add_pass(
         blend,
         opacity: opacity.clamp(0.0, 1.0) as f32,
         isolated,
+        transform,
     });
 }
 
@@ -852,8 +870,12 @@ fn surface_handles(
                 Win32WindowHandle::new(hwnd).into(),
             ))
         }
-        PLATFORM_ANDROID_VIEW => {
-            Err("Qt Android WId is a Java View; an ANativeWindow bridge is required".to_owned())
+        PLATFORM_ANDROID_NDK => {
+            let window = raw_handle(state.window).ok_or("Android surface has no ANativeWindow")?;
+            Ok((
+                Some(AndroidDisplayHandle::new().into()),
+                AndroidNdkWindowHandle::new(window).into(),
+            ))
         }
         PLATFORM_WAYLAND => {
             let display = raw_handle(state.display).ok_or("Wayland surface has no wl_display")?;
@@ -880,7 +902,7 @@ fn platform_backends(platform: u8) -> wgpu::Backends {
     match platform {
         PLATFORM_APPKIT | PLATFORM_UIKIT => wgpu::Backends::METAL,
         PLATFORM_WIN32 => wgpu::Backends::DX12,
-        PLATFORM_ANDROID_VIEW | PLATFORM_WAYLAND | PLATFORM_XCB => wgpu::Backends::VULKAN,
+        PLATFORM_ANDROID_NDK | PLATFORM_WAYLAND | PLATFORM_XCB => wgpu::Backends::VULKAN,
         _ => wgpu::Backends::PRIMARY,
     }
 }
@@ -1115,8 +1137,7 @@ fn frame_result(
 }
 
 fn compose_frame(frame: &FrameBuilder) -> Result<Scene, &'static str> {
-    let camera =
-        finite_transform(frame.header.world_to_surface).ok_or("frame camera is not finite")?;
+    finite_transform(frame.header.world_to_surface).ok_or("frame camera is not finite")?;
     let viewport = Rect::new(
         0.0,
         0.0,
@@ -1135,7 +1156,7 @@ fn compose_frame(frame: &FrameBuilder) -> Result<Scene, &'static str> {
                 &viewport,
             );
         }
-        scene.append(&pass.scene, Some(camera));
+        scene.append(&pass.scene, Some(pass.transform));
         if grouped {
             scene.pop_layer();
         }

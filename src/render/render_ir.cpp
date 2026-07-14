@@ -190,6 +190,11 @@ void RenderIRBuilder::drawLinePattern(PathPtr outline, Color color, double angle
 	});
 }
 
+void RenderIRBuilder::append(const RenderIR& scene)
+{
+	ir_->commands.insert(ir_->commands.end(), scene.commands.begin(), scene.commands.end());
+}
+
 std::size_t RenderIRBuilder::commandCount() const noexcept
 {
 	return ir_->commands.size();

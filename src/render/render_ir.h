@@ -160,6 +160,8 @@ struct StrokeStyle
 	LineCap cap = LineCap::Flat;
 	LineJoin join = LineJoin::Miter;
 	double miter_limit = 4;
+	std::vector<double> dash_pattern;
+	double dash_offset = 0;
 };
 
 struct FontFace
@@ -332,6 +334,7 @@ public:
 	void drawLinePattern(PathPtr outline, Color color, double angle,
 	                     double spacing, double offset, double line_width,
 	                     ObjectId object_id = 0);
+	void append(const RenderIR& scene);
 
 	std::size_t commandCount() const noexcept;
 	std::shared_ptr<const RenderIR> finish();

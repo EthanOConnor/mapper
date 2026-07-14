@@ -29,8 +29,8 @@
 #include <QRgb>
 
 #include "core/map_coord.h"
+#include "render/overlay_scene.h"
 
-class QPainter;
 
 namespace OpenOrienteering {
 
@@ -125,7 +125,7 @@ public:
 	/**
 	 * @brief Draws a single handle.
 	 */
-	void draw(QPainter* painter, const QPointF& position, PointHandleType type, PointHandleState state) const;
+	void draw(render::OverlaySceneBuilder* painter, const QPointF& position, PointHandleType type, PointHandleState state) const;
 	
 	/**
 	 * @brief Draws all point handles for the given object.
@@ -137,7 +137,7 @@ public:
 	 * @param draw_curve_handles If false, curve handles for path objects are not drawn.
 	 * @param base_state The state in which all points except hover_point should be drawn.
 	 */
-	void draw(QPainter* painter,
+	void draw(render::OverlaySceneBuilder* painter,
 	        const MapWidget* widget,
 	        const Object* object,
 	        MapCoordVector::size_type hover_point = std::numeric_limits<MapCoordVector::size_type>::max(),
@@ -150,7 +150,7 @@ public:
 	 * 
 	 * The curve handle line connects a curve anchor point and a controlling handle.
 	 */
-	void drawCurveHandleLine(QPainter* painter, QPointF anchor_point, QPointF curve_handle, PointHandleType type, PointHandleState state) const;
+	void drawCurveHandleLine(render::OverlaySceneBuilder* painter, QPointF anchor_point, QPointF curve_handle, PointHandleType type, PointHandleState state) const;
 	
 private:
 	/**

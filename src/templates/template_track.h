@@ -31,10 +31,10 @@
 #include <QString>
 
 #include "core/track.h"
+#include "render/render_ir.h"
 #include "templates/template.h"
 
 class QByteArray;
-class QPainter;
 class QRectF;
 class QWidget;
 class QXmlStreamReader;
@@ -79,18 +79,15 @@ public:
 	bool postLoadSetup(QWidget* dialog_parent, bool& out_center_in_view) override;
 	void unloadTemplateFileImpl() override;
 	
-	void drawTemplate(QPainter* painter, const QRectF& clip_rect, double scale, bool on_screen, qreal opacity) const override;
 	QRectF getTemplateExtent() const override;
 	QRectF calculateTemplateBoundingBox() const override;
 	int getTemplateBoundingBoxPixelBorder() const override;
 	
 	bool hasAlpha() const override;
 	
-	/// Draws all tracks.
-	void drawTracks(QPainter* painter, bool on_screen) const;
-	
-	/// Draws all waypoints.
-	void drawWaypoints(QPainter* painter) const;
+	std::shared_ptr<const render::RenderIR> buildRenderIR(bool on_screen,
+	                                                     double view_scale,
+	                                                     render::Revision revision) const;
 	
 	/// Import the track as map object(s), returns true if something has been imported.
 	/// TODO: should this be moved to the Track class?

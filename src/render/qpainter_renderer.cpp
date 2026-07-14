@@ -87,6 +87,15 @@ QPen makePen(Color color, const StrokeStyle& style, const QPainter& painter)
 		pen.setMiterLimit(style.miter_limit);
 		fixPenForPdf(pen, painter);
 	}
+	if (!style.dash_pattern.empty())
+	{
+		QList<qreal> dashes;
+		dashes.reserve(qsizetype(style.dash_pattern.size()));
+		for (auto value : style.dash_pattern)
+			dashes.push_back(value / style.width);
+		pen.setDashPattern(dashes);
+		pen.setDashOffset(style.dash_offset / style.width);
+	}
 	return pen;
 }
 

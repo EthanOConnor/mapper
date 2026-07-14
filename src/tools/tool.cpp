@@ -117,7 +117,7 @@ void MapEditorTool::setEditingInProgress(bool state)
 }
 
 
-void MapEditorTool::draw(QPainter* /*painter*/, MapWidget* /*widget*/)
+void MapEditorTool::draw(render::OverlaySceneBuilder* /*painter*/, MapWidget* /*widget*/)
 {
 	// nothing
 }
@@ -249,7 +249,7 @@ void MapEditorTool::setStatusBarText(const QString& text)
 	editor->getWindow()->setStatusBarText(text);
 }
 
-void MapEditorTool::drawSelectionBox(QPainter* painter, MapWidget* widget, const MapCoordF& corner1, const MapCoordF& corner2) const
+void MapEditorTool::drawSelectionBox(render::OverlaySceneBuilder* painter, MapWidget* widget, const MapCoordF& corner1, const MapCoordF& corner2) const
 {
 	painter->setBrush(Qt::NoBrush);
 	

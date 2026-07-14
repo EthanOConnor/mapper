@@ -59,4 +59,6 @@ set_target_properties(cove
     AUTOUIC ON
 )
 
-add_subdirectory("tests")
+if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
+    add_subdirectory("tests")
+endif()

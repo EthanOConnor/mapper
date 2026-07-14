@@ -21,6 +21,8 @@
 
 #include "map_grid.h"
 
+#include <utility>
+
 #include <QtMath>
 #include <QPainter>
 #include <QXmlStreamReader>
@@ -28,6 +30,7 @@
 #include "core/georeferencing.h"
 #include "core/map.h"
 #include "core/map_coord.h"
+#include "render/qt_render_bridge.h"
 #include "util/util.h"
 #include "util/xml_stream_util.h"
 
@@ -123,6 +126,54 @@ void MapGrid::draw(QPainter* painter, const QRectF& bounding_box, Map* map, qrea
 		Util::hatchingOperation(bounding_box, final_vert_spacing, final_vert_offset, final_rotation - M_PI / 2, draw_line);
 	else // if (display == VerticalLines)
 		Util::hatchingOperation(bounding_box, final_horz_spacing, final_horz_offset, final_rotation, draw_line);
+}
+
+std::shared_ptr<const render::RenderIR> MapGrid::buildRenderIR(
+	const QRectF& bounding_box,
+	Map* map,
+	double view_scale,
+	render::Revision revision) const
+{
+	double final_horz_spacing, final_vert_spacing;
+	double final_horz_offset, final_vert_offset;
+	double final_rotation;
+	calculateFinalParameters(final_horz_spacing, final_vert_spacing,
+	                         final_horz_offset, final_vert_offset,
+	                         final_rotation, map);
+
+	render::PathBuilder path;
+	std::function<void (const QPointF&, const QPointF&)> draw_line = [&path](const QPointF& start, const QPointF& end) {
+		path.moveTo({ start.x(), start.y() });
+		path.lineTo({ end.x(), end.y() });
+	};
+	if (display == AllLines)
+	{
+		Util::gridOperation(bounding_box, final_horz_spacing, final_vert_spacing,
+		                    final_horz_offset, final_vert_offset, final_rotation,
+		                    draw_line);
+	}
+	else if (display == HorizontalLines)
+	{
+		Util::hatchingOperation(bounding_box, final_vert_spacing, final_vert_offset,
+		                       final_rotation - M_PI / 2, draw_line);
+	}
+	else
+	{
+		Util::hatchingOperation(bounding_box, final_horz_spacing, final_horz_offset,
+		                       final_rotation, draw_line);
+	}
+
+	render::RenderIRBuilder builder(revision, render::fromQRectF(bounding_box));
+	auto stroke = render::StrokeStyle{};
+	stroke.width = 1.0 / std::max(view_scale, 1.0e-9);
+	builder.strokePath(
+		path.finish(),
+		render::fromQColor(QColor::fromRgba(color)),
+		std::move(stroke),
+		0,
+		render::QualityHint::ForceAntialiasing
+	);
+	return builder.finish();
 }
 
 void MapGrid::calculateFinalParameters(double& final_horz_spacing, double& final_vert_spacing, double& final_horz_offset, double& final_vert_offset, double& final_rotation, Map* map) const

@@ -248,7 +248,7 @@ void GPSDisplay::enableHeadingIndicator(bool enable)
 	heading_indicator_enabled = enable;
 }
 
-void GPSDisplay::paint(QPainter* painter)
+void GPSDisplay::paint(render::OverlaySceneBuilder* painter)
 {
 	if (!visible || !has_valid_position)
 		return;
@@ -263,8 +263,6 @@ void GPSDisplay::paint(QPainter* painter)
 	const auto one_mm = Util::mmToPixelLogical(1);
 	const auto mmToPixelLogical = [one_mm](qreal mm) { return mm * one_mm; };
 	
-	const auto flags = painter->renderHints();
-	painter->setRenderHints(flags | QPainter::Antialiasing);
 	const auto opacity = painter->opacity();
 	painter->setOpacity(pulsating_opacity.current() * opacity);
 	
@@ -354,7 +352,6 @@ void GPSDisplay::paint(QPainter* painter)
 	}
 	
 	painter->setOpacity(opacity);
-	painter->setRenderHints(QPainter::Antialiasing);
 }
 
 

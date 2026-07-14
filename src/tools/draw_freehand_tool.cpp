@@ -144,7 +144,7 @@ bool DrawFreehandTool::keyPressEvent(QKeyEvent* event)
 
 
 
-void DrawFreehandTool::draw(QPainter* painter, MapWidget* widget)
+void DrawFreehandTool::draw(render::OverlaySceneBuilder* painter, MapWidget* widget)
 {
 	drawPreviewObjects(painter, widget);
 }

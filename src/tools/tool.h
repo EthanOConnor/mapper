@@ -34,6 +34,7 @@
 #include <QVariant>
 
 #include "core/map_coord.h"
+#include "render/overlay_scene.h"
 #include "tools/point_handles.h"
 
 class QEvent;
@@ -42,7 +43,6 @@ class QGestureEvent;
 class QInputMethodEvent;
 class QKeyEvent;
 class QMouseEvent;
-class QPainter;
 class QPointF;
 class QWidget;
 
@@ -158,7 +158,7 @@ public:
 	 * All dynamic drawing must be done here using the given painter. Drawing
 	 * is only possible in the area specified by calling map->setDrawingBoundingBox().
 	 */
-	virtual void draw(QPainter* painter, MapWidget* widget);
+	virtual void draw(render::OverlaySceneBuilder* painter, MapWidget* widget);
 	
 	// Mouse input
 	virtual bool mousePressEvent(QMouseEvent* event, const MapCoordF& map_coord, MapWidget* widget);
@@ -332,7 +332,7 @@ protected:
 	 * 
 	 * A selection box is drawn while selecting objects by dragging.
 	 */
-	void drawSelectionBox(QPainter* painter, MapWidget* widget, const MapCoordF& corner1, const MapCoordF& corner2) const;
+	void drawSelectionBox(render::OverlaySceneBuilder* painter, MapWidget* widget, const MapCoordF& corner1, const MapCoordF& corner2) const;
 	
 	
 	/**

@@ -27,10 +27,10 @@
 #include <QString>
 
 #include "core/map_coord.h"
+#include "render/overlay_scene.h"
 
 class QGeoPositionInfo;
 class QGeoPositionInfoSource;
-class QPainter;
 class QTimerEvent;
 
 namespace OpenOrienteering {
@@ -81,7 +81,7 @@ public:
 	void enableHeadingIndicator(bool enable);
 	
 	/// This is called from the MapWidget drawing code to draw the GPS position marker.
-	void paint(QPainter* painter);
+	void paint(render::OverlaySceneBuilder* painter);
 	
 	/// Returns if a valid position was received since the last call to startUpdates().
 	bool hasValidPosition() const { return has_valid_position; }

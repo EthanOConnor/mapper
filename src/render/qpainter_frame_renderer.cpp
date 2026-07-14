@@ -61,12 +61,14 @@ FrameCompletion QPainterFrameRenderer::render(QPainter& painter, const FramePack
 		return { frame.id, FrameStatus::TargetUnavailable };
 
 	painter.save();
-	painter.setWorldTransform(toQTransform(frame.view.world_to_viewport), false);
 	QPainterRenderer renderer;
 	for (auto const& pass : frame.vector_passes)
 	{
 		if (!pass.scene)
 			continue;
+		auto const pass_transform = pass.space == VectorPass::Space::World
+		                          ? toQTransform(frame.view.world_to_viewport)
+		                          : QTransform{};
 		if (pass.isolated)
 		{
 			QImage layer(image->size(), QImage::Format_ARGB32_Premultiplied);
@@ -74,7 +76,7 @@ FrameCompletion QPainterFrameRenderer::render(QPainter& painter, const FramePack
 			layer.fill(Qt::transparent);
 			QPainter layer_painter(&layer);
 			layer_painter.setRenderHints(painter.renderHints());
-			layer_painter.setWorldTransform(toQTransform(frame.view.world_to_viewport));
+			layer_painter.setWorldTransform(pass_transform);
 			renderer.render(layer_painter, *pass.scene, frame.render_request);
 			layer_painter.end();
 			applyOpacity(layer, pass.opacity);
@@ -87,6 +89,7 @@ FrameCompletion QPainterFrameRenderer::render(QPainter& painter, const FramePack
 			continue;
 		}
 		painter.save();
+		painter.setWorldTransform(pass_transform, false);
 		painter.setCompositionMode(compositionMode(pass.blend));
 		painter.setOpacity(painter.opacity() * pass.opacity);
 		renderer.render(painter, *pass.scene, frame.render_request);

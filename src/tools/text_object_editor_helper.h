@@ -29,6 +29,8 @@
 #include <QPointer>
 #include <QString>
 
+#include "render/overlay_scene.h"
+
 class QEvent;
 class QInputMethodEvent;
 class QKeyEvent;
@@ -238,7 +240,7 @@ public:
 	bool keyPressEvent(QKeyEvent* event);
 	bool keyReleaseEvent(QKeyEvent* event);
 	
-	void draw(QPainter* painter, MapWidget* widget);
+	void draw(render::OverlaySceneBuilder* painter, MapWidget* widget);
 	
 	void includeDirtyRect(QRectF& rect) const;
 	

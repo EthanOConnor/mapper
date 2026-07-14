@@ -165,7 +165,7 @@ void CutHoleTool::focusOutEvent(QFocusEvent* event)
 		path_tool->focusOutEvent(event);
 }
 
-void CutHoleTool::draw(QPainter* painter, MapWidget* widget)
+void CutHoleTool::draw(render::OverlaySceneBuilder* painter, MapWidget* widget)
 {
 	map()->drawSelection(painter, true, widget, nullptr);
 	

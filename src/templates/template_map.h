@@ -30,9 +30,9 @@
 #include <QString>
 
 #include "templates/template.h"
+#include "render/render_ir.h"
 
 class QByteArray;
-class QPainter;
 class QRectF;
 class QTransform;
 class QWidget;
@@ -79,8 +79,6 @@ public:
 	void unloadTemplateFileImpl() override;
 	
 	
-	void drawTemplate(QPainter* painter, const QRectF& clip_rect, double scale, bool on_screen, qreal opacity) const override;
-	
 	QRectF getTemplateExtent() const override;
 	
 	
@@ -93,6 +91,10 @@ public:
 	
 	
 	const Map* templateMap() const;
+	virtual bool includesChildTemplates() const noexcept;
+	std::shared_ptr<const render::RenderIR> buildRenderIR(render::Rect map_clip_rect,
+	                                                     double view_scale,
+	                                                     bool on_screen) const;
 	
 	/**
 	 * Returns the template's map.

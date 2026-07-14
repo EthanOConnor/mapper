@@ -8,11 +8,13 @@
 #define OPENORIENTEERING_VELLO_CANVAS_H
 
 #include <cstddef>
+#include <deque>
 #include <memory>
 #include <optional>
 #include <string>
 
 #include <QWidget>
+#include <QTimer>
 
 #include "presentation/native_surface.h"
 #include "render/vello_renderer.h"
@@ -34,12 +36,15 @@ public:
 	void setFrame(render::FramePacketPtr frame);
 	void setBackground(render::Color color);
 	std::optional<render::VelloFrameResult> takeResult();
+	const std::optional<render::VelloFrameResult>& lastResult() const noexcept;
+	const render::FramePacketPtr& currentFrame() const noexcept;
 	std::string lastError() const;
 	const NativeSurfaceState& surfaceState() const noexcept;
 	std::size_t encodedSceneCount() const noexcept;
 
 private:
 	void submitCurrentFrame();
+	void pollResults();
 
 	NativeSurfaceWindow* surface_ = nullptr;
 	QWidget* container_ = nullptr;
@@ -47,6 +52,10 @@ private:
 	render::FramePacketPtr frame_;
 	render::Color background_ { 65535, 65535, 65535, 65535 };
 	NativeSurfaceState surface_state_;
+	QTimer completion_timer_;
+	QTimer retry_timer_;
+	std::deque<render::VelloFrameResult> results_;
+	std::optional<render::VelloFrameResult> last_result_;
 };
 
 }  // namespace OpenOrienteering::presentation

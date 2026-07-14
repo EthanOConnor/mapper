@@ -39,7 +39,6 @@
 
 #include "templates/template.h"
 
-class QPainter;
 class QPointF;
 class QRectF;
 class QWidget;
@@ -125,7 +124,6 @@ public:
 	bool postLoadSetup(QWidget* dialog_parent, bool& out_center_in_view) override;
 	void unloadTemplateFileImpl() override;
 	
-	void drawTemplate(QPainter* painter, const QRectF& clip_rect, double scale, bool on_screen, qreal opacity) const override;
 	QRectF getTemplateExtent() const override;
 	virtual void collectRasterTiles(const QRectF& map_clip_rect,
 	                                double scale,

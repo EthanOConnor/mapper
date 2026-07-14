@@ -23,7 +23,7 @@
 
 #include <QObject>
 
-class QPainter;
+#include "render/overlay_scene.h"
 
 namespace OpenOrienteering {
 
@@ -62,7 +62,7 @@ public:
 	 * Drawing is only possible in the area specified
 	 * by calling map->setActivityBoundingBox().
 	 */
-	virtual void draw(QPainter* painter, MapWidget* widget);
+	virtual void draw(render::OverlaySceneBuilder* painter, MapWidget* widget);
 	
 };
 

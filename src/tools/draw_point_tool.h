@@ -92,7 +92,7 @@ protected:
 	bool keyPress(QKeyEvent* event) override;
 	bool keyRelease(QKeyEvent* event) override;
 	
-	void drawImpl(QPainter* painter, MapWidget* widget) override;
+	void drawImpl(render::OverlaySceneBuilder* painter, MapWidget* widget) override;
 	int updateDirtyRectImpl(QRectF& rect) override;
 	void updateStatusText() override;
 	void objectSelectionChangedImpl() override;

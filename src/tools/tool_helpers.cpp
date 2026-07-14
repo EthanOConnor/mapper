@@ -252,7 +252,7 @@ void ConstrainAngleToolHelper::setActive(bool active)
 	this->active = active;
 }
 
-void ConstrainAngleToolHelper::draw(QPainter* painter, MapWidget* widget)
+void ConstrainAngleToolHelper::draw(render::OverlaySceneBuilder* painter, MapWidget* widget)
 {
 	constexpr auto reduced_opacity = qreal(0.5);
 	
@@ -514,7 +514,7 @@ bool SnappingToolHelper::snapToDirection(const MapCoordF& position, MapWidget* w
 	}
 }
 
-void SnappingToolHelper::draw(QPainter* painter, MapWidget* widget)
+void SnappingToolHelper::draw(render::OverlaySceneBuilder* painter, MapWidget* widget)
 {
 	auto handle_type = PointHandles::EndHandle;
 	switch (snapped_type)
@@ -682,7 +682,7 @@ QRectF AzimuthInfoHelper::dirtyRect(MapWidget* widget, const MapCoordF& pos_map)
 }
 
 
-void AzimuthInfoHelper::draw(QPainter* painter, const MapWidget* widget, const Map* map, const MapCoordF& start_pos, const MapCoordF& end_pos)
+void AzimuthInfoHelper::draw(render::OverlaySceneBuilder* painter, const MapWidget* widget, const Map* map, const MapCoordF& start_pos, const MapCoordF& end_pos)
 {
 	QLineF drag_vector(start_pos, end_pos);
 	const auto distance = drag_vector.length();

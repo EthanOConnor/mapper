@@ -29,6 +29,14 @@ import android.os.Bundle;
 import android.os.PowerManager;
 import android.provider.Settings;
 import android.view.Display;
+import android.view.Surface;
+import android.view.SurfaceView;
+import android.view.TextureView;
+import android.view.View;
+import android.view.ViewGroup;
+
+import java.lang.ref.WeakReference;
+import java.util.WeakHashMap;
 
 import org.qtproject.qt.android.bindings.QtActivity;
 
@@ -39,6 +47,8 @@ public class MapperActivity extends QtActivity
 	private static MapperActivity instance;
 	private static boolean serviceStarted;
 	private static boolean optimizationRequestDone;
+	private static final WeakHashMap<TextureView, WeakReference<Surface>> textureViewSurfaces =
+		new WeakHashMap<>();
 
 	private String yesString;
 	private String noString;
@@ -133,6 +143,47 @@ public class MapperActivity extends QtActivity
 	{
 		Display display = instance.getWindow().getDecorView().getDisplay();
 		return display == null ? 0 : display.getRotation();
+	}
+
+	/** Return the public Android Surface already owned by a Qt child QWindow. */
+	public static Surface nativeSurfaceForQtWindow(Object qtWindow)
+	{
+		if (!(qtWindow instanceof View))
+			return null;
+		return findSurface((View)qtWindow);
+	}
+
+	private static Surface findSurface(View view)
+	{
+		if (view instanceof SurfaceView)
+		{
+			Surface surface = ((SurfaceView)view).getHolder().getSurface();
+			return surface != null && surface.isValid() ? surface : null;
+		}
+		if (view instanceof TextureView)
+		{
+			TextureView textureView = (TextureView)view;
+			WeakReference<Surface> reference = textureViewSurfaces.get(textureView);
+			Surface surface = reference == null ? null : reference.get();
+			if (surface != null && surface.isValid())
+				return surface;
+			if (!textureView.isAvailable() || textureView.getSurfaceTexture() == null)
+				return null;
+			surface = new Surface(textureView.getSurfaceTexture());
+			textureViewSurfaces.put(textureView, new WeakReference<>(surface));
+			return surface.isValid() ? surface : null;
+		}
+		if (view instanceof ViewGroup)
+		{
+			ViewGroup group = (ViewGroup)view;
+			for (int index = 0; index < group.getChildCount(); ++index)
+			{
+				Surface surface = findSurface(group.getChildAt(index));
+				if (surface != null)
+					return surface;
+			}
+		}
+		return null;
 	}
 
 	public static void startService(String message)

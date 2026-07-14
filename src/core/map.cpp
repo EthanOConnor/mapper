@@ -35,8 +35,6 @@
 #include <QCoreApplication>
 #include <QDebug>
 #include <QIODevice>
-#include <QPaintEngine>
-#include <QPainter>
 #include <QPoint>
 #include <QPointF>
 #include <QSignalBlocker>
@@ -798,64 +796,6 @@ std::shared_ptr<const render::MapRenderSnapshot> Map::publishRenderSnapshot()
 
 
 
-void Map::draw(QPainter* painter, const RenderConfig& config)
-{
-	// Update the renderables of all objects marked as dirty
-	updateObjects();
-	
-	// The actual drawing
-	renderables->draw(painter, config);
-}
-
-void Map::drawOverprintingSimulation(QPainter* painter, const RenderConfig& config)
-{
-	// Update the renderables of all objects marked as dirty
-	updateObjects();
-	
-	// The actual drawing
-	renderables->drawOverprintingSimulation(painter, config);
-}
-
-void Map::drawColorSeparation(QPainter* painter, const RenderConfig& config, const MapColor* spot_color, bool use_color)
-{
-	// Update the renderables of all objects marked as dirty
-	updateObjects();
-	
-	// The actual drawing
-	renderables->drawColorSeparation(painter, config, spot_color, use_color);
-}
-
-void Map::drawGrid(QPainter* painter, const QRectF& bounding_box)
-{
-	grid.draw(painter, bounding_box, this);
-}
-
-void Map::drawTemplates(QPainter* painter, const QRectF& bounding_box, int first_template, int last_template, const MapView* view, bool on_screen) const
-{
-	for (int i = first_template; i <= last_template; ++i)
-	{
-		const Template* temp = getTemplate(i);
-		if (temp->getTemplateState() != Template::Loaded)
-			continue;
-		
-		double scale  = std::max(temp->getTemplateScaleX(), temp->getTemplateScaleY());
-		auto visibility = TemplateVisibility{ 1, true };
-		if (view)
-		{
-			visibility = view->getTemplateVisibility(temp);
-			visibility.visible &= visibility.opacity > 0;
-			scale *= view->getZoom();
-		}
-		if (visibility.visible)
-		{
-			Q_ASSERT(visibility.opacity == 1 || painter->paintEngine()->hasFeature(QPaintEngine::ConstantOpacity));
-			painter->save();
-			temp->drawTemplate(painter, bounding_box, scale, on_screen, visibility.opacity);
-			painter->restore();
-		}
-	}
-}
-
 void Map::updateObjects()
 {
 	// TODO: It maybe would be better if the objects entered themselves into a separate list when they get dirty so not all objects have to be traversed here
@@ -965,19 +905,22 @@ void Map::includeSelectionRect(QRectF& rect) const
 		rectIncludeSafe(rect, object->getExtent());
 }
 
-void Map::drawSelection(QPainter* painter, bool force_min_size, MapWidget* widget, MapRenderables* replacement_renderables, bool draw_normal)
+void Map::drawSelection(render::OverlaySceneBuilder* painter,
+	                    bool force_min_size,
+	                    MapWidget* widget,
+	                    MapRenderables* replacement_renderables,
+	                    bool draw_normal)
 {
-	MapView* view = widget->getMapView();
-	
+	if (!painter)
+		return;
+	auto* view = widget->getMapView();
 	painter->save();
-	painter->translate(widget->width() / 2.0 + view->panOffset().x(), widget->height() / 2.0 + view->panOffset().y());
-	painter->setWorldTransform(view->worldTransform(), true);
-	
+	widget->applyMapTransform(painter);
 	if (!replacement_renderables)
 		replacement_renderables = selection_renderables.data();
-	
+
 	RenderConfig::Options options = RenderConfig::Screen | RenderConfig::HelperSymbols;
-	qreal selection_opacity = 1.0;
+	auto selection_opacity = qreal(1);
 	if (force_min_size)
 		options |= RenderConfig::ForceMinSize;
 	if (!draw_normal)
@@ -985,9 +928,14 @@ void Map::drawSelection(QPainter* painter, bool force_min_size, MapWidget* widge
 		options |= RenderConfig::Highlighted;
 		selection_opacity = 0.4;
 	}
-	RenderConfig config = { *this, view->calculateViewedRect(widget->viewportToView(widget->rect())), view->calculateFinalZoomFactor(), options, selection_opacity };
+	RenderConfig config = {
+		*this,
+		view->calculateViewedRect(widget->viewportToView(widget->rect())),
+		view->calculateFinalZoomFactor(),
+		options,
+		selection_opacity,
+	};
 	replacement_renderables->draw(painter, config);
-	
 	painter->restore();
 }
 
@@ -1926,13 +1874,11 @@ void Map::deleteTemplate(int pos)
 
 void Map::setTemplateAreaDirty(Template* temp, const QRectF& area, int pixel_border)
 {
-	bool front_cache = findTemplateIndex(temp) >= getFirstFrontTemplate();	// TODO: is there a better way to find out if that is a front or back template?
-	
 	for (MapWidget* widget : widgets)
 	{
 		const MapView* map_view = widget->getMapView();
 		if (map_view->isTemplateVisible(temp))
-			widget->markTemplateCacheDirty(map_view->calculateViewBoundingBox(area), pixel_border, front_cache);
+			widget->markTemplateAreaDirty(map_view->calculateViewBoundingBox(area), pixel_border);
 	}
 }
 

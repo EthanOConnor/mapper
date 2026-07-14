@@ -455,7 +455,7 @@ int EditLineTool::updateDirtyRectImpl(QRectF& rect)
 	return pixel_border;
 }
 
-void EditLineTool::drawImpl(QPainter* painter, MapWidget* widget)
+void EditLineTool::drawImpl(render::OverlaySceneBuilder* painter, MapWidget* widget)
 {
 	auto num_selected_objects = map()->selectedObjects().size();
 	if (num_selected_objects > 0)

@@ -24,19 +24,15 @@
 #include <utility>
 
 #include <Qt>
-#include <QBrush>
 #include <QByteArray>
 #include <QCommandLinkButton>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QFont>
-#include <QFontMetrics>
 #include <QLatin1Char>
 #include <QLatin1String>
 #include <QMessageBox>
-#include <QPainter>
 #include <QPainterPath>
-#include <QPen>
 #include <QRect>
 #include <QRgb>
 #include <QSize>
@@ -57,6 +53,7 @@
 #include "gui/task_dialog.h"
 #include "undo/object_undo.h"
 #include "util/util.h"
+#include "render/qt_render_bridge.h"
 
 class QAbstractButton;
 
@@ -346,86 +343,70 @@ void TemplateTrack::unloadTemplateFileImpl()
 	track.clear();
 }
 
-void TemplateTrack::drawTemplate(QPainter* painter, const QRectF& /*clip_rect*/, double /*scale*/, bool on_screen, qreal opacity) const
+std::shared_ptr<const render::RenderIR> TemplateTrack::buildRenderIR(
+	bool on_screen,
+	double view_scale,
+	render::Revision revision) const
 {
-	painter->save();
-	painter->setOpacity(opacity);
-	drawTracks(painter, on_screen);
-	drawWaypoints(painter);
-	painter->restore();
-}
-
-void TemplateTrack::drawTracks(QPainter* painter, bool on_screen) const
-{
-	painter->save();
+	render::RenderIRBuilder builder(revision);
 	if (!is_georeferenced)
-		applyTemplateTransform(painter);
-	
-	// Tracks
-	QPen pen(qRgb(212, 0, 244));
-	if (on_screen)
-		pen.setCosmetic(true);
-	else
-		pen.setWidthF(0.1); // = 0.1 mm at 100%
-	painter->setPen(pen);
-	painter->setBrush(Qt::NoBrush);
-	
-	// TODO: could speed that up by storing the template coords of the GPS points in a separate vector or caching the painter paths
-	for (int i = 0; i < track.getNumSegments(); ++i)
 	{
-		QPainterPath path;
-		int size = track.getSegmentPointCount(i);
-		for (int k = 0; k < size; ++k)
-		{
-			const TrackPoint& point = track.getSegmentPoint(i, k);
-			
-			if (k > 0)
-				path.lineTo(point.map_coord.x(), point.map_coord.y());
-			else
-				path.moveTo(point.map_coord.x(), point.map_coord.y());
-		}
-		painter->drawPath(path);
+		auto const origin = templateToMap(QPointF(0, 0));
+		auto const x_axis = templateToMap(QPointF(1, 0));
+		auto const y_axis = templateToMap(QPointF(0, 1));
+		builder.pushTransform({
+			x_axis.x() - origin.x(), x_axis.y() - origin.y(),
+			y_axis.x() - origin.x(), y_axis.y() - origin.y(),
+			origin.x(), origin.y(),
+		});
 	}
-	
-	painter->restore();
-}
 
-void TemplateTrack::drawWaypoints(QPainter* painter) const
-{
-	painter->save();
-	painter->setRenderHint(QPainter::Antialiasing);
-	
-	painter->setPen(Qt::NoPen);
-	painter->setBrush(QBrush(qRgb(255, 0, 0)));
-	
-	QFont font = painter->font();
-	font.setPixelSize(2); // 2 mm at 100%
-	painter->setFont(font);
-	auto const font_metrics = painter->fontMetrics();
-	
-	int size = track.getNumWaypoints();
-	for (int i = 0; i < size; ++i)
+	auto const track_width = on_screen ? 1.0 / std::max(view_scale, 1.0e-9) : 0.1;
+	for (int segment = 0; segment < track.getNumSegments(); ++segment)
 	{
-		const TrackPoint& point = track.getWaypoint(i);
-		const QString& point_name = track.getWaypointName(i);
-		
-		double const radius = 0.25;
-		painter->drawEllipse(point.map_coord, radius, radius);
-		if (!point_name.isEmpty())
+		render::PathBuilder path;
+		for (int point_index = 0; point_index < track.getSegmentPointCount(segment); ++point_index)
 		{
-			painter->setPen(qRgb(255, 0, 0));
-			auto const size = font_metrics.boundingRect(point_name).size();
-			painter->drawText(QRect(qRound(point.map_coord.x() - 0.5*size.width()),
-			                        qRound(point.map_coord.y() - size.height()),
-			                        size.width(),
-			                        size.height()),
-			                  Qt::AlignCenter,
-			                  point_name);
-			painter->setPen(Qt::NoPen);
+			auto const& point = track.getSegmentPoint(segment, point_index);
+			if (point_index == 0)
+				path.moveTo({ point.map_coord.x(), point.map_coord.y() });
+			else
+				path.lineTo({ point.map_coord.x(), point.map_coord.y() });
+		}
+		auto stroke = render::StrokeStyle{};
+		stroke.width = track_width;
+		builder.strokePath(path.finish(), render::fromQColor(QColor(212, 0, 244)),
+		                   std::move(stroke), 0,
+		                   render::QualityHint::ForceAntialiasing);
+	}
+
+	QFont waypoint_font;
+	waypoint_font.setPixelSize(2);
+	for (int waypoint = 0; waypoint < track.getNumWaypoints(); ++waypoint)
+	{
+		auto const& point = track.getWaypoint(waypoint);
+		builder.fillEllipse(
+			{ point.map_coord.x() - 0.25, point.map_coord.y() - 0.25, 0.5, 0.5 },
+			render::fromQColor(QColor(Qt::red)), 0,
+			render::QualityHint::ForceAntialiasing
+		);
+		auto const& name = track.getWaypointName(waypoint);
+		if (!name.isEmpty())
+		{
+			QPainterPath text;
+			text.addText(QPointF(), waypoint_font, name);
+			auto const bounds = text.boundingRect();
+			text.translate(point.map_coord.x() - bounds.center().x(),
+			               point.map_coord.y() - bounds.bottom());
+			builder.fillPath(render::fromQPainterPath(text),
+			                 render::fromQColor(QColor(Qt::red)), 0,
+			                 render::QualityHint::Text);
 		}
 	}
-	
-	painter->restore();
+
+	if (!is_georeferenced)
+		builder.popTransform();
+	return builder.finish();
 }
 
 QRectF TemplateTrack::getTemplateExtent() const

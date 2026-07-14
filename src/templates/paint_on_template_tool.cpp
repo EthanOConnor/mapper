@@ -396,7 +396,7 @@ bool PaintOnTemplateTool::mouseReleaseEvent(QMouseEvent* /*event*/, const MapCoo
 }
 
 
-void PaintOnTemplateTool::draw(QPainter* painter, MapWidget* widget)
+void PaintOnTemplateTool::draw(render::OverlaySceneBuilder* painter, MapWidget* widget)
 {
 	if (dragging && temp)
 	{

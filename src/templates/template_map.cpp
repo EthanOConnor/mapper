@@ -26,8 +26,6 @@
 #include <QtGlobal>
 #include <QByteArray>
 #include <QDialog>
-#include <QPaintDevice>
-#include <QPainter>
 #include <QPoint>
 #include <QPointF>
 #include <QRectF>
@@ -36,7 +34,8 @@
 #include <QTransform>
 #include <QVariant>
 
-#include "settings.h"
+#include "render/qt_render_bridge.h"
+#include "render/render_snapshot.h"
 #include "core/georeferencing.h"
 #include "core/map.h"
 #include "core/map_coord.h"
@@ -238,46 +237,52 @@ void TemplateMap::unloadTemplateFileImpl()
 	template_map.reset();
 }
 
-void TemplateMap::drawTemplate(QPainter* painter, const QRectF& clip_rect, double scale, bool on_screen, qreal opacity) const
+std::shared_ptr<const render::RenderIR> TemplateMap::buildRenderIR(
+	render::Rect map_clip_rect,
+	double view_scale,
+	bool on_screen) const
 {
-	if (!is_georeferenced)
-		applyTemplateTransform(painter);
-	
-	if (Settings::getInstance().getSettingCached(Settings::MapDisplay_Antialiasing).toBool())
-		painter->setRenderHint(QPainter::Antialiasing);
-	
-	QRectF transformed_clip_rect;
+	if (!template_map)
+		return {};
+
+	auto const map_clip = render::toQRectF(map_clip_rect);
+	QRectF template_clip;
 	if (!is_georeferenced)
 	{
-		rectIncludeSafe(transformed_clip_rect, mapToTemplate(MapCoordF(clip_rect.topLeft())));
-		rectIncludeSafe(transformed_clip_rect, mapToTemplate(MapCoordF(clip_rect.topRight())));
-		rectIncludeSafe(transformed_clip_rect, mapToTemplate(MapCoordF(clip_rect.bottomLeft())));
-		rectIncludeSafe(transformed_clip_rect, mapToTemplate(MapCoordF(clip_rect.bottomRight())));
+		rectIncludeSafe(template_clip, mapToTemplate(MapCoordF(map_clip.topLeft())));
+		rectIncludeSafe(template_clip, mapToTemplate(MapCoordF(map_clip.topRight())));
+		rectIncludeSafe(template_clip, mapToTemplate(MapCoordF(map_clip.bottomLeft())));
+		rectIncludeSafe(template_clip, mapToTemplate(MapCoordF(map_clip.bottomRight())));
 	}
 	else
 	{
-		transformed_clip_rect = clip_rect;
+		template_clip = map_clip;
 	}
-	
-	RenderConfig::Options options;
-	auto scaling = scale;
-	if (on_screen)
-	{
-		options |= RenderConfig::Screen;
-		/// \todo Get the actual screen's resolution.
-		scaling = Util::mmToPixelPhysical(scale);
-	}
-	else
-	{
-		auto dpi = painter->device()->physicalDpiX();
-		if (!dpi)
-			dpi = painter->device()->logicalDpiX();
-		if (dpi > 0)
-			scaling *= dpi / 25.4;
-	}
-	RenderConfig config = { *template_map, transformed_clip_rect, scaling, options, qreal(opacity) };
-	// TODO: introduce template-specific options, adjustable by the user, to allow changing some of these parameters
-	template_map->draw(painter, config);
+
+	auto options = on_screen ? RenderConfig::Options(RenderConfig::Screen)
+	                         : RenderConfig::Options(RenderConfig::NoOptions);
+	auto const snapshot = template_map->publishRenderSnapshot();
+	auto scene = snapshot->buildIR({
+		render::fromQRectF(template_clip),
+		view_scale,
+		options,
+		1,
+	});
+	if (is_georeferenced)
+		return scene;
+
+	auto const origin = templateToMap(QPointF(0, 0));
+	auto const x_axis = templateToMap(QPointF(1, 0));
+	auto const y_axis = templateToMap(QPointF(0, 1));
+	render::RenderIRBuilder builder(snapshot->revision(), map_clip_rect);
+	builder.pushTransform({
+		x_axis.x() - origin.x(), x_axis.y() - origin.y(),
+		y_axis.x() - origin.x(), y_axis.y() - origin.y(),
+		origin.x(), origin.y(),
+	});
+	builder.append(*scene);
+	builder.popTransform();
+	return builder.finish();
 }
 
 QRectF TemplateMap::getTemplateExtent() const
@@ -344,6 +349,11 @@ bool TemplateMap::trySetTemplateGeoreferenced(bool value, QWidget* /*dialog_pare
 const Map* TemplateMap::templateMap() const
 {
 	return template_map.get();
+}
+
+bool TemplateMap::includesChildTemplates() const noexcept
+{
+	return false;
 }
 
 Map* TemplateMap::templateMap()

@@ -29,11 +29,18 @@ struct FrameView
 /** One ordered vector contribution to a frame. */
 struct VectorPass
 {
+	enum class Space : std::uint8_t
+	{
+		World,
+		Viewport,
+	};
+
 	std::shared_ptr<const RenderIR> scene;
 	BlendMode blend = BlendMode::SourceOver;
 	double opacity = 1;
 	/** Render to transparent intermediate storage before compositing. */
 	bool isolated = false;
+	Space space = Space::World;
 };
 
 /**
@@ -76,10 +83,17 @@ struct FrameRequest
 class FramePlanner
 {
 public:
+	/** Plans a frame which has no document map pass (for example an empty-map help view). */
+	FramePacketPtr plan(const FrameRequest& request);
 	FramePacketPtr plan(const MapRenderSnapshot& snapshot, const FrameRequest& request);
 
 private:
 	FrameId next_frame_id_ = 1;
+	std::uint64_t cached_snapshot_identity_ = 0;
+	Revision cached_revision_ = 0;
+	RenderRequest cached_request_;
+	bool cached_overprinting_ = false;
+	std::vector<VectorPass> cached_map_passes_;
 };
 
 enum class FrameStatus : std::uint8_t

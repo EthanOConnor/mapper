@@ -857,7 +857,7 @@ bool TextObjectEditorHelper::keyReleaseEvent(QKeyEvent* event)
 
 
 
-void TextObjectEditorHelper::draw(QPainter* painter, MapWidget* widget)
+void TextObjectEditorHelper::draw(render::OverlaySceneBuilder* painter, MapWidget* widget)
 {
 	Q_UNUSED(widget)
 	

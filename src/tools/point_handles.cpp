@@ -80,7 +80,7 @@ QRgb PointHandles::stateColor(PointHandleState state)
 
 
 void PointHandles::draw(
-        QPainter* painter,
+        render::OverlaySceneBuilder* painter,
         const MapWidget* widget,
         const Object* object,
         MapCoordVector::size_type hover_point,
@@ -166,7 +166,7 @@ void PointHandles::draw(
 }
 
 
-void PointHandles::draw(QPainter* painter, const QPointF& position, PointHandleType type, PointHandleState state) const
+void PointHandles::draw(render::OverlaySceneBuilder* painter, const QPointF& position, PointHandleType type, PointHandleState state) const
 {
 	auto width = int(scale_factor) * 11;  // = displayRadius() * 2 - 1
 	auto offset = (width - 1) / 2;
@@ -174,7 +174,7 @@ void PointHandles::draw(QPainter* painter, const QPointF& position, PointHandleT
 }
 
 
-void PointHandles::drawCurveHandleLine(QPainter* painter, QPointF anchor_point, QPointF curve_handle, PointHandleType type, PointHandleState state) const
+void PointHandles::drawCurveHandleLine(render::OverlaySceneBuilder* painter, QPointF anchor_point, QPointF curve_handle, PointHandleType type, PointHandleState state) const
 {
 	const auto handle_radius = 3 * scale_factor;
 	if (scale_factor > 1)

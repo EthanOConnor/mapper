@@ -30,7 +30,6 @@
 
 #include "templates/template.h"
 
-class QPainter;
 class QRectF;
 class QXmlStreamReader;
 class QXmlStreamWriter;
@@ -87,8 +86,6 @@ public:
 	bool isRasterGraphics() const override;
 	
 	/** Does nothing. */
-	void drawTemplate(QPainter* painter, const QRectF& clip_rect, double scale, bool on_screen, qreal opacity) const override;
-	
 	
 	/** Does nothing. */
 	void setTemplateAreaDirty() override;

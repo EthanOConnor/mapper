@@ -165,7 +165,7 @@ void MainWindow::applicationStateChanged()
 	if (QGuiApplication::applicationState() == Qt::ApplicationActive)
 	{
 		auto activity = QNativeInterface::QAndroidApplication::context();
-		auto intent_uri = activity.callObjectMethod<jstring>("takeIntentUri").toString();
+		auto intent_uri = activity.callMethod<QString>("takeIntentUri");
 		if (!intent_uri.isEmpty())
 		{
 			const auto intent_url = QUrl{intent_uri};

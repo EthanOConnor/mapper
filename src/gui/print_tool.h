@@ -77,7 +77,7 @@ public:
 	bool mouseReleaseEvent(QMouseEvent* event, const MapCoordF& map_coord, MapWidget* widget) override;
 	
 	/** Draws a visualization of the print area the map widget. */
-	void draw(QPainter* painter, MapWidget* widget) override;
+	void draw(render::OverlaySceneBuilder* painter, MapWidget* widget) override;
 	
 public slots:
 	/** Updates the print area visualization in the map editors. */

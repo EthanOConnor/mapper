@@ -148,7 +148,7 @@ public:
 	bool keyReleaseEvent(QKeyEvent* event) override;
 	
 	/// Draws the preview renderables. Should be overridden to draw custom elements.
-	void draw(QPainter* painter, MapWidget* widget) override;
+	void draw(render::OverlaySceneBuilder* painter, MapWidget* widget) override;
 	
 	void finishEditing() override;
 	
@@ -173,7 +173,7 @@ protected:
 	/// The implementation draws the preview renderables.
 	/// MapEditorToolBase::draw() draws the activated tool helpers afterwards.
 	/// If this is not desired, you can override draw() directly.
-	virtual void drawImpl(QPainter* painter, MapWidget* widget);
+	virtual void drawImpl(render::OverlaySceneBuilder* painter, MapWidget* widget);
 	/// Must update the status bar text
 	virtual void updateStatusText() = 0;
 	/// Called when the object selection in the map is changed.
@@ -245,7 +245,7 @@ protected:
 	
 	/// If the tool created custom renderables (e.g. with updatePreviewObjects()), draws the preview renderables,
 	/// else draws the renderables of the selected map objects.
-	void drawSelectionOrPreviewObjects(QPainter* painter, MapWidget* widget, bool draw_opaque = false);
+	void drawSelectionOrPreviewObjects(render::OverlaySceneBuilder* painter, MapWidget* widget, bool draw_opaque = false);
 	
 	/// Activates or deactivates the angle helper, recalculates (un-)constrained cursor position,
 	/// and calls mouseMove() or dragMove() to update the tool.

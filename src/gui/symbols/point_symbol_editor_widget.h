@@ -222,7 +222,7 @@ public:
 	
 	void init() override;
 	void update();
-	void draw(QPainter* painter, MapWidget* map_widget) override;
+	void draw(render::OverlaySceneBuilder* painter, MapWidget* map_widget) override;
 	
 private:
 	Map* const map;

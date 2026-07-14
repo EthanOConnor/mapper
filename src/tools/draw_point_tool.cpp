@@ -260,7 +260,7 @@ bool DrawPointTool::keyRelease(QKeyEvent* event)
 	return false;
 }
 
-void DrawPointTool::drawImpl(QPainter* painter, MapWidget* widget)
+void DrawPointTool::drawImpl(render::OverlaySceneBuilder* painter, MapWidget* widget)
 {
 	Q_ASSERT(preview_object);
 	
@@ -279,7 +279,6 @@ void DrawPointTool::drawImpl(QPainter* painter, MapWidget* widget)
 	{
 		if (isDragging())
 		{
-			painter->setRenderHint(QPainter::Antialiasing);
 			
 			QPen pen(qRgb(255, 255, 255));
 			pen.setWidth(3);

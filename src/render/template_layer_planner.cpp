@@ -4,7 +4,7 @@
  *    This file is part of OpenOrienteering.
  */
 
-#include "render/raster_layer_planner.h"
+#include "render/template_layer_planner.h"
 
 #include <algorithm>
 #include <cmath>
@@ -26,6 +26,9 @@
 #include "render/qt_render_bridge.h"
 #include "templates/template.h"
 #include "templates/template_image.h"
+#include "templates/template_map.h"
+#include "templates/template_track.h"
+#include "util/util.h"
 
 namespace OpenOrienteering::render {
 
@@ -226,7 +229,7 @@ Rect fullImageTarget(const TileKey& tile)
 
 }  // namespace
 
-class RasterLayerPlanner::Impl
+class TemplateLayerPlanner::Impl
 {
 public:
 	struct CachedLayer
@@ -235,38 +238,82 @@ public:
 		std::shared_ptr<const RenderIR> scene;
 	};
 
-	RasterLayerPlan plan(const Map& map,
-	                     const MapView& view,
+	TemplateLayerPlan plan(const Map& map,
+	                     const MapView* view,
 	                     Rect visible_map_rect,
 	                     double view_scale,
 	                     bool on_screen)
 	{
-		RasterLayerPlan result;
+		TemplateLayerPlan result;
 		std::set<const TemplateImage*> live_layers;
+		std::set<const TemplateMap*> live_child_maps;
 		auto const first_above = map.getFirstFrontTemplate();
 		for (int index = 0; index < map.getNumTemplates(); ++index)
 		{
-			auto const* source = dynamic_cast<const TemplateImage*>(map.getTemplate(index));
-			if (!source || source->getTemplateState() != Template::Loaded)
+			auto const* source = map.getTemplate(index);
+			if (source->getTemplateState() != Template::Loaded)
 				continue;
-			auto const visibility = view.getTemplateVisibility(source);
+			auto const visibility = view ? view->getTemplateVisibility(source)
+			                             : TemplateVisibility { 1, true };
 			if (!visibility.visible || visibility.opacity <= 0)
 				continue;
 
-			live_layers.insert(source);
-			QVector<RasterTemplateTile> source_tiles;
-			source->collectRasterTiles(
-				toQRectF(visible_map_rect), view_scale, on_screen, source_tiles
-			);
-			auto layer = layerFor(*source, source_tiles, result);
+			auto const template_scale = std::max(1.0e-9, view_scale * std::max(
+				std::abs(source->getTemplateScaleX()),
+				std::abs(source->getTemplateScaleY())
+			));
+			std::shared_ptr<const RenderIR> layer;
+			if (auto const* image = dynamic_cast<const TemplateImage*>(source))
+			{
+				live_layers.insert(image);
+				QVector<RasterTemplateTile> source_tiles;
+				image->collectRasterTiles(
+					toQRectF(visible_map_rect), template_scale, on_screen, source_tiles
+				);
+				layer = layerFor(*image, source_tiles, result, on_screen);
+			}
+			else if (auto const* map_template = dynamic_cast<const TemplateMap*>(source))
+			{
+				layer = map_template->buildRenderIR(
+					visible_map_rect, template_scale, on_screen
+				);
+				if (map_template->includesChildTemplates() && map_template->templateMap())
+				{
+					live_child_maps.insert(map_template);
+					auto& planner = child_planners_[map_template];
+					if (!planner)
+						planner = std::make_unique<TemplateLayerPlanner>();
+					auto template_clip = templateClip(*map_template, visible_map_rect);
+					auto children = planner->plan(
+						*map_template->templateMap(), nullptr, template_clip,
+						template_scale, on_screen
+					);
+					result.complete &= children.complete;
+					result.newly_resident_images += children.newly_resident_images;
+					auto& destination = index < first_above
+					                  ? result.below_map : result.above_map;
+					appendNested(destination, std::move(children.below_map),
+					             *map_template, visible_map_rect, visibility.opacity);
+					if (layer)
+						destination.push_back(passFor(
+							std::move(layer), visibility.opacity
+						));
+					appendNested(destination, std::move(children.above_map),
+					             *map_template, visible_map_rect, visibility.opacity);
+					continue;
+				}
+			}
+			else if (auto const* track_template = dynamic_cast<const TemplateTrack*>(source))
+			{
+				if (next_revision_ == std::numeric_limits<Revision>::max())
+					qFatal("Template layer revision space exhausted");
+				layer = track_template->buildRenderIR(
+					on_screen, template_scale, next_revision_++
+				);
+			}
 			if (!layer)
 				continue;
-			VectorPass pass {
-				std::move(layer),
-				BlendMode::SourceOver,
-				std::clamp(double(visibility.opacity), 0.0, 1.0),
-				visibility.opacity < 1,
-			};
+			VectorPass pass = passFor(std::move(layer), visibility.opacity);
 			auto& destination = index < first_above ? result.below_map : result.above_map;
 			destination.push_back(std::move(pass));
 		}
@@ -285,13 +332,75 @@ public:
 			else
 				++it;
 		}
+		for (auto it = child_planners_.begin(); it != child_planners_.end(); )
+		{
+			if (!live_child_maps.contains(it->first))
+				it = child_planners_.erase(it);
+			else
+				++it;
+		}
 		return result;
 	}
 
 private:
+	static VectorPass passFor(std::shared_ptr<const RenderIR> scene, double opacity)
+	{
+		auto const clamped = std::clamp(opacity, 0.0, 1.0);
+		return { std::move(scene), BlendMode::SourceOver, clamped, clamped < 1 };
+	}
+
+	static Rect templateClip(const TemplateMap& source, Rect map_clip)
+	{
+		if (source.isTemplateGeoreferenced())
+			return map_clip;
+		QRectF result;
+		auto const clip = toQRectF(map_clip);
+		rectIncludeSafe(result, source.mapToTemplate(MapCoordF(clip.topLeft())));
+		rectIncludeSafe(result, source.mapToTemplate(MapCoordF(clip.topRight())));
+		rectIncludeSafe(result, source.mapToTemplate(MapCoordF(clip.bottomLeft())));
+		rectIncludeSafe(result, source.mapToTemplate(MapCoordF(clip.bottomRight())));
+		return fromQRectF(result);
+	}
+
+	std::shared_ptr<const RenderIR> nestedToHost(const TemplateMap& source,
+	                                             std::shared_ptr<const RenderIR> scene,
+	                                             Rect host_clip)
+	{
+		if (!scene || source.isTemplateGeoreferenced())
+			return scene;
+		auto const origin = source.templateToMap(QPointF(0, 0));
+		auto const x_axis = source.templateToMap(QPointF(1, 0));
+		auto const y_axis = source.templateToMap(QPointF(0, 1));
+		RenderIRBuilder builder(scene->revision, host_clip);
+		builder.pushTransform({
+			x_axis.x() - origin.x(), x_axis.y() - origin.y(),
+			y_axis.x() - origin.x(), y_axis.y() - origin.y(),
+			origin.x(), origin.y(),
+		});
+		builder.append(*scene);
+		builder.popTransform();
+		return builder.finish();
+	}
+
+	void appendNested(std::vector<VectorPass>& destination,
+	                  std::vector<VectorPass> passes,
+	                  const TemplateMap& source,
+	                  Rect host_clip,
+	                  double outer_opacity)
+	{
+		for (auto& pass : passes)
+		{
+			pass.scene = nestedToHost(source, std::move(pass.scene), host_clip);
+			pass.opacity *= std::clamp(outer_opacity, 0.0, 1.0);
+			pass.isolated |= pass.opacity < 1;
+			destination.push_back(std::move(pass));
+		}
+	}
+
 	std::shared_ptr<const RenderIR> layerFor(const TemplateImage& source,
 	                                        const QVector<RasterTemplateTile>& source_tiles,
-	                                        RasterLayerPlan& result)
+	                                        TemplateLayerPlan& result,
+	                                        bool on_screen)
 	{
 		LayerKey full_key;
 		full_key.template_to_map = templateToMapTransform(source);
@@ -341,7 +450,7 @@ private:
 		);
 		if (has_transparency)
 		{
-			if (result.newly_resident_images >= max_new_images_per_frame)
+			if (on_screen && result.newly_resident_images >= max_new_images_per_frame)
 			{
 				result.complete = false;
 				return {};
@@ -371,7 +480,7 @@ private:
 		tiles.reserve(source_images.size());
 		for (auto const& tile : source_images)
 		{
-			auto image = imageFor(tile.key.image, tile.image, result);
+			auto image = imageFor(tile.key.image, tile.image, result, on_screen);
 			if (!image)
 			{
 				result.complete = false;
@@ -411,7 +520,8 @@ private:
 
 	std::shared_ptr<const ImageData> imageFor(const ImageKey& key,
 	                                          const QImage& image,
-	                                          RasterLayerPlan& result)
+	                                          TemplateLayerPlan& result,
+	                                          bool on_screen)
 	{
 		auto const found = images_.find(key);
 		if (found != images_.end())
@@ -419,7 +529,7 @@ private:
 			if (auto existing = found->second.lock())
 				return existing;
 		}
-		if (result.newly_resident_images >= max_new_images_per_frame)
+		if (on_screen && result.newly_resident_images >= max_new_images_per_frame)
 			return {};
 
 		auto snapshot = snapshotImage(image);
@@ -434,16 +544,26 @@ private:
 	std::unordered_map<const TemplateImage*, CachedLayer> layers_;
 	std::map<ImageKey, std::weak_ptr<const ImageData>> images_;
 	std::map<ImageKey, bool> opacity_;
+	std::unordered_map<const TemplateMap*, std::unique_ptr<TemplateLayerPlanner>> child_planners_;
 };
 
-RasterLayerPlanner::RasterLayerPlanner()
+TemplateLayerPlanner::TemplateLayerPlanner()
  : impl_(std::make_unique<Impl>())
 {}
 
-RasterLayerPlanner::~RasterLayerPlanner() = default;
+TemplateLayerPlanner::~TemplateLayerPlanner() = default;
 
-RasterLayerPlan RasterLayerPlanner::plan(const Map& map,
+TemplateLayerPlan TemplateLayerPlanner::plan(const Map& map,
 	                                     const MapView& view,
+	                                     Rect visible_map_rect,
+	                                     double view_scale,
+	                                     bool on_screen)
+{
+	return impl_->plan(map, &view, visible_map_rect, view_scale, on_screen);
+}
+
+TemplateLayerPlan TemplateLayerPlanner::plan(const Map& map,
+	                                     const MapView* view,
 	                                     Rect visible_map_rect,
 	                                     double view_scale,
 	                                     bool on_screen)

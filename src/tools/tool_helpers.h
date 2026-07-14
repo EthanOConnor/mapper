@@ -141,7 +141,7 @@ public:
 	 * Draws the set of allowed angles as lines radiating out from the
 	 * center point. The active angle, if any, is highlighted.
 	 */
-	void draw(QPainter* painter, MapWidget* widget);
+	void draw(render::OverlaySceneBuilder* painter, MapWidget* widget);
 	
 	/** Includes this helper's drawing region in the given rect. */
 	void includeDirtyRect(QRectF& rect);
@@ -238,7 +238,7 @@ public:
 	bool snapToDirection(const MapCoordF& position, MapWidget* widget, ConstrainAngleToolHelper* angle_tool, MapCoord* out_snap_position = nullptr);
 	
 	/** Draws the snap mark which was last returned by snapToObject(). */
-	void draw(QPainter* painter, MapWidget* widget);
+	void draw(render::OverlaySceneBuilder* painter, MapWidget* widget);
 	
 	/** Includes this helper's drawing region in the given rect. */
 	void includeDirtyRect(QRectF& rect);
@@ -371,7 +371,7 @@ public:
 	QRectF dirtyRect(MapWidget* widget, const MapCoordF& pos_map) const;
 	
 	/** Draws the azimuth and distance info text. */
-	void draw(QPainter* painter, const MapWidget* widget, const Map* map,
+	void draw(render::OverlaySceneBuilder* painter, const MapWidget* widget, const Map* map,
 	          const MapCoordF& start_pos, const MapCoordF& end_pos);
 
 };

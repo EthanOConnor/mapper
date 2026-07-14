@@ -212,7 +212,7 @@ bool DrawCircleTool::keyPressEvent(QKeyEvent* event)
 	return false;
 }
 
-void DrawCircleTool::draw(QPainter* painter, MapWidget* widget)
+void DrawCircleTool::draw(render::OverlaySceneBuilder* painter, MapWidget* widget)
 {
 	drawPreviewObjects(painter, widget);
 }

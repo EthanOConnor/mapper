@@ -189,9 +189,11 @@ void RenderIrTest::referenceRendererInterpretsIr()
 	builder.pushLayer(0.5);
 	builder.fillPath(full, render::fromQColor(Qt::blue), 3);
 	builder.strokePath(line, render::fromQColor(Qt::black),
-	                   { 2, render::LineCap::Round, render::LineJoin::Round, 4 }, 4);
+	                   { .width = 2, .cap = render::LineCap::Round,
+	                     .join = render::LineJoin::Round, .miter_limit = 4 }, 4);
 	builder.strokeEllipse({ 30, 30, 20, 20 }, render::fromQColor(Qt::yellow),
-	                      { 2, render::LineCap::Flat, render::LineJoin::Miter, 4 }, 5);
+	                      { .width = 2, .cap = render::LineCap::Flat,
+	                        .join = render::LineJoin::Miter, .miter_limit = 4 }, 5);
 	builder.popLayer();
 	builder.popClip();
 

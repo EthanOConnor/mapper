@@ -90,9 +90,11 @@ render::FramePacketPtr completeOperationFrame(render::FrameId id)
 	builder.pushLayer(0.5);
 	builder.fillPath(full, render::fromQColor(Qt::blue), 3);
 	builder.strokePath(full, render::fromQColor(Qt::black),
-	                   { 2, render::LineCap::Round, render::LineJoin::Round, 4 }, 4);
+	                   { .width = 2, .cap = render::LineCap::Round,
+	                     .join = render::LineJoin::Round, .miter_limit = 4 }, 4);
 	builder.strokeEllipse({ 30, 30, 20, 20 }, render::fromQColor(Qt::yellow),
-	                      { 2, render::LineCap::Flat, render::LineJoin::Miter, 4 }, 5);
+	                      { .width = 2, .cap = render::LineCap::Flat,
+	                        .join = render::LineJoin::Miter, .miter_limit = 4 }, 5);
 	builder.popLayer();
 	builder.popClip();
 	auto pixels = std::make_shared<const std::vector<std::uint8_t>>(
@@ -375,7 +377,7 @@ void VelloRendererTest::nativeSurfaceLifecyclePresentsCurrentFrame()
 	layout->addWidget(&canvas);
 	host.resize(640, 480);
 	host.show();
-	QVERIFY(QTest::qWaitForWindowExposed(&host));
+	QVERIFY(QTest::qWaitForWindowExposed(&host, 15000));
 	host.raise();
 	host.activateWindow();
 	QTRY_COMPARE(canvas.surfaceState().phase, presentation::SurfacePhase::Exposed);
@@ -402,7 +404,7 @@ void VelloRendererTest::nativeSurfaceLifecyclePresentsCurrentFrame()
 	host.hide();
 	QTRY_COMPARE(canvas.surfaceState().phase, presentation::SurfacePhase::Hidden);
 	host.show();
-	QVERIFY(QTest::qWaitForWindowExposed(&host));
+	QVERIFY(QTest::qWaitForWindowExposed(&host, 15000));
 	QTRY_COMPARE(canvas.surfaceState().phase, presentation::SurfacePhase::Exposed);
 	auto const resumed = waitForTerminalResult(canvas, first->id);
 	QVERIFY2(resumed, canvas.lastError().c_str());

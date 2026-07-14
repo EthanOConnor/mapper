@@ -33,7 +33,6 @@
 #include <QLatin1Char>
 #include <QMessageBox>
 #include <QMouseEvent>
-#include <QPainter>
 #include <QPixmap>
 #include <QPoint>
 #include <QPointF>
@@ -85,7 +84,7 @@ void TemplateAdjustActivity::init()
 	connect(this, &QObject::destroyed, dock, &QObject::deleteLater);
 }
 
-void TemplateAdjustActivity::draw(QPainter* painter, MapWidget* widget)
+void TemplateAdjustActivity::draw(render::OverlaySceneBuilder* painter, MapWidget* widget)
 {
 	bool adjusted = temp->isAdjustmentApplied();
     
@@ -101,7 +100,7 @@ void TemplateAdjustActivity::draw(QPainter* painter, MapWidget* widget)
 	}
 }
 
-void TemplateAdjustActivity::drawCross(QPainter* painter, const QPoint& midpoint, QColor color)
+void TemplateAdjustActivity::drawCross(render::OverlaySceneBuilder* painter, const QPoint& midpoint, QColor color)
 {
 	painter->setPen(color);
 	painter->drawLine(midpoint + QPoint(0, -TemplateAdjustActivity::cross_radius), midpoint + QPoint(0, TemplateAdjustActivity::cross_radius));
@@ -534,7 +533,7 @@ TemplateAdjustEditTool::TemplateAdjustEditTool(MapEditorController* editor, QAct
 	active_point = -1;
 }
 
-void TemplateAdjustEditTool::draw(QPainter* painter, MapWidget* widget)
+void TemplateAdjustEditTool::draw(render::OverlaySceneBuilder* painter, MapWidget* widget)
 {
 	bool adjusted = this->widget->getTemplate()->isAdjustmentApplied();
 	
@@ -659,7 +658,7 @@ bool TemplateAdjustAddTool::keyPressEvent(QKeyEvent* event)
     return false;
 }
 
-void TemplateAdjustAddTool::draw(QPainter* painter, MapWidget* widget)
+void TemplateAdjustAddTool::draw(render::OverlaySceneBuilder* painter, MapWidget* widget)
 {
 	if (first_point_set)
 	{

@@ -245,7 +245,7 @@ void EditTool::setupAngleHelperFromEditedObjects()
 }
 
 
-void EditTool::drawBoundingBox(QPainter* painter, MapWidget* widget, const QRectF& bounding_box, const QRgb& color)
+void EditTool::drawBoundingBox(render::OverlaySceneBuilder* painter, MapWidget* widget, const QRectF& bounding_box, const QRgb& color)
 {
 	QPen pen(color);
 	pen.setStyle(Qt::DashLine);
@@ -257,7 +257,7 @@ void EditTool::drawBoundingBox(QPainter* painter, MapWidget* widget, const QRect
 }
 
 
-void EditTool::drawBoundingPath(QPainter* painter, MapWidget* widget, const std::vector<QPointF>& bounding_path, const QRgb& color)
+void EditTool::drawBoundingPath(render::OverlaySceneBuilder* painter, MapWidget* widget, const std::vector<QPointF>& bounding_path, const QRgb& color)
 {
 	Q_ASSERT(!bounding_path.empty());
 	

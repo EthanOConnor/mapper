@@ -104,7 +104,7 @@ protected:
 	void updatePreviewObjects() override;
 	void deletePreviewObject();
 	int updateDirtyRectImpl(QRectF& rect) override;
-	void drawImpl(QPainter* painter, MapWidget* widget) override;
+	void drawImpl(render::OverlaySceneBuilder* painter, MapWidget* widget) override;
 	
 	// State 
 	void updateHoverState(const MapCoordF& cursor_pos);

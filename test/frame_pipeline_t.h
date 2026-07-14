@@ -18,6 +18,8 @@ private slots:
 	void packetIsCompleteAndMonotonic();
 	void qpainterConsumesTheFrameContract();
 	void overprintingUsesIsolatedPasses();
+	void viewportOverlayUsesTheSharedFrameContract();
+	void overlayPatternsAndImagesStayRetained();
 	void mapWidgetUsesTheFrameContract();
 	void nativeSurfacePublishesOrderedLifecycle();
 };

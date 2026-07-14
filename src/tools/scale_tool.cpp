@@ -163,7 +163,7 @@ bool ScaleTool::keyReleaseEvent(QKeyEvent* event)
 }
 
 
-void ScaleTool::drawImpl(QPainter* painter, MapWidget* widget)
+void ScaleTool::drawImpl(render::OverlaySceneBuilder* painter, MapWidget* widget)
 {
 	drawSelectionOrPreviewObjects(painter, widget);
 	

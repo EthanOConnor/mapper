@@ -65,7 +65,7 @@ protected slots:
 protected:
 	void initImpl() override;
 	int updateDirtyRectImpl(QRectF& rect) override;
-	void drawImpl(QPainter* painter, MapWidget* widget) override;
+	void drawImpl(render::OverlaySceneBuilder* painter, MapWidget* widget) override;
 	void updateStatusText() override;
 	void objectSelectionChangedImpl() override;
 	

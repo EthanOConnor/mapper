@@ -137,7 +137,7 @@ TouchCursor::MouseEventTranslation TouchCursor::mouseDoubleClickEvent(const QMou
 	return { .action = MouseEventTranslation::Action::Discard };
 }
 
-void TouchCursor::paint(QPainter* painter)
+void TouchCursor::paint(render::OverlaySceneBuilder* painter)
 {
 	if (!visible)
 		return;

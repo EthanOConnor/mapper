@@ -48,7 +48,6 @@
 // IWYU pragma: no_include "templates/template.h"
 
 class QIODevice;
-class QPainter;
 class QTranslator;
 class QWidget;
 // IWYU pragma: no_forward_declare QRectF
@@ -75,6 +74,7 @@ class UndoStep;
 
 namespace render {
 class MapRenderSnapshot;
+class OverlaySceneBuilder;
 }
 
 
@@ -251,69 +251,6 @@ public:
 	 * subsequent document edits. It never reads the Map while being rendered.
 	 */
 	std::shared_ptr<const render::MapRenderSnapshot> publishRenderSnapshot();
-	
-	
-	/**
-	 * Draws the part of the map which is visible in the bounding box.
-	 * 
-	 * @param painter The QPainter used for drawing.
-	 * @param config  The rendering configuration
-	 */
-	void draw(QPainter* painter, const RenderConfig& config);
-	
-	/**
-	 * Draws a spot color overprinting simulation for the part of the map
-	 * which is visible in the given bounding box.
-	 * 
-	 * @param painter Must be a QPainter on a QImage of Format_ARGB32_Premultiplied.
-	 * @param config  The rendering configuration
-	 */
-	void drawOverprintingSimulation(QPainter* painter, const RenderConfig& config);
-	
-	/**
-	 * Draws the separation for a particular spot color for the part of the
-	 * map which is visible in the given bounding box.
-	 * 
-	 * Separations are normally drawn in levels of gray where black means
-	 * full tone of the spot color. The parameter use_color can be used to
-	 * draw in the actual spot color instead.
-	 *
-	 * @param painter The QPainter used for drawing.
-	 * @param config  The rendering configuration
-	 * @param spot_color The spot color to draw the separation for.
-	 * @param use_color  If true, forces the separation to be drawn in its actual color.
-	 */
-	void drawColorSeparation(QPainter* painter, const RenderConfig& config,
-		const MapColor* spot_color, bool use_color = false);
-	
-	/**
-	 * Draws the map grid.
-	 * 
-	 * @param painter The QPainter used for drawing.
-	 * @param bounding_box Bounding box of area to draw, given in map coordinates.
-	 */
-	void drawGrid(QPainter* painter, const QRectF& bounding_box);
-	
-	/**
-	 * Draws the templates with indices first_template until last_template which
-	 * are visible in the given bounding box.
-	 * 
-	 * view determines template visibility and can be nullptr to show all templates.
-	 * The initial transform of the given QPainter must be the map-to-paintdevice transformation.
-     * If on_screen is set to true, some optimizations will be applied, leading to a possibly lower display quality.
-	 * 
-	 * @param painter The QPainter used for drawing.
-	 * @param bounding_box Bounding box of area to draw, given in map coordinates.
-	 * @param first_template Lowest index of the template range to draw.
-	 * @param last_template Highest index of the template range to draw.
-	 * @param view Optional pointer to MapView object which is used to query
-	 *     template visibilities.
-	 * @param on_screen Potentially enables some drawing optimizations which
-	 *     decrease drawing quality. Should be enabled when drawing on-screen.
-	 */
-	void drawTemplates(QPainter* painter, const QRectF& bounding_box, int first_template,
-					   int last_template, const MapView* view, bool on_screen) const;
-	
 	
 	/**
 	 * Updates the renderables and extent of all objects which have changed.
@@ -1152,10 +1089,9 @@ public:
 	void includeSelectionRect(QRectF& rect) const;
 	
 	/**
-	 * Draws the selected objects.
-	 * 
-	 * @param painter The QPainter used for drawing.
-	 * @param force_min_size See draw().
+	 * Records the selected objects into the transient viewport scene.
+	 *
+	 * @param force_min_size Enables minimum on-screen sizes.
 	 * @param widget The widget in which the drawing happens.
 	 *     Used to get view and viewport information.
 	 * @param replacement_renderables If given, draws these renderables instead
@@ -1163,8 +1099,10 @@ public:
 	 * @param draw_normal If set to true, draws the objects like normal objects,
 	 *     otherwise draws transparent highlights.
 	 */
-	void drawSelection(QPainter* painter, bool force_min_size, MapWidget* widget,
-		MapRenderables* replacement_renderables = nullptr, bool draw_normal = false);
+	void drawSelection(render::OverlaySceneBuilder* painter, bool force_min_size,
+	                   MapWidget* widget,
+	                   MapRenderables* replacement_renderables = nullptr,
+	                   bool draw_normal = false);
 	
 	/**
 	 * Adds the given object to the selection.

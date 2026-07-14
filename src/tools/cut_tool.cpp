@@ -609,7 +609,7 @@ int CutTool::updateDirtyRectImpl(QRectF& rect)
 }
 
 
-void CutTool::drawImpl(QPainter* painter, MapWidget* widget)
+void CutTool::drawImpl(render::OverlaySceneBuilder* painter, MapWidget* widget)
 {
 	auto map = this->map();
 	map->drawSelection(painter, true, widget, nullptr);

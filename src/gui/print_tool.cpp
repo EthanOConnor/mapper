@@ -130,7 +130,7 @@ bool PrintTool::mouseReleaseEvent(QMouseEvent* event, const MapCoordF& map_coord
 	return false;
 }
 
-void PrintTool::draw(QPainter* painter, MapWidget* widget)
+void PrintTool::draw(render::OverlaySceneBuilder* painter, MapWidget* widget)
 {
 	painter->save();
 	

@@ -23,8 +23,11 @@
 
 #include <QtGlobal>
 #include <QDoubleValidator>
+#include <QPen>
 #include <QString>
 #include <QValidator>
+
+#include "render/overlay_scene.h"
 
 class QCheckBox;
 class QDoubleSpinBox;
@@ -256,6 +259,19 @@ namespace Util
 	{
 		/** Center marker sign for rotate and scale tools. */
 		void drawCenterMarker(QPainter* painter, const QPointF& center);
+		inline void drawCenterMarker(render::OverlaySceneBuilder* painter, const QPointF& center)
+		{
+			const auto larger_radius = mmToPixelPhysical(1.1);
+			const auto smaller_radius = larger_radius * 3 / 4;
+			auto pen = QPen(Qt::white);
+			pen.setWidthF(larger_radius - smaller_radius);
+			painter->setPen(pen);
+			painter->setBrush(Qt::NoBrush);
+			painter->drawEllipse(center, smaller_radius, smaller_radius);
+			pen.setColor(Qt::black);
+			painter->setPen(pen);
+			painter->drawEllipse(center, larger_radius, larger_radius);
+		}
 	}  // namespace Marker
 
 

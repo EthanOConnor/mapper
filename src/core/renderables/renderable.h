@@ -27,7 +27,6 @@
 #include "render/render_ir.h"
 
 class QColor;
-class QPainter;
 
 namespace OpenOrienteering {
 
@@ -36,6 +35,8 @@ class Object;
 
 namespace render {
 class MapRenderSnapshot;
+class OverlaySceneBuilder;
+struct RenderRequest;
 struct SnapshotObjectBlock;
 struct SnapshotObject;
 }
@@ -129,10 +130,9 @@ public:
 	void insertRenderable(Renderable* renderable);
 	void clear();
 	void detach();
-
-	/** Draws one color through the same IR/reference path as normal map output. */
-	void draw(int map_color, const QColor& color, QPainter* painter,
-	          const RenderConfig& config) const;
+	std::shared_ptr<const render::RenderIR> buildIR(
+		int map_color, render::Color color, const render::RenderRequest& request
+	) const;
 
 	void setClipPath(render::PathPtr path);
 	render::PathPtr getClipPath() const;
@@ -164,10 +164,7 @@ public:
 
 	explicit MapRenderables(Map* map);
 
-	void draw(QPainter* painter, const RenderConfig& config) const;
-	void drawOverprintingSimulation(QPainter* painter, const RenderConfig& config) const;
-	void drawColorSeparation(QPainter* painter, const RenderConfig& config,
-	                         const MapColor* separation, bool use_color = false) const;
+	void draw(render::OverlaySceneBuilder* painter, const RenderConfig& config) const;
 
 	void insertRenderablesOfObject(const Object* object);
 	void removeRenderablesOfObject(const Object* object, bool mark_area_as_dirty);

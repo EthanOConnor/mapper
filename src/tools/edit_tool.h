@@ -136,14 +136,14 @@ protected:
 	 * 
 	 * @param bounding_box the box extent in map coordinates
 	 */
-	void drawBoundingBox(QPainter* painter, MapWidget* widget, const QRectF& bounding_box, const QRgb& color);
+	void drawBoundingBox(render::OverlaySceneBuilder* painter, MapWidget* widget, const QRectF& bounding_box, const QRgb& color);
 	
 	/**
 	 * Draws a bounding path with a dashed line of the given color.
 	 * 
 	 * @param bounding_box the box extent in map coordinates
 	 */
-	void drawBoundingPath(QPainter* painter, MapWidget* widget, const std::vector<QPointF>& bounding_path, const QRgb& color);
+	void drawBoundingPath(render::OverlaySceneBuilder* painter, MapWidget* widget, const std::vector<QPointF>& bounding_path, const QRgb& color);
 	
 	/**
 	 * An utility implementing object selection logic.

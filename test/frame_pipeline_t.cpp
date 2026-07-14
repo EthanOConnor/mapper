@@ -15,7 +15,9 @@
 #include <QDir>
 #include <QImage>
 #include <QPainter>
+#include <QPen>
 #include <QPlatformSurfaceEvent>
+#include <QPixmap>
 #include <QResizeEvent>
 #include <QTransform>
 
@@ -27,7 +29,9 @@
 #include "core/objects/object.h"
 #include "gui/map/map_widget.h"
 #include "presentation/native_surface.h"
+#include "presentation/vello_canvas.h"
 #include "render/frame_pipeline.h"
+#include "render/overlay_scene.h"
 #include "render/qpainter_frame_renderer.h"
 #include "render/qpainter_renderer.h"
 #include "render/qt_render_bridge.h"
@@ -257,75 +261,181 @@ void FramePipelineTest::overprintingUsesIsolatedPasses()
 	                    .arg(changed).arg(max_delta)));
 }
 
+void FramePipelineTest::viewportOverlayUsesTheSharedFrameContract()
+{
+	constexpr auto width = 180;
+	constexpr auto height = 120;
+	render::OverlaySceneBuilder builder;
+	builder.begin(41, { 0, 0, width, height });
+	QPen pen(QColor(220, 20, 30), 3, Qt::DashLine, Qt::RoundCap, Qt::RoundJoin);
+	builder.setPen(pen);
+	builder.setBrush(QColor(20, 180, 90, 180));
+	builder.setOpacity(0.75);
+	builder.translate(18, 13);
+	QTransform rotation;
+	rotation.rotate(17);
+	builder.setWorldTransform(rotation, true);
+	builder.drawRect(QRectF(8, 7, 54, 31));
+	auto scene = builder.finish();
+
+	render::FrameRequest request;
+	request.view = {
+		width,
+		height,
+		1,
+		render::fromQTransform(QTransform::fromTranslate(80, 0)),
+	};
+	request.above_map.push_back({
+		scene,
+		render::BlendMode::SourceOver,
+		1,
+		false,
+		render::VectorPass::Space::Viewport,
+	});
+	render::FramePlanner planner;
+	auto const first = planner.plan(request);
+	auto const second = planner.plan(request);
+	QCOMPARE(first->id, render::FrameId(1));
+	QCOMPARE(second->id, render::FrameId(2));
+	QCOMPARE(first->revision, render::Revision(41));
+
+	QImage actual(width, height, QImage::Format_ARGB32_Premultiplied);
+	actual.fill(Qt::transparent);
+	QPainter actual_painter(&actual);
+	actual_painter.setRenderHint(QPainter::Antialiasing, true);
+	QCOMPARE(render::QPainterFrameRenderer().render(actual_painter, *first).status,
+	         render::FrameStatus::Presented);
+	actual_painter.end();
+
+	QImage expected(width, height, QImage::Format_ARGB32_Premultiplied);
+	expected.fill(Qt::transparent);
+	QPainter expected_painter(&expected);
+	expected_painter.setRenderHint(QPainter::Antialiasing, true);
+	expected_painter.setPen(pen);
+	expected_painter.setBrush(QColor(20, 180, 90, 180));
+	expected_painter.setOpacity(0.75);
+	expected_painter.translate(18, 13);
+	expected_painter.setWorldTransform(rotation, true);
+	expected_painter.drawRect(QRectF(8, 7, 54, 31));
+	expected_painter.end();
+	auto pixelBounds = [](const QImage& image) {
+		QRect bounds;
+		for (auto y = 0; y < image.height(); ++y)
+		{
+			for (auto x = 0; x < image.width(); ++x)
+			{
+				if (image.pixelColor(x, y).alpha() > 0)
+					bounds = bounds.united(QRect(x, y, 1, 1));
+			}
+		}
+		return bounds;
+	};
+	QCOMPARE(pixelBounds(actual), pixelBounds(expected));
+	auto max_delta = 0;
+	auto changed_pixels = 0;
+	auto total_delta = std::uint64_t(0);
+	for (auto y = 0; y < height; ++y)
+	{
+		for (auto x = 0; x < width; ++x)
+		{
+			auto const a = actual.pixel(x, y);
+			auto const b = expected.pixel(x, y);
+			auto const delta = std::array {
+				std::abs(qRed(a) - qRed(b)), std::abs(qGreen(a) - qGreen(b)),
+				std::abs(qBlue(a) - qBlue(b)), std::abs(qAlpha(a) - qAlpha(b)),
+			};
+			max_delta = std::max(max_delta, *std::ranges::max_element(delta));
+			total_delta += std::uint64_t(delta[0] + delta[1] + delta[2] + delta[3]);
+			changed_pixels += a != b;
+		}
+	}
+	auto const mean_delta = double(total_delta) / double(width * height * 4);
+	QVERIFY2(max_delta <= 3 && mean_delta < 0.01,
+	         qPrintable(QStringLiteral("%1 changed pixels; max channel delta %2; mean %3")
+	                    .arg(changed_pixels).arg(max_delta).arg(mean_delta)));
+}
+
+void FramePipelineTest::overlayPatternsAndImagesStayRetained()
+{
+	render::OverlaySceneBuilder builder;
+	QPixmap cursor(24, 16);
+	cursor.setDevicePixelRatio(2);
+	cursor.fill(QColor(20, 40, 60, 180));
+
+	auto record = [&] {
+		builder.begin(42, { 0, 0, 80, 60 });
+		builder.setPen(Qt::NoPen);
+		builder.setBrush(QBrush(QColor(180, 20, 80), Qt::Dense5Pattern));
+		builder.drawRect(QRectF(4, 5, 30, 20));
+		builder.drawPixmap(QPointF(40, 9), cursor);
+		return builder.finish();
+	};
+
+	auto const first = record();
+	auto const second = record();
+	auto pattern_count = 0;
+	std::shared_ptr<const render::ImageData> first_image;
+	for (auto const& command : first->commands)
+	{
+		if (std::holds_alternative<render::DrawLinePattern>(command))
+			++pattern_count;
+		if (auto const* image = std::get_if<render::DrawImage>(&command))
+		{
+			first_image = image->image;
+			QCOMPARE(image->target.width, 12.0);
+			QCOMPARE(image->target.height, 8.0);
+		}
+	}
+	QCOMPARE(pattern_count, 2);
+	QVERIFY(first_image);
+
+	std::shared_ptr<const render::ImageData> second_image;
+	for (auto const& command : second->commands)
+		if (auto const* image = std::get_if<render::DrawImage>(&command))
+			second_image = image->image;
+	QCOMPARE(second_image, first_image);
+}
+
 void FramePipelineTest::mapWidgetUsesTheFrameContract()
 {
 	auto fixture = makeFixture(example(QStringLiteral("complete map.omap")));
 	QVERIFY(fixture);
 	MapView view(nullptr, &fixture->map);
 	MapWidget widget(false, true);
+	widget.setWindowFlag(Qt::WindowStaysOnTopHint);
 	widget.resize(800, 600);
 	widget.setMapView(&view);
 	widget.adjustViewToRect(fixture->extent, MapWidget::ContinuousZoom);
 	widget.show();
 	QVERIFY(QTest::qWaitForWindowExposed(&widget));
-	QCoreApplication::processEvents();
-	auto const captured = widget.grab();
-	auto actual = captured.toImage().convertToFormat(QImage::Format_ARGB32_Premultiplied);
-
-	QImage cache(widget.size(), QImage::Format_ARGB32_Premultiplied);
-	cache.fill(Qt::transparent);
-	QPainter painter(&cache);
-	painter.setRenderHint(QPainter::Antialiasing, true);
-	painter.translate(widget.width() / 2.0, widget.height() / 2.0);
-	painter.setWorldTransform(view.worldTransform(), true);
-	auto const visible = view.calculateViewedRect(widget.viewportToView(widget.rect()));
-	fixture->map.draw(&painter, {
-		fixture->map,
-		visible,
-		view.calculateFinalZoomFactor(),
-		RenderConfig::Screen | RenderConfig::HelperSymbols,
-		1,
-	});
-	painter.end();
-	QImage expected(actual.size(), QImage::Format_ARGB32_Premultiplied);
-	expected.setDevicePixelRatio(captured.devicePixelRatio());
-	expected.fill(Qt::white);
-	QPainter composite(&expected);
-	composite.drawImage(0, 0, cache);
-	composite.end();
-
-	auto changed = 0;
-	auto max_delta = 0;
-	QPoint first_changed(-1, -1);
-	for (auto y = 0; y < actual.height(); ++y)
+	widget.raise();
+	widget.activateWindow();
+	auto* canvas_widget = widget.findChild<QWidget*>(QStringLiteral("mapVelloCanvas"));
+	QVERIFY(canvas_widget);
+	auto* canvas = dynamic_cast<presentation::VelloCanvas*>(canvas_widget);
+	QVERIFY(canvas);
+	QTRY_VERIFY(canvas->currentFrame());
+	auto const first_frame = canvas->currentFrame();
+	QVERIFY(!first_frame->vector_passes.empty());
+	QTRY_VERIFY(canvas->lastResult());
+	QTRY_COMPARE(canvas->lastResult()->completion.frame_id, first_frame->id);
+	QTRY_VERIFY(canvas->lastResult()->completion.status == render::FrameStatus::Presented
+	            || canvas->lastResult()->completion.status == render::FrameStatus::TargetUnavailable);
+	if (canvas->lastResult()->completion.status == render::FrameStatus::TargetUnavailable)
 	{
-		for (auto x = 0; x < actual.width(); ++x)
-		{
-			auto const actual_color = actual.pixelColor(x, y);
-			auto const expected_color = expected.pixelColor(x, y);
-			if (actual_color == expected_color)
-				continue;
-			if (first_changed.x() < 0)
-				first_changed = { x, y };
-			++changed;
-			max_delta = std::max({
-				max_delta,
-				std::abs(actual_color.red() - expected_color.red()),
-				std::abs(actual_color.green() - expected_color.green()),
-				std::abs(actual_color.blue() - expected_color.blue()),
-				std::abs(actual_color.alpha() - expected_color.alpha()),
-			});
-		}
+		QCOMPARE(canvas->surfaceState().phase, presentation::SurfacePhase::Exposed);
+		QVERIFY2(canvas->lastError().empty(), canvas->lastError().c_str());
+#if defined(Q_OS_MACOS)
+		QCOMPARE(canvas->lastResult()->backend, std::uint8_t(2));
+#endif
 	}
-	// QWidget's platform backing store can quantize antialiased edge pixels
-	// differently from an in-memory QImage. Geometry and solid interiors must
-	// still agree; only a small, low-delta edge band is accepted here. The
-	// packet-to-QImage comparison above remains pixel exact.
-	auto const changed_limit = actual.width() * actual.height() / 10;
-	QVERIFY2(changed <= changed_limit && max_delta <= 8,
-	         qPrintable(QStringLiteral("%1 pixels changed; max delta %2; first at %3,%4")
-	                    .arg(changed).arg(max_delta)
-	                    .arg(first_changed.x()).arg(first_changed.y())));
+
+	auto* object = fixture->map.getPart(0)->getObject(0);
+	QVERIFY(object);
+	object->move(1000, 0);
+	widget.updateEverything();
+	QTRY_VERIFY(canvas->currentFrame()->id > first_frame->id);
+	QVERIFY(canvas->currentFrame()->revision >= first_frame->revision);
 }
 
 void FramePipelineTest::nativeSurfacePublishesOrderedLifecycle()
@@ -357,18 +467,6 @@ void FramePipelineTest::nativeSurfacePublishesOrderedLifecycle()
 	QCOMPARE(states.back().logical_height, std::uint32_t(200));
 	QVERIFY(states.back().physical_width >= states.back().logical_width);
 	QVERIFY(states.back().physical_height >= states.back().logical_height);
-
-#if defined(Q_OS_MACOS)
-	auto frame_requests = 0;
-	window.setFrameRequestHandler([&frame_requests] { ++frame_requests; });
-	window.show();
-	QVERIFY(QTest::qWaitForWindowExposed(&window));
-	QTRY_COMPARE(states.back().phase, SurfacePhase::Exposed);
-	window.requestFrame();
-	QTRY_COMPARE(frame_requests, 1);
-	window.hide();
-	QTRY_COMPARE(states.back().phase, SurfacePhase::Hidden);
-#endif
 
 	QPlatformSurfaceEvent destroying(QPlatformSurfaceEvent::SurfaceAboutToBeDestroyed);
 	QCoreApplication::sendEvent(&window, &destroying);

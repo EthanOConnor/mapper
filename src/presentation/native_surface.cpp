@@ -17,6 +17,17 @@
 #include <QResizeEvent>
 #include <QShowEvent>
 
+#if defined(Q_OS_ANDROID)
+#include <android/native_window_jni.h>
+
+#include <QCoreApplication>
+#include <QDeadlineTimer>
+#include <QJniEnvironment>
+#include <QJniObject>
+#include <QTimer>
+#include <QVariant>
+#endif
+
 namespace OpenOrienteering::presentation {
 
 namespace {
@@ -31,6 +42,35 @@ bool appIsSuspended(Qt::ApplicationState state)
 {
 	return state == Qt::ApplicationHidden || state == Qt::ApplicationSuspended;
 }
+
+#if defined(Q_OS_ANDROID)
+ANativeWindow* acquireAndroidNativeWindow(QWindow& window)
+{
+	auto const qt_window = QJniObject(reinterpret_cast<jobject>(window.winId()));
+	if (!qt_window.isValid())
+		return nullptr;
+	auto future = QNativeInterface::QAndroidApplication::runOnAndroidMainThread(
+		[qt_window]() -> QVariant {
+			auto surface = QJniObject::callStaticObjectMethod(
+				"org/openorienteering/mapper/MapperActivity",
+				"nativeSurfaceForQtWindow",
+				"(Ljava/lang/Object;)Landroid/view/Surface;",
+				qt_window.object<jobject>()
+			);
+			return QVariant::fromValue(surface);
+		},
+		QDeadlineTimer(250)
+	);
+	future.waitForFinished();
+	if (!future.isFinished() || future.isCanceled())
+		return nullptr;
+	auto const surface = future.result().value<QJniObject>();
+	if (!surface.isValid())
+		return nullptr;
+	QJniEnvironment environment;
+	return ANativeWindow_fromSurface(environment.jniEnv(), surface.object<jobject>());
+}
+#endif
 
 }  // namespace
 
@@ -50,8 +90,9 @@ NativeSurfaceDescriptor describeNativeSurface(QWindow& window)
 	if (platform == QLatin1String("windows"))
 		descriptor.platform = NativePlatform::Win32;
 #elif defined(Q_OS_ANDROID)
-	if (platform == QLatin1String("android"))
-		descriptor.platform = NativePlatform::AndroidView;
+	// Android's WId is a Java window object rather than an ANativeWindow.
+	// NativeSurfaceWindow owns the public-JNI bridge and publishes that handle.
+	descriptor.window = 0;
 #else
 #if QT_CONFIG(wayland)
 	if (platform.contains(QLatin1String("wayland")))
@@ -104,6 +145,12 @@ NativeSurfaceWindow::~NativeSurfaceWindow()
 	}
 	state_handler_ = {};
 	frame_request_handler_ = {};
+#if defined(Q_OS_ANDROID)
+	retireAndroidNativeWindow();
+	for (auto* window : retired_android_native_windows_)
+		ANativeWindow_release(static_cast<ANativeWindow*>(window));
+	retired_android_native_windows_.clear();
+#endif
 }
 
 void NativeSurfaceWindow::setStateHandler(StateHandler handler)
@@ -129,6 +176,50 @@ void NativeSurfaceWindow::requestFrame()
 		requestUpdate();
 }
 
+void NativeSurfaceWindow::refreshState()
+{
+#if defined(Q_OS_ANDROID)
+	refreshAndroidNativeWindow(true);
+#endif
+	publishState();
+}
+
+#if defined(Q_OS_ANDROID)
+void NativeSurfaceWindow::refreshAndroidNativeWindow(bool retire_if_missing)
+{
+	auto* acquired = acquireAndroidNativeWindow(*this);
+	if (acquired == android_native_window_)
+	{
+		if (acquired)
+			ANativeWindow_release(acquired);
+		return;
+	}
+	if (!acquired && !retire_if_missing)
+		return;
+	retireAndroidNativeWindow();
+	android_native_window_ = acquired;
+}
+
+void NativeSurfaceWindow::retireAndroidNativeWindow()
+{
+	if (!android_native_window_)
+		return;
+	retired_android_native_windows_.push_back(android_native_window_);
+	android_native_window_ = nullptr;
+}
+
+void NativeSurfaceWindow::scheduleAndroidSurfaceRefresh()
+{
+	if (android_refresh_pending_ || !isVisible())
+		return;
+	android_refresh_pending_ = true;
+	QTimer::singleShot(50, this, [this] {
+		android_refresh_pending_ = false;
+		refreshState();
+	});
+}
+#endif
+
 bool NativeSurfaceWindow::event(QEvent* event)
 {
 	if (event->type() == QEvent::PlatformSurface)
@@ -137,6 +228,9 @@ bool NativeSurfaceWindow::event(QEvent* event)
 		if (surface_event->surfaceEventType() == QPlatformSurfaceEvent::SurfaceAboutToBeDestroyed)
 		{
 			platform_surface_available_ = false;
+#if defined(Q_OS_ANDROID)
+			retireAndroidNativeWindow();
+#endif
 			publishState();
 		}
 		else if (surface_event->surfaceEventType() == QPlatformSurfaceEvent::SurfaceCreated)
@@ -197,13 +291,28 @@ void NativeSurfaceWindow::publishState()
 	}
 	else
 	{
+#if defined(Q_OS_ANDROID)
+		if (!android_native_window_)
+			refreshAndroidNativeWindow(false);
+		if (android_native_window_)
+		{
+			next.native.platform = NativePlatform::AndroidNdk;
+			next.native.window = reinterpret_cast<std::uintptr_t>(android_native_window_);
+		}
+#else
 		next.native = describeNativeSurface(*this);
+#endif
 		if (suspended_)
 			next.phase = SurfacePhase::Suspended;
-		else if (isExposed() && next.physical_width > 0 && next.physical_height > 0)
+		else if (isExposed() && next.native.window != 0
+		         && next.physical_width > 0 && next.physical_height > 0)
 			next.phase = SurfacePhase::Exposed;
 		else
 			next.phase = SurfacePhase::Hidden;
+#if defined(Q_OS_ANDROID)
+		if (isExposed() && !android_native_window_)
+			scheduleAndroidSurfaceRefresh();
+#endif
 	}
 
 	// Handle acquisition can synchronously create a platform surface and thus

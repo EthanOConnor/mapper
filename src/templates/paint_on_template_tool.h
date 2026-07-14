@@ -41,7 +41,6 @@ class QAction;
 class QActionGroup;
 class QCursor;
 class QMouseEvent;
-class QPainter;
 
 namespace OpenOrienteering {
 
@@ -76,7 +75,7 @@ public:
 	bool mouseMoveEvent(QMouseEvent* event, const MapCoordF& map_coord, MapWidget* widget) override;
 	bool mouseReleaseEvent(QMouseEvent* event, const MapCoordF& map_coord, MapWidget* widget) override;
 	
-	void draw(QPainter* painter, MapWidget* widget) override;
+	void draw(render::OverlaySceneBuilder* painter, MapWidget* widget) override;
 	
 protected:
 	void templateAboutToBeDeleted(int pos, Template* temp);

@@ -38,7 +38,6 @@ class QCursor;
 class QEvent;
 class QKeyEvent;
 class QMouseEvent;
-class QPainter;
 class QPoint;
 class QPushButton;
 class QTableWidget;
@@ -66,9 +65,9 @@ public:
 	~TemplateAdjustActivity() override;
 	
 	void init() override;
-	void draw(QPainter* painter, MapWidget* widget) override;
+	void draw(render::OverlaySceneBuilder* painter, MapWidget* widget) override;
 	
-	static void drawCross(QPainter* painter, const QPoint& midpoint, QColor color);
+	static void drawCross(render::OverlaySceneBuilder* painter, const QPoint& midpoint, QColor color);
 	static int findHoverPoint(Template* temp, const QPoint& mouse_pos, MapWidget* widget, bool& point_src);
 	static bool calculateTemplateAdjust(Template* temp, TemplateTransform& out, QWidget* dialog_parent);
 	
@@ -156,7 +155,7 @@ Q_OBJECT
 public:
 	TemplateAdjustEditTool(MapEditorController* editor, QAction* tool_action, TemplateAdjustWidget* widget);
 	
-	void draw(QPainter* painter, MapWidget* widget) override;
+	void draw(render::OverlaySceneBuilder* painter, MapWidget* widget) override;
 	
 protected:
 	void findHoverPoint(const QPoint& mouse_pos, MapWidget* map_widget);
@@ -181,7 +180,7 @@ public:
 	bool mouseMoveEvent(QMouseEvent* event, const MapCoordF& map_coord, MapWidget* widget) override;
 	bool keyPressEvent(QKeyEvent* event) override;
 	
-	void draw(QPainter* painter, MapWidget* widget) override;
+	void draw(render::OverlaySceneBuilder* painter, MapWidget* widget) override;
 	
 protected:
 	void setDirtyRect(const MapCoordF& mouse_pos);

@@ -18,12 +18,11 @@
 #include <utility>
 
 #include <QColor>
-#include <QPainter>
 
 #include "core/map.h"
 #include "core/objects/object.h"
 #include "core/symbols/symbol.h"
-#include "render/qpainter_renderer.h"
+#include "render/overlay_scene.h"
 #include "render/qt_render_bridge.h"
 #include "render/render_snapshot.h"
 #include "util/util.h"
@@ -57,16 +56,6 @@ render::SnapshotColor snapshotColor(const MapColor& color)
 			snapshot.components.push_back({ component.spot_color->getPriority(), component.factor });
 	}
 	return snapshot;
-}
-
-render::RenderRequest requestFor(const RenderConfig& config)
-{
-	return {
-		render::fromQRectF(config.bounding_box),
-		config.scaling,
-		config.options,
-		config.opacity,
-	};
 }
 
 }  // namespace
@@ -119,22 +108,23 @@ void ObjectRenderables::detach()
 	}
 }
 
-void ObjectRenderables::draw(int map_color, const QColor& color, QPainter* painter,
-	                         const RenderConfig& config) const
+std::shared_ptr<const render::RenderIR> ObjectRenderables::buildIR(
+	int map_color, render::Color color, const render::RenderRequest& request) const
 {
-	if (!painter || !extent.intersects(config.bounding_box))
-		return;
+	render::RenderIRBuilder builder(0, request.bounding_box);
+	auto const bounding_box = render::toQRectF(request.bounding_box);
+	if (!extent.intersects(bounding_box))
+		return builder.finish();
 	auto const found = find(map_color);
 	if (found == end() || !found->second)
-		return;
+		return builder.finish();
 
-	render::RenderIRBuilder builder(0, render::fromQRectF(config.bounding_box));
-	if (config.opacity != 1)
-		builder.pushLayer(config.opacity);
+	if (request.opacity != 1)
+		builder.pushLayer(request.opacity);
 	render::PathPtr active_clip;
 	for (auto const& item : *found->second)
 	{
-		if (!item.renderable || !item.renderable->intersects(config.bounding_box))
+		if (!item.renderable || !item.renderable->intersects(bounding_box))
 			continue;
 		if (active_clip != item.clip_path)
 		{
@@ -145,18 +135,17 @@ void ObjectRenderables::draw(int map_color, const QColor& color, QPainter* paint
 				builder.pushClip(active_clip);
 		}
 		item.renderable->appendTo(builder, {
-			config.scaling,
-			config.options,
-			render::fromQColor(color),
+			request.scaling,
+			request.options,
+			color,
 			0,
 		});
 	}
 	if (active_clip)
 		builder.popClip();
-	if (config.opacity != 1)
+	if (request.opacity != 1)
 		builder.popLayer();
-	auto const ir = builder.finish();
-	render::QPainterRenderer().render(*painter, *ir, requestFor(config));
+	return builder.finish();
 }
 
 void ObjectRenderables::setClipPath(render::PathPtr path)
@@ -430,37 +419,17 @@ std::shared_ptr<const render::MapRenderSnapshot> MapRenderables::snapshot() cons
 	return published_snapshot;
 }
 
-void MapRenderables::draw(QPainter* painter, const RenderConfig& config) const
+void MapRenderables::draw(render::OverlaySceneBuilder* painter,
+	                      const RenderConfig& config) const
 {
 	if (!painter)
 		return;
-	render::QPainterRenderer().draw(*painter, *snapshot(), requestFor(config));
-}
-
-void MapRenderables::drawColorSeparation(QPainter* painter, const RenderConfig& config,
-	                                     const MapColor* separation, bool use_color) const
-{
-	if (!painter || !separation)
-		return;
-	render::QPainterRenderer().drawColorSeparation(
-		*painter,
-		*snapshot(),
-		requestFor(config),
-		separation->getPriority(),
-		use_color
-	);
-}
-
-void MapRenderables::drawOverprintingSimulation(QPainter* painter,
-	                                            const RenderConfig& config) const
-{
-	if (!painter)
-		return;
-	render::QPainterRenderer().drawOverprintingSimulation(
-		*painter,
-		*snapshot(),
-		requestFor(config)
-	);
+	painter->append(*snapshot()->buildIR({
+		render::fromQRectF(config.bounding_box),
+		config.scaling,
+		config.options,
+		config.opacity,
+	}));
 }
 
 }  // namespace OpenOrienteering

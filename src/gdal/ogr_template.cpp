@@ -30,7 +30,6 @@
 #include <QByteArray>
 #include <QDialog>
 #include <QLatin1String>
-#include <QPainter>
 #include <QPoint>
 #include <QPointF>
 #include <QRectF>
@@ -470,6 +469,11 @@ bool OgrTemplate::canChangeTemplateGeoreferenced() const
 	return false;
 }
 
+bool OgrTemplate::includesChildTemplates() const noexcept
+{
+	return true;
+}
+
 
 
 void OgrTemplate::mapTransformationChanged()
@@ -497,27 +501,6 @@ void OgrTemplate::mapTransformationChanged()
 }
 
 
-
-void OgrTemplate::drawTemplate(QPainter* painter, const QRectF& clip_rect, double scale, bool on_screen, qreal opacity) const
-{
-	// For efficiency, re-implementing Map::drawTemplates
-	auto const draw_child_templates = [this, painter, &clip_rect, scale, on_screen, opacity](int first, int  last)  {
-		for (int i = first; i < last; ++i)
-		{
-			auto const* temp = templateMap()->getTemplate(i);
-			if (temp->getTemplateState() != Template::Loaded)
-				continue;
-			if (!clip_rect.intersects(temp->calculateTemplateBoundingBox()))
-				continue;
-			painter->save();
-			temp->drawTemplate(painter, clip_rect, scale, on_screen, opacity);
-			painter->restore();
-		}
-	};
-	draw_child_templates(0, templateMap()->getFirstFrontTemplate());
-	TemplateMap::drawTemplate(painter, clip_rect, scale, on_screen, opacity);
-	draw_child_templates(templateMap()->getFirstFrontTemplate(), templateMap()->getNumTemplates());
-}
 
 QRectF OgrTemplate::getTemplateExtent() const
 {

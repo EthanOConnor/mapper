@@ -88,7 +88,7 @@ void CutoutTool::initImpl()
 	map()->releaseObject(cutout_object);
 }
 
-void CutoutTool::drawImpl(QPainter* painter, MapWidget* widget)
+void CutoutTool::drawImpl(render::OverlaySceneBuilder* painter, MapWidget* widget)
 {
 	// Draw selection renderables
 	map()->drawSelection(painter, true, widget, nullptr, false);

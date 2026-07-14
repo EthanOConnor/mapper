@@ -41,7 +41,6 @@
 #include <QLatin1Char>
 #include <QLatin1String>
 #include <QMessageBox>
-#include <QPainter>
 #include <QRectF>
 #include <QSizeF>
 #include <QStringView>
@@ -738,26 +737,6 @@ bool Template::trySetTemplateGeoreferenced(bool value, QWidget* /*dialog_parent*
 	return isTemplateGeoreferenced() == value;
 }
 
-
-void Template::applyTemplateTransform(QPainter* painter) const
-{
-	painter->translate(transform.template_x / 1000.0, transform.template_y / 1000.0);
-	// Rotate counter-clockwise.
-	painter->rotate(-transform.template_rotation * (180 / M_PI));
-
-	// Scale
-	if (qFuzzyIsNull(transform.template_shear))
-	{
-		painter->scale(transform.template_scale_x, transform.template_scale_y);
-	}
-	else
-	{
-		QTransform scaling(transform.template_scale_x, transform.template_shear,
-		                   transform.template_shear, transform.template_scale_y,
-		                   0, 0);
-		painter->setTransform(scaling, true);
-	}
-}
 
 QRectF Template::getTemplateExtent() const
 {

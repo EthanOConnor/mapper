@@ -31,7 +31,7 @@
 #include "render/frame_pipeline.h"
 #include "render/qpainter_frame_renderer.h"
 #include "render/qt_render_bridge.h"
-#include "render/raster_layer_planner.h"
+#include "render/template_layer_planner.h"
 #include "render/vello_renderer.h"
 
 using namespace OpenOrienteering;
@@ -165,20 +165,20 @@ int main(int argc, char** argv)
 	auto const view_zoom = 1.0 / Util::mmToPixelPhysical(1.0);
 	map.getTemplate(0)->updateRenderContext({ visible, view_zoom });
 
-	render::RasterLayerPlanner raster_planner;
-	render::RasterLayerPlan raster_plan;
+	render::TemplateLayerPlanner template_planner;
+	render::TemplateLayerPlan template_plan;
 	QElapsedTimer ready_timer;
 	ready_timer.start();
 	do
 	{
 		QCoreApplication::processEvents(QEventLoop::AllEvents, 5);
-		raster_plan = raster_planner.plan(map, view, render::fromQRectF(visible), 1);
-		if (raster_plan.complete && raster_plan.newly_resident_images == 0
-		    && (!raster_plan.below_map.empty() || !raster_plan.above_map.empty()))
+		template_plan = template_planner.plan(map, view, render::fromQRectF(visible), 1);
+		if (template_plan.complete && template_plan.newly_resident_images == 0
+		    && (!template_plan.below_map.empty() || !template_plan.above_map.empty()))
 			break;
 		QThread::msleep(1);
 	} while (ready_timer.elapsed() < 30000);
-	if (!raster_plan.complete)
+	if (!template_plan.complete)
 		return 5;
 
 	auto const snapshot = map.publishRenderSnapshot();
@@ -195,9 +195,9 @@ int main(int argc, char** argv)
 		{ render::fromQRectF(visible), 1, RenderConfig::Screen, 1 },
 		false,
 	};
-	request.below_map = raster_plan.below_map;
-	request.above_map = raster_plan.above_map;
-	request.raster_complete = raster_plan.complete;
+	request.below_map = template_plan.below_map;
+	request.above_map = template_plan.above_map;
+	request.raster_complete = template_plan.complete;
 	render::FramePlanner frame_planner;
 	auto const base_frame = frame_planner.plan(*snapshot, request);
 

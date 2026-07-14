@@ -27,7 +27,6 @@
 #include <Qt>
 #include <QtGlobal>
 #include <QCursor>
-#include <QImage>
 #include <QObject>
 #include <QPoint>
 #include <QPointF>
@@ -43,6 +42,8 @@
 #include "core/map_coord.h"
 #include "core/map_view.h"
 #include "render/frame_pipeline.h"
+#include "render/overlay_scene.h"
+#include "render/template_layer_planner.h"
 
 class QContextMenuEvent;
 class QEvent;
@@ -53,12 +54,12 @@ class QKeyEvent;
 class QLabel;
 class QMouseEvent;
 class QPaintEvent;
-class QPainter;
-class QPixmap;
 class QResizeEvent;
 class QWheelEvent;
 
 namespace OpenOrienteering {
+
+namespace presentation { class VelloCanvas; }
 
 class GPSDisplay;
 class GPSTemporaryMarkers;
@@ -71,19 +72,8 @@ struct ViewRenderContext;
 
 
 /**
- * QWidget for displaying a map. Needs a pointer to a MapView which defines
- * the view properties.
- * 
- * For faster display, the widget keeps some cached image internally which
- * are of the same size as the widget area. If then for example the map changes,
- * the other caches do not need to be redrawn.
- * <ul>
- * <li>The <b>map cache</b> contains the currently visible part of the map</li>
- * <li>The <b>below template cache</b> contains the currently
- *     visible part of all templates below the map</li>
- * <li>The <b>above template cache</b> contains the currently
- *     visible part of all templates above the map</li>
- * </ul>
+ * QWidget input authority for the native retained map surface. A MapView
+ * defines the camera; immutable frame packets define all displayed content.
  */
 class MapWidget : public QWidget
 {
@@ -162,7 +152,7 @@ public:
 	 * map objects with map coordinates and have them correctly displayed in
 	 * the widget with the settings of the used MapView.
 	 */
-	void applyMapTransform(QPainter* painter) const;
+	void applyMapTransform(render::OverlaySceneBuilder* painter) const;
 	
 	// Coordinate transformations
 	
@@ -224,29 +214,22 @@ public:
 	void adjustViewToRect(QRectF map_rect, ZoomOption zoom_option);  // clazy:exclude=function-args-by-ref
 	
 	/**
-	 * Mark a rectangular region of a template cache as "dirty", i.e. redraw needed.
-	 * This rect is united with possible previous dirty rects of that cache.
+	 * Requests a redraw of a template area.
 	 * @param view_rect Affected rect in view coordinates.
 	 * @param pixel_border Additional affected extent around the view rect in
 	 *     pixels. Allows to specify zoom-independent extents.
-	 * @param front_cache If set to true, invalidates the cache for templates
-	 *     in front of the map, else invalidates the cache for templates behind the map.
 	 */
-	void markTemplateCacheDirty(const QRectF& view_rect, int pixel_border, bool front_cache);
+	void markTemplateAreaDirty(const QRectF& view_rect, int pixel_border);
 	
 	/**
-	 * Mark a rectangular region given in map coordinates of the map cache
-	 * as dirty, i.e. redraw needed.
-	 * This rect is united with possible previous dirty rects of that cache.
+	 * Requests a redraw of a map-object area in map coordinates.
 	 */
 	void markObjectAreaDirty(const QRectF& map_rect);
 	
 	/**
 	 * Set the given rect as bounding box for the current drawing, i.e. the
 	 * graphical display of the active tool.
-	 * NOTE: Unlike for markTemplateCacheDirty(), multiple calls to
-	 * these methodsdo not result in uniting all given rects,
-	 * instead only the last rect is used!
+	 * Only the most recent drawing bounds are retained.
 	 * Pass QRect() to disable the current drawing.
 	 * @param map_rect Affected rect in map coordinates.
 	 * @param pixel_border Additional affected extent around the map rect in
@@ -273,27 +256,17 @@ public:
 	 */
 	void updateDrawing(const QRectF& map_rect, int pixel_border);
 	/**
-	 * Triggers a redraw of the MapWidget at the given area.
-	 */
-	void updateMapRect(const QRectF& map_rect, int pixel_border, QRect& cache_dirty_rect);
-	/**
-	 * Triggers a redraw of the MapWidget at the given area.
-	 */
-	void updateViewportRect(QRect viewport_rect, QRect& cache_dirty_rect);
-	/**
 	 * Variant of updateDrawing() which waits for some milliseconds before
 	 * calling update() in order to avoid excessive redraws.
 	 */
 	void updateDrawingLater(const QRectF& map_rect, int pixel_border);
 	
 	/**
-	 * Invalidates all caches and redraws the whole widget. Very slow, try to
-	 * avoid this.
+	 * Requests a complete new frame.
 	 */
 	void updateEverything();
 	/**
-	 * Sets all "dirty" region markers to the given rect in viewport coordinates
-	 * and triggers a redraw of the MapWidget there.
+	 * Requests a new frame for the given viewport region.
 	 */
 	void updateEverythingInRect(const QRect& dirty_rect);
 	
@@ -394,48 +367,11 @@ protected:
 private:
 	void updatePlaceholder();
 	
-	/** Checks if there is a visible template in the range
-	 *  from first_template to last_template. */
-	bool containsVisibleTemplate(int first_template, int last_template) const;
-	/** Checks if there is any visible template above the map. */
-	bool isAboveTemplateVisible() const;
-	/** Checks if there is any visible template below the map. */
-	bool isBelowTemplateVisible() const;
-	/**
-	 * Redraws the template cache.
-	 * @param cache Reference to pointer to the cache.
-	 * @param dirty_rect Rectangle of the cache to redraw, in viewport coordinates.
-	 * @param first_template Lowest template index to draw.
-	 * @param last_template Highest template index to draw.
-	 * @param use_background If set to true, fills the cache with white before
-	 *     drawing the templates, else makes it transparent.
-	 */
-	void updateTemplateCache(QImage& cache, QRect& dirty_rect, int first_template, int last_template, bool use_background);
-	/**
-	 * Redraws the map cache in the map cache dirty rect.
-	 * @param use_background If set to true, fills the cache with white before
-	 *     drawing the map, else makes it transparent.
-	 */
-	void updateMapCache(bool use_background);
-	/** Redraws all dirty caches. */
-	void updateAllDirtyCaches();
-	/** Shifts the content in the cache by the given amount of pixels. */
-	void shiftCache(int sx, int sy, QImage& cache);
-	void shiftCache(int sx, int sy, QPixmap& cache);
-	
 	/**
 	 * Calculates the bounding box of the given map coordinates rect and
 	 * additional pixel extent in integer viewport coordinates.
 	 */
 	QRect calculateViewportBoundingBox(const QRectF& map_rect, int pixel_border) const;
-	/** Internal method for setting a part of a cache as dirty. */
-	void setDynamicBoundingBox(QRectF map_rect, int pixel_border, QRect& dirty_rect_old, QRectF& dirty_rect_new, int& dirty_rect_new_border, bool do_update);
-	/** Internal method for removing the dirty state of a cache. */
-	void clearDynamicBoundingBox(QRect& dirty_rect_old, QRectF& dirty_rect_new, int& dirty_rect_new_border);
-	
-	/** Moves the dirty rect by the given amount of pixels. */
-	void moveDirtyRect(QRect& dirty_rect, qreal x, qreal y);
-	
 	/** Starts a dragging interaction at the given cursor position. */
 	void startDragging(const QPoint& cursor_pos);
 	/** Submits a new cursor position during a dragging interaction. */
@@ -459,7 +395,7 @@ private:
 	void moveMap(int steps_x, int steps_y);
 	
 	/** Draws a help message at the center of the MapWidget. */
-	void showHelpMessage(QPainter* painter, const QString& text) const;
+	void showHelpMessage(render::OverlaySceneBuilder* painter, const QString& text) const;
 
 	void scheduleRenderContextUpdate();
 	void publishRenderContext();
@@ -504,19 +440,11 @@ private:
 	// Panning (operation)
 	QPoint pan_offset;
 	
-	// Template caches
-	/** Cache for templates below map layer */
-	QImage below_template_cache;
-	QRect below_template_cache_dirty_rect;
-	
-	/** Cache for templates above map layer */
-	QImage above_template_cache;
-	QRect above_template_cache_dirty_rect;
-	
-	/** Map layer cache  */
-	QImage map_cache;
-	QRect map_cache_dirty_rect;
 	render::FramePlanner frame_planner;
+	render::TemplateLayerPlanner template_layer_planner;
+	render::OverlaySceneBuilder overlay_scene_builder;
+	presentation::VelloCanvas* vello_canvas;
+	render::Revision overlay_revision = 1;
 	
 	// Dirty regions for drawings (tools) and activities
 	/** Dirty rect for the current tool, in viewport coordinates (pixels). */

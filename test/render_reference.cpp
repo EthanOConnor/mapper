@@ -3,10 +3,9 @@
  *
  *    This file is part of OpenOrienteering.
  *
- *    Manual visual-parity helper. It deliberately renders through Map::draw,
- *    so the same invocation can compare an upstream checkpoint with the
- *    modern immutable-snapshot/IR path. The optional final argument expands
- *    only the render request, which isolates viewport pre-clipping effects.
+ *    Manual visual-parity helper for the immutable-snapshot reference path.
+ *    The optional final argument expands only the render request, which
+ *    isolates viewport pre-clipping effects.
  */
 
 #include <algorithm>
@@ -18,6 +17,8 @@
 #include "global.h"
 #include "core/map.h"
 #include "core/renderables/renderable.h"
+#include "render/qpainter_renderer.h"
+#include "render/qt_render_bridge.h"
 
 using namespace OpenOrienteering;
 
@@ -58,9 +59,11 @@ int main(int argc, char** argv)
 	painter.scale(pixels_per_mm, pixels_per_mm);
 	painter.translate(-extent.topLeft());
 	painter.setClipRect(extent);
-	map.draw(&painter, RenderConfig {
-		map,
-		extent.adjusted(-render_padding, -render_padding, render_padding, render_padding),
+	auto const snapshot = map.publishRenderSnapshot();
+	render::QPainterRenderer().draw(painter, *snapshot, {
+		render::fromQRectF(
+			extent.adjusted(-render_padding, -render_padding, render_padding, render_padding)
+		),
 		pixels_per_mm,
 		RenderConfig::HelperSymbols,
 		1,

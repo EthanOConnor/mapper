@@ -61,7 +61,7 @@ public:
 	
 	bool keyPressEvent(QKeyEvent* event) override;
 	
-	void draw(QPainter* painter, MapWidget* widget) override;
+	void draw(render::OverlaySceneBuilder* painter, MapWidget* widget) override;
 	
 protected:
 	void finishDrawing() override;

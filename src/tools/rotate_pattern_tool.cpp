@@ -209,7 +209,7 @@ void RotatePatternTool::dragFinish()
 
 
 
-void RotatePatternTool::drawImpl(QPainter* painter, MapWidget* widget)
+void RotatePatternTool::drawImpl(render::OverlaySceneBuilder* painter, MapWidget* widget)
 {
 	drawSelectionOrPreviewObjects(painter, widget);
 	

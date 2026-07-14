@@ -77,7 +77,7 @@ public:
 	bool keyReleaseEvent(QKeyEvent* event) override;
 	void focusOutEvent(QFocusEvent* event) override;
 	
-	void draw(QPainter* painter, MapWidget* widget) override;
+	void draw(render::OverlaySceneBuilder* painter, MapWidget* widget) override;
 	
 public slots:
 	void objectSelectionChanged();

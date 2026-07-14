@@ -135,10 +135,6 @@ bool TemplatePlaceholder::isRasterGraphics() const
 	return true;
 }
 
-void TemplatePlaceholder::drawTemplate(QPainter* /*painter*/, const QRectF& /*clip_rect*/, double /*scale*/, bool /*on_screen*/, qreal /*opacity*/) const
-{}
-
-
 void TemplatePlaceholder::setTemplateAreaDirty()
 {}
 

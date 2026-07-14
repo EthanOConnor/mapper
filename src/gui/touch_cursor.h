@@ -27,8 +27,8 @@
 #include <Qt>
 
 #include "core/map_coord.h"
+#include "render/overlay_scene.h"
 class QMouseEvent;
-class QPainter;
 
 namespace OpenOrienteering {
 
@@ -89,7 +89,7 @@ public:
 	[[nodiscard]] MouseEventTranslation mouseDoubleClickEvent(const QMouseEvent& event);
 	
 	/** Paints the cursor. */
-	void paint(QPainter* painter);
+	void paint(render::OverlaySceneBuilder* painter);
 
 	/** Issues a (delayed) redraw of the cursor. */
 	void updateMapWidget(bool delayed);

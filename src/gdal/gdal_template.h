@@ -40,7 +40,6 @@
 #include "templates/template_image.h"
 
 class QByteArray;
-class QPainter;
 class QWidget;
 class QRectF;
 
@@ -107,7 +106,6 @@ protected:
 	void unloadTemplateFileImpl() override;
 
 	void updateRenderContext(const ViewRenderContext& context) override;
-	void drawTemplate(QPainter* painter, const QRectF& clip_rect, double scale, bool on_screen, qreal opacity) const override;
 	QRectF getTemplateExtent() const override;
 	void collectRasterTiles(const QRectF& map_clip_rect,
 	                        double scale,

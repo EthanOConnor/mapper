@@ -136,20 +136,22 @@ resize, resource release, suspend, or shutdown. Completed status is tagged with
 a frame id; the caller never treats the previous frame's status as the current
 submission.
 
-Checkpoint 3 makes the contract concrete as an immutable `FramePacket`. It
-owns the camera, viewport/DPR, render request, ordered IR passes, document
-revision, and monotonic frame id. Pass isolation is explicit: an overprint
-separation is rendered to transparent intermediate storage before multiply
-composition, so knockout white can erase earlier marks within that separation.
-The QPainter implementation consumes this packet in the live `MapWidget` path
-and remains the exact reference for normal and overprint output.
+Checkpoint 3 made the contract concrete as an immutable `FramePacket`. It owns
+the camera, viewport/DPR, render request, ordered IR passes, document revision,
+and monotonic frame id. Pass isolation is explicit: an overprint separation is
+rendered to transparent intermediate storage before multiply composition, so
+knockout white can erase earlier marks within that separation. At that recovery
+point QPainter consumed the packet in `MapWidget`; checkpoint 6 replaced that
+temporary screen path with Vello while retaining QPainter as the exact reference
+and output backend.
 
 The corresponding `NativeSurfaceWindow` uses public Qt APIs only. It owns a
 render-only `QWindow`, emits sequenced unavailable/hidden/exposed/suspended
 state, reports logical and physical size, and exposes Qt's opaque `WId` plus
 the public XCB/Wayland application display handle where required. It contains
-no map, snapshot, cache, renderer, input forwarding, retry loop, or private
-`qpa` dependency.
+no map, snapshot, cache, renderer, input forwarding, render policy, or private
+`qpa` dependency. Presentation readiness and surface-loss recovery use bounded
+event-driven retries because those are ordinary lifecycle states.
 
 Checkpoint 4 connects this boundary to a typed `cxx` bridge and Vello 0.9.0.
 Rust owns the wgpu instance, surface, adapter, device, queue, Vello renderer,
@@ -164,10 +166,11 @@ On Apple platforms, public raw-window APIs require deriving the AppKit surface
 from the `NSView` on the main thread. Only instance/surface preparation occurs
 there; the prepared wgpu objects move to and remain owned by the render thread.
 Windows, XCB, and Wayland descriptors likewise use public Qt native interfaces.
-Qt currently exposes an Android Java `View` as `WId`, not a public
-`ANativeWindow`; Android native presentation therefore remains an explicit
-cutover blocker rather than introducing Qt-private reflection. Offscreen Vello
-rendering has no such dependency.
+On Android the application traverses the public `ViewGroup` represented by the
+Qt `WId`, reuses Qt's existing `SurfaceView` or `TextureView`, and converts its
+public Java `Surface` with `ANativeWindow_fromSurface`. Acquisition runs on the
+Android main thread through `QAndroidApplication`; no Qt-private reflection,
+second rendering view, or QPA header is involved.
 
 The renderer first draws to an RGBA8 storage texture, then uses wgpu's maintained
 `TextureBlitter` for the swapchain format. The same path supports deterministic
@@ -226,10 +229,45 @@ the retained frame held 25 images and 27 raster-scene commands. Samples measured
 5.14 ms p50, 5.27 ms p95, and 7.40 ms maximum. Against the QPainter reference,
 the two maintained bilinear samplers differed by 3.05 mean RGBA-channel levels,
 with exact alpha and five high-delta pixels among 3.94 million. Peak RSS was
-468 MiB and macOS peak footprint was 1.08 GiB. The direct QPainter template path
-already consumes the asynchronous scheduler; checkpoint 6 performs the live
-Vello product cutover. Native raster presentation on Linux, Windows, and
-Android is not claimed at this checkpoint.
+468 MiB and macOS peak footprint was 1.08 GiB. Checkpoint 6's
+`TemplateLayerPlanner` now feeds raster, nested-map, and track templates into
+the same live retained Vello frame as the vector map and transient overlays.
+
+### Product cutover and output
+
+Checkpoint 6 removes the screen backing images and makes the native Vello
+surface the only live map-widget rendering path. A frame contains the map,
+templates below and above it, the map grid, and viewport-space transient IR for
+selection, tools, handles, GPS, touch, paint-on-template, print guides, and
+symbol editing. These operations use the same ordered frame submission and do
+not require a GPU readback or a model-to-QPainter screen escape hatch.
+
+`OverlaySceneBuilder` translates the small retained Qt drawing vocabulary into
+backend-neutral IR, including dashed strokes, standard hatch patterns, text,
+and stable-DPR images. Unsupported brush kinds fail at the boundary instead of
+silently changing appearance. The frame planner reuses unchanged map passes,
+assigns monotonic ids even to empty frames, and preserves the last complete
+frame while replacement work is pending.
+
+Printing, preview, PDF, raster output, map separations, grids, and templates now
+consume immutable render snapshots and IR through the QPainter output backend.
+The former direct `Map::draw`, template drawing, selection drawing, and
+MapWidget backing-store paths have been deleted. Surface exposure, resize,
+occlusion, suspension, loss, and Android view readiness are recoverable
+presentation states; actual renderer failures remain fatal and visible.
+
+Desktop tests exercise direct native-surface creation, lifecycle ordering,
+overlay fidelity, retained template composition, and shared print semantics.
+The Android arm64 package is cross-built from the same CMake preset and public
+native bridge; a physical-device surface smoke remains mandatory before the
+campaign can claim Android runtime acceptance.
+
+Checkpoint 6 closes with 35 of 35 tests passing in both Debug and Release, the
+six render/frame/raster/print tests passing under AddressSanitizer and
+UndefinedBehaviorSanitizer, and Rust test, clippy, formatting, and Android
+target checks clean. Qt's sequential package targets produced both an unsigned
+arm64 release APK and release AAB with Java compilation and Android lint in the
+gate. No physical Android device was attached for the final surface smoke.
 
 ## Lessons from the exploratory renderer
 

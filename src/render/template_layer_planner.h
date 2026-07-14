@@ -4,8 +4,8 @@
  *    This file is part of OpenOrienteering.
  */
 
-#ifndef OPENORIENTEERING_RASTER_LAYER_PLANNER_H
-#define OPENORIENTEERING_RASTER_LAYER_PLANNER_H
+#ifndef OPENORIENTEERING_TEMPLATE_LAYER_PLANNER_H
+#define OPENORIENTEERING_TEMPLATE_LAYER_PLANNER_H
 
 #include <cstddef>
 #include <memory>
@@ -20,7 +20,7 @@ class MapView;
 
 namespace render {
 
-struct RasterLayerPlan
+struct TemplateLayerPlan
 {
 	std::vector<VectorPass> below_map;
 	std::vector<VectorPass> above_map;
@@ -29,23 +29,28 @@ struct RasterLayerPlan
 };
 
 /**
- * Records visible raster templates into stable retained image scenes.
+ * Records every visible template into ordered retained scenes.
  *
  * Source decoding and caching remain properties of each template source. This
  * planner snapshots ready immutable pixels, preserves template order, and
  * admits only bounded new image data into any one frame.
  */
-class RasterLayerPlanner
+class TemplateLayerPlanner
 {
 public:
-	RasterLayerPlanner();
-	~RasterLayerPlanner();
+	TemplateLayerPlanner();
+	~TemplateLayerPlanner();
 
-	RasterLayerPlanner(const RasterLayerPlanner&) = delete;
-	RasterLayerPlanner& operator=(const RasterLayerPlanner&) = delete;
+	TemplateLayerPlanner(const TemplateLayerPlanner&) = delete;
+	TemplateLayerPlanner& operator=(const TemplateLayerPlanner&) = delete;
 
-	RasterLayerPlan plan(const Map& map,
+	TemplateLayerPlan plan(const Map& map,
 	                     const MapView& view,
+	                     Rect visible_map_rect,
+	                     double view_scale,
+	                     bool on_screen = true);
+	TemplateLayerPlan plan(const Map& map,
+	                     const MapView* view,
 	                     Rect visible_map_rect,
 	                     double view_scale,
 	                     bool on_screen = true);

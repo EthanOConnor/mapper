@@ -54,6 +54,9 @@
 #include "core/symbols/symbol.h"
 #include "gui/map/map_editor.h"
 #include "gui/map/map_widget.h"
+#include "render/qpainter_renderer.h"
+#include "render/qt_render_bridge.h"
+#include "render/render_snapshot.h"
 #include "tools/tool.h"
 #include "tools/tool_base.h"
 #include "undo/object_undo.h"
@@ -324,6 +327,13 @@ void FillTool::drawObjectIDs(Map* map, QPainter* painter, const RenderConfig &co
 	auto part = map->getCurrentPart();
 	auto num_objects = qMin(part->getNumObjects(), int(RGB_MASK));
 	auto num_colors = map->getNumColors();
+	auto const request = render::RenderRequest {
+		render::fromQRectF(config.bounding_box),
+		config.scaling,
+		config.options,
+		config.opacity,
+	};
+	render::QPainterRenderer renderer;
 	for (auto c = num_colors-1; c >= MapColor::Reserved; --c)
 	{
 		auto map_color = map->getColor(c);
@@ -342,7 +352,10 @@ void FillTool::drawObjectIDs(Map* map, QPainter* painter, const RenderConfig &co
 			}
 			
 			object->update();
-			object->renderables().draw(c, QRgb(o) | ~RGB_MASK, painter, config);
+			auto scene = object->renderables().buildIR(
+				c, render::fromQColor(QColor::fromRgba(QRgb(o) | ~RGB_MASK)), request
+			);
+			renderer.render(*painter, *scene, request);
 		}
 	}
 }

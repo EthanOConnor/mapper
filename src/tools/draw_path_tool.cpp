@@ -535,13 +535,12 @@ bool DrawPathTool::keyReleaseEvent(QKeyEvent* event)
 	return false;
 }
 
-void DrawPathTool::draw(QPainter* painter, MapWidget* widget)
+void DrawPathTool::draw(render::OverlaySceneBuilder* painter, MapWidget* widget)
 {
 	drawPreviewObjects(painter, widget);
 	
 	if (editingInProgress())
 	{
-		painter->setRenderHint(QPainter::Antialiasing);
 		
 		auto azimuth_info_pending = azimuth_helper->isActive();
 		

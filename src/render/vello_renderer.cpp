@@ -266,7 +266,8 @@ public:
 				{
 					auto const& elements = paths.get(op.path);
 					ffi::scene_stroke_path(
-						*builder, slice(elements), ffiColor(op.color), ffiStroke(op.style)
+						*builder, slice(elements), ffiColor(op.color), ffiStroke(op.style),
+						slice(op.style.dash_pattern), op.style.dash_offset
 					);
 				}
 				else if constexpr (std::is_same_v<T, FillEllipse>)
@@ -357,13 +358,16 @@ public:
 	                                      std::uint64_t surface_sequence,
 	                                      Color background)
 	{
-		auto transform = frame.view.world_to_viewport;
-		transform.m11 *= device_pixel_ratio;
-		transform.m12 *= device_pixel_ratio;
-		transform.m21 *= device_pixel_ratio;
-		transform.m22 *= device_pixel_ratio;
-		transform.dx *= device_pixel_ratio;
-		transform.dy *= device_pixel_ratio;
+		auto world_transform = frame.view.world_to_viewport;
+		world_transform.m11 *= device_pixel_ratio;
+		world_transform.m12 *= device_pixel_ratio;
+		world_transform.m21 *= device_pixel_ratio;
+		world_transform.m22 *= device_pixel_ratio;
+		world_transform.dx *= device_pixel_ratio;
+		world_transform.dy *= device_pixel_ratio;
+		Transform const viewport_transform {
+			device_pixel_ratio, 0, 0, device_pixel_ratio, 0, 0
+		};
 
 		ffi::FrameHeader header;
 		header.frame_id = frame.id;
@@ -371,7 +375,7 @@ public:
 		header.surface_sequence = surface_sequence;
 		header.width = width;
 		header.height = height;
-		header.world_to_surface = ffiTransform(transform);
+		header.world_to_surface = ffiTransform(world_transform);
 		header.background = ffiColor(background);
 		auto request = ffi::new_frame(header);
 		for (auto const& pass : frame.vector_passes)
@@ -380,7 +384,9 @@ public:
 				continue;
 			auto const retained = encode(pass.scene);
 			ffi::frame_add_pass(
-				*request, *retained->scene, ffiBlend(pass.blend), pass.opacity, pass.isolated
+				*request, *retained->scene, ffiBlend(pass.blend), pass.opacity, pass.isolated,
+				ffiTransform(pass.space == VectorPass::Space::World
+				             ? world_transform : viewport_transform)
 			);
 		}
 		return request;

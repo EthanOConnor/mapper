@@ -32,7 +32,6 @@
 #include <QBrush>
 #include <QByteArray>
 #include <QDialog>
-#include <QFileInfo>  // IWYU pragma: keep
 #include <QImageReader>
 #include <QImageWriter>
 #include <QLatin1String>
@@ -156,12 +155,7 @@ bool TemplateImage::saveTemplateFile() const
 			return false;
 		}
 	}
-	
-#ifdef Q_OS_ANDROID
-	// Make the MediaScanner aware of the *updated* file.
-	Android::mediaScannerScanFile(QFileInfo(template_path).absolutePath());
-#endif
-	
+
 	const_cast<TemplateImage*>(this)->setHasUnsavedChanges(false);
 	return true;
 }
@@ -331,15 +325,6 @@ void TemplateImage::unloadTemplateFileImpl()
 	image = QImage();
 }
 
-void TemplateImage::drawTemplate(QPainter* painter, const QRectF& /*clip_rect*/, double /*scale*/, bool /*on_screen*/, qreal opacity) const
-{
-	applyTemplateTransform(painter);
-	
-	painter->setRenderHint(QPainter::SmoothPixmapTransform);
-	painter->setOpacity(opacity);
-	painter->drawImage(QPointF(-image.width() * 0.5, -image.height() * 0.5), image);
-	painter->setRenderHint(QPainter::SmoothPixmapTransform, false);
-}
 QRectF TemplateImage::getTemplateExtent() const
 {
     // If the image is invalid, the extent is an empty rectangle.

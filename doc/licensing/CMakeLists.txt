@@ -116,7 +116,8 @@ endif()
 # Official Qt binary archives contain one SPDX document per installed module.
 # Install those upstream-generated inventories rather than maintaining a local
 # list that can drift from the actual Qt deployment closure.
-file(GLOB qt_sboms CONFIGURE_DEPENDS "${QT_INSTALL_PREFIX}/sbom/*.spdx.json")
+get_filename_component(qt_install_prefix "${Qt6_DIR}/../../.." ABSOLUTE)
+file(GLOB qt_sboms CONFIGURE_DEPENDS "${qt_install_prefix}/sbom/*.spdx.json")
 foreach(qt_sbom IN LISTS qt_sboms)
 	get_filename_component(qt_sbom_name "${qt_sbom}" NAME)
 	mapper_add_dependency_notice(

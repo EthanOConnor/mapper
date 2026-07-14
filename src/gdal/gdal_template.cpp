@@ -33,7 +33,6 @@
 #include <QFile>
 #include <QImageReader>
 #include <QMetaObject>
-#include <QPainter>
 #include <QPointF>
 #include <QRect>
 #include <QRectF>
@@ -406,84 +405,6 @@ void GdalTemplate::updateRenderContext(const ViewRenderContext& context)
 }
 
 
-void GdalTemplate::drawTemplate(QPainter* painter, const QRectF& clip_rect, double scale, bool on_screen, qreal opacity) const
-{
-	if (!isTiledSource())
-	{
-		TemplateImage::drawTemplate(painter, clip_rect, scale, on_screen, opacity);
-		return;
-	}
-
-	applyTemplateTransform(painter);
-	painter->setRenderHint(QPainter::SmoothPixmapTransform);
-	painter->setOpacity(opacity);
-
-	int subsampling = wanted_window.subsampling;
-	if (!on_screen)
-	{
-		auto effective_scale = scale;
-		auto dpi = painter->device()->physicalDpiX();
-		if (!dpi)
-			dpi = painter->device()->logicalDpiX();
-		if (dpi > 0)
-			effective_scale *= dpi / 25.4;
-		subsampling = chooseTiledSubsampling(effective_scale);
-	}
-
-	auto const window = tileWindowForMapRect(clip_rect, subsampling);
-	auto const half_w = tiled_raster_size.width() * 0.5;
-	auto const half_h = tiled_raster_size.height() * 0.5;
-
-	for (int ty = window.tile_y_min; ty <= window.tile_y_max; ++ty)
-	{
-		for (int tx = window.tile_x_min; tx <= window.tile_x_max; ++tx)
-		{
-			auto const src = sourceRectForTile(tiled_raster_size, tiled_raster_info.block_size, tx, ty, subsampling);
-			if (src.isEmpty())
-				continue;
-
-			auto const dest_rect = QRectF(src.x() - half_w, src.y() - half_h, src.width(), src.height());
-			auto const key = tileKey(tx, ty, subsampling);
-
-			if (auto const* exact = tile_cache.object(key))
-			{
-				auto const decoded = decodedSourceRectForTile(
-					tiled_raster_size, tiled_raster_info.block_size, tx, ty, subsampling
-				);
-				auto const image_source = sourceRectWithinCachedTile(
-					src, decoded, exact->size()
-				);
-				painter->drawImage(dest_rect, *exact, image_source);
-				continue;
-			}
-
-			if (on_screen)
-			{
-				QRectF fallback_source_rect;
-				auto const* fallback = findBestCachedTile(tx, ty, subsampling, &fallback_source_rect);
-				if (fallback)
-					painter->drawImage(dest_rect, *fallback, fallback_source_rect);
-			}
-			else
-			{
-				auto tile = readTileImage(tx, ty, subsampling);
-				if (!tile.isNull())
-				{
-					auto const decoded = decodedSourceRectForTile(
-						tiled_raster_size, tiled_raster_info.block_size, tx, ty, subsampling
-					);
-					painter->drawImage(
-						dest_rect, tile, sourceRectWithinCachedTile(src, decoded, tile.size())
-					);
-				}
-			}
-		}
-	}
-
-	painter->setRenderHint(QPainter::SmoothPixmapTransform, false);
-}
-
-
 QRectF GdalTemplate::getTemplateExtent() const
 {
 	if (!isTiledSource())
@@ -539,6 +460,25 @@ void GdalTemplate::collectRasterTiles(const QRectF& map_clip_rect,
 					false,
 				});
 				continue;
+			}
+			if (!on_screen)
+			{
+				auto exact = readTileImage(tx, ty, subsampling);
+				if (!exact.isNull())
+				{
+					auto const decoded = decodedSourceRectForTile(
+						tiled_raster_size, tiled_raster_info.block_size,
+						tx, ty, subsampling
+					);
+					out.push_back({
+						exact,
+						target,
+						sourceRectWithinCachedTile(core, decoded, exact.size()),
+						quint64(exact.cacheKey()),
+						false,
+					});
+					continue;
+				}
 			}
 
 			if (on_screen)

@@ -30,6 +30,9 @@
 #include <QPageLayout>
 #include <QPageSize>
 #include <QRectF>
+
+#include "render/frame_pipeline.h"
+#include "render/template_layer_planner.h"
 #include <QSizeF>
 #include <QString>
 #include <QTransform>
@@ -501,6 +504,8 @@ protected:
 	std::vector<qreal> h_page_pos;
 	std::vector<qreal> v_page_pos;
 	bool cancel_print_map = false;
+	mutable render::FramePlanner frame_planner;
+	mutable render::TemplateLayerPlanner template_layer_planner;
 };
 
 #endif

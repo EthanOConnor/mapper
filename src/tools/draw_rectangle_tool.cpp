@@ -426,7 +426,7 @@ bool DrawRectangleTool::keyReleaseEvent(QKeyEvent* event)
 	return false;
 }
 
-void DrawRectangleTool::draw(QPainter* painter, MapWidget* widget)
+void DrawRectangleTool::draw(render::OverlaySceneBuilder* painter, MapWidget* widget)
 {
 	drawPreviewObjects(painter, widget);
 	
@@ -451,7 +451,6 @@ void DrawRectangleTool::draw(QPainter* painter, MapWidget* widget)
 			use_preview_radius = false;
 		
 		auto helper_cross_radius = Settings::getInstance().getRectangleToolHelperCrossRadiusPx();
-		painter->setRenderHint(QPainter::Antialiasing);
 		
 		auto perp_vector = forward_vector.perpRight();
 		
