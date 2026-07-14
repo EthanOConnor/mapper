@@ -27,6 +27,8 @@
 #include <QStringView>  // IWYU pragma: keep
 #include <QVector>
 
+#include "core/document_path.h"
+
 
 namespace
 {
@@ -52,6 +54,32 @@ void FileDialog::adjustParameters(QStringView filter, QFileDialog::Options& opti
 	
 	if (has_long_filters)
 		options |= QFileDialog::HideNameFilterDetails;
+}
+
+QString FileDialog::getOpenFileName(QWidget* parent,
+                                    const QString& caption,
+                                    const QString& dir,
+                                    QString filter,
+                                    QString* selected_filter,
+                                    QFileDialog::Options options)
+{
+	adjustParameters(filter, options);
+	return DocumentPath::fromUrl(
+		QFileDialog::getOpenFileUrl(parent, caption, DocumentPath::toUrl(dir),
+		                            filter, selected_filter, options));
+}
+
+QString FileDialog::getSaveFileName(QWidget* parent,
+                                    const QString& caption,
+                                    const QString& dir,
+                                    QString filter,
+                                    QString* selected_filter,
+                                    QFileDialog::Options options)
+{
+	adjustParameters(filter, options);
+	return DocumentPath::fromUrl(
+		QFileDialog::getSaveFileUrl(parent, caption, DocumentPath::toUrl(dir),
+		                            filter, selected_filter, options));
 }
 
 

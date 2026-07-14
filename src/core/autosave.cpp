@@ -20,10 +20,10 @@
 #include "autosave.h"
 
 #include <QtGlobal>
-#include <QLatin1String>
 #include <QString>
 #include <QVariant>
 
+#include "core/document_path.h"
 #include "settings.h"
 
 
@@ -122,7 +122,7 @@ Autosave::~Autosave() = default;
 
 QString Autosave::autosavePath(const QString &path) const
 {
-	return path + QLatin1String(".autosave");
+	return DocumentPath::autosavePath(path);
 }
 
 void Autosave::setAutosaveNeeded(bool needed)

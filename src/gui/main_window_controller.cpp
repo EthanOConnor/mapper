@@ -110,9 +110,10 @@ bool MainWindowController::keyReleaseEventFilter(QKeyEvent* event)
 	return false;
 }
 
-MainWindowController* MainWindowController::controllerForFile(const QString& filename)
+MainWindowController* MainWindowController::controllerForFile(const QString& filename, const FileFormat* format)
 {
-	if (FileFormats.findFormatForFilename(filename, &FileFormat::supportsReading))
+	if ((format && format->supportsReading())
+	    || FileFormats.findFormatForFilename(filename, &FileFormat::supportsReading))
 		return new MapEditorController(MapEditorController::MapEditor);
 	
 	return nullptr;

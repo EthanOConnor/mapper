@@ -120,8 +120,10 @@ endfunction()
 # Unit tests
 add_unit_test(tst_qglobal)
 add_unit_test(autosave_t MANUAL ../src/core/autosave
+	../src/core/document_path
 	../src/settings
 )
+add_unit_test(document_path_t ../src/core/document_path)
 add_unit_test(encoding_t ../src/util/encoding)
 target_link_libraries(encoding_t PRIVATE ICU::uc)
 add_unit_test(georef_ocd_mapping_t

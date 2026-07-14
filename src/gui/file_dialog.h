@@ -45,39 +45,31 @@ namespace FileDialog {
 	
 	
 	/**
-	 * Calls QFileDialog::getOpenFileName with adjusted parameters.
+	 * Calls QFileDialog::getOpenFileUrl with adjusted parameters and returns a
+	 * local path or Android document URI accepted by QFile.
 	 * 
-	 * \see adjustParameters, QFileDialog::getOpenFileName
+	 * \see adjustParameters, QFileDialog::getOpenFileUrl
 	 */
-	inline
 	QString getOpenFileName(QWidget* parent = nullptr,
 	                        const QString& caption = {},
 	                        const QString& dir = {},
 	                        QString filter = {},
 	                        QString* selected_filter = nullptr,
-	                        QFileDialog::Options options = {})
-	{
-		adjustParameters(filter, options);
-		return QFileDialog::getOpenFileName(parent, caption, dir, filter, selected_filter, options);
-	}
+	                        QFileDialog::Options options = {});
 	
 	
 	/**
-	 * Calls QFileDialog::getSaveFileName with adjusted parameters.
+	 * Calls QFileDialog::getSaveFileUrl with adjusted parameters and returns a
+	 * local path or Android document URI accepted by QFile.
 	 * 
-	 * \see adjustParameters, QFileDialog::getSaveFileName
+	 * \see adjustParameters, QFileDialog::getSaveFileUrl
 	 */
-	inline
 	QString getSaveFileName(QWidget* parent = nullptr,
 	                        const QString& caption = {},
 	                        const QString& dir = {},
 	                        QString filter = {},
 	                        QString* selected_filter = nullptr,
-	                        QFileDialog::Options options = {})
-	{
-		adjustParameters(filter, options);
-		return QFileDialog::getSaveFileName(parent, caption, dir, filter, selected_filter, options);
-	}
+	                        QFileDialog::Options options = {});
 	
 	
 }  // namespace FileDialog

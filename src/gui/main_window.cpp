@@ -49,6 +49,7 @@
 
 #include "mapper_config.h"
 #include "settings.h"
+#include "core/document_path.h"
 #include "core/map.h"
 #include "core/map_view.h"
 #include "core/symbols/symbol.h"
@@ -168,8 +169,7 @@ void MainWindow::applicationStateChanged()
 		auto intent_uri = activity.callMethod<QString>("takeIntentUri");
 		if (!intent_uri.isEmpty())
 		{
-			const auto intent_url = QUrl{intent_uri};
-			const auto selected_file = intent_url.isLocalFile() ? intent_url.toLocalFile() : intent_uri;
+			const auto selected_file = DocumentPath::fromUrl(QUrl{intent_uri});
 			if (!hasOpenedFile())
 			{
 				openPathLater(selected_file);
@@ -506,23 +506,26 @@ void MainWindow::createHelpMenu()
 void MainWindow::setCurrentFile(const QString& path, const FileFormat* format)
 {
 	Q_ASSERT(has_opened_file || path.isEmpty());
+	const auto identity = DocumentPath::canonical(path);
 	
-	if (path != current_path)
+	if (identity != current_path)
 	{
 		QString window_file_path;
 		current_path.clear();
 		current_format = nullptr;
 		if (has_opened_file)
 		{
-			window_file_path = QFileInfo(path).canonicalFilePath();
-			if (window_file_path.isEmpty())
+			if (identity.isEmpty())
 			{
 				window_file_path = tr("Unsaved file");
 			}
 			else
 			{
-				current_path = window_file_path;
+				current_path = identity;
 				current_format = format;
+				window_file_path = DocumentPath::isContentUri(identity)
+				                 ? DocumentPath::displayName(identity)
+				                 : identity;
 			}
 		}
 		setWindowFilePath(window_file_path);
@@ -535,18 +538,23 @@ void MainWindow::setCurrentFile(const QString& path, const FileFormat* format)
 
 void MainWindow::setMostRecentlyUsedFile(const QString& path)
 {
-	if (!path.isEmpty())
+	const auto identity = DocumentPath::canonical(path);
+	if (!identity.isEmpty())
 	{
 		Settings& settings = Settings::getInstance();
 		
 		// Update least recently used directory
-		const QString open_directory = QFileInfo(path).canonicalPath();
-		QSettings().setValue(QString::fromLatin1("openFileDirectory"), open_directory);
+		if (!DocumentPath::isContentUri(identity))
+		{
+			const QString open_directory = QFileInfo(identity).canonicalPath();
+			if (!open_directory.isEmpty())
+				QSettings().setValue(QString::fromLatin1("openFileDirectory"), open_directory);
+		}
 		
 		// Update recent file lists
 		QStringList files = settings.getSettingCached(Settings::General_RecentFilesList).toStringList();
-		files.removeAll(path);
-		files.prepend(path);
+		files.removeAll(identity);
+		files.prepend(identity);
 		if (files.size() > max_recent_files)
 			files.erase(files.begin() + max_recent_files, files.end());
 		settings.setSetting(Settings::General_RecentFilesList, files);
@@ -787,7 +795,7 @@ void MainWindow::loadWindowSettings()
 
 MainWindow* MainWindow::findMainWindow(const QString& file_name)
 {
-	QString canonical_file_path = QFileInfo(file_name).canonicalFilePath();
+	const auto canonical_file_path = DocumentPath::canonical(file_name);
 	if (canonical_file_path.isEmpty())
 		return nullptr;
 	
@@ -900,7 +908,7 @@ bool MainWindow::openPath(const QString& path, const FileFormat* format)
 		return true;
 	
 #ifdef Q_OS_ANDROID
-	showStatusBarMessageImmediately(tr("Opening %1").arg(QFileInfo(path).fileName()));
+	showStatusBarMessageImmediately(tr("Opening %1").arg(DocumentPath::displayName(path)));
 #else
 	MainWindow* const existing = findMainWindow(path);
 	if (existing)
@@ -913,9 +921,12 @@ bool MainWindow::openPath(const QString& path, const FileFormat* format)
 #endif
 	
 	if (!format || !format->supportsReading())
+	{
 		QMessageBox::warning(this, tr("Error"),
 		                     tr("Cannot open file:\n%1\n\n%2").
 		                     arg(path, tr("Invalid file type.")));
+		return false;
+	}
 	
 	// Check a blocker that prevents immediate re-opening of crashing files.
 	// Needed for stopping auto-loading a crashing file on startup.
@@ -938,7 +949,7 @@ bool MainWindow::openPath(const QString& path, const FileFormat* format)
 	settings.setValue(reopen_blocker, path);
 	settings.sync();
 	
-	MainWindowController* const new_controller = MainWindowController::controllerForFile(path);
+	MainWindowController* const new_controller = MainWindowController::controllerForFile(path, format);
 	if (!new_controller)
 	{
 		QMessageBox::warning(this, tr("Error"), tr("Cannot open file:\n%1\n\nFile format not recognized.").arg(path));
@@ -1032,8 +1043,8 @@ void MainWindow::switchActualPath(const QString& path)
 	if (ret != QMessageBox::Cancel)
 	{
 		const QString& current_path = currentPath();
-		MainWindowController* const new_controller = MainWindowController::controllerForFile(current_path);
 		auto format = (path == current_path) ? current_format : FileFormats.findFormat(FileFormats.defaultFormat());
+		MainWindowController* const new_controller = MainWindowController::controllerForFile(current_path, format);
 		if (new_controller && new_controller->loadFrom(path, *format, this))
 		{
 			setController(new_controller, current_path, format);
@@ -1079,7 +1090,7 @@ void MainWindow::updateRecentFileActions()
 	
 	open_recent_menu->clear();
 	for (int i = 0; i < num_recent_files; ++i) {
-		QString text = tr("&%1 %2").arg(i + 1).arg(QFileInfo(files[i]).fileName());
+		QString text = tr("&%1 %2").arg(i + 1).arg(DocumentPath::displayName(files[i]));
 		recent_file_act[i]->setText(text);
 		recent_file_act[i]->setData(files[i]);
 		open_recent_menu->addAction(recent_file_act[i]);
@@ -1238,7 +1249,7 @@ MainWindow::FileInfo MainWindow::getOpenFileName(QWidget* parent, const QString&
 	const FileFormat* format = nullptr;
 	if (!path.isEmpty())
 	{
-		path = QFileInfo(path).canonicalFilePath();
+		path = DocumentPath::canonical(path);
 		format = FileFormats.findFormatByFilter(filter, &FileFormat::supportsFileOpen);
 		if (!format)
 			format = FileFormats.findFormatForFilename(path, &FileFormat::supportsFileOpen);
@@ -1275,8 +1286,9 @@ bool MainWindow::showSaveAsDialog()
 		return false;
 	
 	// Try current directory first
-	QFileInfo current(currentPath());
-	QString save_directory = current.canonicalPath();
+	QString save_directory;
+	if (!DocumentPath::isContentUri(currentPath()))
+		save_directory = QFileInfo(currentPath()).canonicalPath();
 	if (save_directory.isEmpty())
 	{
 		// revert to least recently used directory or home directory.
@@ -1317,6 +1329,16 @@ bool MainWindow::showSaveAsDialog()
 	
 	const FileFormat *format = FileFormats.findFormatByFilter(filter, &FileFormat::supportsFileSaveAs);
 	if (!format)
+		format = FileFormats.findFormatForFilename(path, &FileFormat::supportsFileSaveAs);
+	if (!format && current_format && current_format->supportsFileSaveAs())
+		format = current_format;
+	if (!format)
+	{
+		auto* const default_format = FileFormats.findFormat(FileFormats.defaultFormat());
+		if (default_format && default_format->supportsFileSaveAs())
+			format = default_format;
+	}
+	if (!format)
 	{
 		QMessageBox::information(this, tr("Error"), 
 		  tr("File could not be saved:") + QLatin1Char('\n') +
@@ -1325,7 +1347,8 @@ bool MainWindow::showSaveAsDialog()
 		return false;
 	}
 	
-	path = format->fixupExtension(path);
+	if (!DocumentPath::isContentUri(path))
+		path = format->fixupExtension(path);
 	return saveTo(path, *format);
 }
 

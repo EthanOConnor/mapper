@@ -28,6 +28,7 @@
 #include <QtGlobal>
 #include <QtMath>
 #include <QChar>
+#include <QByteArray>
 #include <QFile>
 #include <QFileInfo>  // IWYU pragma: keep
 #include <QFlags>
@@ -37,7 +38,9 @@
 #include <QObject>
 #include <QSaveFile>
 #include <QScopedValueRollback>
+#include <QTemporaryFile>
 
+#include "core/document_path.h"
 #include "core/georeferencing.h"
 #include "core/map.h"
 #include "core/map_part.h"
@@ -281,13 +284,24 @@ Exporter::~Exporter() = default;
 bool Exporter::doExport()
 {
 	std::unique_ptr<QSaveFile> managed_file;
+	std::unique_ptr<QTemporaryFile> staged_file;
 	QScopedValueRollback<QIODevice*> original_device{device_};
 	if (supportsQIODevice())
 	{
 		if (!device_)
 		{
-			managed_file = std::make_unique<QSaveFile>(path);
-			device_ = managed_file.get();
+			if (DocumentPath::isContentUri(path))
+			{
+				// Android document providers do not offer QSaveFile's atomic rename.
+				// Complete serialization locally before replacing the selected document.
+				staged_file = std::make_unique<QTemporaryFile>();
+				device_ = staged_file.get();
+			}
+			else
+			{
+				managed_file = std::make_unique<QSaveFile>(path);
+				device_ = managed_file.get();
+			}
 		}
 		if (!device_->isOpen() && !device_->open(QIODevice::WriteOnly))
 		{
@@ -309,6 +323,56 @@ bool Exporter::doExport()
 		{
 			addWarning(managed_file->errorString());
 			success = false;
+		}
+		if (success && staged_file)
+		{
+			if (!staged_file->flush() || !staged_file->seek(0))
+			{
+				addWarning(staged_file->errorString());
+				success = false;
+			}
+			else
+			{
+				QFile destination{path};
+				if (!destination.open(QIODevice::WriteOnly | QIODevice::Truncate))
+				{
+					addWarning(tr("Cannot open file\n%1:\n%2").arg(path, destination.errorString()));
+					success = false;
+				}
+				else
+				{
+					QByteArray buffer(64 * 1024, Qt::Uninitialized);
+					while (success)
+					{
+						const auto count = staged_file->read(buffer.data(), buffer.size());
+						if (count == 0)
+							break;
+						if (count < 0)
+						{
+							addWarning(staged_file->errorString());
+							success = false;
+							break;
+						}
+						qint64 offset = 0;
+						while (offset < count)
+						{
+							const auto written = destination.write(buffer.constData() + offset, count - offset);
+							if (written <= 0)
+							{
+								addWarning(destination.errorString());
+								success = false;
+								break;
+							}
+							offset += written;
+						}
+					}
+					if (success && !destination.flush())
+					{
+						addWarning(destination.errorString());
+						success = false;
+					}
+				}
+			}
 		}
 	}
 	catch (std::exception &e)

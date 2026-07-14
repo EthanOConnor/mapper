@@ -95,6 +95,7 @@
 #endif
 
 #include "settings.h"
+#include "core/document_path.h"
 #include "core/georeferencing.h"
 #include "core/map.h"
 #include "core/map_coord.h"
@@ -611,6 +612,13 @@ bool MapEditorController::exportTo(const QString& path, const FileFormat& format
 		            format.description(),
 		            format.fileExtensions().join(QLatin1String(", ")) );
 		QMessageBox::warning(nullptr, tr("Error"), message);
+		return false;
+	}
+	if (DocumentPath::isContentUri(path) && !exporter->supportsQIODevice())
+	{
+		QMessageBox::warning(window, tr("Error"),
+		                     tr("This export format cannot write directly to an Android document. "
+		                        "Choose a local folder or another format."));
 		return false;
 	}
 	
@@ -1785,7 +1793,8 @@ void MapEditorController::exportVectorData(int file_types, const QString& format
 	if (filename.isEmpty())
 		return;
 	
-	settings.setValue(QString::fromLatin1("importFileDirectory"), QFileInfo(filename).canonicalPath());
+	if (!DocumentPath::isContentUri(filename))
+		settings.setValue(QString::fromLatin1("importFileDirectory"), QFileInfo(filename).canonicalPath());
 	settings.setValue(format_settings_key, selected_filter);
 	
 	auto const* format = FileFormats.findFormatByFilter(selected_filter, &FileFormat::supportsFileExport);
@@ -1799,7 +1808,8 @@ void MapEditorController::exportVectorData(int file_types, const QString& format
 		return;
 	}
 	
-	filename = format->fixupExtension(filename);
+	if (!DocumentPath::isContentUri(filename))
+		filename = format->fixupExtension(filename);
 	exportTo(filename, *format);
 }
 

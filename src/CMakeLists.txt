@@ -77,6 +77,7 @@ set(Mapper_Common_SRCS
   core/autosave.cpp
   core/crs_template.cpp
   core/crs_template_implementation.cpp
+  core/document_path.cpp
   core/georeferencing.cpp
   core/latlon.cpp
   core/map.cpp

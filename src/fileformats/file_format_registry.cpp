@@ -23,6 +23,7 @@
 #include <QFile>
 #include <QFileInfo>
 
+#include "core/document_path.h"
 #include "fileformats/file_import_export.h"
 
 
@@ -83,7 +84,7 @@ std::unique_ptr<FileFormat> FileFormatRegistry::unregisterFormat(const FileForma
 
 std::unique_ptr<Importer> FileFormatRegistry::makeImporter(const QString& path, Map& map, MapView* view)
 {
-	auto extension = QFileInfo(path).suffix();
+	auto extension = DocumentPath::suffix(path);
 	auto format = findFormat([extension](auto format) {
 		return format->supportsReading()
 		       && format->fileExtensions().contains(extension, Qt::CaseInsensitive);
@@ -95,7 +96,7 @@ std::unique_ptr<Importer> FileFormatRegistry::makeImporter(const QString& path, 
 
 std::unique_ptr<Exporter> FileFormatRegistry::makeExporter(const QString& path, const Map* map, const MapView* view)
 {
-	auto extension = QFileInfo(path).suffix();
+	auto extension = DocumentPath::suffix(path);
 	auto format = findFormat([extension](auto format) {
 		return format->supportsWriting()
 		       && format->fileExtensions().contains(extension, Qt::CaseInsensitive);
@@ -132,7 +133,7 @@ const FileFormat *FileFormatRegistry::findFormatByFilter(const QString& filter, 
 
 const FileFormat *FileFormatRegistry::findFormatForFilename(const QString& filename, bool (FileFormat::*predicate)() const) const
 {
-	auto extension = QFileInfo(filename).suffix();
+	auto extension = DocumentPath::suffix(filename);
 	return findFormat([predicate, extension](auto format) {
 		return (format->*predicate)()
 		       && format->fileExtensions().contains(extension, Qt::CaseInsensitive);

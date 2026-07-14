@@ -37,6 +37,7 @@
 #include <QVBoxLayout>
 
 #include "settings.h"
+#include "core/document_path.h"
 #include "core/storage_location.h" // IWYU pragma: keep
 #include "fileformats/file_format_registry.h"
 #include "gui/home_screen_controller.h"
@@ -276,7 +277,7 @@ void HomeScreenWidgetDesktop::setRecentFiles(const QStringList& files)
 	recent_files_list->clear();
 	for (auto&& file : files)
 	{
-		QListWidgetItem* new_item = new QListWidgetItem(QFileInfo(file).fileName());
+		QListWidgetItem* new_item = new QListWidgetItem(DocumentPath::displayName(file));
 		new_item->setData(pathRole(), file);
 		new_item->setToolTip(file);
 		recent_files_list->addItem(new_item);
@@ -339,6 +340,15 @@ HomeScreenWidgetMobile::HomeScreenWidgetMobile(HomeScreenController* controller,
 	title_label->setPixmap(title_pixmap);
 	title_label->setAlignment(Qt::AlignCenter);
 	layout->addWidget(title_label);
+
+	auto* document_buttons = new QHBoxLayout();
+	auto* new_button = new QPushButton(tr("Create new map"));
+	auto* open_button = new QPushButton(tr("Open map"));
+	connect(new_button, &QPushButton::clicked, controller->getWindow(), &MainWindow::showNewMapWizard);
+	connect(open_button, &QPushButton::clicked, controller->getWindow(), &MainWindow::showOpenDialog);
+	document_buttons->addWidget(new_button);
+	document_buttons->addWidget(open_button);
+	layout->addLayout(document_buttons);
 	
 	file_list_widget = makeFileListWidget();
 	connect(file_list_widget, &QListWidget::itemClicked, this, &HomeScreenWidgetMobile::itemClicked);
@@ -392,7 +402,8 @@ void HomeScreenWidgetMobile::adjustTitlePixmapSize()
 
 void HomeScreenWidgetMobile::setRecentFiles(const QStringList& /*files*/)
 {
-	// nothing
+	if (history.empty())
+		updateFileListWidget();
 }
 
 void HomeScreenWidgetMobile::setOpenMRUFileChecked(bool /*state*/)
@@ -441,6 +452,13 @@ void HomeScreenWidgetMobile::itemClicked(QListWidgetItem* item)
 		QMessageBox::warning(this,
 		                     ::OpenOrienteering::MainWindow::tr("Warning"),
 		                     StorageLocation::fileHintTextTemplate(hint).arg(file_path));
+	}
+	else if (DocumentPath::isContentUri(file_path))
+	{
+		setEnabled(false);
+		QApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 100 /* ms */);
+		controller->getWindow()->openPath(file_path);
+		setEnabled(true);
 	}
 	else if (QFileInfo(file_path).isDir())
 	{
@@ -501,9 +519,20 @@ void HomeScreenWidgetMobile::updateFileListWidget()
 		auto recent_files = settings.getSetting(Settings::General_RecentFilesList).toStringList();
 		for (auto& file_path : recent_files)
 		{
-			auto file_info = QFileInfo(file_path);
-			if (file_info.exists())
-				addItemToFileList(file_info);
+			if (DocumentPath::isContentUri(file_path))
+			{
+				auto* item = new QListWidgetItem(DocumentPath::displayName(file_path));
+				item->setData(pathRole(), file_path);
+				item->setData(hintRole(), StorageLocation::HintNormal);
+				item->setToolTip(file_path);
+				file_list_widget->addItem(item);
+			}
+			else
+			{
+				auto file_info = QFileInfo(file_path);
+				if (file_info.exists())
+					addItemToFileList(file_info);
+			}
 		}
 		
 #ifdef Q_OS_ANDROID

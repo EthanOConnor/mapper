@@ -37,7 +37,13 @@ std::shared_ptr<const std::vector<StorageLocation>> StorageLocation::knownLocati
 	locations.reserve(std::size_t(paths.size()));
 	for (const auto& path : paths)
 	{
-		locations.emplace_back(path, HintNormal);
+		locations.emplace_back(path,
+#ifdef Q_OS_ANDROID
+		                       HintApplication
+#else
+		                       HintNormal
+#endif
+		);
 	}
 	return std::make_shared<const std::vector<StorageLocation>>(std::move(locations));
 }

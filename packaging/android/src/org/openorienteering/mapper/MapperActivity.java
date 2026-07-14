@@ -80,7 +80,23 @@ public class MapperActivity extends QtActivity
 		Uri uri = intent.getData();
 		setIntent(null);
 		if ((Intent.ACTION_EDIT.equals(action) || Intent.ACTION_VIEW.equals(action)) && uri != null)
+		{
+			int flags = intent.getFlags()
+				& (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+			if ((intent.getFlags() & Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION) != 0
+			    && flags != 0)
+			{
+				try
+				{
+					getContentResolver().takePersistableUriPermission(uri, flags);
+				}
+				catch (SecurityException ignored)
+				{
+					// Some providers advertise persistence but reject the request.
+				}
+			}
 			return uri.toString();
+		}
 		return "";
 	}
 

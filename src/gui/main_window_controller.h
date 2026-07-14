@@ -141,9 +141,10 @@ public:
 	
 	/** Get a controller suitable for a particular file.
 	 *  @param filename the name of the file
+	 *  @param format the already detected format, if available
 	 *  @return a MainWindowController that is able to load the file
 	 */
-	static MainWindowController* controllerForFile(const QString& filename);
+	static MainWindowController* controllerForFile(const QString& filename, const FileFormat* format = nullptr);
 	
 protected:
 	MainWindow* window;
