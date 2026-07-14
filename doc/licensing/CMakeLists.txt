@@ -80,6 +80,39 @@ if(TARGET cove)
 	)
 endif()
 
+set(rust_notice_count 0)
+find_program(mapper_cargo_about NAMES cargo-about)
+if(mapper_cargo_about)
+	set(rust_notice "${CMAKE_CURRENT_BINARY_DIR}/rust-dependencies.html")
+	execute_process(
+		COMMAND "${mapper_cargo_about}" generate
+			--locked
+			--fail
+			--target all
+			--manifest-path "${PROJECT_SOURCE_DIR}/src/render/vello/Cargo.toml"
+			--config "${PROJECT_SOURCE_DIR}/src/render/vello/about.toml"
+			--output-file "${rust_notice}"
+			"${CMAKE_CURRENT_SOURCE_DIR}/rust-dependencies.hbs"
+		RESULT_VARIABLE cargo_about_result
+		OUTPUT_VARIABLE cargo_about_output
+		ERROR_VARIABLE cargo_about_error
+	)
+	if(NOT cargo_about_result EQUAL 0)
+		message(FATAL_ERROR
+			"cargo-about failed (${cargo_about_result}):\n${cargo_about_output}${cargo_about_error}")
+	endif()
+	mapper_add_dependency_notice(
+		rust
+		"Rust dependency notices from Cargo.lock"
+		"${rust_notice}"
+		licenses.html
+	)
+	set(rust_notice_count 1)
+elseif(Mapper_PACKAGE_BUILD)
+	message(FATAL_ERROR
+		"Package builds require cargo-about 0.9.1 for locked Rust dependency notices")
+endif()
+
 # Official Qt binary archives contain one SPDX document per installed module.
 # Install those upstream-generated inventories rather than maintaining a local
 # list that can drift from the actual Qt deployment closure.
@@ -143,7 +176,7 @@ if(Mapper_PACKAGE_BUILD AND vcpkg_sbom_count EQUAL 0)
 endif()
 
 message(STATUS
-	"Dependency inventory: ${qt_sbom_count} Qt SBOMs, ${vcpkg_notice_count} vcpkg notices, ${vcpkg_sbom_count} vcpkg SBOMs")
+	"Dependency inventory: ${qt_sbom_count} Qt SBOMs, ${vcpkg_notice_count} vcpkg notices, ${vcpkg_sbom_count} vcpkg SBOMs, ${rust_notice_count} Rust notice")
 
 list(SORT third_party_copyright)
 string(REPLACE ";" "\n" third_party_copyright "${third_party_copyright}")

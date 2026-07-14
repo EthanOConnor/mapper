@@ -1,0 +1,17 @@
+[package]
+name = "mapper-vello"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+publish = false
+license = "GPL-3.0-or-later"
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+cxx = "1.0.197"
+flume = { version = "0.12.0", default-features = false, features = ["select"] }
+pollster = "1.0.1"
+raw-window-handle = "0.6.2"
+vello = "0.9.0"

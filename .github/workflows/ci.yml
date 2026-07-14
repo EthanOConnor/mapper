@@ -65,6 +65,17 @@ jobs:
           key: vcpkg-${{ runner.os }}-${{ matrix.triplet }}-${{ hashFiles('vcpkg.json', 'cmake/vcpkg/**') }}
           restore-keys: vcpkg-${{ runner.os }}-${{ matrix.triplet }}-
 
+      - name: Restore Rust cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/bin/cargo-about
+            ~/.cargo/registry
+            ~/.cargo/git
+            build/${{ matrix.preset }}/cargo
+          key: rust-${{ runner.os }}-${{ matrix.triplet }}-${{ hashFiles('rust-toolchain.toml', 'src/render/vello/Cargo.lock') }}
+          restore-keys: rust-${{ runner.os }}-${{ matrix.triplet }}-
+
       - name: Install Qt
         uses: jurplel/install-qt-action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4.3.1
         with:
@@ -77,11 +88,24 @@ jobs:
       - name: Install CMake and Ninja
         run: python -m pip install --disable-pip-version-check cmake==4.4.0 ninja==1.13.0
 
+      - name: Install Rust tools
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy,rustfmt
+          cargo install cargo-about --version 0.9.1 --locked --features cli
+
+      - name: Check Rust renderer
+        env:
+          CARGO_TARGET_DIR: build/${{ matrix.preset }}/cargo/checks
+        run: |
+          cargo fmt --manifest-path src/render/vello/Cargo.toml -- --check
+          cargo clippy --manifest-path src/render/vello/Cargo.toml --locked --all-targets -- -D warnings
+          cargo test --manifest-path src/render/vello/Cargo.toml --locked
+
       - name: Install Linux host tools
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install --yes doxygen libegl1 libgl1-mesa-dev libxcb-cursor0 libxkbcommon-x11-0 xvfb
+          sudo apt-get install --yes doxygen libegl1 libgl1-mesa-dev libvulkan1 libxcb-cursor0 libxkbcommon-x11-0 mesa-vulkan-drivers xvfb
 
       - name: Install macOS host tools
         if: runner.os == 'macOS'
@@ -154,6 +178,17 @@ jobs:
           key: vcpkg-Android-arm64-${{ hashFiles('vcpkg.json', 'cmake/vcpkg/**') }}
           restore-keys: vcpkg-Android-arm64-
 
+      - name: Restore Rust cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/bin/cargo-about
+            ~/.cargo/registry
+            ~/.cargo/git
+            build/ci-android/cargo
+          key: rust-Android-arm64-${{ hashFiles('rust-toolchain.toml', 'src/render/vello/Cargo.lock') }}
+          restore-keys: rust-Android-arm64-
+
       - name: Install JDK 21
         uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5.5.0
         with:
@@ -178,6 +213,21 @@ jobs:
           sudo apt-get install --yes doxygen
           sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018"
           echo "ANDROID_NDK_ROOT=${ANDROID_SDK_ROOT}/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
+      - name: Install Rust tools
+        env:
+          CARGO_TARGET_DIR: build/ci-android/cargo/checks
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt
+          rustup target add aarch64-linux-android
+          cargo install cargo-about --version 0.9.1 --locked --features cli
+          cargo fmt --manifest-path src/render/vello/Cargo.toml -- --check
+          NDK_BIN="${ANDROID_NDK_ROOT}/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          export CC_aarch64_linux_android="${NDK_BIN}/aarch64-linux-android28-clang"
+          export CXX_aarch64_linux_android="${NDK_BIN}/aarch64-linux-android28-clang++"
+          export AR_aarch64_linux_android="${NDK_BIN}/llvm-ar"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="${CC_aarch64_linux_android}"
+          cargo check --manifest-path src/render/vello/Cargo.toml --target aarch64-linux-android --locked
 
       - name: Bootstrap vcpkg
         run: .vcpkg/bootstrap-vcpkg.sh -disableMetrics

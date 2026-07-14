@@ -21,6 +21,15 @@ set(CMAKE_AUTOMOC ON)
 
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}")
 
+corrosion_import_crate(
+  MANIFEST_PATH "${CMAKE_CURRENT_SOURCE_DIR}/render/vello/Cargo.toml"
+  CRATES mapper-vello
+  LOCKED
+)
+corrosion_add_cxxbridge(mapper-vello-cxx CRATE mapper_vello FILES lib.rs)
+target_compile_features(mapper-vello-cxx PUBLIC cxx_std_23)
+add_feature_info(Vello ON "0.9.0 with wgpu 29.0.4")
+
 
 # Build configuration
 
@@ -92,8 +101,10 @@ set(Mapper_Common_SRCS
   render/qt_render_bridge.cpp
   render/qpainter_frame_renderer.cpp
   render/qpainter_renderer.cpp
+  render/vello_renderer.cpp
 
   presentation/native_surface.cpp
+  presentation/vello_canvas.cpp
   
   core/symbols/area_symbol.cpp
   core/symbols/combined_symbol.cpp
@@ -292,6 +303,7 @@ qt_add_resources(Mapper_Common "mapper-translations"
 target_link_libraries(Mapper_Common
   PUBLIC
   Clipper2::Clipper2
+  mapper-vello-cxx
   ${PROJ_LIBRARIES}
   Qt6::Widgets
   PRIVATE

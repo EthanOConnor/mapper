@@ -38,10 +38,8 @@ configure_file(test_config.h.in ${CMAKE_CURRENT_BINARY_DIR}/test_config.h @ONLY)
 # It only needs to be rebuild and run when one of its components was modified.
 # Additional link libraries may be added to the executable target as usual.
 #
-# The autorun parameter controls whether the test will be run automatically
-# when executing Mapper-with-test.
-#
-function(add_test_helper testname autorun)
+# Tests are registered directly with CTest. IDEs and CI use the same entrypoint.
+function(add_test_helper testname)
 	unset(TEST_${testname}_SRCS)
 	set(manual_test 0)
 	foreach(arg ${ARGN})
@@ -63,15 +61,10 @@ function(add_test_helper testname autorun)
 		target_link_libraries(${testname} PRIVATE Qt6::Widgets)
 	endif()
 	if(NOT manual_test)
-		configure_file(TESTNAME-RUN.cmake.in ${CMAKE_CURRENT_BINARY_DIR}/${testname}-RUN.cmake @ONLY)
-		add_test(${testname} ${CMAKE_COMMAND} -P ${testname}-RUN.cmake)
-		add_custom_command(OUTPUT ${testname}-RUN.stamp
-		  COMMAND ${CMAKE_COMMAND} -P ${testname}-RUN.cmake
-		  DEPENDS ${testname}
+		add_test(NAME ${testname} COMMAND $<TARGET_FILE:${testname}>)
+		set_tests_properties(${testname} PROPERTIES
+		  WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
 		)
-		if(autorun)
-			set_property(DIRECTORY APPEND PROPERTY Mapper_AUTORUN_TESTS ${testname})
-		endif()
 	endif()
 endfunction()
 
@@ -93,7 +86,7 @@ endfunction()
 #
 function(add_unit_test testname)
 	if(Mapper_DEVELOPMENT_BUILD)
-		add_test_helper("${testname}" 1 ${ARGN})
+		add_test_helper("${testname}" ${ARGN})
 	elseif("${ARGN}" MATCHES "MANUAL")
 		add_system_test("${testname}" MANUAL)
 	else()
@@ -112,7 +105,7 @@ endfunction()
 # That is why it will be rebuild and run very often.
 #
 function(add_system_test testname)
-	add_test_helper("${testname}" ${Mapper_AUTORUN_SYSTEM_TESTS} ${ARGN})
+	add_test_helper("${testname}" ${ARGN})
 	target_link_libraries(${testname} PRIVATE
 	  Mapper_Common
 	  Qt6::Widgets
@@ -192,6 +185,7 @@ add_system_test(object_t)
 add_system_test(object_query_t)
 add_system_test(path_object_t)
 add_system_test(render_ir_t)
+add_system_test(vello_renderer_t)
 add_system_test(style_t)
 add_system_test(symbol_set_t)
 add_system_test(symbol_t)
@@ -211,6 +205,10 @@ add_executable(render_benchmark EXCLUDE_FROM_ALL render_benchmark.cpp)
 mapper_target_defaults(render_benchmark)
 target_link_libraries(render_benchmark PRIVATE Mapper_Common Qt6::Widgets)
 
+add_executable(vello_benchmark EXCLUDE_FROM_ALL vello_benchmark.cpp)
+mapper_target_defaults(vello_benchmark)
+target_link_libraries(vello_benchmark PRIVATE Mapper_Common Qt6::Widgets)
+
 if(TARGET mapper-sensors)
 	add_system_test(sensors_t)
 	target_link_libraries(sensors_t  PRIVATE mapper-sensors)
@@ -220,24 +218,6 @@ if(TARGET mapper-sensors)
 		endif()
 	endforeach()
 endif()
-
-# Collect the AUTORUN_TESTS
-get_property(Mapper_AUTORUN_TESTS DIRECTORY PROPERTY Mapper_AUTORUN_TESTS)
-if(Mapper_AUTORUN_TESTS)
-	configure_file(AUTORUN_TESTS.cmake.in ${CMAKE_CURRENT_BINARY_DIR}/AUTORUN_TESTS.cmake @ONLY)
-	
-	# Unlike the default "test" target, this custom target is displayed in Qt
-	# Creator's Projects view, and when build, it prints the output of failed
-	# tests. It maybe used as an additional build step, or it can be build from
-	# the Projects view. It also provides access to the the script template.
-	add_custom_target(AUTORUN_TESTS
-	  COMMAND "${CMAKE_COMMAND}" -P AUTORUN_TESTS.cmake
-	  SOURCES AUTORUN_TESTS.cmake.in
-	  COMMENT "Running tests for modified sources"
-	)
-	add_dependencies(AUTORUN_TESTS ${Mapper_AUTORUN_TESTS})
-endif()
-
 
 set(IOF_3_XSD_FILE "" CACHE FILEPATH "Path of the IOF Data Standard 3 XSD file")
 if(IOF_3_XSD_FILE)

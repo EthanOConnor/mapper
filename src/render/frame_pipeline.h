@@ -75,6 +75,9 @@ enum class FrameStatus : std::uint8_t
 {
 	Presented,
 	TargetUnavailable,
+	DroppedStale,
+	SurfaceLost,
+	Failed,
 };
 
 /** A completion always identifies the submission to which it belongs. */

@@ -149,9 +149,38 @@ render-only `QWindow`, emits sequenced unavailable/hidden/exposed/suspended
 state, reports logical and physical size, and exposes Qt's opaque `WId` plus
 the public XCB/Wayland application display handle where required. It contains
 no map, snapshot, cache, renderer, input forwarding, retry loop, or private
-`qpa` dependency. The existing QWidget remains the input authority; embedding
-and the bounded Rust render-thread channel happen with the real Vello consumer
-in checkpoint 4 rather than as unused transitional machinery here.
+`qpa` dependency.
+
+Checkpoint 4 connects this boundary to a typed `cxx` bridge and Vello 0.9.0.
+Rust owns the wgpu instance, surface, adapter, device, queue, Vello renderer,
+render thread, and presentation. `RenderIR` instances are encoded once and held
+as shared retained scenes while their immutable C++ source remains alive. The
+ordered lifecycle channel is bounded independently from the capacity-one,
+latest-wins frame channel; synchronous offscreen requests use their own bounded
+reliable channel. The QWidget host stays transparent to input and contains no
+map, planner, cache policy, or backend selection.
+
+On Apple platforms, public raw-window APIs require deriving the AppKit surface
+from the `NSView` on the main thread. Only instance/surface preparation occurs
+there; the prepared wgpu objects move to and remain owned by the render thread.
+Windows, XCB, and Wayland descriptors likewise use public Qt native interfaces.
+Qt currently exposes an Android Java `View` as `WId`, not a public
+`ANativeWindow`; Android native presentation therefore remains an explicit
+cutover blocker rather than introducing Qt-private reflection. Offscreen Vello
+rendering has no such dependency.
+
+The renderer first draws to an RGBA8 storage texture, then uses wgpu's maintained
+`TextureBlitter` for the swapchain format. The same path supports deterministic
+GPU readback for conformance tests without creating a second encoder. The
+complete-operation fixture and five map/DPR/rotation/overprint scenarios require
+mean channel delta below 3 and fewer than 2 percent high-delta pixels against
+the QPainter reference. The initial complete-map benchmark records 10,736
+commands once and includes GPU synchronization plus a 3 MiB CPU readback on
+every measured frame; that deliberately stricter offscreen measurement is not
+substituted for later native-presentation latency measurement. In the checkpoint
+4 Release build, 300 samples at 1024 x 768 on an Apple M3 Max measured 6.67 ms
+p50, 9.08 ms p95, and 10.91 ms maximum for that render-and-readback path while
+encoding the retained scene exactly once.
 
 ### Raster
 

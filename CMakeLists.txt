@@ -58,14 +58,6 @@ option(Mapper_DEVELOPMENT_BUILD
 	"Load development resources from the build tree"
 	${mapper_development_default})
 
-option(Mapper_AUTORUN_SYSTEM_TESTS
-	"Run system tests as part of Mapper-with-test"
-	${Mapper_DEVELOPMENT_BUILD})
-option(Mapper_AUTORUN_MANUAL_TESTS
-	"Run manual tests as part of Mapper-with-test"
-	OFF)
-mark_as_advanced(Mapper_AUTORUN_SYSTEM_TESTS Mapper_AUTORUN_MANUAL_TESTS)
-
 if(Mapper_DEVELOPMENT_BUILD)
 	set(mapper_build_manual_default OFF)
 else()
@@ -114,6 +106,15 @@ endif()
 mapper_define_build_options()
 
 include(FetchContent)
+FetchContent_Declare(corrosion
+	URL https://github.com/corrosion-rs/corrosion/archive/refs/tags/v0.6.1.tar.gz
+	URL_HASH SHA256=e9e95b1ee2bad52681f347993fb1a5af5cce458c5ce8a2636c9e476e4babf8e3
+	DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+	EXCLUDE_FROM_ALL
+)
+FetchContent_MakeAvailable(corrosion)
+add_feature_info(Corrosion ON "0.6.1")
+
 set(CLIPPER2_UTILS OFF CACHE BOOL "" FORCE)
 set(CLIPPER2_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(CLIPPER2_TESTS OFF CACHE BOOL "" FORCE)
