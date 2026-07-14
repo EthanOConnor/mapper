@@ -278,8 +278,8 @@ jobs:
         with:
           name: Mapper-Android
           path: |
-            build/ci-android/**/*.aab
-            build/ci-android/**/*.apk
+            build/ci-android/src/android-build/Mapper.apk
+            build/ci-android/src/android-build/build/outputs/bundle/release/android-build-release.aab
           if-no-files-found: error
           compression-level: 0
 
