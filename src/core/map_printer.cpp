@@ -71,6 +71,20 @@ namespace OpenOrienteering {
 namespace {
 
 #if defined(QT_PRINTSUPPORT_LIB)
+bool requiresPrecisionPageSpool(const QPainter* painter)
+{
+	/*
+	 * Qt's native Windows print engine ultimately sends integer coordinates to
+	 * GDI. Keep sub-device-pixel map geometry intact by composing the page at
+	 * Mapper's configured resolution and handing the driver one image. This is
+	 * deliberately based only on QPaintEngine's public type contract: previews,
+	 * PDFs, images, and non-Windows print engines retain their vector paths.
+	 */
+	return painter
+	       && painter->paintEngine()
+	       && painter->paintEngine()->type() == QPaintEngine::Windows;
+}
+
 bool renderFramePasses(QPainter* painter,
 	                   const std::vector<render::VectorPass>& passes,
 	                   const render::RenderRequest& request,
@@ -1039,7 +1053,8 @@ void MapPrinter::drawPage(QPainter* device_painter, const QRectF& page_extent, c
 	 * resolution.
 	 */
 	const bool use_buffer_for_map = rasterModeSelected() || target == imageTarget() || target == kmzTarget() || engineWillRasterize();
-	bool use_page_buffer = use_buffer_for_map;
+	const bool precision_page_spool = requiresPrecisionPageSpool(device_painter);
+	bool use_page_buffer = use_buffer_for_map || precision_page_spool;
 	
 	auto first_front_template = map.getFirstFrontTemplate();
 	if (options.show_templates && engineMayRasterize())
@@ -1119,7 +1134,7 @@ void MapPrinter::drawPage(QPainter* device_painter, const QRectF& page_extent, c
 		page_painter->restore();
 	}
 	
-	if (local_page_painter.isActive() && !use_buffer_for_map)
+	if (local_page_painter.isActive() && !use_buffer_for_map && !precision_page_spool)
 	{
 		// Flush the buffer, reset painter
 		local_page_painter.end();
@@ -1285,31 +1300,43 @@ void MapPrinter::drawPage(QPainter* device_painter, const QRectF& page_extent, c
 
 void MapPrinter::drawSeparationPages(QPagedPaintDevice* device, QPainter* device_painter, const QRectF& page_extent) const
 {
-	device_painter->save();
-	
-	device_painter->setRenderHint(QPainter::Antialiasing);
-	
-	// Translate for top left page margin 
-	qreal scale = options.resolution / 25.4; // Dots per mm
-	device_painter->scale(scale, scale);
-	device_painter->translate(page_format.page_rect.left(), page_format.page_rect.top());
-	
-	// Convert native map scale to print scale
-	if (scale_adjustment != 1.0)
-	{
-		scale *= scale_adjustment;
-		device_painter->scale(scale_adjustment, scale_adjustment);
-	}
-	
-	// Translate and clip for margins and print area
-	device_painter->translate(-page_extent.left(), -page_extent.top());
-	device_painter->setClipRect(page_extent.intersected(print_area).adjusted(-10, 10, 10, 10), Qt::ReplaceClip);
+	const auto units_per_mm = options.resolution / 25.4;
+	const auto precision_spool = requiresPrecisionPageSpool(device_painter);
 	auto const snapshot = map.publishRenderSnapshot();
-	auto const request = render::RenderRequest {
-		render::fromQRectF(page_extent),
-		scale,
-		RenderConfig::NoOptions,
-		1,
+	auto draw_separation = [&](QPainter* painter, const MapColor* color) {
+		painter->save();
+		painter->setRenderHint(QPainter::Antialiasing);
+
+		// Translate for the page margin and convert native map scale to print scale.
+		auto scale = units_per_mm;
+		painter->scale(scale, scale);
+		painter->translate(page_format.page_rect.left(), page_format.page_rect.top());
+		if (scale_adjustment != 1.0)
+		{
+			scale *= scale_adjustment;
+			painter->scale(scale_adjustment, scale_adjustment);
+		}
+
+		painter->translate(-page_extent.left(), -page_extent.top());
+		painter->setClipRect(
+			page_extent.intersected(print_area).adjusted(-10, 10, 10, 10),
+			Qt::ReplaceClip
+		);
+		auto const request = render::RenderRequest {
+			render::fromQRectF(page_extent),
+			scale,
+			RenderConfig::NoOptions,
+			1,
+		};
+		auto scene = snapshot->buildColorSeparationIR(
+			request, color->getPriority(), false
+		);
+		auto const rendered = renderFramePasses(
+			painter, { { std::move(scene) } }, request,
+			painter->worldTransform(), page_extent
+		);
+		painter->restore();
+		return rendered;
 	};
 	
 	bool need_new_page = false;
@@ -1322,13 +1349,31 @@ void MapPrinter::drawSeparationPages(QPagedPaintDevice* device, QPainter* device
 			{
 					device->newPage();
 			}
-			
-			auto scene = snapshot->buildColorSeparationIR(
-				request, color->getPriority(), false
-			);
-			if (!renderFramePasses(
-				    device_painter, { { std::move(scene) } }, request,
-				    device_painter->worldTransform(), page_extent))
+
+			if (precision_spool)
+			{
+				const auto page_size = QSize {
+					qCeil(page_format.paper_dimensions.width() * units_per_mm),
+					qCeil(page_format.paper_dimensions.height() * units_per_mm)
+				};
+				QImage page_buffer(page_size, QImage::Format_RGB32);
+				if (page_buffer.isNull())
+				{
+					device_painter->end();
+					return;
+				}
+				page_buffer.fill(Qt::white);
+				QPainter page_painter(&page_buffer);
+				if (!draw_separation(&page_painter, color))
+				{
+					device_painter->end();
+					return;
+				}
+				page_painter.end();
+				device_painter->setRenderHint(QPainter::SmoothPixmapTransform, false);
+				device_painter->drawImage(0, 0, page_buffer);
+			}
+			else if (!draw_separation(device_painter, color))
 			{
 				device_painter->end();
 				return;
@@ -1336,8 +1381,6 @@ void MapPrinter::drawSeparationPages(QPagedPaintDevice* device, QPainter* device
 			need_new_page = true;
 		}
 	}
-	
-	device_painter->restore();
 }
 
 bool MapPrinter::printMap(QPrinter* printer)
