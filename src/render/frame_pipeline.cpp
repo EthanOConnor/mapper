@@ -99,11 +99,16 @@ FramePacketPtr FramePlanner::plan(const MapRenderSnapshot& snapshot, const Frame
 	frame->revision = snapshot.revision();
 	frame->view = request.view;
 	frame->render_request = request.render;
+	frame->raster_complete = request.raster_complete;
+	frame->vector_passes = request.below_map;
 
 	if (request.simulate_overprinting)
 		appendOverprintingFrame(*frame, snapshot);
 	else
 		appendNormalFrame(*frame, snapshot);
+	frame->vector_passes.insert(
+		frame->vector_passes.end(), request.above_map.begin(), request.above_map.end()
+	);
 
 	return frame;
 }

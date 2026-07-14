@@ -35,6 +35,7 @@
 #include <QRgb>
 #include <QString>
 #include <QTransform>
+#include <QVector>
 
 #include "templates/template.h"
 
@@ -50,6 +51,16 @@ namespace OpenOrienteering {
 class Georeferencing;
 class Map;
 class MapCoordF;
+
+struct RasterTemplateTile
+{
+	QImage image;
+	QRectF template_rect;
+	QRectF source_rect;
+	quint64 cache_key = 0;
+	bool missing = false;
+	bool provisional = false;
+};
 
 
 /**
@@ -114,8 +125,12 @@ public:
 	bool postLoadSetup(QWidget* dialog_parent, bool& out_center_in_view) override;
 	void unloadTemplateFileImpl() override;
 	
-    void drawTemplate(QPainter* painter, const QRectF& clip_rect, double scale, bool on_screen, qreal opacity) const override;
+	void drawTemplate(QPainter* painter, const QRectF& clip_rect, double scale, bool on_screen, qreal opacity) const override;
 	QRectF getTemplateExtent() const override;
+	virtual void collectRasterTiles(const QRectF& map_clip_rect,
+	                                double scale,
+	                                bool on_screen,
+	                                QVector<RasterTemplateTile>& out) const;
 	bool canBeDrawnOnto() const override { return drawable; }
 
 	/**
@@ -126,6 +141,7 @@ public:
 	
 	/** Returns the internal QImage. */
 	inline const QImage& getImage() const {return image;}
+	virtual QSize getRasterPixelSize() const { return image.size(); }
 	
 	/**
 	 * Returns which georeferencing methods are known to be available.
@@ -166,6 +182,7 @@ protected:
 	 * CRS specs.
 	 */
 	bool isGeoreferencingUsable() const;
+	static QByteArray findExportFormat(const QString& filename);
 	
 	/** Information about an undo step for the paint-on-template functionality. */
 	struct DrawOnImageUndoStep

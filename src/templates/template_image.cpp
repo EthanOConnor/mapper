@@ -72,9 +72,7 @@ TemplateImage::GeoreferencingOption readGdalGeoTransform(const QString& filepath
 #endif
 
 
-namespace {
-
-QByteArray findExportFormat(const QString& filename)
+QByteArray TemplateImage::findExportFormat(const QString& filename)
 {
 	auto const formats = QImageWriter::supportedImageFormats();
 	for (auto const& format : formats)
@@ -84,8 +82,6 @@ QByteArray findExportFormat(const QString& filename)
 			return format;
 	}
 	return {};
-}
-
 }
 
 
@@ -350,6 +346,20 @@ QRectF TemplateImage::getTemplateExtent() const
     if (image.isNull())
 		return QRectF();
 	return QRectF(-image.width() * 0.5, -image.height() * 0.5, image.width(), image.height());
+}
+
+void TemplateImage::collectRasterTiles(const QRectF&, double, bool, QVector<RasterTemplateTile>& out) const
+{
+	if (image.isNull())
+		return;
+
+	out.push_back({
+		image,
+		getTemplateExtent(),
+		QRectF(QPointF(0, 0), QSizeF(image.size())),
+		quint64(image.cacheKey()),
+		false,
+	});
 }
 
 QPointF TemplateImage::calcCenterOfGravity(QRgb background_color)

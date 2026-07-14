@@ -30,6 +30,7 @@
 #include <QFlags>
 #include <QObject>
 #include <QPointF>
+#include <QRectF>
 #include <QString>
 #include <QStringView>
 
@@ -54,6 +55,14 @@ namespace OpenOrienteering {
 class Map;
 class MapView;
 class Object;
+
+
+/** Immutable view state published to template render sources. */
+struct ViewRenderContext
+{
+	QRectF visible_map_rect;
+	double view_zoom = 1.0;
+};
 
 
 /**
@@ -368,6 +377,9 @@ public:
 	 * Must not be called if the template file is already unloaded, or invalid.
 	 */
 	void unloadTemplateFile();
+
+	/** Publishes the current view goal to asynchronous template sources. */
+	virtual void updateRenderContext(const ViewRenderContext& context);
 	
 	/** 
 	 * Draws the template using the given painter with the given opacity.

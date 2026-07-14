@@ -64,6 +64,7 @@ public:
 	std::string lastError() const;
 	std::size_t cachedSceneCount() const noexcept;
 	std::size_t encodedSceneCount() const noexcept;
+	std::size_t cachedImageCount() const noexcept;
 
 private:
 	class Impl;

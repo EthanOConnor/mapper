@@ -343,6 +343,7 @@ void QPainterRenderer::render(QPainter& painter, const RenderIR& ir,
 				QImage image(bytes.data(), int(op.image->width), int(op.image->height),
 				             qsizetype(op.image->bytes_per_row), QImage::Format_RGBA8888);
 				painter.save();
+				painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
 				painter.setOpacity(painter.opacity() * op.opacity);
 				painter.drawImage(toQRectF(op.target), image);
 				painter.restore();

@@ -101,6 +101,7 @@ set(Mapper_Common_SRCS
   render/qt_render_bridge.cpp
   render/qpainter_frame_renderer.cpp
   render/qpainter_renderer.cpp
+  render/raster_layer_planner.cpp
   render/vello_renderer.cpp
 
   presentation/native_surface.cpp

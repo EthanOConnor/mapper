@@ -131,6 +131,7 @@ mod ffi {
         type SceneEncoder;
         type SceneBuilder;
         type RetainedScene;
+        type RetainedImage;
         type FrameBuilder;
         type Renderer;
 
@@ -168,12 +169,15 @@ mod ffi {
             glyphs: &[Glyph],
             style: GlyphStyle,
         ) -> bool;
-        fn scene_draw_image(
-            scene: &mut SceneBuilder,
+        fn new_retained_image(
             image_bytes: &[u8],
             width: u32,
             height: u32,
             stride: u32,
+        ) -> Box<RetainedImage>;
+        fn scene_draw_image(
+            scene: &mut SceneBuilder,
+            image: &RetainedImage,
             target: Rect,
             opacity: f64,
         ) -> bool;
@@ -238,6 +242,10 @@ pub struct RetainedScene {
     scene: Arc<Scene>,
     revision: u64,
     command_count: u64,
+}
+
+pub struct RetainedImage {
+    image: Option<ImageData>,
 }
 
 pub struct FrameBuilder {
@@ -556,43 +564,30 @@ fn scene_draw_glyphs(
     true
 }
 
-#[allow(clippy::too_many_arguments)]
-fn scene_draw_image(
-    scene: &mut SceneBuilder,
+fn new_retained_image(
     image_bytes: &[u8],
     width: u32,
     height: u32,
     stride: u32,
-    target: ffi::Rect,
-    opacity: f64,
-) -> bool {
-    scene.command_count += 1;
-    let Some(target) = rect(target) else {
-        return false;
-    };
+) -> Box<RetainedImage> {
     let Some(row_bytes) = width.checked_mul(4) else {
-        return false;
+        return Box::new(RetainedImage { image: None });
     };
     let Some(required) = usize::try_from(stride)
         .ok()
         .and_then(|stride| stride.checked_mul(usize::try_from(height).ok()?))
     else {
-        return false;
+        return Box::new(RetainedImage { image: None });
     };
-    if width == 0
-        || height == 0
-        || stride < row_bytes
-        || required > image_bytes.len()
-        || !opacity.is_finite()
-    {
-        return false;
+    if width == 0 || height == 0 || stride < row_bytes || required > image_bytes.len() {
+        return Box::new(RetainedImage { image: None });
     }
 
     let tight_length = usize::try_from(row_bytes)
         .ok()
         .and_then(|row| row.checked_mul(usize::try_from(height).ok()?));
     let Some(tight_length) = tight_length else {
-        return false;
+        return Box::new(RetainedImage { image: None });
     };
     let mut pixels = Vec::with_capacity(tight_length);
     let stride = stride as usize;
@@ -602,19 +597,41 @@ fn scene_draw_image(
         pixels.extend_from_slice(&image_bytes[start..start + row_bytes]);
     }
 
-    let image = ImageData {
-        data: Blob::from(pixels),
-        format: ImageFormat::Rgba8,
-        alpha_type: ImageAlphaType::Alpha,
-        width,
-        height,
+    Box::new(RetainedImage {
+        image: Some(ImageData {
+            data: Blob::from(pixels),
+            format: ImageFormat::Rgba8,
+            alpha_type: ImageAlphaType::Alpha,
+            width,
+            height,
+        }),
+    })
+}
+
+fn scene_draw_image(
+    scene: &mut SceneBuilder,
+    retained: &RetainedImage,
+    target: ffi::Rect,
+    opacity: f64,
+) -> bool {
+    scene.command_count += 1;
+    let Some(target) = rect(target) else {
+        return false;
     };
+    let Some(image) = retained.image.clone() else {
+        return false;
+    };
+    if !opacity.is_finite() {
+        return false;
+    }
+    let width = image.width;
+    let height = image.height;
     let brush = ImageBrush {
         image,
         sampler: ImageSampler {
             x_extend: Extend::Pad,
             y_extend: Extend::Pad,
-            quality: ImageQuality::High,
+            quality: ImageQuality::Medium,
             alpha: opacity.clamp(0.0, 1.0) as f32,
         },
     };
@@ -728,7 +745,7 @@ fn frame_add_pass(
     opacity: f64,
     isolated: bool,
 ) {
-    if scene.revision != frame.header.revision || !opacity.is_finite() || opacity <= 0.0 {
+    if !opacity.is_finite() || opacity <= 0.0 {
         return;
     }
     frame.passes.push(FramePass {

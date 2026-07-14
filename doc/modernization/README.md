@@ -184,15 +184,52 @@ encoding the retained scene exactly once.
 
 ### Raster
 
-GDAL/source work happens on workers. Decoded tiles are immutable CPU data; the
-Rust renderer owns GPU copies. Native overviews are preferred, and missing
-levels are produced by a maintained resampler off the UI thread. Device-pixel
-ratio and live gesture scale are part of level selection.
+Checkpoint 5 uses the GDAL 3.13 fine-grained C++ API directly:
+`GDALDatasetUniquePtr`, `GDALDataset::Open`, `GDALDataset::RasterIO`, and
+`GDALDataset::IsThreadSafe`. Raster datasets are opened with the thread-safe
+read-only contract and decoded on a private Qt `QThreadPool` of at most four
+workers. No compatibility C-handle layer or application-owned worker fleet was
+introduced.
 
-Tiles have gutters and clamped sampling. One template's tiles compose in one
-opacity group so overlap does not darken translucent templates. Upload size and
-work per frame are bounded; a gesture cannot synchronously decode, resample, or
-upload an unbounded image.
+Useful native blocks are retained. A large strip or monolithic source instead
+gets a logical 512 x 512 grid, so the 13,746 x 15,855 Fishtrap GeoTIFF is never
+allocated as one image. The screen queue is capped at 64 tasks and orders a
+coarse-to-exact power-of-two ladder around the view center. Decimated reads use
+GDAL's maintained average resampler. A non-overlapping pan or level change
+increments a generation, clears queued work, and cancels in-flight
+`RasterIO`; small overlapping pans retain useful requests. Exact decoded tiles
+use a 128 MiB Qt LRU per template. Mapper also supplies a 128 MiB default for
+GDAL's process-global block cache, while preserving an explicit user or
+environment override. This replaces GDAL's RAM-percentage default, which was
+measured at roughly 3.05 GiB peak RSS on the heavy strip fixture.
+
+Decoded tiles include a source-pixel gutter. Fully opaque tiles overlap through
+those identical gutters without antialiased clip paths. A layer containing real
+source alpha is flattened once into a bounded retained mosaic, so a transparent
+pixel is composited exactly once rather than double-blending in the overlap.
+The fractional-transform regression compares two transparent guttered tiles
+with one monolithic source; the real Fishtrap capture separately caught and
+then eliminated the earlier clip-edge seam.
+
+The raster planner preserves template order below and above the map and applies
+template opacity once to an isolated retained scene. It admits at most four new
+immutable images per frame. C++ image identity remains stable across scene
+growth, Rust copies each image into one retained `peniko::Blob`, and stock
+Vello owns atlas upload and eviction. The residency test grows from four to six
+tiles and observes six retained Vello images total, not ten cumulative uploads.
+`FramePacket::raster_complete` makes coarse or missing coverage explicit.
+
+On the Apple M3 Max checkpoint machine, the Release heavy-raster gate used the
+831 MiB Fishtrap source at 2068 x 1906 physical pixels for 300 synchronized
+Vello render-and-readback samples. Exact visible coverage arrived in 3.24 s;
+the retained frame held 25 images and 27 raster-scene commands. Samples measured
+5.14 ms p50, 5.27 ms p95, and 7.40 ms maximum. Against the QPainter reference,
+the two maintained bilinear samplers differed by 3.05 mean RGBA-channel levels,
+with exact alpha and five high-delta pixels among 3.94 million. Peak RSS was
+468 MiB and macOS peak footprint was 1.08 GiB. The direct QPainter template path
+already consumes the asynchronous scheduler; checkpoint 6 performs the live
+Vello product cutover. Native raster presentation on Linux, Windows, and
+Android is not claimed at this checkpoint.
 
 ## Lessons from the exploratory renderer
 

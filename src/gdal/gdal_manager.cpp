@@ -72,6 +72,12 @@ public:
 	GdalManagerPrivate()
 	: dirty{ true }
 	{
+		// GDAL otherwise sizes its process-global block cache as a percentage
+		// of physical RAM. That is disproportionate for an interactive editor,
+		// especially when thread-safe raster datasets open several driver
+		// instances. Preserve an explicit user/environment override.
+		if (!CPLGetConfigOption("GDAL_CACHEMAX", nullptr))
+			CPLSetConfigOption("GDAL_CACHEMAX", "128MB");
 		GDALAllRegister();
 
 		// Prefer LIBMKL driver to the KML driver if available

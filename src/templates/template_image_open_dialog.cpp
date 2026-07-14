@@ -50,9 +50,10 @@ TemplateImageOpenDialog::TemplateImageOpenDialog(TemplateImage* templ, QWidget* 
 {
 	setWindowTitle(tr("Opening %1").arg(templ->getTemplateFilename()));
 	
+	auto const raster_size = templ->getRasterPixelSize();
 	auto* size_label = new QLabel(QLatin1String("<b>") + tr("Image size:") + QLatin1String("</b> ")
-	                                + QString::number(templ->getImage().width()) + QLatin1String(" x ")
-	                                + QString::number(templ->getImage().height()));
+	                                + QString::number(raster_size.width()) + QLatin1String(" x ")
+	                                + QString::number(raster_size.height()));
 	auto* desc_label = new QLabel(tr("Specify how to position or scale the image:"));
 	
 	const auto& defaults = templ->getMap()->getImageTemplateDefaults();

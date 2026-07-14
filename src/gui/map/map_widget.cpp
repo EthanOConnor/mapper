@@ -128,6 +128,7 @@ MapWidget::MapWidget(bool show_help, bool force_antialiasing, QWidget* parent)
  , dragging(false)
  , pinching(false)
  , pinching_factor(1.0)
+ , render_context_update_scheduled(false)
  , below_template_cache_dirty_rect(rect())
  , above_template_cache_dirty_rect(rect())
  , map_cache_dirty_rect(rect())
@@ -162,10 +163,12 @@ void MapWidget::setMapView(MapView* view)
 	{
 		if (this->view)
 		{
-			auto* map = view->getMap();
+			auto* map = this->view->getMap();
 			map->removeMapWidget(this);
 			disconnect(map);
 			disconnect(this->view);
+			for (int i = 0; i < map->getNumTemplates(); ++i)
+				disconnect(map->getTemplate(i), nullptr, this, nullptr);
 		}
 
 		this->view = view;
@@ -184,6 +187,22 @@ void MapWidget::setMapView(MapView* view)
 			connect(map, &Map::symbolDeleted, this, &MapWidget::updatePlaceholder);
 			connect(map, &Map::templateAdded, this, &MapWidget::updatePlaceholder);
 			connect(map, &Map::templateDeleted, this, &MapWidget::updatePlaceholder);
+			for (int i = 0; i < map->getNumTemplates(); ++i)
+				observeTemplate(map->getTemplate(i));
+			connect(map, &Map::templateAdded, this, [this](int, Template* temp) {
+				observeTemplate(temp);
+				scheduleRenderContextUpdate();
+			});
+			connect(map, &Map::templateChanged, this, [this](int, Template* temp) {
+				observeTemplate(temp);
+				scheduleRenderContextUpdate();
+			});
+			connect(map, &Map::templateDeleted, this,
+			        [this](int, const Template* temp) {
+				disconnect(temp, nullptr, this, nullptr);
+				scheduleRenderContextUpdate();
+			});
+			scheduleRenderContextUpdate();
 		}
 		
 		update();
@@ -311,11 +330,53 @@ QRectF MapWidget::mapToViewport(const QRectF& input) const
 	return result;
 }
 
+void MapWidget::observeTemplate(Template* temp)
+{
+	connect(temp, &Template::templateStateChanged,
+	        this, &MapWidget::scheduleRenderContextUpdate,
+	        Qt::UniqueConnection);
+}
+
+void MapWidget::scheduleRenderContextUpdate()
+{
+	if (!view || render_context_update_scheduled)
+		return;
+
+	render_context_update_scheduled = true;
+	QTimer::singleShot(0, this, &MapWidget::publishRenderContext);
+}
+
+void MapWidget::publishRenderContext()
+{
+	render_context_update_scheduled = false;
+	if (!view || view->areAllTemplatesHidden())
+		return;
+
+	auto const context = currentViewRenderContext();
+	auto* map = view->getMap();
+	for (int i = 0; i < map->getNumTemplates(); ++i)
+	{
+		auto* temp = map->getTemplate(i);
+		if (temp->getTemplateState() == Template::Loaded && view->isTemplateVisible(temp))
+			temp->updateRenderContext(context);
+	}
+}
+
+ViewRenderContext MapWidget::currentViewRenderContext() const
+{
+	Q_ASSERT(view);
+	return {
+		view->calculateViewedRect(viewportToView(rect())),
+		view->getZoom(),
+	};
+}
+
 void MapWidget::viewChanged(MapView::ChangeFlags changes)
 {
 	setDrawingBoundingBox(drawing_dirty_rect_map, drawing_dirty_rect_border, true);
 	setActivityBoundingBox(activity_dirty_rect_map, activity_dirty_rect_border, true);
 	updateEverything();
+	scheduleRenderContextUpdate();
 	if (changes.testFlag(MapView::ZoomChange))
 		updateZoomDisplay();
 }
@@ -352,6 +413,8 @@ void MapWidget::visibilityChanged(MapView::VisibilityFeature feature, bool activ
 						                     qApp->translate("OpenOrienteering::MainWindow", "Error"),
 						                     qApp->translate("OpenOrienteering::Importer", "Failed to load template '%1', reason: %2")
 						                     .arg(temp->getTemplateFilename(), temp->errorString()) );
+					else if (widget)
+						widget->scheduleRenderContextUpdate();
 				}
 			}));
 		}
@@ -369,11 +432,14 @@ void MapWidget::visibilityChanged(MapView::VisibilityFeature feature, bool activ
 		updateEverything();
 		break;
 	}
+
+	scheduleRenderContextUpdate();
 }
 
 void MapWidget::setPanOffset(const QPoint& offset)
 {
 	pan_offset = offset;
+	scheduleRenderContextUpdate();
 	update();
 }
 
@@ -1020,6 +1086,7 @@ void MapWidget::resizeEvent(QResizeEvent* event)
 	}
 	
 	QWidget::resizeEvent(event);
+	scheduleRenderContextUpdate();
 }
 
 void MapWidget::mousePressEvent(QMouseEvent* event)

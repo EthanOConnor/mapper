@@ -270,6 +270,30 @@ GdalImageReader::RasterInfo GdalImageReader::readRasterInfo() const
 			}
 		}
 	}
+
+	if (!raster.bands.empty())
+	{
+		auto raster_band = GDALGetRasterBand(dataset, raster.bands.front());
+		GDALGetBlockSize(raster_band, &raster.block_size.rwidth(), &raster.block_size.rheight());
+		auto const pixels = qint64(raster.size.width()) * raster.size.height();
+		auto const large_source = pixels > qint64(4096) * 4096
+		                          || raster.size.width() > 8192
+		                          || raster.size.height() > 8192;
+		auto const usable_native_blocks = raster.block_size != raster.size
+		                                  && raster.block_size.width() >= 64
+		                                  && raster.block_size.height() >= 64;
+		if (!usable_native_blocks && large_source)
+		{
+			raster.block_size = {
+				std::min(512, raster.size.width()),
+				std::min(512, raster.size.height()),
+			};
+		}
+		else if (!usable_native_blocks)
+		{
+			raster.block_size = {};
+		}
+	}
 	
 	return raster;
 }

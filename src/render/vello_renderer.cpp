@@ -160,10 +160,51 @@ public:
 		std::shared_ptr<const Retained> retained;
 	};
 
+	struct RetainedImage
+	{
+		explicit RetainedImage(rust::Box<ffi::RetainedImage> image)
+		 : image(std::move(image))
+		{}
+
+		rust::Box<ffi::RetainedImage> image;
+	};
+
+	struct ImageCacheEntry
+	{
+		std::weak_ptr<const ImageData> source;
+		std::shared_ptr<const RetainedImage> retained;
+	};
+
 	Impl()
 	 : scene_encoder(ffi::new_scene_encoder())
 	 , renderer(ffi::new_renderer())
 	{}
+
+	std::shared_ptr<const RetainedImage> retainImage(
+		const std::shared_ptr<const ImageData>& image)
+	{
+		for (auto entry = images.begin(); entry != images.end(); )
+		{
+			if (entry->second.source.expired())
+				entry = images.erase(entry);
+			else
+				++entry;
+		}
+		if (auto const found = images.find(image.get()); found != images.end())
+		{
+			if (auto source = found->second.source.lock(); source == image)
+				return found->second.retained;
+			images.erase(found);
+		}
+
+		auto const& bytes = *image->rgba8;
+		auto retained = std::make_shared<RetainedImage>(ffi::new_retained_image(
+			rust::Slice<const std::uint8_t> { bytes.data(), bytes.size() },
+			image->width, image->height, image->bytes_per_row
+		));
+		images.emplace(image.get(), ImageCacheEntry { image, retained });
+		return retained;
+	}
 
 	std::shared_ptr<const Retained> encode(const std::shared_ptr<const RenderIR>& ir)
 	{
@@ -273,11 +314,9 @@ public:
 				{
 					if (!op.image || !op.image->rgba8)
 						qFatal("Vello received invalid immutable image data");
-					auto const& bytes = *op.image->rgba8;
+					auto const image = retainImage(op.image);
 					auto const accepted = ffi::scene_draw_image(
-						*builder, rust::Slice<const std::uint8_t> { bytes.data(), bytes.size() }, op.image->width,
-						op.image->height, op.image->bytes_per_row, ffiRect(op.target),
-						op.opacity
+						*builder, *image->image, ffiRect(op.target), op.opacity
 					);
 					if (!accepted)
 						qFatal("Vello rejected immutable image data");
@@ -350,6 +389,7 @@ public:
 	rust::Box<ffi::SceneEncoder> scene_encoder;
 	rust::Box<ffi::Renderer> renderer;
 	std::unordered_map<const RenderIR*, CacheEntry> scenes;
+	std::unordered_map<const ImageData*, ImageCacheEntry> images;
 	std::size_t encoded_scene_count = 0;
 };
 
@@ -448,6 +488,11 @@ std::size_t VelloRenderer::cachedSceneCount() const noexcept
 std::size_t VelloRenderer::encodedSceneCount() const noexcept
 {
 	return impl_->encoded_scene_count;
+}
+
+std::size_t VelloRenderer::cachedImageCount() const noexcept
+{
+	return impl_->images.size();
 }
 
 }  // namespace OpenOrienteering::render
