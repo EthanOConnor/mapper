@@ -1,18 +1,5 @@
 <RCC>
     <qresource prefix="/">
-        <file>images/about.png</file>
-        <file>images/arrow-down.png</file>
-        <file>images/arrow-left.png</file>
-        <file>images/arrow-right.png</file>
-        <file>images/arrow-thin-upleft.png</file>
-        <file>images/arrow-thin-downright.png</file>
-        <file>images/arrow-up.png</file>
-        <file>images/close.png</file>
-        <file>images/colors.png</file>
-        <file>images/compass.png</file>
-        <file>images/control.png</file>
-        <file>images/copy.png</file>
-        <file>images/copy-coords.png</file>
         <file>images/cursor-crosshair.png</file>
         <file>images/cursor-cut.png</file>
         <file>images/cursor-delete.png</file>
@@ -30,97 +17,112 @@
         <file>images/cursor-rotate.png</file>
         <file>images/cursor-scale.png</file>
         <file>images/cursor-zoom.png</file>
-        <file>images/cut.png</file>
-        <file>images/delete.png</file>
-        <file>images/draw-circle.png</file>
-        <file>images/draw-freehand.png</file>
-        <file>images/draw-path.png</file>
-        <file>images/draw-point.png</file>
-        <file>images/draw-point-gps.png</file>
-        <file>images/draw-rectangle.png</file>
-        <file>images/draw-text.png</file>
-        <file>images/georeferencing.png</file>
-        <file>images/gps-distance-rings.png</file>
-        <file>images/gps-temporary-point.png</file>
-        <file>images/gps-temporary-path.png</file>
-        <file>images/gps-temporary-clear.png</file>
-        <file>images/grid.png</file>
-        <file>images/group.png</file>
-        <file>images/help.png</file>
-        <file>images/magnifying-glass.png</file>
-        <file>images/map-information.png</file>
-        <file>images/map-parts.png</file>
         <file>images/mapper.png</file>
-        <file>images/minus.png</file>
-        <file>images/move.png</file>
-        <file>images/new.png</file>
         <file>images/open-orienteering.png</file>
-        <file>images/open.png</file>
-        <file>images/move-to-gps.png</file>
-        <file>images/paste.png</file>
-        <file>images/paste-at-location.png</file>
-        <file>images/pencil.png</file>
-        <file>images/plus.png</file>
         <file>images/point-handles.png</file>
         <file>images/point-handles-2x.png</file>
         <file>images/point-handles-4x.png</file>
-        <file>images/print.png</file>
-        <file>images/print-mode-vector.png</file>
-        <file>images/print-mode-raster.png</file>
-        <file>images/print-mode-separations.png</file>
-        <file>images/redo.png</file>
-        <file>images/rotate-map.png</file>
-        <file>images/save.png</file>
-        <file>images/scribble-fill-shapes.png</file>
-        <file>images/settings.png</file>
-        <file>images/symbols.png</file>
         <file>images/symbol_point_explanation.png</file>
-        <file>images/tag-editor.png</file>
-        <file>images/tag-selector.png</file>
-        <file>images/templates.png</file>
-        <file>images/text-align-left.png</file>
-        <file>images/text-align-hcenter.png</file>
-        <file>images/text-align-right.png</file>
-        <file>images/text-align-top.png</file>
-        <file>images/text-align-vcenter.png</file>
-        <file>images/text-align-baseline.png</file>
-        <file>images/text-align-bottom.png</file>
-        <file>images/three-dots.png</file>
         <file>images/title.png</file>
-        <file>images/tool-boolean-difference.png</file>
-        <file>images/tool-boolean-intersection.png</file>
-        <file>images/tool-boolean-union.png</file>
-        <file>images/tool-boolean-xor.png</file>
-        <file>images/tool-boolean-merge-holes.png</file>
-        <file>images/tool-clip.png</file>
-        <file>images/tool-connect-paths.png</file>
-        <file>images/tool-convert-to-curves.png</file>
-        <file>images/tool-cut.png</file>
-        <file>images/tool-cut-hole.png</file>
-        <file>images/tool-distribute-points.png</file>
-        <file>images/tool-duplicate.png</file>
-        <file>images/tool-edit.png</file>
-        <file>images/tool-edit-line.png</file>
-        <file>images/tool-erase.png</file>
-        <file>images/tool-fill.png</file>
-        <file>images/tool-fill-border.png</file>
-        <file>images/tool-gps-display.png</file>
-        <file>images/tool-measure.png</file>
-        <file>images/tool-rotate.png</file>
-        <file>images/tool-rotate-pattern.png</file>
-        <file>images/tool-scale.png</file>
-        <file>images/tool-simplify-path.png</file>
-        <file>images/tool-switch-dashes.png</file>
-        <file>images/tool-switch-symbol.png</file>
-        <file>images/tool-touch-cursor.png</file>
-        <file>images/undo.png</file>
-        <file>images/view-baseline.png</file>
-        <file>images/view-box-zoom.png</file>
-        <file>images/view-hatch-areas.png</file>
-        <file>images/view-show-all.png</file>
-        <file>images/view-zoom-in.png</file>
-        <file>images/view-zoom-out.png</file>
-        <file>images/window-new.png</file>
+        <!-- Scalable action artwork. Keep cursors, application artwork, and
+             point-handle sprites as pixel assets with explicit pixel semantics. -->
+        <file alias="icons/about.svg">images/material/info.svg</file>
+        <file alias="icons/arrow-down.svg">images/material/arrow-down.svg</file>
+        <file alias="icons/arrow-left.svg">images/material/arrow-left.svg</file>
+        <file alias="icons/arrow-right.svg">images/material/arrow-right.svg</file>
+        <file alias="icons/arrow-thin-downright.svg">images/material/arrow-down.svg</file>
+        <file alias="icons/arrow-thin-upleft.svg">images/material/arrow-up.svg</file>
+        <file alias="icons/arrow-up.svg">images/material/arrow-up.svg</file>
+        <file alias="icons/close.svg">images/material/close.svg</file>
+        <file alias="icons/colors.svg">images/material/palette.svg</file>
+        <file alias="icons/compass.svg">images/material/explore.svg</file>
+        <file alias="icons/control.svg">images/material/control-point.svg</file>
+        <file alias="icons/copy.svg">images/material/content-copy.svg</file>
+        <file alias="icons/copy-coords.svg">images/material/content-copy.svg</file>
+        <file alias="icons/cut.svg">images/material/content-cut.svg</file>
+        <file alias="icons/delete.svg">images/svg/delete.svg</file>
+        <file alias="icons/draw-circle.svg">images/material/circle.svg</file>
+        <file alias="icons/draw-freehand.svg">images/material/gesture.svg</file>
+        <file alias="icons/draw-path.svg">images/material/polyline.svg</file>
+        <file alias="icons/draw-point.svg">images/material/circle.svg</file>
+        <file alias="icons/draw-point-gps.svg">images/material/add-location.svg</file>
+        <file alias="icons/draw-rectangle.svg">images/material/rectangle.svg</file>
+        <file alias="icons/draw-text.svg">images/material/text-fields.svg</file>
+        <file alias="icons/georeferencing.svg">images/material/transform.svg</file>
+        <file alias="icons/gps-distance-rings.svg">images/material/radar.svg</file>
+        <file alias="icons/gps-temporary-clear.svg">images/material/location-off.svg</file>
+        <file alias="icons/gps-temporary-path.svg">images/material/route.svg</file>
+        <file alias="icons/gps-temporary-point.svg">images/material/location-on.svg</file>
+        <file alias="icons/grid.svg">images/material/grid-on.svg</file>
+        <file alias="icons/group.svg">images/material/interests.svg</file>
+        <file alias="icons/help.svg">images/material/help.svg</file>
+        <file alias="icons/magnifying-glass.svg">images/material/search.svg</file>
+        <file alias="icons/map-information.svg">images/material/info.svg</file>
+        <file alias="icons/map-parts.svg">images/svg/map-parts.svg</file>
+        <file alias="icons/minus.svg">images/material/remove.svg</file>
+        <file alias="icons/move.svg">images/material/open-with.svg</file>
+        <file alias="icons/move-to-gps.svg">images/svg/move-to-gps.svg</file>
+        <file alias="icons/new.svg">images/material/note-add.svg</file>
+        <file alias="icons/open.svg">images/material/folder-open.svg</file>
+        <file alias="icons/paste.svg">images/material/content-paste.svg</file>
+        <file alias="icons/paste-at-location.svg">images/material/content-paste-go.svg</file>
+        <file alias="icons/pencil.svg">images/material/edit.svg</file>
+        <file alias="icons/plus.svg">images/material/add.svg</file>
+        <file alias="icons/print.svg">images/material/print.svg</file>
+        <file alias="icons/print-mode-vector.svg">images/material/shape-line.svg</file>
+        <file alias="icons/print-mode-raster.svg">images/material/grid-on.svg</file>
+        <file alias="icons/print-mode-separations.svg">images/material/palette.svg</file>
+        <file alias="icons/redo.svg">images/material/redo.svg</file>
+        <file alias="icons/rotate-map.svg">images/material/screen-rotation.svg</file>
+        <file alias="icons/save.svg">images/material/save.svg</file>
+        <file alias="icons/scribble-fill-shapes.svg">images/svg/scribble-fill-shapes.svg</file>
+        <file alias="icons/settings.svg">images/material/settings.svg</file>
+        <file alias="icons/symbols.svg">images/material/category.svg</file>
+        <file alias="icons/tag-editor.svg">images/material/label.svg</file>
+        <file alias="icons/tag-selector.svg">images/material/select-all.svg</file>
+        <file alias="icons/templates.svg">images/material/layers.svg</file>
+        <file alias="icons/text-align-baseline.svg">images/material/vertical-align-bottom.svg</file>
+        <file alias="icons/text-align-bottom.svg">images/material/vertical-align-bottom.svg</file>
+        <file alias="icons/text-align-hcenter.svg">images/material/format-align-center.svg</file>
+        <file alias="icons/text-align-left.svg">images/material/format-align-left.svg</file>
+        <file alias="icons/text-align-right.svg">images/material/format-align-right.svg</file>
+        <file alias="icons/text-align-top.svg">images/material/vertical-align-top.svg</file>
+        <file alias="icons/text-align-vcenter.svg">images/material/vertical-align-center.svg</file>
+        <file alias="icons/three-dots.svg">images/material/more-horiz.svg</file>
+        <file alias="icons/tool-boolean-difference.svg">images/material/difference.svg</file>
+        <file alias="icons/tool-boolean-intersection.svg">images/material/join-inner.svg</file>
+        <file alias="icons/tool-boolean-merge-holes.svg">images/material/merge.svg</file>
+        <file alias="icons/tool-boolean-union.svg">images/material/join-full.svg</file>
+        <file alias="icons/tool-boolean-xor.svg">images/material/join-right.svg</file>
+        <file alias="icons/tool-clip.svg">images/svg/tool-clip.svg</file>
+        <file alias="icons/tool-connect-paths.svg">images/material/merge.svg</file>
+        <file alias="icons/tool-convert-to-curves.svg">images/material/shape-line.svg</file>
+        <file alias="icons/tool-cut.svg">images/material/content-cut.svg</file>
+        <file alias="icons/tool-cut-hole.svg">images/material/donut-large.svg</file>
+        <file alias="icons/tool-distribute-points.svg">images/material/scatter-plot.svg</file>
+        <file alias="icons/tool-duplicate.svg">images/material/content-copy.svg</file>
+        <file alias="icons/tool-edit-line.svg">images/material/polyline.svg</file>
+        <file alias="icons/tool-edit.svg">images/material/edit.svg</file>
+        <file alias="icons/tool-erase.svg">images/svg/tool-erase.svg</file>
+        <file alias="icons/tool-fill-border.svg">images/material/border-outer.svg</file>
+        <file alias="icons/tool-fill.svg">images/material/format-color-fill.svg</file>
+        <file alias="icons/tool-gps-display.svg">images/material/my-location.svg</file>
+        <file alias="icons/tool-measure.svg">images/material/straighten.svg</file>
+        <file alias="icons/tool-rotate-pattern.svg">images/material/screen-rotation.svg</file>
+        <file alias="icons/tool-rotate.svg">images/material/rotate-right.svg</file>
+        <file alias="icons/tool-scale.svg">images/material/transform.svg</file>
+        <file alias="icons/tool-simplify-path.svg">images/material/linear-scale.svg</file>
+        <file alias="icons/tool-switch-dashes.svg">images/material/border-style.svg</file>
+        <file alias="icons/tool-switch-symbol.svg">images/material/category.svg</file>
+        <file alias="icons/tool-touch-cursor.svg">images/material/touch-app.svg</file>
+        <file alias="icons/undo.svg">images/material/undo.svg</file>
+        <file alias="icons/view-baseline.svg">images/svg/view-baseline.svg</file>
+        <file alias="icons/view-box-zoom.svg">images/material/zoom-out-map.svg</file>
+        <file alias="icons/view-hatch-areas.svg">images/svg/view-hatch-areas.svg</file>
+        <file alias="icons/view-show-all.svg">images/material/fit-screen.svg</file>
+        <file alias="icons/view-zoom-in.svg">images/material/zoom-in.svg</file>
+        <file alias="icons/view-zoom-out.svg">images/material/zoom-out.svg</file>
+        <file alias="icons/window-new.svg">images/material/open-in-new.svg</file>
         <file>images/mapper-icon/Mapper-128.png</file>
         <file alias="doc/tip-of-the-day/tips.txt">doc/tip-of-the-day/tips_en.txt</file>
     </qresource>

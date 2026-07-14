@@ -20,6 +20,7 @@
 
 
 #include "paint_on_template_tool.h"
+#include "gui/action_icon.h"
 
 #include <type_traits>
 
@@ -243,7 +244,7 @@ ActionGridBar* PaintOnTemplateTool::makeToolBar()
 	});
 	toolbar->addActionAtEnd(background_drawing_action, 0, 1);
 	
-	auto* fill_action = new QAction(QIcon(QString::fromLatin1(":/images/scribble-fill-shapes.png")),
+	auto* fill_action = new QAction(ActionIcon::fromName(u"scribble-fill-shapes"),
 	                                tr("Filled area"),
 	                                toolbar);
 	fill_action->setCheckable(true);
@@ -270,13 +271,13 @@ ActionGridBar* PaintOnTemplateTool::makeToolBar()
 		add_option(tr("Pattern"), Template::PatternFill);
 	}
 	
-	auto* undo_action = new QAction(QIcon(QString::fromLatin1(":/images/undo.png")),
+	auto* undo_action = new QAction(ActionIcon::fromName(u"undo"),
 	                                ::OpenOrienteering::MapEditorController::tr("Undo"),
 	                                toolbar);
 	connect(undo_action, &QAction::triggered, this, &PaintOnTemplateTool::undoSelected);
 	toolbar->addActionAtEnd(undo_action, 0, 0);
 	
-	auto* redo_action = new QAction(QIcon(QString::fromLatin1(":/images/redo.png")),
+	auto* redo_action = new QAction(ActionIcon::fromName(u"redo"),
 	                                ::OpenOrienteering::MapEditorController::tr("Redo"),
 	                                toolbar);
 	connect(redo_action, &QAction::triggered, this, &PaintOnTemplateTool::redoSelected);

@@ -18,6 +18,7 @@
  */
 
 #include "map_information_dialog.h"
+#include "gui/action_icon.h"
 
 #include <vector>
 
@@ -77,7 +78,7 @@ MapInformationDialog::MapInformationDialog(MainWindow* parent, Map* map)
 {
 	setWindowTitle(QCoreApplication::translate("OpenOrienteering::MapInformation", "Map information"));
 	
-	auto* save_button = new QPushButton(QIcon(QLatin1String(":/images/save.png")), QCoreApplication::translate("OpenOrienteering::MapInformation", "Save as..."));
+	auto* save_button = new QPushButton(ActionIcon::fromName(u"save"), QCoreApplication::translate("OpenOrienteering::MapInformation", "Save as..."));
 	auto* close_button = new QPushButton(QGuiApplication::translate("QPlatformTheme", "Close"));
 	close_button->setDefault(true);
 	

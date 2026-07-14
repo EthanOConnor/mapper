@@ -143,6 +143,7 @@ set(Mapper_Common_SRCS
   fileformats/xml_file_format.cpp
   
   gui/about_dialog.cpp
+  gui/action_icon.cpp
   gui/autosave_dialog.cpp
   gui/color_dialog.cpp
   gui/configure_grid_dialog.cpp
@@ -319,6 +320,7 @@ target_link_libraries(Mapper_Common
   mapper-vello-cxx
   ${PROJ_LIBRARIES}
   Qt6::Widgets
+  Qt6::Svg
   PRIVATE
   ICU::data
   ICU::uc

@@ -20,6 +20,7 @@
 
 
 #include "area_symbol_settings.h"
+#include "gui/action_icon.h"
 
 #include <Qt>
 #include <QtGlobal>
@@ -97,9 +98,9 @@ AreaSymbolSettings::AreaSymbolSettings(AreaSymbol* symbol, SymbolSettingDialog* 
 	pattern_list = new QListWidget();
 	fill_patterns_list_layout->addWidget(pattern_list, 1);
 	
-	del_pattern_button = new QPushButton(QIcon(QString::fromLatin1(":/images/minus.png")), QString{});
+	del_pattern_button = new QPushButton(ActionIcon::fromName(u"minus"), QString{});
 	add_pattern_button = new QToolButton();
-	add_pattern_button->setIcon(QIcon(QString::fromLatin1(":/images/plus.png")));
+	add_pattern_button->setIcon(ActionIcon::fromName(u"plus"));
 	add_pattern_button->setToolButtonStyle(Qt::ToolButtonIconOnly);
 	add_pattern_button->setPopupMode(QToolButton::InstantPopup);
 	add_pattern_button->setSizePolicy(QSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed));

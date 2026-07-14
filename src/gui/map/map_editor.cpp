@@ -20,6 +20,7 @@
 
 
 #include "map_editor.h"
+#include "gui/action_icon.h"
 #include "map_editor_p.h"
 
 #include <algorithm>
@@ -737,10 +738,8 @@ void MapEditorController::attach(MainWindow* window)
 		// Add zoom / cursor position field to status bar
 		auto* statusbar_zoom_icon = new QLabel();
 		auto fontmetrics = statusbar_zoom_icon->fontMetrics();
-		auto pixmap = QPixmap(QLatin1String(":/images/magnifying-glass.png"));
-		auto scale = qreal(fontmetrics.height()) / pixmap.height();
-		if (scale < 0.9 || scale > 1.1)
-			pixmap = pixmap.scaledToHeight(qRound(scale * pixmap.height()), Qt::SmoothTransformation);
+		auto pixmap = ActionIcon::fromName(u"magnifying-glass").pixmap(
+		  QSize{fontmetrics.height(), fontmetrics.height()});
 		statusbar_zoom_icon->setPixmap(pixmap);
 		
 		auto* statusbar_zoom_label = new QLabel();
@@ -858,7 +857,7 @@ void MapEditorController::attach(MainWindow* window)
 QAction* MapEditorController::newAction(const char* id, const QString &tr_text, QObject* receiver, const char* slot, const char* icon, const QString& tr_tip, const char* whats_this_link)
 {
 	Q_ASSERT(window); // Qt documentation recommends that actions are created as children of the window they are used in.
-	QAction* action = new QAction(icon ? QIcon(QLatin1String(":/images/") + QLatin1String(icon)) : QIcon(), tr_text, window);
+	QAction* action = new QAction(icon ? ActionIcon::fromName(QString::fromLatin1(icon)) : QIcon(), tr_text, window);
 	if (!tr_tip.isEmpty()) action->setStatusTip(tr_tip);
 	if (whats_this_link) action->setWhatsThis(Util::makeWhatThis(whats_this_link));
 	if (receiver) QObject::connect(action, SIGNAL(triggered()), receiver, slot);
@@ -878,7 +877,7 @@ QAction* MapEditorController::newCheckAction(const char* id, const QString &tr_t
 QAction* MapEditorController::newToolAction(const char* id, const QString &tr_text, QObject* receiver, const char* slot, const char* icon, const QString& tr_tip, const char* whats_this_link)
 {
 	Q_ASSERT(window); // Qt documentation recommends that actions are created as children of the window they are used in.
-	QAction* action = new MapEditorToolAction(icon ? QIcon(QLatin1String(":/images/") + QLatin1String(icon)) : QIcon(), tr_text, window);
+	QAction* action = new MapEditorToolAction(icon ? ActionIcon::fromName(QString::fromLatin1(icon)) : QIcon(), tr_text, window);
 	if (!tr_tip.isEmpty()) action->setStatusTip(tr_tip);
 	if (whats_this_link) action->setWhatsThis(Util::makeWhatThis(whats_this_link));
 	if (receiver) QObject::connect(action, SIGNAL(activated()), receiver, slot);
@@ -957,7 +956,7 @@ void MapEditorController::createActions()
 {
 	// Define all the actions, saving them into variables as necessary. Can also get them by ID.
 #ifdef QT_PRINTSUPPORT_LIB
-	print_act = newAction("print", tr("Print..."), nullptr, nullptr, "print.png", QString{}, "file_menu.html");
+	print_act = newAction("print", tr("Print..."), nullptr, nullptr, "print", QString{}, "file_menu.html");
 	connect(print_act, &QAction::triggered, this, [this] { printClicked(PrintWidget::PRINT_TASK); });
 	export_image_act = newAction("export-image", tr("&Image"), nullptr, nullptr, nullptr, QString{}, "file_menu.html");
 	connect(export_image_act, &QAction::triggered, this, [this] { printClicked(PrintWidget::EXPORT_IMAGE_TASK); });
@@ -983,19 +982,19 @@ void MapEditorController::createActions()
 	export_pdf_act = nullptr;
 #endif
 	
-	undo_act = newAction("undo", tr("Undo"), this, SLOT(undo()), "undo.png", tr("Undo the last step"), "edit_menu.html");
-	redo_act = newAction("redo", tr("Redo"), this, SLOT(redo()), "redo.png", tr("Redo the last step"), "edit_menu.html");
-	cut_act = newAction("cut", tr("Cu&t"), this, SLOT(cut()), "cut.png", QString{}, "edit_menu.html");
+	undo_act = newAction("undo", tr("Undo"), this, SLOT(undo()), "undo", tr("Undo the last step"), "edit_menu.html");
+	redo_act = newAction("redo", tr("Redo"), this, SLOT(redo()), "redo", tr("Redo the last step"), "edit_menu.html");
+	cut_act = newAction("cut", tr("Cu&t"), this, SLOT(cut()), "cut", QString{}, "edit_menu.html");
 	cut_act->setMenuRole(QAction::TextHeuristicRole);
-	copy_act = newAction("copy", tr("C&opy"), this, SLOT(copy()), "copy.png", QString{}, "edit_menu.html");
+	copy_act = newAction("copy", tr("C&opy"), this, SLOT(copy()), "copy", QString{}, "edit_menu.html");
 	copy_act->setMenuRole(QAction::TextHeuristicRole);
 	paste_act = newAction("paste", tr("&Paste"), nullptr, nullptr, "paste", QString{}, "edit_menu.html");
 	paste_act->setMenuRole(QAction::TextHeuristicRole);
 	connect(paste_act, &QAction::triggered, this, [this] { paste(1); });
-	paste_original_act = newAction("paste-original", tr("Paste at original location"), nullptr, nullptr, "paste-at-location.png", QString{}, "edit_menu.html");
+	paste_original_act = newAction("paste-original", tr("Paste at original location"), nullptr, nullptr, "paste-at-location", QString{}, "edit_menu.html");
 	paste_original_act->setMenuRole(QAction::TextHeuristicRole);
 	connect(paste_original_act, &QAction::triggered, this, [this] { paste(0); });
-	delete_act = newAction("delete", tr("Delete"), this, SLOT(deleteClicked()), "delete.png", QString{}, "toolbars.html#delete");
+	delete_act = newAction("delete", tr("Delete"), this, SLOT(deleteClicked()), "delete", QString{}, "toolbars.html#delete");
 	select_all_act = newAction("select-all", tr("Select all"), this, SLOT(selectAll()), nullptr, QString{}, "edit_menu.html");
 	select_nothing_act = newAction("select-nothing", tr("Select nothing"), this, SLOT(selectNothing()), nullptr, QString{}, "edit_menu.html");
 	invert_selection_act = newAction("invert-selection", tr("Invert selection"), this, SLOT(invertSelection()), nullptr, QString{}, "edit_menu.html");
@@ -1004,26 +1003,26 @@ void MapEditorController::createActions()
 	
 	clear_undo_redo_history_act = newAction("clearundoredohistory", tr("Clear undo / redo history"), this, SLOT(clearUndoRedoHistory()), nullptr, tr("Clear the undo / redo history to reduce map file size."), "edit_menu.html");
 	
-	show_grid_act = newCheckAction("showgrid", tr("Show grid"), this, SLOT(showGrid()), "grid.png", QString{}, "grid.html");
-	configure_grid_act = newAction("configuregrid", tr("Configure grid..."), this, SLOT(configureGrid()), "grid.png", QString{}, "grid.html");
-	pan_act = newToolAction("panmap", tr("Pan"), this, SLOT(pan()), "move.png", QString{}, "view_menu.html");
-	move_to_gps_pos_act = newAction("movegps", tr("Move to my location"), this, SLOT(moveToGpsPos()), "move-to-gps.png", QString{}, "view_menu.html");
+	show_grid_act = newCheckAction("showgrid", tr("Show grid"), this, SLOT(showGrid()), "grid", QString{}, "grid.html");
+	configure_grid_act = newAction("configuregrid", tr("Configure grid..."), this, SLOT(configureGrid()), "grid", QString{}, "grid.html");
+	pan_act = newToolAction("panmap", tr("Pan"), this, SLOT(pan()), "move", QString{}, "view_menu.html");
+	move_to_gps_pos_act = newAction("movegps", tr("Move to my location"), this, SLOT(moveToGpsPos()), "move-to-gps", QString{}, "view_menu.html");
 	move_to_gps_pos_act->setEnabled(false);
 	follow_position_act = newCheckAction("follow-position", tr("Keep my location on screen"), this, SLOT(followPositionClicked(bool)), nullptr, QString{}, "view_menu.html");
-	zoom_in_act = newAction("zoomin", tr("Zoom in"), this, SLOT(zoomIn()), "view-zoom-in.png", QString{}, "view_menu.html");
-	zoom_out_act = newAction("zoomout", tr("Zoom out"), this, SLOT(zoomOut()), "view-zoom-out.png", QString{}, "view_menu.html");
-	box_zoom_act = newCheckAction("boxzoom", tr("Zoom to box"), this, SLOT(boxZoom(bool)), "view-box-zoom.png", QString{}, "view_menu.html");
-	show_all_act = newAction("showall", tr("Show whole map"), this, SLOT(showWholeMap()), "view-show-all.png", QString{}, "view_menu.html");
+	zoom_in_act = newAction("zoomin", tr("Zoom in"), this, SLOT(zoomIn()), "view-zoom-in", QString{}, "view_menu.html");
+	zoom_out_act = newAction("zoomout", tr("Zoom out"), this, SLOT(zoomOut()), "view-zoom-out", QString{}, "view_menu.html");
+	box_zoom_act = newCheckAction("boxzoom", tr("Zoom to box"), this, SLOT(boxZoom(bool)), "view-box-zoom", QString{}, "view_menu.html");
+	show_all_act = newAction("showall", tr("Show whole map"), this, SLOT(showWholeMap()), "view-show-all", QString{}, "view_menu.html");
 	fullscreen_act = newAction("fullscreen", tr("Toggle fullscreen mode"), window, SLOT(toggleFullscreenMode()), nullptr, QString{}, "view_menu.html");
 	custom_zoom_act = newAction("setzoom", tr("Set custom zoom factor..."), this, SLOT(setCustomZoomFactorClicked()), nullptr, QString{}, "view_menu.html");
 	
-	hatch_areas_view_act = newCheckAction("hatchareasview", tr("Hatch areas"), this, SLOT(hatchAreas(bool)), "view-hatch-areas.png", QString{}, "view_menu.html");
-	baseline_view_act = newCheckAction("baselineview", tr("Baseline view"), this, SLOT(baselineView(bool)), "view-baseline.png", QString{}, "view_menu.html");
+	hatch_areas_view_act = newCheckAction("hatchareasview", tr("Hatch areas"), this, SLOT(hatchAreas(bool)), "view-hatch-areas", QString{}, "view_menu.html");
+	baseline_view_act = newCheckAction("baselineview", tr("Baseline view"), this, SLOT(baselineView(bool)), "view-baseline", QString{}, "view_menu.html");
 	hide_all_templates_act = newCheckAction("hidealltemplates", tr("Hide all templates"), this, SLOT(hideAllTemplates(bool)), nullptr, QString{}, "view_menu.html");
 	overprinting_simulation_act = newCheckAction("overprintsimulation", tr("Overprinting simulation"), this, SLOT(overprintingSimulation(bool)), nullptr, QString{}, "view_menu.html");
 	
-	symbol_window_act = newCheckAction("symbolwindow", tr("Symbol window"), this, SLOT(showSymbolWindow(bool)), "symbols.png", tr("Show/Hide the symbol window"), "symbol_dock_widget.html");
-	color_window_act = newCheckAction("colorwindow", tr("Color window"), this, SLOT(showColorWindow(bool)), "colors.png", tr("Show/Hide the color window"), "color_dock_widget.html");
+	symbol_window_act = newCheckAction("symbolwindow", tr("Symbol window"), this, SLOT(showSymbolWindow(bool)), "symbols", tr("Show/Hide the symbol window"), "symbol_dock_widget.html");
+	color_window_act = newCheckAction("colorwindow", tr("Color window"), this, SLOT(showColorWindow(bool)), "colors", tr("Show/Hide the color window"), "color_dock_widget.html");
 	symbol_set_id_act = newAction("symbol-set-id", tr("Symbol set ID..."), this, SLOT(symbolSetIdClicked()), nullptr, tr("Edit the symbol set ID"), nullptr);
 	load_symbols_from_act = newAction("loadsymbols", tr("Replace symbol set..."), this, SLOT(loadSymbolsFromClicked()), nullptr, tr("Replace the symbols with those from another map file"), "symbol_replace_dialog.html");
 	load_crt_act = newAction("loadcrt", tr("Load CRT file..."), this, SLOT(loadCrtClicked()), nullptr, tr("Assign new symbols by cross-reference table"), "symbol_replace_dialog.html");
@@ -1032,78 +1031,78 @@ void MapEditorController::createActions()
 	
 	scale_all_symbols_act = newAction("scaleall", tr("Scale all symbols..."), this, SLOT(scaleAllSymbolsClicked()), nullptr, tr("Scale the whole symbol set"), "map_menu.html");
 	georeferencing_act = newAction("georef", tr("Georeferencing..."), this, SLOT(editGeoreferencing()), nullptr, QString{}, "georeferencing.html");
-	scale_map_act = newAction("scalemap", tr("Change map scale..."), this, SLOT(scaleMapClicked()), "tool-scale.png", tr("Change the map scale and adjust map objects and symbol sizes"), "map_menu.html");
-	rotate_map_act = newAction("rotatemap", tr("Rotate map..."), this, SLOT(rotateMapClicked()), "tool-rotate.png", tr("Rotate the whole map"), "map_menu.html");
+	scale_map_act = newAction("scalemap", tr("Change map scale..."), this, SLOT(scaleMapClicked()), "tool-scale", tr("Change the map scale and adjust map objects and symbol sizes"), "map_menu.html");
+	rotate_map_act = newAction("rotatemap", tr("Rotate map..."), this, SLOT(rotateMapClicked()), "tool-rotate", tr("Rotate the whole map"), "map_menu.html");
 	map_notes_act = newAction("mapnotes", tr("Map notes..."), this, SLOT(mapNotesClicked()), nullptr, QString{}, "map_menu.html");
-	map_info_act = newAction("mapinfo", tr("Map information..."), this, SLOT(mapInfoClicked()), "map-information.png", QString{}, "map_menu.html");
+	map_info_act = newAction("mapinfo", tr("Map information..."), this, SLOT(mapInfoClicked()), "map-information", QString{}, "map_menu.html");
 	
-	template_window_act = newCheckAction("templatewindow", tr("Template setup window"), this, SLOT(showTemplateWindow(bool)), "templates.png", tr("Show/Hide the template window"), "templates_menu.html");
+	template_window_act = newCheckAction("templatewindow", tr("Template setup window"), this, SLOT(showTemplateWindow(bool)), "templates", tr("Show/Hide the template window"), "templates_menu.html");
 	//QAction* template_config_window_act = newCheckAction("templateconfigwindow", tr("Template configurations window"), this, SLOT(showTemplateConfigurationsWindow(bool)), "window-new", tr("Show/Hide the template configurations window"));
 	//QAction* template_visibilities_window_act = newCheckAction("templatevisibilitieswindow", tr("Template visibilities window"), this, SLOT(showTemplateVisbilitiesWindow(bool)), "window-new", tr("Show/Hide the template visibilities window"));
 	open_template_act = newAction("opentemplate", tr("Open template..."), this, SLOT(openTemplateClicked()), nullptr, QString{}, "templates_menu.html");
 	reopen_template_act = newAction("reopentemplate", tr("Reopen template..."), this, SLOT(reopenTemplateClicked()), nullptr, QString{}, "templates_menu.html");
-	
-	tags_window_act = newCheckAction("tagswindow", tr("Tag editor"), this, SLOT(showTagsWindow(bool)), "tag-editor.png", tr("Show/Hide the tag editor window"), "tag_editor.html");
-	
-	edit_tool_act = newToolAction("editobjects", tr("Edit objects"), this, SLOT(editToolClicked()), "tool-edit.png", QString{}, "toolbars.html#tool_edit_point");
-	edit_line_tool_act = newToolAction("editlines", tr("Edit lines"), this, SLOT(editLineToolClicked()), "tool-edit-line.png", QString{}, "toolbars.html#tool_edit_line");
-	draw_point_act = newToolAction("drawpoint", tr("Set point objects"), this, SLOT(drawPointClicked()), "draw-point.png", QString{}, "toolbars.html#tool_draw_point");
-	draw_path_act = newToolAction("drawpath", tr("Draw paths"), this, SLOT(drawPathClicked()), "draw-path.png", QString{}, "toolbars.html#tool_draw_path");
-	draw_circle_act = newToolAction("drawcircle", tr("Draw circles and ellipses"), this, SLOT(drawCircleClicked()), "draw-circle.png", QString{}, "toolbars.html#tool_draw_circle");
-	draw_rectangle_act = newToolAction("drawrectangle", tr("Draw rectangles"), this, SLOT(drawRectangleClicked()), "draw-rectangle.png", QString{}, "toolbars.html#tool_draw_rectangle");
-	draw_freehand_act = newToolAction("drawfreehand", tr("Draw free-handedly"), this, SLOT(drawFreehandClicked()), "draw-freehand.png", QString{}, "toolbars.html#tool_draw_freehand"); // TODO: documentation
-	draw_fill_act = newToolAction("drawfill", tr("Fill bounded areas"), this, SLOT(drawFillClicked()), "tool-fill.png", QString{}, "toolbars.html#tool_draw_fill"); // TODO: documentation
-	draw_text_act = newToolAction("drawtext", tr("Write text"), this, SLOT(drawTextClicked()), "draw-text.png", QString{}, "toolbars.html#tool_draw_text");
-	duplicate_act = newAction("duplicate", tr("Duplicate"), this, SLOT(duplicateClicked()), "tool-duplicate.png", QString{}, "toolbars.html#duplicate");
-	switch_symbol_act = newAction("switchsymbol", tr("Switch symbol"), this, SLOT(switchSymbolClicked()), "tool-switch-symbol.png", QString{}, "toolbars.html#switch_symbol");
-	fill_border_act = newAction("fillborder", tr("Fill / Create border"), this, SLOT(fillBorderClicked()), "tool-fill-border.png", QString{}, "toolbars.html#fill_create_border");
-	switch_dashes_act = newAction("switchdashes", tr("Switch dash direction"), this, SLOT(switchDashesClicked()), "tool-switch-dashes.png", QString{}, "toolbars.html#switch_dashes");
-	connect_paths_act = newAction("connectpaths", tr("Connect paths"), this, SLOT(connectPathsClicked()), "tool-connect-paths.png", QString{}, "toolbars.html#connect");
-	
-	cut_tool_act = newToolAction("cutobject", tr("Cut object"), this, SLOT(cutClicked()), "tool-cut.png", QString{}, "toolbars.html#cut_tool");
-	cut_hole_act = newToolAction("cuthole", tr("Cut free form hole"), this, SLOT(cutHoleClicked()), "tool-cut-hole.png", QString{}, "toolbars.html#cut_hole"); // cut hole using a path
-	cut_hole_circle_act = newToolAction("cutholecircle", tr("Cut round hole"), this, SLOT(cutHoleCircleClicked()), "tool-cut-hole.png", QString{}, "toolbars.html#cut_hole");
-	cut_hole_rectangle_act = newToolAction("cutholerectangle", tr("Cut rectangular hole"), this, SLOT(cutHoleRectangleClicked()), "tool-cut-hole.png", QString{}, "toolbars.html#cut_hole");
+
+	tags_window_act = newCheckAction("tagswindow", tr("Tag editor"), this, SLOT(showTagsWindow(bool)), "tag-editor", tr("Show/Hide the tag editor window"), "tag_editor.html");
+
+	edit_tool_act = newToolAction("editobjects", tr("Edit objects"), this, SLOT(editToolClicked()), "tool-edit", QString{}, "toolbars.html#tool_edit_point");
+	edit_line_tool_act = newToolAction("editlines", tr("Edit lines"), this, SLOT(editLineToolClicked()), "tool-edit-line", QString{}, "toolbars.html#tool_edit_line");
+	draw_point_act = newToolAction("drawpoint", tr("Set point objects"), this, SLOT(drawPointClicked()), "draw-point", QString{}, "toolbars.html#tool_draw_point");
+	draw_path_act = newToolAction("drawpath", tr("Draw paths"), this, SLOT(drawPathClicked()), "draw-path", QString{}, "toolbars.html#tool_draw_path");
+	draw_circle_act = newToolAction("drawcircle", tr("Draw circles and ellipses"), this, SLOT(drawCircleClicked()), "draw-circle", QString{}, "toolbars.html#tool_draw_circle");
+	draw_rectangle_act = newToolAction("drawrectangle", tr("Draw rectangles"), this, SLOT(drawRectangleClicked()), "draw-rectangle", QString{}, "toolbars.html#tool_draw_rectangle");
+	draw_freehand_act = newToolAction("drawfreehand", tr("Draw free-handedly"), this, SLOT(drawFreehandClicked()), "draw-freehand", QString{}, "toolbars.html#tool_draw_freehand"); // TODO: documentation
+	draw_fill_act = newToolAction("drawfill", tr("Fill bounded areas"), this, SLOT(drawFillClicked()), "tool-fill", QString{}, "toolbars.html#tool_draw_fill"); // TODO: documentation
+	draw_text_act = newToolAction("drawtext", tr("Write text"), this, SLOT(drawTextClicked()), "draw-text", QString{}, "toolbars.html#tool_draw_text");
+	duplicate_act = newAction("duplicate", tr("Duplicate"), this, SLOT(duplicateClicked()), "tool-duplicate", QString{}, "toolbars.html#duplicate");
+	switch_symbol_act = newAction("switchsymbol", tr("Switch symbol"), this, SLOT(switchSymbolClicked()), "tool-switch-symbol", QString{}, "toolbars.html#switch_symbol");
+	fill_border_act = newAction("fillborder", tr("Fill / Create border"), this, SLOT(fillBorderClicked()), "tool-fill-border", QString{}, "toolbars.html#fill_create_border");
+	switch_dashes_act = newAction("switchdashes", tr("Switch dash direction"), this, SLOT(switchDashesClicked()), "tool-switch-dashes", QString{}, "toolbars.html#switch_dashes");
+	connect_paths_act = newAction("connectpaths", tr("Connect paths"), this, SLOT(connectPathsClicked()), "tool-connect-paths", QString{}, "toolbars.html#connect");
+
+	cut_tool_act = newToolAction("cutobject", tr("Cut object"), this, SLOT(cutClicked()), "tool-cut", QString{}, "toolbars.html#cut_tool");
+	cut_hole_act = newToolAction("cuthole", tr("Cut free form hole"), this, SLOT(cutHoleClicked()), "tool-cut-hole", QString{}, "toolbars.html#cut_hole"); // cut hole using a path
+	cut_hole_circle_act = newToolAction("cutholecircle", tr("Cut round hole"), this, SLOT(cutHoleCircleClicked()), "tool-cut-hole", QString{}, "toolbars.html#cut_hole");
+	cut_hole_rectangle_act = newToolAction("cutholerectangle", tr("Cut rectangular hole"), this, SLOT(cutHoleRectangleClicked()), "tool-cut-hole", QString{}, "toolbars.html#cut_hole");
 	cut_hole_menu = new QMenu(tr("Cut hole"));
 	cut_hole_menu->menuAction()->setMenuRole(QAction::NoRole);
-	cut_hole_menu->setIcon(QIcon(QString::fromLatin1(":/images/tool-cut-hole.png")));
+	cut_hole_menu->setIcon(ActionIcon::fromName(u"tool-cut-hole"));
 	cut_hole_menu->addAction(cut_hole_act);
 	cut_hole_menu->addAction(cut_hole_circle_act);
 	cut_hole_menu->addAction(cut_hole_rectangle_act);
 	
-	rotate_act = newToolAction("rotateobjects", tr("Rotate objects"), this, SLOT(rotateClicked()), "tool-rotate.png", QString{}, "toolbars.html#rotate");
-	rotate_pattern_act = newToolAction("rotatepatterns", tr("Rotate pattern"), this, SLOT(rotatePatternClicked()), "tool-rotate-pattern.png", QString{}, "toolbars.html#tool_rotate_pattern");
-	scale_act = newToolAction("scaleobjects", tr("Scale objects"), this, SLOT(scaleClicked()), "tool-scale.png", QString{}, "toolbars.html#scale");
-	measure_act = newCheckAction("measure", tr("Measure lengths and areas"), this, SLOT(measureClicked(bool)), "tool-measure.png", QString{}, "toolbars.html#measure");
-	boolean_union_act = newAction("booleanunion", tr("Unify areas"), this, SLOT(booleanUnionClicked()), "tool-boolean-union.png", QString{}, "toolbars.html#unify_areas");
-	boolean_intersection_act = newAction("booleanintersection", tr("Intersect areas"), this, SLOT(booleanIntersectionClicked()), "tool-boolean-intersection.png", QString{}, "toolbars.html#intersect_areas");
-	boolean_difference_act = newAction("booleandifference", tr("Cut away from area"), this, SLOT(booleanDifferenceClicked()), "tool-boolean-difference.png", QString{}, "toolbars.html#area_difference");
-	boolean_xor_act = newAction("booleanxor", tr("Area XOr"), this, SLOT(booleanXOrClicked()), "tool-boolean-xor.png", QString{}, "toolbars.html#area_xor");
-	boolean_merge_holes_act = newAction("booleanmergeholes", tr("Merge area holes"), this, SLOT(booleanMergeHolesClicked()), "tool-boolean-merge-holes.png", QString{}, "toolbars.html#area_merge_holes"); // TODO:documentation
-	convert_to_curves_act = newAction("converttocurves", tr("Convert to curves"), this, SLOT(convertToCurvesClicked()), "tool-convert-to-curves.png", QString{}, "toolbars.html#convert_to_curves");
-	simplify_path_act = newAction("simplify", tr("Simplify path"), this, SLOT(simplifyPathClicked()), "tool-simplify-path.png", QString{}, "toolbars.html#simplify_path");
-	clip_area_act = newToolAction("cliparea", tr("Clip area"), this, SLOT(clipAreaClicked()), "tool-clip.png", QString{}, "toolbars.html#clip_area");
-	erase_area_act = newToolAction("erasearea", tr("Erase area"), this, SLOT(eraseAreaClicked()), "tool-erase.png", QString{}, "toolbars.html#erase_area");
-	distribute_points_act = newAction("distributepoints", tr("Distribute points along path"), this, SLOT(distributePointsClicked()), "tool-distribute-points.png", QString{}, "toolbars.html#distribute_points"); // TODO: write documentation
+	rotate_act = newToolAction("rotateobjects", tr("Rotate objects"), this, SLOT(rotateClicked()), "tool-rotate", QString{}, "toolbars.html#rotate");
+	rotate_pattern_act = newToolAction("rotatepatterns", tr("Rotate pattern"), this, SLOT(rotatePatternClicked()), "tool-rotate-pattern", QString{}, "toolbars.html#tool_rotate_pattern");
+	scale_act = newToolAction("scaleobjects", tr("Scale objects"), this, SLOT(scaleClicked()), "tool-scale", QString{}, "toolbars.html#scale");
+	measure_act = newCheckAction("measure", tr("Measure lengths and areas"), this, SLOT(measureClicked(bool)), "tool-measure", QString{}, "toolbars.html#measure");
+	boolean_union_act = newAction("booleanunion", tr("Unify areas"), this, SLOT(booleanUnionClicked()), "tool-boolean-union", QString{}, "toolbars.html#unify_areas");
+	boolean_intersection_act = newAction("booleanintersection", tr("Intersect areas"), this, SLOT(booleanIntersectionClicked()), "tool-boolean-intersection", QString{}, "toolbars.html#intersect_areas");
+	boolean_difference_act = newAction("booleandifference", tr("Cut away from area"), this, SLOT(booleanDifferenceClicked()), "tool-boolean-difference", QString{}, "toolbars.html#area_difference");
+	boolean_xor_act = newAction("booleanxor", tr("Area XOr"), this, SLOT(booleanXOrClicked()), "tool-boolean-xor", QString{}, "toolbars.html#area_xor");
+	boolean_merge_holes_act = newAction("booleanmergeholes", tr("Merge area holes"), this, SLOT(booleanMergeHolesClicked()), "tool-boolean-merge-holes", QString{}, "toolbars.html#area_merge_holes"); // TODO:documentation
+	convert_to_curves_act = newAction("converttocurves", tr("Convert to curves"), this, SLOT(convertToCurvesClicked()), "tool-convert-to-curves", QString{}, "toolbars.html#convert_to_curves");
+	simplify_path_act = newAction("simplify", tr("Simplify path"), this, SLOT(simplifyPathClicked()), "tool-simplify-path", QString{}, "toolbars.html#simplify_path");
+	clip_area_act = newToolAction("cliparea", tr("Clip area"), this, SLOT(clipAreaClicked()), "tool-clip", QString{}, "toolbars.html#clip_area");
+	erase_area_act = newToolAction("erasearea", tr("Erase area"), this, SLOT(eraseAreaClicked()), "tool-erase", QString{}, "toolbars.html#erase_area");
+	distribute_points_act = newAction("distributepoints", tr("Distribute points along path"), this, SLOT(distributePointsClicked()), "tool-distribute-points", QString{}, "toolbars.html#distribute_points"); // TODO: write documentation
 	
 	paint_feature = std::make_unique<PaintOnTemplateFeature>(*this);
 	
-	touch_cursor_action = newCheckAction("touchcursor", tr("Enable touch cursor"), map_widget, SLOT(enableTouchCursor(bool)), "tool-touch-cursor.png", QString{}, "toolbars.html#touch_cursor"); // TODO: write documentation
-	gps_display_action = newCheckAction("gpsdisplay", tr("Enable GPS display"), this, SLOT(enableGPSDisplay(bool)), "tool-gps-display.png", QString{}, "toolbars.html#gps_display"); // TODO: write documentation
+	touch_cursor_action = newCheckAction("touchcursor", tr("Enable touch cursor"), map_widget, SLOT(enableTouchCursor(bool)), "tool-touch-cursor", QString{}, "toolbars.html#touch_cursor"); // TODO: write documentation
+	gps_display_action = newCheckAction("gpsdisplay", tr("Enable GPS display"), this, SLOT(enableGPSDisplay(bool)), "tool-gps-display", QString{}, "toolbars.html#gps_display"); // TODO: write documentation
 	gps_display_action->setEnabled(map->getGeoreferencing().getState() == Georeferencing::Geospatial);
-	gps_distance_rings_action = newCheckAction("gpsdistancerings", tr("Enable GPS distance rings"), this, SLOT(enableGPSDistanceRings(bool)), "gps-distance-rings.png", QString{}, "toolbars.html#gps_distance_rings"); // TODO: write documentation
+	gps_distance_rings_action = newCheckAction("gpsdistancerings", tr("Enable GPS distance rings"), this, SLOT(enableGPSDistanceRings(bool)), "gps-distance-rings", QString{}, "toolbars.html#gps_distance_rings"); // TODO: write documentation
 	gps_distance_rings_action->setEnabled(false);
-	draw_point_gps_act = newToolAction("drawpointgps", tr("Set point object at GPS position"), this, SLOT(drawPointGPSClicked()), "draw-point-gps.png", QString{}, "toolbars.html#tool_draw_point_gps"); // TODO: write documentation
+	draw_point_gps_act = newToolAction("drawpointgps", tr("Set point object at GPS position"), this, SLOT(drawPointGPSClicked()), "draw-point-gps", QString{}, "toolbars.html#tool_draw_point_gps"); // TODO: write documentation
 	draw_point_gps_act->setEnabled(false);
-	gps_temporary_point_act = newAction("gpstemporarypoint", tr("Set temporary marker at GPS position"), this, SLOT(gpsTemporaryPointClicked()), "gps-temporary-point.png", QString{}, "toolbars.html#gps_temporary_point"); // TODO: write documentation
+	gps_temporary_point_act = newAction("gpstemporarypoint", tr("Set temporary marker at GPS position"), this, SLOT(gpsTemporaryPointClicked()), "gps-temporary-point", QString{}, "toolbars.html#gps_temporary_point"); // TODO: write documentation
 	gps_temporary_point_act->setEnabled(false);
-	gps_temporary_path_act = newCheckAction("gpstemporarypath", tr("Create temporary path at GPS position"), this, SLOT(gpsTemporaryPathClicked(bool)), "gps-temporary-path.png", QString{}, "toolbars.html#gps_temporary_path"); // TODO: write documentation
+	gps_temporary_path_act = newCheckAction("gpstemporarypath", tr("Create temporary path at GPS position"), this, SLOT(gpsTemporaryPathClicked(bool)), "gps-temporary-path", QString{}, "toolbars.html#gps_temporary_path"); // TODO: write documentation
 	gps_temporary_path_act->setEnabled(false);
-	gps_temporary_clear_act = newAction("gpstemporaryclear", tr("Clear temporary GPS markers"), this, SLOT(gpsTemporaryClearClicked()), "gps-temporary-clear.png", QString{}, "toolbars.html#gps_temporary_clear"); // TODO: write documentation
+	gps_temporary_clear_act = newAction("gpstemporaryclear", tr("Clear temporary GPS markers"), this, SLOT(gpsTemporaryClearClicked()), "gps-temporary-clear", QString{}, "toolbars.html#gps_temporary_clear"); // TODO: write documentation
 	gps_temporary_clear_act->setEnabled(false);
 	
-	compass_action = newCheckAction("compassdisplay", tr("Enable compass display"), this, SLOT(enableCompassDisplay(bool)), "compass.png", QString{}, "toolbars.html#compass_display"); // TODO: write documentation
-	align_map_with_north_act = newCheckAction("alignmapwithnorth", tr("Align map with north"), this, SLOT(alignMapWithNorth(bool)), "rotate-map.png", QString{}, "toolbars.html#align_map_with_north"); // TODO: write documentation
+	compass_action = newCheckAction("compassdisplay", tr("Enable compass display"), this, SLOT(enableCompassDisplay(bool)), "compass", QString{}, "toolbars.html#compass_display"); // TODO: write documentation
+	align_map_with_north_act = newCheckAction("alignmapwithnorth", tr("Align map with north"), this, SLOT(alignMapWithNorth(bool)), "rotate-map", QString{}, "toolbars.html#align_map_with_north"); // TODO: write documentation
 	
 	mappart_add_act = newAction("addmappart", tr("Add new part..."), this, SLOT(addMapPart()));
 	mappart_rename_act = newAction("renamemappart", tr("Rename current part..."), this, SLOT(renameMapPart()));
@@ -1130,7 +1129,7 @@ void MapEditorController::createActions()
 	QObject::connect(&map->getGeoreferencing(), &Georeferencing::projectionChanged, this, &MapEditorController::projectionChanged);
 	projectionChanged();
 	
-	copy_coords_act = newAction("copy-coords", tr("Copy position"), this, SLOT(copyDisplayedCoords()), "copy-coords.png", tr("Copy position to clipboard."));
+	copy_coords_act = newAction("copy-coords", tr("Copy position"), this, SLOT(copyDisplayedCoords()), "copy-coords", tr("Copy position to clipboard."));
 }
 
 void MapEditorController::createMenuAndToolbars()
@@ -1465,13 +1464,13 @@ void MapEditorController::createMobileGUI()
 		selectedSymbolsChanged();
 	});
 	
-	QAction* hide_top_bar_action = new QAction(QIcon(QString::fromLatin1(":/images/arrow-thin-upleft.png")), tr("Hide top bar"), this);
+	QAction* hide_top_bar_action = new QAction(ActionIcon::fromName(u"arrow-thin-upleft"), tr("Hide top bar"), this);
  	connect(hide_top_bar_action, &QAction::triggered, this, &MapEditorController::hideTopActionBar);
 	
-	QAction* show_top_bar_action = new QAction(QIcon(QString::fromLatin1(":/images/arrow-thin-downright.png")), tr("Show top bar"), this);
+	QAction* show_top_bar_action = new QAction(ActionIcon::fromName(u"arrow-thin-downright"), tr("Show top bar"), this);
  	connect(show_top_bar_action, &QAction::triggered, this, &MapEditorController::showTopActionBar);
 	
-	QAction* mappart_action = new QAction(QIcon(QString::fromLatin1(":/images/map-parts.png")), tr("Map parts"), this);
+	QAction* mappart_action = new QAction(ActionIcon::fromName(u"map-parts"), tr("Map parts"), this);
 	auto* mappart_group = new QActionGroup(window);
 	auto* mappart_menu = new QMenu(window);
 	mappart_action->setMenu(mappart_menu);

@@ -170,6 +170,7 @@ set(mapper_qt_components
 	Positioning
 	Sensors
 	SerialPort
+	Svg
 	Widgets
 )
 if(Mapper_WITH_COVE)

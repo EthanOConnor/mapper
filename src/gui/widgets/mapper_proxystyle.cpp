@@ -21,6 +21,7 @@
 #include "mapper_proxystyle.h"
 
 #include <algorithm>
+#include <utility>
 
 #include <Qt>
 #include <QAbstractSpinBox>
@@ -49,6 +50,7 @@
 #include <QWidget>
 
 #include "settings.h"
+#include "gui/action_icon.h"
 #include "gui/widgets/segmented_button_layout.h"
 #include "gui/util_gui.h"
 
@@ -473,7 +475,7 @@ QIcon MapperProxyStyle::standardIcon(QStyle::StandardPixmap standard_icon, const
 	
 	if (icon.isNull())
 		icon = QProxyStyle::standardIcon(standard_icon, option, widget);
-	return icon;
+	return ActionIcon::bounded(std::move(icon));
 }
 
 QPixmap MapperProxyStyle::standardPixmap(QStyle::StandardPixmap standard_pixmap, const QStyleOption* option, const QWidget* widget) const

@@ -22,6 +22,7 @@
 #ifdef QT_PRINTSUPPORT_LIB
 
 #include "print_widget.h"
+#include "gui/action_icon.h"
 
 #include <limits>
 // IWYU pragma: no_include <type_traits>
@@ -211,9 +212,9 @@ PrintWidget::PrintWidget(Map* map, MainWindow* main_window, MapView* main_view, 
 	mode_widget->setLayout(mode_layout);
 	mode_layout->setContentsMargins({});
 	
-	vector_mode_button = createPrintModeButton(QIcon(QString::fromLatin1(":/images/print-mode-vector.png")), tr("Vector\ngraphics"));
-	raster_mode_button = createPrintModeButton(QIcon(QString::fromLatin1(":/images/print-mode-raster.png")), tr("Raster\ngraphics"));
-	separations_mode_button = createPrintModeButton(QIcon(QString::fromLatin1(":/images/print-mode-separations.png")), tr("Color\nseparations"));
+	vector_mode_button = createPrintModeButton(ActionIcon::fromName(u"print-mode-vector"), tr("Vector\ngraphics"));
+	raster_mode_button = createPrintModeButton(ActionIcon::fromName(u"print-mode-raster"), tr("Raster\ngraphics"));
+	separations_mode_button = createPrintModeButton(ActionIcon::fromName(u"print-mode-separations"), tr("Color\nseparations"));
 	vector_mode_button->setChecked(true);
 	
 	auto mode_button_group = new QButtonGroup(this);

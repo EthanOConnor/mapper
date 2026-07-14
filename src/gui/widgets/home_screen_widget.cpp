@@ -20,6 +20,7 @@
 
 
 #include "home_screen_widget.h"
+#include "gui/action_icon.h"
 
 #include <QApplication> // IWYU pragma: keep
 #include <QAbstractButton>
@@ -147,26 +148,26 @@ QWidget* HomeScreenWidgetDesktop::makeMenuWidget(HomeScreenController* controlle
 	QLabel* menu_headline = makeHeadline(tr("Activities"));
 	menu_layout->addWidget(menu_headline);
 	QAbstractButton* button_new_map = makeButton(
-	  tr("Create a new map ..."), QIcon(QString::fromLatin1(":/images/new.png")));
+	  tr("Create a new map ..."), ActionIcon::fromName(u"new"));
 	menu_layout->addWidget(button_new_map);
 	QAbstractButton* button_open_map = makeButton(
-	  tr("Open map ..."), QIcon(QString::fromLatin1(":/images/open.png")));
+	  tr("Open map ..."), ActionIcon::fromName(u"open"));
 	menu_layout->addWidget(button_open_map);
 	
 	menu_layout->addStretch(1);
 	
-	auto* button_touch = makeButton(tr("Touch mode"), QIcon{QLatin1String(":/images/tool-touch-cursor.png")});
+	auto* button_touch = makeButton(tr("Touch mode"), ActionIcon::fromName(u"tool-touch-cursor"));
 	button_touch->setCheckable(true);
 	button_touch->setChecked(Settings::getInstance().touchModeEnabled());
 	menu_layout->addWidget(button_touch);
 	QAbstractButton* button_settings = makeButton(
-	  tr("Settings"), QIcon(QString::fromLatin1(":/images/settings.png")));
+	  tr("Settings"), ActionIcon::fromName(u"settings"));
 	menu_layout->addWidget(button_settings);
 	QAbstractButton* button_about = makeButton(
-	  tr("About %1", "As in 'About OpenOrienteering Mapper'").arg(window->appName()), QIcon(QString::fromLatin1(":/images/about.png")));
+	  tr("About %1", "As in 'About OpenOrienteering Mapper'").arg(window->appName()), ActionIcon::fromName(u"about"));
 	menu_layout->addWidget(button_about);
 	QAbstractButton* button_help = makeButton(
-	  tr("Help"), QIcon(QString::fromLatin1(":/images/help.png")));
+	  tr("Help"), ActionIcon::fromName(u"help"));
 	menu_layout->addWidget(button_help);
 	QAbstractButton* button_exit = makeButton(
 	  tr("Exit"), style()->standardIcon(QStyle::SP_DialogCloseButton));
@@ -246,9 +247,9 @@ QWidget* HomeScreenWidgetDesktop::makeTipsWidget(HomeScreenController* controlle
 	tips_check->setChecked(true);
 	tips_layout->addWidget(tips_check, 2, 0, 1, 1);
 	tips_layout->addWidget(tips_label, 1, 0, 1, 3);
-	QPushButton* prev_button = new QPushButton(QIcon(QString::fromLatin1(":/images/arrow-left.png")), tr("Previous"));
+	QPushButton* prev_button = new QPushButton(ActionIcon::fromName(u"arrow-left"), tr("Previous"));
 	tips_layout->addWidget(prev_button, 2, 1, 1, 1);
-	QPushButton* next_button = new QPushButton(QIcon(QString::fromLatin1(":/images/arrow-right.png")), tr("Next"));
+	QPushButton* next_button = new QPushButton(ActionIcon::fromName(u"arrow-right"), tr("Next"));
 	tips_layout->addWidget(next_button, 2, 2, 1, 1);
 	
 	tips_layout->setRowStretch(1, 1);

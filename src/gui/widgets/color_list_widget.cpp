@@ -20,6 +20,7 @@
 
 
 #include "color_list_widget.h"
+#include "gui/action_icon.h"
 
 #include <Qt>
 #include <QtGlobal>
@@ -98,21 +99,21 @@ ColorListWidget::ColorListWidget(Map* map, MainWindow* window, QWidget* parent)
 	auto new_button_menu = new QMenu(this);
 	(void) new_button_menu->addAction(tr("New"), this, SLOT(newColor()));
 	duplicate_action = new_button_menu->addAction(tr("Duplicate"), this, SLOT(duplicateColor()));
-	duplicate_action->setIcon(QIcon(QString::fromLatin1(":/images/tool-duplicate.png")));
+	duplicate_action->setIcon(ActionIcon::fromName(u"tool-duplicate"));
 	
 	// Buttons
-	auto new_button = createToolButton(QIcon(QString::fromLatin1(":/images/plus.png")), tr("New"));
+	auto new_button = createToolButton(ActionIcon::fromName(u"plus"), tr("New"));
 	new_button->setPopupMode(QToolButton::DelayedPopup); // or MenuButtonPopup
 	new_button->setMenu(new_button_menu);
-	delete_button = createToolButton(QIcon(QString::fromLatin1(":/images/minus.png")), tr("Delete"));
+	delete_button = createToolButton(ActionIcon::fromName(u"minus"), tr("Delete"));
 	
 	auto add_remove_layout = new SegmentedButtonLayout();
 	add_remove_layout->addWidget(new_button);
 	add_remove_layout->addWidget(delete_button);
 	
-	move_up_button = createToolButton(QIcon(QString::fromLatin1(":/images/arrow-up.png")), tr("Move Up"));
+	move_up_button = createToolButton(ActionIcon::fromName(u"arrow-up"), tr("Move Up"));
 	move_up_button->setAutoRepeat(true);
-	move_down_button = createToolButton(QIcon(QString::fromLatin1(":/images/arrow-down.png")), tr("Move Down"));
+	move_down_button = createToolButton(ActionIcon::fromName(u"arrow-down"), tr("Move Down"));
 	move_down_button->setAutoRepeat(true);
 	
 	auto up_down_layout = new SegmentedButtonLayout();
@@ -120,10 +121,10 @@ ColorListWidget::ColorListWidget(Map* map, MainWindow* window, QWidget* parent)
 	up_down_layout->addWidget(move_down_button);
 	
 	// TODO: In Mapper >= 0.6, switch to ColorWidget (or generic) translation context.
-	edit_button = createToolButton(QIcon(QString::fromLatin1(":/images/settings.png")), QApplication::translate("OpenOrienteering::MapEditorController", "&Edit").remove(QLatin1Char('&')));
+	edit_button = createToolButton(ActionIcon::fromName(u"settings"), QApplication::translate("OpenOrienteering::MapEditorController", "&Edit").remove(QLatin1Char('&')));
 	edit_button->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
 	
-	auto help_button = createToolButton(QIcon(QString::fromLatin1(":/images/help.png")), tr("Help"));
+	auto help_button = createToolButton(ActionIcon::fromName(u"help"), tr("Help"));
 	help_button->setAutoRaise(true);
 	
 	// The buttons row layout

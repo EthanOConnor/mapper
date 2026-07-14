@@ -21,12 +21,16 @@
 #include <Qt>
 #include <QtGlobal>
 #include <QtTest>
+#include <QDir>
+#include <QFileInfo>
 #include <QIcon>
+#include <QImage>
 #include <QObject>
 #include <QSize>
 #include <QString>
 #include <QStyle>
 
+#include "gui/action_icon.h"
 #include "gui/widgets/mapper_proxystyle.h"
 
 using namespace OpenOrienteering;
@@ -40,16 +44,53 @@ class StyleTest : public QObject
 {
 Q_OBJECT
 private slots:
-	void resourceIconTest();
+	void scalableActionIconTest();
+	void allActionIconsTest();
 	void standardIconTest();
 };
 
-void StyleTest::resourceIconTest()
+void StyleTest::scalableActionIconTest()
 {
 	Q_INIT_RESOURCE(resources);
-	const QIcon icon(QStringLiteral(":/images/help.png"));
+	const auto icon = ActionIcon::fromName(u"delete");
 	QVERIFY(!icon.isNull());
-	QVERIFY(!icon.pixmap(QSize(32, 32)).isNull());
+	for (auto const size : { QSize{32, 32}, QSize{96, 96}, QSize{256, 256} })
+	{
+		QCOMPARE(icon.actualSize(size), size);
+		QCOMPARE(icon.pixmap(size).size(), size);
+	}
+	auto const pathological = QSize{1000, 1000};
+	QCOMPARE(icon.actualSize(pathological), QSize(256, 256));
+	QCOMPARE(icon.pixmap(pathological).size(), QSize(256, 256));
+}
+
+void StyleTest::allActionIconsTest()
+{
+	Q_INIT_RESOURCE(resources);
+	const auto files = QDir{QStringLiteral(":/icons")}.entryList(
+	  {QStringLiteral("*.svg")}, QDir::Files, QDir::Name);
+	QCOMPARE(files.size(), 97);
+
+	for (const auto& file : files)
+	{
+		const auto name = QFileInfo{file}.completeBaseName();
+		const auto icon = ActionIcon::fromName(name);
+		QVERIFY2(!icon.isNull(), qPrintable(name));
+		QCOMPARE(icon.actualSize(QSize{32, 32}), QSize(32, 32));
+
+		const auto pixmap = icon.pixmap(QSize{32, 32}, 2.0);
+		QCOMPARE(pixmap.size(), QSize(64, 64));
+		QCOMPARE(pixmap.devicePixelRatio(), 2.0);
+		const auto image = pixmap.toImage().convertToFormat(QImage::Format_ARGB32);
+		bool has_visible_pixel = false;
+		for (auto y = 0; y < image.height() && !has_visible_pixel; ++y)
+		{
+			const auto* row = reinterpret_cast<const QRgb*>(image.constScanLine(y));
+			for (auto x = 0; x < image.width(); ++x)
+				has_visible_pixel |= qAlpha(row[x]) != 0;
+		}
+		QVERIFY2(has_visible_pixel, qPrintable(name));
+	}
 }
 
 /**
@@ -62,9 +103,8 @@ void StyleTest::standardIconTest()
 	auto const icon = MapperProxyStyle().standardIcon(standard_icon, nullptr, nullptr);
 	auto const size = icon.actualSize(large);
 	QVERIFY(!icon.isNull());
-	QVERIFY(size.isValid());
-	QVERIFY(size.width() <= large.width());
-	QVERIFY(size.height() <= large.height());
+	QCOMPARE(size, QSize(256, 256));
+	QCOMPARE(icon.pixmap(large).size(), QSize(256, 256));
 }
 
 

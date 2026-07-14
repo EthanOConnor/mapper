@@ -20,6 +20,7 @@
 
 
 #include "template_image_open_dialog.h"
+#include "gui/action_icon.h"
 
 #include <Qt>
 #include <QtGlobal>
@@ -110,7 +111,7 @@ TemplateImageOpenDialog::TemplateImageOpenDialog(TemplateImage* templ, QWidget* 
 	scale_layout->addStretch(1);
 	
 	auto* cancel_button = new QPushButton(tr("Cancel"));
-	open_button = new QPushButton(QIcon(QString::fromLatin1(":/images/arrow-right.png")), tr("Open"));
+	open_button = new QPushButton(ActionIcon::fromName(u"arrow-right"), tr("Open"));
 	open_button->setDefault(true);
 	
 	auto* buttons_layout = new QHBoxLayout();

@@ -20,6 +20,7 @@
 
 
 #include "main_window.h"
+#include "gui/action_icon.h"
 
 #include <QApplication>
 #include <QCloseEvent>
@@ -376,14 +377,14 @@ void MainWindow::setController(MainWindowController* new_controller, bool has_fi
 
 void MainWindow::createFileMenu()
 {
-	QAction* new_act = new QAction(QIcon(QString::fromLatin1(":/images/new.png")), tr("&New"), this);
+	QAction* new_act = new QAction(ActionIcon::fromName(u"new"), tr("&New"), this);
 	new_act->setMenuRole(QAction::NoRole);
 	new_act->setShortcuts(QKeySequence::New);
 	new_act->setStatusTip(tr("Create a new map"));
 	new_act->setWhatsThis(Util::makeWhatThis("file_menu.html"));
 	connect(new_act, &QAction::triggered, this, &MainWindow::showNewMapWizard);
 	
-	QAction* open_act = new QAction(QIcon(QString::fromLatin1(":/images/open.png")), tr("&Open..."), this);
+	QAction* open_act = new QAction(ActionIcon::fromName(u"open"), tr("&Open..."), this);
 	open_act->setMenuRole(QAction::NoRole);
 	open_act->setShortcuts(QKeySequence::Open);
 	open_act->setStatusTip(tr("Open an existing file"));
@@ -402,7 +403,7 @@ void MainWindow::createFileMenu()
 	
 	// NOTE: if you insert something between open_recent_menu and save_act, adjust updateRecentFileActions()!
 	
-	save_act = new QAction(QIcon(QString::fromLatin1(":/images/save.png")), tr("&Save"), this);
+	save_act = new QAction(ActionIcon::fromName(u"save"), tr("&Save"), this);
 	save_act->setMenuRole(QAction::NoRole);
 	save_act->setShortcuts(QKeySequence::Save);
 	save_act->setWhatsThis(Util::makeWhatThis("file_menu.html"));
@@ -422,7 +423,7 @@ void MainWindow::createFileMenu()
 	settings_act->setShortcut(QKeySequence::Preferences);
 	connect(settings_act, &QAction::triggered, this, &MainWindow::showSettings);
 	
-	close_act = new QAction(QIcon(QString::fromLatin1(":/images/close.png")), tr("Close"), this);
+	close_act = new QAction(ActionIcon::fromName(u"close"), tr("Close"), this);
 	close_act->setMenuRole(QAction::NoRole);
 	close_act->setShortcut(QKeySequence::Close);
 	close_act->setStatusTip(tr("Close this file"));
@@ -472,7 +473,7 @@ void MainWindow::createFileMenu()
 void MainWindow::createHelpMenu()
 {
 	// Help menu
-	QAction* manualAct = new QAction(QIcon(QString::fromLatin1(":/images/help.png")), tr("Open &Manual"), this);
+	QAction* manualAct = new QAction(ActionIcon::fromName(u"help"), tr("Open &Manual"), this);
 	manualAct->setMenuRole(QAction::NoRole);
 	manualAct->setStatusTip(tr("Show the help file for this application"));
 	manualAct->setShortcut(QKeySequence::HelpContents);

@@ -20,6 +20,7 @@
 
 
 #include "paint_on_template_feature.h"
+#include "gui/action_icon.h"
 
 #include <algorithm>
 #include <memory>
@@ -172,7 +173,7 @@ PaintOnTemplateFeature::PaintOnTemplateFeature(MapEditorController& controller)
 {
 	connect(controller.getMap(), &Map::templateAboutToBeDeleted, this, &PaintOnTemplateFeature::templateAboutToBeDeleted);
 	
-	paint_action = new QAction(QIcon(QString::fromLatin1(":/images/pencil.png")),
+	paint_action = new QAction(ActionIcon::fromName(u"pencil"),
 	                           QCoreApplication::translate("OpenOrienteering::MapEditorController", "Paint on template"),
 	                           this);
 	paint_action->setMenuRole(QAction::NoRole);
@@ -238,7 +239,7 @@ void PaintOnTemplateFeature::refreshTemplateMenu(QMenu* menu, QActionGroup* acti
 	Q_ASSERT(action_group->actions().isEmpty());
 	
 	/// \todo Review source string (no ellipsis when no dialog)
-	auto* action_new = menu->addAction(QIcon(QStringLiteral(":/images/plus.png")),
+	auto* action_new = menu->addAction(ActionIcon::fromName(u"plus"),
 	                                   QCoreApplication::translate("OpenOrienteering::TemplateListWidget", "Add template..."));
 	connect(action_new, &QAction::triggered, this, [this]() {
 		if (auto* selected_template = setupTemplate())

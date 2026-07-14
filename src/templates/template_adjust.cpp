@@ -20,6 +20,7 @@
 
 
 #include "template_adjust.h"
+#include "gui/action_icon.h"
 
 #include <Qt>
 #include <QAbstractItemView>
@@ -211,15 +212,15 @@ TemplateAdjustWidget::TemplateAdjustWidget(Template* temp, MapEditorController* 
 	
 	auto passpoint_label = new QLabel(tr("Pass points:"));
 	
-	new_act = new QAction(QIcon(QString::fromLatin1(":/images/cursor-georeferencing-add.png")), tr("New"), this);
+	new_act = new QAction(ActionIcon::fromName(u"plus"), tr("New"), this);
 	new_act->setCheckable(true);
 	toolbar->addAction(new_act);
 
-	move_act = new QAction(QIcon(QString::fromLatin1(":/images/move.png")), tr("Move"), this);
+	move_act = new QAction(ActionIcon::fromName(u"move"), tr("Move"), this);
 	move_act->setCheckable(true);
 	toolbar->addAction(move_act);
 	
-	delete_act = new QAction(QIcon(QString::fromLatin1(":/images/delete.png")), tr("Delete"), this);
+	delete_act = new QAction(ActionIcon::fromName(u"delete"), tr("Delete"), this);
 	delete_act->setCheckable(true);
 	toolbar->addAction(delete_act);
 	
@@ -239,7 +240,7 @@ TemplateAdjustWidget::TemplateAdjustWidget(Template* temp, MapEditorController* 
 	
 	apply_check = new QCheckBox(tr("Apply pass points"));
 	apply_check->setChecked(temp->isAdjustmentApplied());
-	auto help_button = new QPushButton(QIcon(QString::fromLatin1(":/images/help.png")), tr("Help"));
+	auto help_button = new QPushButton(ActionIcon::fromName(u"help"), tr("Help"));
 	clear_and_apply_button = new QPushButton(tr("Apply && clear all"));
 	clear_and_revert_button = new QPushButton(tr("Clear all"));
 	

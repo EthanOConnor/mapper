@@ -20,6 +20,7 @@
 
 
 #include "action_grid_bar.h"
+#include "gui/action_icon.h"
 
 #include <algorithm>
 
@@ -54,7 +55,7 @@ ActionGridBar::ActionGridBar(Direction direction, int rows, QWidget* parent)
 		setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
 	
 	// Create overflow action
-	overflow_action = new QAction(QIcon(QString::fromLatin1(":/images/three-dots.png")), tr("Show remaining items"), this);
+	overflow_action = new QAction(ActionIcon::fromName(u"three-dots"), tr("Show remaining items"), this);
  	connect(overflow_action, &QAction::triggered, this, &ActionGridBar::overflowActionClicked);
 	overflow_menu = new QMenu(this);
 	include_overflow_from_list.push_back(this);

@@ -20,6 +20,7 @@
 
 
 #include "point_symbol_editor_widget.h"
+#include "gui/action_icon.h"
 
 #include <algorithm>
 #include <limits>
@@ -100,9 +101,9 @@ PointSymbolEditorWidget::PointSymbolEditorWidget(MapEditorController* controller
 	element_list = new QListWidget();
 	initElementList();
 	
-	delete_element_button = new QPushButton(QIcon(QString::fromLatin1(":/images/minus.png")), QString{});
+	delete_element_button = new QPushButton(ActionIcon::fromName(u"minus"), QString{});
 	auto* add_element_button = new QToolButton();
-	add_element_button->setIcon(QIcon(QString::fromLatin1(":/images/plus.png")));
+	add_element_button->setIcon(ActionIcon::fromName(u"plus"));
 	add_element_button->setToolButtonStyle(Qt::ToolButtonIconOnly);
 	add_element_button->setPopupMode(QToolButton::InstantPopup);
 	add_element_button->setSizePolicy(QSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed));
@@ -221,8 +222,8 @@ PointSymbolEditorWidget::PointSymbolEditorWidget(MapEditorController* controller
 	header_view->setSectionResizeMode(2, QHeaderView::ResizeToContents);
 	header_view->setSectionsClickable(false);
 	
-	add_coord_button = new QPushButton(QIcon(QString::fromLatin1(":/images/plus.png")), QString{});
-	delete_coord_button = new QPushButton(QIcon(QString::fromLatin1(":/images/minus.png")), QString{});
+	add_coord_button = new QPushButton(ActionIcon::fromName(u"plus"), QString{});
+	delete_coord_button = new QPushButton(ActionIcon::fromName(u"minus"), QString{});
 	center_coords_button = new QPushButton(tr("Center by coordinate average"));
 	
 	// Layout

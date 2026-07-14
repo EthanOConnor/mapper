@@ -19,6 +19,7 @@
  */
 
 #include "general_settings_page.h"
+#include "gui/action_icon.h"
 
 #include <algorithm>
 #include <iterator>
@@ -91,7 +92,7 @@ GeneralSettingsPage::GeneralSettingsPage(QWidget* parent)
 	}
 	else
 	{
-		language_file_button->setIcon(QIcon(QLatin1String(":/images/open.png")));
+		language_file_button->setIcon(ActionIcon::fromName(u"open"));
 	}
 	language_layout->addWidget(language_file_button);
 	
@@ -107,7 +108,7 @@ GeneralSettingsPage::GeneralSettingsPage(QWidget* parent)
 	ppi_layout->addWidget(ppi_edit);
 	
 	auto ppi_calculate_button = new QToolButton();
-	ppi_calculate_button->setIcon(QIcon(QLatin1String(":/images/settings.png")));
+	ppi_calculate_button->setIcon(ActionIcon::fromName(u"settings"));
 	ppi_layout->addWidget(ppi_calculate_button);
 	
 	layout->addItem(Util::SpacerItem::create(this));

@@ -20,6 +20,7 @@
 
 
 #include "template_list_widget.h"
+#include "gui/action_icon.h"
 
 #include <utility>
 #include <vector>
@@ -161,7 +162,7 @@ TemplateListWidget::TemplateListWidget(Map& map, MapView& main_view, MapEditorCo
 	
 	if (mobile_mode)
 	{
-		auto* close_action = new QAction(QIcon(QString::fromLatin1(":/images/close.png")), ::OpenOrienteering::MainWindow::tr("Close"), this);
+		auto* close_action = new QAction(ActionIcon::fromName(u"close"), ::OpenOrienteering::MainWindow::tr("Close"), this);
 		connect(close_action, &QAction::triggered, this, &TemplateListWidget::closeClicked );
 		
 		auto* close_button = new QToolButton();
@@ -238,10 +239,10 @@ TemplateListWidget::TemplateListWidget(Map& map, MapView& main_view, MapEditorCo
 	auto* new_button_menu = new QMenu(this);
 	if (!mobile_mode)
 	{
-		new_button_menu->addAction(QIcon(QString::fromLatin1(":/images/open.png")), tr("Open..."), this, &TemplateListWidget::openTemplate);
+		new_button_menu->addAction(ActionIcon::fromName(u"open"), tr("Open..."), this, &TemplateListWidget::openTemplate);
 		new_button_menu->addAction(controller.getAction("reopentemplate"));
 	}
-	duplicate_action = new_button_menu->addAction(QIcon(QString::fromLatin1(":/images/tool-duplicate.png")), tr("Duplicate"), this, &TemplateListWidget::duplicateTemplate);
+	duplicate_action = new_button_menu->addAction(ActionIcon::fromName(u"tool-duplicate"), tr("Duplicate"), this, &TemplateListWidget::duplicateTemplate);
 #if 0
 	current_action = new_button_menu->addAction(tr("Sketch"));
 	current_action->setDisabled(true);
@@ -249,31 +250,31 @@ TemplateListWidget::TemplateListWidget(Map& map, MapView& main_view, MapEditorCo
 	current_action->setDisabled(true);
 #endif
 	
-	auto* new_button = createToolButton(QIcon(QString::fromLatin1(":/images/plus.png")), tr("Add template..."));
+	auto* new_button = createToolButton(ActionIcon::fromName(u"plus"), tr("Add template..."));
 	new_button->setPopupMode(QToolButton::InstantPopup);
 	new_button->setMenu(new_button_menu);
 	
-	delete_button = createToolButton(QIcon(QString::fromLatin1(":/images/minus.png")), tr("Remove"));
+	delete_button = createToolButton(ActionIcon::fromName(u"minus"), tr("Remove"));
 	
 	auto* add_remove_layout = new SegmentedButtonLayout();
 	add_remove_layout->addWidget(new_button);
 	add_remove_layout->addWidget(delete_button);
 	
-	move_up_button = createToolButton(QIcon(QString::fromLatin1(":/images/arrow-up.png")), tr("Move Up"));
+	move_up_button = createToolButton(ActionIcon::fromName(u"arrow-up"), tr("Move Up"));
 	move_up_button->setAutoRepeat(true);
-	move_down_button = createToolButton(QIcon(QString::fromLatin1(":/images/arrow-down.png")), tr("Move Down"));
+	move_down_button = createToolButton(ActionIcon::fromName(u"arrow-down"), tr("Move Down"));
 	move_down_button->setAutoRepeat(true);
 	
 	auto* up_down_layout = new SegmentedButtonLayout();
 	up_down_layout->addWidget(move_up_button);
 	up_down_layout->addWidget(move_down_button);
 	
-	move_by_hand_action = new QAction(QIcon(QString::fromLatin1(":/images/move.png")), tr("Move by hand"), this);
+	move_by_hand_action = new QAction(ActionIcon::fromName(u"move"), tr("Move by hand"), this);
 	move_by_hand_action->setCheckable(true);
 	move_by_hand_button = createToolButton(move_by_hand_action->icon(), move_by_hand_action->text());
 	move_by_hand_button->setDefaultAction(move_by_hand_action);
 	move_by_hand_button->setVisible(!mobile_mode);
-	adjust_button = createToolButton(QIcon(QString::fromLatin1(":/images/georeferencing.png")), tr("Adjust..."));
+	adjust_button = createToolButton(ActionIcon::fromName(u"georeferencing"), tr("Adjust..."));
 	adjust_button->setCheckable(true);
 	adjust_button->setVisible(!mobile_mode);
 	
@@ -291,7 +292,7 @@ TemplateListWidget::TemplateListWidget(Map& map, MapView& main_view, MapEditorCo
 	vectorize_action = nullptr;
 #endif /* WITH_COVE */
 
-	edit_button = createToolButton(QIcon(QString::fromLatin1(":/images/settings.png")),
+	edit_button = createToolButton(ActionIcon::fromName(u"settings"),
 	                            ::OpenOrienteering::MapEditorController::tr("&Edit").remove(QLatin1Char('&')));
 	edit_button->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
 	edit_button->setPopupMode(QToolButton::InstantPopup);
@@ -322,7 +323,7 @@ TemplateListWidget::TemplateListWidget(Map& map, MapView& main_view, MapEditorCo
 	
 	if (!mobile_mode)
 	{
-		auto help_button = createToolButton(QIcon(QString::fromLatin1(":/images/help.png")), tr("Help"));
+		auto help_button = createToolButton(ActionIcon::fromName(u"help"), tr("Help"));
 		help_button->setAutoRaise(true);
 		all_buttons_layout->addWidget(help_button);
 		connect(help_button, &QAbstractButton::clicked, this, &TemplateListWidget::showHelp);
@@ -332,13 +333,13 @@ TemplateListWidget::TemplateListWidget(Map& map, MapView& main_view, MapEditorCo
 	
 	setLayout(all_templates_layout);
 	
-	//group_button = new QPushButton(QIcon(QString::fromLatin1(":/images/group.png")), tr("(Un)group"));
+	//group_button = new QPushButton(ActionIcon::fromName(u"group"), tr("(Un)group"));
 	/*more_button = new QToolButton();
 	more_button->setText(tr("More..."));
 	more_button->setPopupMode(QToolButton::InstantPopup);
 	more_button->setSizePolicy(QSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed));
 	QMenu* more_button_menu = new QMenu(more_button);
-	more_button_menu->addAction(QIcon(QString::fromLatin1(":/images/window-new.png")), tr("Numeric transformation window"));
+	more_button_menu->addAction(ActionIcon::fromName(u"window-new"), tr("Numeric transformation window"));
 	more_button_menu->addAction(tr("Set transparent color..."));
 	more_button_menu->addAction(tr("Trace lines..."));
 	more_button->setMenu(more_button_menu);*/

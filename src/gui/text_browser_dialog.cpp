@@ -19,6 +19,7 @@
  */
 
 #include "text_browser_dialog.h"
+#include "gui/action_icon.h"
 
 #include <Qt>
 #include <QtGlobal>
@@ -67,7 +68,7 @@ TextBrowserDialog::TextBrowserDialog(QWidget* parent)
 	auto* buttons_layout = new QHBoxLayout();
 	buttons_layout->setContentsMargins(left, top, right, bottom);
 	
-	QPushButton* back_button  = new QPushButton(QIcon(QStringLiteral(":/images/arrow-left.png")), QApplication::translate("QFileDialog", "Back"));
+	QPushButton* back_button  = new QPushButton(ActionIcon::fromName(u"arrow-left"), QApplication::translate("QFileDialog", "Back"));
 	back_button->setEnabled(false);
 	buttons_layout->addWidget(back_button);
 	

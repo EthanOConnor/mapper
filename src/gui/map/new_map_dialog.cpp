@@ -20,6 +20,7 @@
 
 
 #include "new_map_dialog.h"
+#include "gui/action_icon.h"
 
 #include <utility>
 
@@ -90,7 +91,7 @@ NewMapDialog::NewMapDialog(QWidget* parent) : QDialog(parent, Qt::WindowSystemMe
 	
 	auto button_box = new QDialogButtonBox(QDialogButtonBox::Cancel | QDialogButtonBox::Ok);
 	create_button = button_box->button(QDialogButtonBox::Ok);
-	create_button->setIcon(QIcon(QString::fromLatin1(":/images/arrow-right.png")));
+	create_button->setIcon(ActionIcon::fromName(u"arrow-right"));
 	create_button->setText(tr("Create"));
 	layout->addWidget(button_box);
 	
@@ -169,10 +170,10 @@ void NewMapDialog::updateSymbolSetList()
 		
 	auto item = new QListWidgetItem(tr("Empty symbol set"));
 	item->setData(Qt::UserRole, QVariant(QString{}));
-	item->setIcon(QIcon(QString::fromLatin1(":/images/new.png")));
+	item->setIcon(ActionIcon::fromName(u"new"));
 	symbol_set_list->addItem(item);
 	
-	QIcon control(QString::fromLatin1(":/images/control.png"));
+	const auto control = ActionIcon::fromName(u"control");
 	auto it = symbol_set_map.find(scale);
 	if (it != symbol_set_map.end())
 	{
@@ -207,7 +208,7 @@ void NewMapDialog::updateSymbolSetList()
 	
 	load_from_file = new QListWidgetItem(tr("Load symbol set from a file..."));
 	load_from_file->setData(Qt::UserRole, QVariant::fromValue<void*>(nullptr));
-	load_from_file->setIcon(QIcon(QString::fromLatin1(":/images/open.png")));
+	load_from_file->setIcon(ActionIcon::fromName(u"open"));
 	symbol_set_list->addItem(load_from_file);
 	
 	// Select second row, which usually is the first (and only) symbol set

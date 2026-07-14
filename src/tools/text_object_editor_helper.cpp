@@ -20,6 +20,7 @@
 
 
 #include "text_object_editor_helper.h"
+#include "gui/action_icon.h"
 
 #include <QtGlobal>
 #include <QAbstractButton>
@@ -524,37 +525,37 @@ QToolBar* TextObjectEditorHelper::makeAlignmentToolBar()
 	auto* toolbar = new QToolBar();
 	
 	auto* horizontal_alignment_group = new QButtonGroup(toolbar);
-	auto add_horizontal_option = [this, toolbar, horizontal_alignment_group](int alignment, const char* icon, const QString& label) {
-		auto* action = toolbar->addAction(QIcon(QString::fromLatin1(icon)), label);
+	auto add_horizontal_option = [this, toolbar, horizontal_alignment_group](int alignment, QStringView icon_name, const QString& label) {
+		auto* action = toolbar->addAction(ActionIcon::fromName(icon_name), label);
 		action->setCheckable(true);
 		action->setChecked(text_object->getHorizontalAlignment() == alignment);
 		horizontal_alignment_group->addButton(static_cast<QAbstractButton*>(toolbar->widgetForAction(action)));
 		connect(action, &QAction::triggered, this, [this, alignment]() { setHorizontalAlignment(alignment); });
 	};
-	add_horizontal_option(TextObject::AlignLeft, ":/images/text-align-left.png",
+	add_horizontal_option(TextObject::AlignLeft, u"text-align-left",
 	                      QCoreApplication::translate("OpenOrienteering::TextObjectAlignmentDockWidget", "Left"));
-	add_horizontal_option(TextObject::AlignHCenter, ":/images/text-align-hcenter.png",
+	add_horizontal_option(TextObject::AlignHCenter, u"text-align-hcenter",
 	                      QCoreApplication::translate("OpenOrienteering::TextObjectAlignmentDockWidget", "Center"));
-	add_horizontal_option(TextObject::AlignRight, ":/images/text-align-right.png",
+	add_horizontal_option(TextObject::AlignRight, u"text-align-right",
 	                      QCoreApplication::translate("OpenOrienteering::TextObjectAlignmentDockWidget", "Right"));
 	
 	toolbar->addSeparator();
 	
 	auto* vertical_alignment_group = new QButtonGroup(toolbar);
-	auto add_vertical_option = [this, toolbar, vertical_alignment_group](int alignment, const char* icon, const QString& label) {
-		auto* action = toolbar->addAction(QIcon(QString::fromLatin1(icon)), label);
+	auto add_vertical_option = [this, toolbar, vertical_alignment_group](int alignment, QStringView icon_name, const QString& label) {
+		auto* action = toolbar->addAction(ActionIcon::fromName(icon_name), label);
 		action->setCheckable(true);
 		action->setChecked(text_object->getVerticalAlignment() == alignment);
 		vertical_alignment_group->addButton(static_cast<QAbstractButton*>(toolbar->widgetForAction(action)));
 		connect(action, &QAction::triggered, this, [this, alignment]() { setVerticalAlignment(alignment); });
 	};
-	add_vertical_option(TextObject::AlignTop, ":/images/text-align-top.png",
+	add_vertical_option(TextObject::AlignTop, u"text-align-top",
 	                    QCoreApplication::translate("OpenOrienteering::TextObjectAlignmentDockWidget", "Top"));
-	add_vertical_option(TextObject::AlignVCenter, ":/images/text-align-vcenter.png",
+	add_vertical_option(TextObject::AlignVCenter, u"text-align-vcenter",
 	                    QCoreApplication::translate("OpenOrienteering::TextObjectAlignmentDockWidget", "Center"));
-	add_vertical_option(TextObject::AlignBaseline, ":/images/text-align-baseline.png",
+	add_vertical_option(TextObject::AlignBaseline, u"text-align-baseline",
 	                    QCoreApplication::translate("OpenOrienteering::TextObjectAlignmentDockWidget", "Baseline"));
-	add_vertical_option(TextObject::AlignBottom, ":/images/text-align-bottom.png",
+	add_vertical_option(TextObject::AlignBottom, u"text-align-bottom",
 	                    QCoreApplication::translate("OpenOrienteering::TextObjectAlignmentDockWidget", "Bottom"));
 	
 	return toolbar;

@@ -19,6 +19,7 @@
 
 
 #include "tags_widget.h"
+#include "gui/action_icon.h"
 
 #include <QHeaderView>
 #include <QLabel>
@@ -62,7 +63,7 @@ TagsWidget::TagsWidget(Map* map, MapView* main_view, MapEditorController* contro
 	
 	layout->addWidget(tags_table);
 	
-	auto help_button = Util::ToolButton::create(QIcon(QString::fromLatin1(":/images/help.png")), tr("Help"));
+	auto help_button = Util::ToolButton::create(ActionIcon::fromName(u"help"), tr("Help"));
 	help_button->setAutoRaise(true);
 	
 	auto all_buttons_layout = new QHBoxLayout();

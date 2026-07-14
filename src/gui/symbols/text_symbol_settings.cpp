@@ -20,6 +20,7 @@
 
 
 #include "text_symbol_settings.h"
+#include "gui/action_icon.h"
 
 // IWYU pragma: no_include <algorithm>
 #include <vector>
@@ -224,9 +225,9 @@ TextSymbolSettings::TextSymbolSettings(TextSymbol* symbol, SymbolSettingDialog* 
 	ocad_compat_layout->addRow(custom_tab_list);
 	
 	auto custom_tabs_button_layout = new QHBoxLayout();
-	custom_tab_add = new QPushButton(QIcon(QStringLiteral(":/images/plus.png")), QString{});
+	custom_tab_add = new QPushButton(ActionIcon::fromName(u"plus"), QString{});
 	custom_tabs_button_layout->addWidget(custom_tab_add);
-	custom_tab_remove = new QPushButton(QIcon(QStringLiteral(":/images/minus.png")), QString{});
+	custom_tab_remove = new QPushButton(ActionIcon::fromName(u"minus"), QString{});
 	custom_tab_remove->setEnabled(false);
 	custom_tabs_button_layout->addWidget(custom_tab_remove);
 	custom_tabs_button_layout->addStretch(1);

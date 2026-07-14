@@ -18,6 +18,7 @@
  */
 
 #include "paint_on_template_settings_page.h"
+#include "gui/action_icon.h"
 
 #include <array>
 #include <vector>
@@ -129,18 +130,18 @@ PaintOnTemplateSettingsPage::PaintOnTemplateSettingsPage(QWidget* parent)
 	color_table->setSelectionMode(QAbstractItemView::SingleSelection);
 	layout->addWidget(color_table);
 
-	auto* add_button = Util::ToolButton::create(QIcon(QString::fromLatin1(":/images/plus.png")), tr("Add color..."));
-	delete_button = Util::ToolButton::create(QIcon(QString::fromLatin1(":/images/minus.png")), tr("Remove"));
+	auto* add_button = Util::ToolButton::create(ActionIcon::fromName(u"plus"), tr("Add color..."));
+	delete_button = Util::ToolButton::create(ActionIcon::fromName(u"minus"), tr("Remove"));
 	delete_button->setEnabled(false);
 
 	auto* add_remove_layout = new SegmentedButtonLayout();
 	add_remove_layout->addWidget(add_button);
 	add_remove_layout->addWidget(delete_button);
 
-	move_up_button = Util::ToolButton::create(QIcon(QString::fromLatin1(":/images/arrow-up.png")), tr("Move Up"));
+	move_up_button = Util::ToolButton::create(ActionIcon::fromName(u"arrow-up"), tr("Move Up"));
 	move_up_button->setAutoRepeat(true);
 	move_up_button->setEnabled(false);
-	move_down_button = Util::ToolButton::create(QIcon(QString::fromLatin1(":/images/arrow-down.png")), tr("Move Down"));
+	move_down_button = Util::ToolButton::create(ActionIcon::fromName(u"arrow-down"), tr("Move Down"));
 	move_down_button->setAutoRepeat(true);
 	move_down_button->setEnabled(false);
 
@@ -148,7 +149,7 @@ PaintOnTemplateSettingsPage::PaintOnTemplateSettingsPage(QWidget* parent)
 	up_down_layout->addWidget(move_up_button);
 	up_down_layout->addWidget(move_down_button);
 
-	edit_button = Util::ToolButton::create(QIcon(QString::fromLatin1(":/images/settings.png")),
+	edit_button = Util::ToolButton::create(ActionIcon::fromName(u"settings"),
 	                            ::OpenOrienteering::MapEditorController::tr("&Edit").remove(QLatin1Char('&')));
 	edit_button->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
 	edit_button->setEnabled(false);

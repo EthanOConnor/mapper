@@ -19,6 +19,7 @@
 
 
 #include "template_table_model.h"
+#include "gui/action_icon.h"
 
 #include <Qt>
 #include <QtGlobal>
@@ -299,7 +300,7 @@ QVariant TemplateTableModel::templateData(Template* temp, const QModelIndex &ind
 		
 	case combined(opacityColumn(), Qt::DecorationRole):
 		if (temp->getTemplateState() == Template::Invalid)
-				return QIcon::fromTheme(QLatin1String("image-missing"), QIcon{QLatin1String(":/images/close.png")});
+				return QIcon::fromTheme(QLatin1String("image-missing"), ActionIcon::fromName(u"close"));
 		if (visibility.visible)
 			return QColor::fromCmykF(0, 0, 0, visibility.opacity);
 		return QColor{Qt::transparent};

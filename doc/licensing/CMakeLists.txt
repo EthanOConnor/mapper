@@ -62,6 +62,13 @@ mapper_add_dependency_notice(
 	LICENSE.txt
 )
 
+mapper_add_dependency_notice(
+	material-design-icons
+	"Google Material Design Icons (commit 819d7868)"
+	"${PROJECT_SOURCE_DIR}/images/material/LICENSE.txt"
+	LICENSE.txt
+)
+
 if(TARGET kdsingleapplication)
 	mapper_add_dependency_notice(
 		kdsingleapplication

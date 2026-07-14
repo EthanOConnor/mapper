@@ -20,6 +20,7 @@
 
 
 #include "symbol_replacement_dialog.h"
+#include "gui/action_icon.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -154,9 +155,9 @@ SymbolReplacementDialog::SymbolReplacementDialog(QWidget* parent, Map& object_ma
 	auto action = mapping_menu->addAction(tr("Clear replacements"));
 	connect(action, &QAction::triggered, this, &SymbolReplacementDialog::resetReplacements);
 	mapping_menu->addSeparator();
-	action = mapping_menu->addAction(QIcon{QLatin1String{":/images/open.png"}}, tr("Open CRT file..."));
+	action = mapping_menu->addAction(ActionIcon::fromName(u"open"), tr("Open CRT file..."));
 	connect(action, &QAction::triggered, this, QOverload<>::of(&SymbolReplacementDialog::openCrtFile));
-	action = mapping_menu->addAction(QIcon{QLatin1String{":/images/save.png"}}, tr("Save CRT file..."));
+	action = mapping_menu->addAction(ActionIcon::fromName(u"save"), tr("Save CRT file..."));
 	connect(action, &QAction::triggered, this, &SymbolReplacementDialog::saveCrtFile);
 	
 	auto button_box = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel | QDialogButtonBox::Help, Qt::Horizontal);
