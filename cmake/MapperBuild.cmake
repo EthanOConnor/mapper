@@ -8,7 +8,7 @@ function(mapper_define_build_options)
 	target_compile_definitions(mapper-build-options INTERFACE
 		_USE_MATH_DEFINES
 		UNICODE
-		QT_DISABLE_DEPRECATED_BEFORE=0x060b00
+		QT_DISABLE_DEPRECATED_BEFORE=0x060a00
 	)
 	target_compile_options(mapper-build-options INTERFACE
 		"$<$<COMPILE_LANG_AND_ID:CXX,AppleClang,Clang,GNU>:-Wall;-Wextra;-Wpedantic>"

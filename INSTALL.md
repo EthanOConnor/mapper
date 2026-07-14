@@ -1,9 +1,13 @@
 # Building Mapper
 
 Mapper uses one CMake/Ninja build on Linux, macOS, Windows, and Android. The
-project baseline is CMake 4.4.0, Ninja 1.13.0, a C++23 compiler, and Qt 6.11.1.
+project baseline is CMake 4.4.0, Ninja 1.13.0, a C++23 compiler, and Qt 6.10.2.
 Desktop and Android packages are built by the same presets used in GitHub
 Actions.
+
+The Qt baseline is the newest official binary release available for every
+supported target. Update the CMake requirement, CI environment, and this guide
+together when the next release reaches the complete platform matrix.
 
 ## Dependencies
 
@@ -17,7 +21,7 @@ soon as the pinned vcpkg baseline provides the same or a newer release.
 
 ## Reproducible desktop build
 
-Install Qt 6.11.1 with the Image Formats, Positioning, Sensors, and Serial Port
+Install Qt 6.10.2 with the Image Formats, Positioning, Sensors, and Serial Port
 modules. Clone and bootstrap the vcpkg baseline recorded in `vcpkg.json`,
 then expose its root to CMake:
 
@@ -72,7 +76,7 @@ locate a nonstandard installation, pass its standard package root or
 
 Android targets API 36, has a minimum API of 28, and currently ships arm64-v8a.
 Install JDK 21, Android SDK platform/build tools 36, NDK 27.2.12479018, and the
-Qt 6.11.1 `android_arm64_v8a` kit. Set `QT_ROOT_DIR`, `VCPKG_ROOT`,
+Qt 6.10.2 `android_arm64_v8a` kit. Set `QT_ROOT_DIR`, `VCPKG_ROOT`,
 `ANDROID_SDK_ROOT`, and `ANDROID_NDK_ROOT`, then run:
 
 ```sh
