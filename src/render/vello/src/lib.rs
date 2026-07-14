@@ -1439,12 +1439,11 @@ fn process_frame(
         publish_result(
             result_tx,
             result_replace_rx,
-            // Surface preparation happens on Qt's platform thread and target
-            // creation happens on this thread. An expose/resize burst can
-            // publish another state between those two operations. That is a
-            // lifecycle loss to refresh, not a corrupt frame or renderer
-            // failure to abort over.
-            frame_result(&frame, FRAME_SURFACE_LOST, 0, started),
+            // No presentation target is available for this otherwise valid
+            // lifecycle state. This is distinct from losing an established
+            // wgpu surface: callers may retain the current lifecycle and
+            // retry without manufacturing resize/expose transitions.
+            frame_result(&frame, FRAME_TARGET_UNAVAILABLE, 0, started),
         );
         return;
     }
@@ -1761,5 +1760,34 @@ mod tests {
         }
 
         assert_eq!(frame_rx.recv().unwrap().header.frame_id, 129);
+    }
+
+    #[test]
+    fn missing_native_target_is_retriable_without_surface_churn() {
+        let (result_tx, result_rx) = flume::bounded(2);
+        let result_replace_rx = result_rx.clone();
+        let last_error = Mutex::new(String::new());
+        let prepared_descriptor = Mutex::new(Some((PLATFORM_XCB, 1, 2)));
+        let mut submitted = frame(7);
+        submitted.header.surface_sequence = 11;
+
+        process_frame(
+            submitted,
+            ffi::SurfaceState {
+                sequence: 11,
+                phase: SURFACE_EXPOSED,
+                width: 1,
+                height: 1,
+                ..ffi::SurfaceState::default()
+            },
+            &mut None,
+            &result_tx,
+            &result_replace_rx,
+            &last_error,
+            &prepared_descriptor,
+        );
+
+        assert_eq!(result_rx.recv().unwrap().status, FRAME_TARGET_UNAVAILABLE);
+        assert_eq!(*prepared_descriptor.lock().unwrap(), None);
     }
 }

@@ -284,7 +284,7 @@ void VelloRendererTest::typedEncoderRetainsImmutableScenes()
 	QCOMPARE(renderer.cachedSceneCount(), std::size_t(1));
 }
 
-void VelloRendererTest::missingNativeTargetRequestsLifecycleRecovery()
+void VelloRendererTest::missingNativeTargetIsRetriable()
 {
 	auto const frame = completeOperationFrame(3);
 	QVERIFY2(frame, "The platform's standard test font is required");
@@ -310,7 +310,7 @@ void VelloRendererTest::missingNativeTargetRequestsLifecycleRecovery()
 	}
 	QVERIFY2(result, renderer.lastError().c_str());
 	QCOMPARE(result->completion.frame_id, frame->id);
-	QCOMPARE(result->completion.status, render::FrameStatus::SurfaceLost);
+	QCOMPARE(result->completion.status, render::FrameStatus::TargetUnavailable);
 	QVERIFY(!renderer.lastError().empty());
 }
 
