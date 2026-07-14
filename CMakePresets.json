@@ -74,6 +74,8 @@
       "name": "dev-windows",
       "displayName": "Windows development",
       "inherits": "base",
+      "generator": "Visual Studio 18 2026",
+      "architecture": "x64",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "Mapper_DEVELOPMENT_BUILD": "ON"
@@ -99,6 +101,8 @@
       "name": "dev-windows-vcpkg",
       "displayName": "Windows development with managed dependencies",
       "inherits": "dev-vcpkg",
+      "generator": "Visual Studio 18 2026",
+      "architecture": "x64",
       "cacheVariables": {
         "VCPKG_TARGET_TRIPLET": "x64-windows-static-md"
       }
@@ -123,6 +127,8 @@
       "name": "ci-windows",
       "displayName": "Windows CI",
       "inherits": "ci",
+      "generator": "Visual Studio 18 2026",
+      "architecture": "x64",
       "cacheVariables": {
         "VCPKG_TARGET_TRIPLET": "x64-windows-static-md-release"
       }
@@ -148,13 +154,13 @@
     { "name": "dev-macos", "configurePreset": "dev-macos" },
     { "name": "dev-macos-sanitize", "configurePreset": "dev-macos-sanitize" },
     { "name": "dev-linux", "configurePreset": "dev-linux" },
-    { "name": "dev-windows", "configurePreset": "dev-windows" },
+    { "name": "dev-windows", "configurePreset": "dev-windows", "configuration": "Debug" },
     { "name": "dev-macos-vcpkg", "configurePreset": "dev-macos-vcpkg" },
     { "name": "dev-linux-vcpkg", "configurePreset": "dev-linux-vcpkg" },
-    { "name": "dev-windows-vcpkg", "configurePreset": "dev-windows-vcpkg" },
+    { "name": "dev-windows-vcpkg", "configurePreset": "dev-windows-vcpkg", "configuration": "Debug" },
     { "name": "ci-linux", "configurePreset": "ci-linux" },
     { "name": "ci-macos", "configurePreset": "ci-macos" },
-    { "name": "ci-windows", "configurePreset": "ci-windows" },
+    { "name": "ci-windows", "configurePreset": "ci-windows", "configuration": "Release" },
     { "name": "ci-android", "configurePreset": "ci-android" }
   ],
   "testPresets": [
@@ -176,6 +182,7 @@
     {
       "name": "dev-windows",
       "configurePreset": "dev-windows",
+      "configuration": "Debug",
       "output": { "outputOnFailure": true }
     },
     {
@@ -191,6 +198,7 @@
     {
       "name": "dev-windows-vcpkg",
       "configurePreset": "dev-windows-vcpkg",
+      "configuration": "Debug",
       "output": { "outputOnFailure": true }
     },
     {
@@ -206,6 +214,7 @@
     {
       "name": "ci-windows",
       "configurePreset": "ci-windows",
+      "configuration": "Release",
       "output": { "outputOnFailure": true }
     }
   ]
