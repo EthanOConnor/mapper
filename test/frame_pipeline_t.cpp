@@ -490,10 +490,4 @@ void FramePipelineTest::nativeSurfacePublishesOrderedLifecycle()
 	QCOMPARE(destruction_states.back().native.window, std::uintptr_t(0));
 }
 
-namespace {
-#ifndef Q_OS_MACOS
-[[maybe_unused]] const auto qpa_selected = qputenv("QT_QPA_PLATFORM", "offscreen");
-#endif
-}
-
 QTEST_MAIN(FramePipelineTest)
