@@ -2,20 +2,32 @@
 
 ![Mapper Screenshot](https://www.openorienteering.org/mapper-manual/pages/images/main_window.png)
 
+> [!IMPORTANT]
+> This public fork carries two deliberately separate lines. `master` mirrors
+> [OpenOrienteering Mapper](https://github.com/OpenOrienteering/mapper)
+> exactly. `main` is the forward COC product, built from the completed 2026
+> modernization campaign. Clean upstream candidates start from `master`; the
+> product line is never merged into them. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
 OpenOrienteering Mapper is an orienteering mapmaking program and provides
 a free and open source alternative to existing commercial software.
 OpenOrienteering Mapper runs on Android, Windows, macOS and Linux.
 
  - [Mapper Homepage](https://www.openorienteering.org/apps/mapper/)
  - [Manual](https://www.openorienteering.org/mapper-manual/)
- - [Downloads](https://github.com/OpenOrienteering/mapper/releases)
+ - [Forward COC development](https://github.com/EthanOConnor/mapper/tree/main)
+ - [Current COC Base download](https://ethanoconnor.github.io/mapper-coc/)
+ - [Official OpenOrienteering releases](https://github.com/OpenOrienteering/mapper/releases)
  - [OpenOrienteering Blog](https://www.openorienteering.org/)
 
 
 ## Reporting Issues and Asking for Help
 
-Issues and possible improvements can be posted to our public [Ticket system](https://github.com/OpenOrienteering/mapper/issues).
-Please make sure you provide all relevant information about your problem or idea.
+Issues in the forward COC product belong in this repository's
+[issue tracker](https://github.com/EthanOConnor/mapper/issues). Problems in an
+unmodified official OpenOrienteering release belong in the
+[upstream tracker](https://github.com/OpenOrienteering/mapper/issues). Please
+identify the build and commit you are using.
 
 
 ## Contributing
@@ -33,10 +45,12 @@ which contains all information for you to get started.
 
 ### Writing Code
 
-For building Mapper from source see [`INSTALL.md`](https://github.com/OpenOrienteering/mapper/blob/master/INSTALL.md).
+For building this product line from source see [`INSTALL.md`](INSTALL.md).
 Pull requests are very welcome.
 
- - [Issue tracker](https://github.com/OpenOrienteering/mapper/issues)
+ - [COC product issue tracker](https://github.com/EthanOConnor/mapper/issues)
+ - [Contribution and branch policy](CONTRIBUTING.md)
+ - [Supported platforms](SUPPORT.md)
  - [API documentation](https://www.openorienteering.org/api-docs/mapper/)
  - [Developer wiki](https://github.com/OpenOrienteering/mapper/wiki)
 

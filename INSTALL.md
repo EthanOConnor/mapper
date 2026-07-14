@@ -85,7 +85,7 @@ second platform build system.
 
 ## GitHub delivery
 
-Pull requests and `modern-core` pushes build, test, and package every target.
+Pull requests and `main` pushes build, test, and package every target.
 Pushing a `v*` tag builds the same matrix, creates GitHub artifact attestations,
 and opens a draft GitHub release containing the desktop, APK, and AAB packages.
 The release remains a draft until the club's Apple, Windows, and Android signing

@@ -1,6 +1,7 @@
-# Mapper modern-core campaign
+# Mapper modernization campaign
 
-This branch starts at upstream commit
+The campaign ran on `modern-core` and was promoted without rewriting history to
+the public product branch `main`. It starts at upstream commit
 `064e6c943ee963277f1e930bda595723acd3e8c6` (2026-06-20). Upstream is the
 ancestry and behavioral baseline. `full-speed-ahead` is evidence about what was
 tried, what looked good, what failed, and what was measured. It is not a code
@@ -47,7 +48,7 @@ The architecture is judged against these existing uses:
 ## Recovery checkpoints
 
 These are recovery points inside one sustained campaign, not product phases.
-Feature work stays frozen until all are complete.
+Feature work stayed frozen until all were complete.
 
 1. Modern CMake/dependency model and Qt 6 application stand-up.
 2. Immutable render snapshot/IR and QPainter reference renderer.

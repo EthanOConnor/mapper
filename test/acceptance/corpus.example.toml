@@ -26,4 +26,3 @@ id = "reference-print"
 kind = "pdf"
 path = "/absolute/path/to/reference.pdf"
 tags = ["real", "print", "pdf"]
-

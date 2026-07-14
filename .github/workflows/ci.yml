@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [modern-core]
+    branches: [main]
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
