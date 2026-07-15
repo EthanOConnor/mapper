@@ -1,7 +1,7 @@
 # Building Mapper
 
 Mapper uses one CMake/Ninja build on Linux, macOS, Windows, and Android. The
-project baseline is CMake 4.4.0, Ninja 1.13.0, a C++23 compiler, and Qt 6.10.2.
+project baseline is CMake 4.4.0, Ninja 1.13.2, a C++23 compiler, and Qt 6.10.2.
 Desktop and Android packages are built by the same presets used in GitHub
 Actions.
 
