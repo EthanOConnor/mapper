@@ -26,6 +26,8 @@ corrosion_import_crate(
 )
 corrosion_add_cxxbridge(mapper-vello-cxx CRATE mapper_vello FILES lib.rs)
 target_compile_features(mapper-vello-cxx PUBLIC cxx_std_23)
+get_target_property(mapper_vello_bridge_headers mapper-vello-cxx INTERFACE_SOURCES)
+set_source_files_properties(${mapper_vello_bridge_headers} PROPERTIES SKIP_AUTOMOC ON)
 add_feature_info(Vello ON "0.9.0 with wgpu 29.0.4")
 
 
@@ -317,11 +319,11 @@ target_link_libraries(Mapper_Common
   PUBLIC
   Clipper2::Clipper2
   Mapper::RenderIR
-  mapper-vello-cxx
   ${PROJ_LIBRARIES}
   Qt6::Widgets
   Qt6::Svg
   PRIVATE
+  mapper-vello-cxx
   ICU::data
   ICU::uc
 )
