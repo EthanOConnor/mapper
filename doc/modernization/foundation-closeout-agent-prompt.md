@@ -1,10 +1,11 @@
 # Agent prompt: finish the modernization foundation
 
-Work on the canonical public `main` worktree for `EthanOConnor/mapper`. The
-workspace is being reorganized, so discover it from the current workspace
-`AGENTS.md`; do not assume an old absolute directory. Before editing, verify
-that the branch is `main`, `origin` is the public fork, the worktree is clean,
-and you have read every applicable `AGENTS.md` and `CLAUDE.md`.
+Work on the canonical public `main` checkout for `EthanOConnor/mapper`. In the
+OOM workspace this is `worktrees/main`; read the workspace-root `AGENTS.md` and
+do not work through the `worktrees/modern-core` compatibility symlink. Outside
+that workspace, use an ordinary clean checkout of public `main`. Before editing,
+verify the branch, public `origin`, clean status, and every applicable
+`AGENTS.md` and `CLAUDE.md`.
 
 Your sole goal is to execute
 [`doc/modernization/foundation-closeout-plan.md`](foundation-closeout-plan.md)
@@ -31,9 +32,12 @@ pins, least privilege, concurrency, hosted-native tests, provenance, and
 Dependabot; redesign cache keys and trust-aware writes from measured cold/warm
 timings and byte use, keep cache occupancy sustainable, and optimize the
 Windows critical path without custom infrastructure unless the measurements
-compel it. Reconcile every modernization claim with production code and current
-evidence. Run the three-map live comparison, record the human verdict, and only
-then retire product-embedded parity instrumentation.
+compel it. Keep direct Cargo and Corrosion output inside build-owned directories,
+not the source tree, and recreate retained CMake caches so final evidence no
+longer depends on the `modern-core` compatibility path. Reconcile every
+modernization claim with production code and current evidence. Run the
+three-map live comparison, record the human verdict, and only then retire
+product-embedded parity instrumentation.
 
 Commit coherent changes and create the annotated checkpoint tags named in the
 plan only after local verification and a green hosted matrix for the exact SHA.
@@ -42,4 +46,6 @@ and artifact links, and continue until the final tag exists. Never weaken a
 test, gate, or support claim to get green. Do not stop merely because tests pass
 or one phase is complete. If the only remaining requirement needs a human or
 physical device, prepare the exact binary and minimal instructions and report
-that one blocker with everything else completed.
+that one blocker with everything else completed. After the public final tag,
+perform the plan's bounded campaign-workspace retirement; do not touch the dirty
+`coc-minimal` worktree or drift into unrelated branch/research cleanup.

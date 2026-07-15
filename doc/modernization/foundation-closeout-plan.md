@@ -46,6 +46,9 @@ The foundation is done only when all of these are true at the same commit:
   and has measured build and cache behavior with sustainable cache use.
 - The modernization and acceptance documents describe the code that actually
   exists, the current test matrix, and current evidence.
+- Final evidence is built from the canonical checkout, and the documented CMake,
+  Corrosion, and direct Cargo paths put generated output under `build/` rather
+  than the source tree.
 - The live three-map comparison against `full-speed-ahead` passes for visual
   quality, interaction, and fluidity, with a human verdict recorded.
 - Validation-only product instrumentation has been removed or extracted after
@@ -57,11 +60,16 @@ Green unit tests alone do not satisfy this definition.
 
 ## Source and workspace rules
 
-Work from the canonical public `main` worktree described by the workspace
-`AGENTS.md`. Do not rely on a particular absolute directory name: confirm
-`main`, a clean worktree, and the `EthanOConnor/mapper` `origin` before changing
-code. The workspace is being rationalized, so repository-relative paths in this
-plan are intentional.
+In the OOM workspace, work from `worktrees/main`, the canonical public `main`
+checkout described by the workspace-root `AGENTS.md`. The adjacent
+`worktrees/modern-core` path is only a compatibility symlink for old notes and
+build records; do not use it in new commands, evidence, or documentation.
+Outside that workspace, use an ordinary clean checkout of public `main`.
+
+Confirm `main`, a clean worktree, and the public `EthanOConnor/mapper` `origin`
+before changing code. Use the detached `repo/` checkout only for graph, ref,
+remote, and worktree administration. Repository-relative paths in this plan are
+portable; workspace paths name roles, not source dependencies.
 
 Treat `full-speed-ahead` and the private historical branches as behavioral and
 implementation oracles, never ancestry to merge wholesale. Preserve the exact
@@ -102,6 +110,11 @@ Before editing:
    or amend any item already resolved by concurrent work.
 5. Capture current cold/warm CI durations, cache hits, and cache sizes before
    changing the workflow.
+6. Inspect retained `CMakeCache.txt` and Rust dependency files for the old
+   `worktrees/modern-core` source path. They were intentionally preserved across
+   the directory move, but they are migration scaffolding. Recreate the builds
+   used for final evidence from `worktrees/main`; a successful build through
+   the compatibility symlink is not final-path verification.
 
 The 2026-07-15 snapshot was public HEAD
 `9e607b98939552a7c05141cdf54256242e44faa5`, 36 discovered CTest tests, and green
@@ -231,7 +244,11 @@ The CI change is complete only when measurements support it:
 7. Keep the workflow in one readable file unless extracting a reusable component
    measurably removes duplication. Add a pinned standard checker such as
    `actionlint` only if it replaces ad hoc validation and stays low maintenance.
-8. Validate YAML, presets, packages, installation/startup smoke checks, release
+8. Keep CMake, Corrosion, and direct Cargo output under the active
+   `build/<preset>/` tree. Give direct Rust checks one documented build-owned
+   target directory, remove `src/render/vello/target`, and do not share mutable
+   target output across incompatible host, Android, or configuration builds.
+9. Validate YAML, presets, packages, installation/startup smoke checks, release
    provenance, and the exact hosted matrix after restructuring.
 
 The brief attempt to use Ninja 1.13.2 failed because that version was not
@@ -296,6 +313,33 @@ hosted infrastructure. They must be stated plainly with prepared binaries and
 instructions; they do not justify pretending the foundation is untested, nor
 do they justify inventing simulated platform machinery.
 
+## Phase 6: close the local campaign workspace
+
+After the public final tag exists, perform only the bounded local cleanup that
+the finished workspace topology assigns to this campaign:
+
+- Verify `worktrees/full-speed-ahead` is clean and its HEAD is preserved by the
+  private `internal/full-speed-ahead` ref, then remove that temporary worktree
+  through the detached `repo/` administration checkout.
+- Distill any still-useful findings from `dev/modernize/` into the public docs,
+  then mark or archive that research area as completed and update
+  `dev/README.md`. Do not reorganize unrelated research topics.
+- Remove superseded local build directories after final evidence has been
+  retained under `artifacts/`, and confirm Phase 3 left no generated Rust output
+  in the source tree.
+- After current build caches have been recreated from `worktrees/main`, verify
+  that no active configuration or command depends on `worktrees/modern-core`
+  and remove the compatibility symlink. Historical text under `artifacts/` may
+  retain the old path as evidence and does not block removal.
+- Update the workspace-root `README.md`, `AGENTS.md`, and `dev/README.md` after
+  removing the oracle worktree or compatibility symlink so the routing table
+  describes the state agents will actually encounter.
+
+Do not touch the deliberately dirty `worktrees/coc-minimal`, promote unrelated
+standalone projects, or turn local/public branch hygiene into modernization
+work. Those are separate workspace decisions. Phase 6 changes no public source
+tag and must not become another product checkpoint.
+
 ## Completion behavior
 
 Persist through all phases. Do not stop after a code fix, documentation cleanup,
@@ -309,8 +353,8 @@ system.
 ## Required reading
 
 - [`README.md`](README.md) — campaign goals, scenarios, and architecture
-- [`../../AGENTS.md`](../../AGENTS.md) and any workspace-level `AGENTS.md` —
-  active repository and worktree policy
+- [`../../AGENTS.md`](../../AGENTS.md) and, in the OOM workspace, its root
+  `AGENTS.md` — active repository and worktree policy
 - [`../../SUPPORT.md`](../../SUPPORT.md) — supported platforms and toolchains
 - [`../../test/manual/rewrite-foundation-acceptance.md`](../../test/manual/rewrite-foundation-acceptance.md)
 - [`../../test/manual/render-parity.md`](../../test/manual/render-parity.md)
