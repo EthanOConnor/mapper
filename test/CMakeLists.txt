@@ -65,10 +65,15 @@ function(add_test_helper testname)
 		target_link_libraries(${testname} PRIVATE Qt6::Widgets)
 	endif()
 	if(NOT manual_test)
-		# Send Qt Test output to the console explicitly. In particular, GUI-linked
-		# test executables do not reliably inherit a visible console logger on
-		# hosted Windows runners.
-		add_test(NAME ${testname} COMMAND $<TARGET_FILE:${testname}> -o -,txt)
+		if(WIN32)
+			# Preserve diagnostics even when the hosted runner cannot attach the
+			# GUI-linked executable's standard streams to CTest.
+			add_test(NAME ${testname} COMMAND $<TARGET_FILE:${testname}>
+			  -o "${CMAKE_CURRENT_BINARY_DIR}/${testname}.txt,txt"
+			)
+		else()
+			add_test(NAME ${testname} COMMAND $<TARGET_FILE:${testname}> -o -,txt)
+		endif()
 		set_tests_properties(${testname} PROPERTIES
 		  WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
 		)

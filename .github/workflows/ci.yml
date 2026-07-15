@@ -59,7 +59,8 @@ jobs:
           path: .vcpkg
 
       - name: Restore dependency cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: vcpkg-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             .vcpkg/downloads
@@ -137,6 +138,15 @@ jobs:
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }}
 
+      - name: Save dependency cache
+        if: steps.vcpkg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .vcpkg/downloads
+            .vcpkg-cache
+          key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
+
       - name: Install Windows software GPU test runtime
         if: runner.os == 'Windows'
         shell: pwsh
@@ -170,6 +180,16 @@ jobs:
       - name: Test under Xvfb
         if: runner.os == 'Linux'
         run: xvfb-run --auto-servernum ctest --preset ${{ matrix.preset }} --output-on-failure --parallel 4
+
+      - name: Report failed Windows tests
+        if: runner.os == 'Windows' && failure()
+        shell: pwsh
+        run: |
+          Get-Content build/ci-windows/Testing/Temporary/LastTestsFailed.log | ForEach-Object {
+            $name = ($_ -split ':', 2)[1]
+            Write-Host "`n===== $name ====="
+            Get-Content "build/ci-windows/test/$name.txt"
+          }
 
       - name: Remove Windows software GPU test runtime
         if: runner.os == 'Windows' && always()
