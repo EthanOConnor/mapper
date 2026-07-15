@@ -20,7 +20,6 @@
 
 namespace OpenOrienteering::render {
 
-using ObjectId = std::uint64_t;
 using Revision = std::uint64_t;
 
 struct Point
@@ -150,7 +149,6 @@ enum class BlendMode : std::uint8_t
 enum class QualityHint : std::uint8_t
 {
 	Default,
-	Text,
 	ForceAntialiasing,
 };
 
@@ -162,28 +160,6 @@ struct StrokeStyle
 	double miter_limit = 4;
 	std::vector<double> dash_pattern;
 	double dash_offset = 0;
-};
-
-struct FontFace
-{
-	/** Bytes for one OpenType face, normalized out of any collection. */
-	std::shared_ptr<const std::vector<std::uint8_t>> data;
-	std::uint64_t content_id = 0;
-};
-
-struct Glyph
-{
-	std::uint32_t id = 0;
-	Point position;
-};
-
-struct GlyphRun
-{
-	std::shared_ptr<const FontFace> font;
-	double size = 0;
-	Transform transform;
-	std::vector<Glyph> glyphs;
-	bool hint = false;
 };
 
 struct ImageData
@@ -220,7 +196,6 @@ struct FillPath
 {
 	PathPtr path;
 	Color color;
-	ObjectId object_id = 0;
 	QualityHint quality = QualityHint::Default;
 };
 
@@ -229,7 +204,6 @@ struct StrokePath
 	PathPtr path;
 	Color color;
 	StrokeStyle style;
-	ObjectId object_id = 0;
 	QualityHint quality = QualityHint::Default;
 };
 
@@ -237,7 +211,6 @@ struct FillEllipse
 {
 	Rect bounds;
 	Color color;
-	ObjectId object_id = 0;
 	QualityHint quality = QualityHint::Default;
 };
 
@@ -246,17 +219,7 @@ struct StrokeEllipse
 	Rect bounds;
 	Color color;
 	StrokeStyle style;
-	ObjectId object_id = 0;
 	QualityHint quality = QualityHint::Default;
-};
-
-struct DrawGlyphRun
-{
-	std::shared_ptr<const GlyphRun> run;
-	Color color;
-	StrokeStyle stroke;
-	bool outline = false;
-	ObjectId object_id = 0;
 };
 
 struct DrawImage
@@ -264,7 +227,6 @@ struct DrawImage
 	std::shared_ptr<const ImageData> image;
 	Rect target;
 	double opacity = 1;
-	ObjectId object_id = 0;
 };
 
 struct DrawLinePattern
@@ -275,7 +237,6 @@ struct DrawLinePattern
 	double spacing = 0;
 	double offset = 0;
 	double line_width = 0;
-	ObjectId object_id = 0;
 };
 
 using Command = std::variant<
@@ -289,7 +250,6 @@ using Command = std::variant<
 	StrokePath,
 	FillEllipse,
 	StrokeEllipse,
-	DrawGlyphRun,
 	DrawImage,
 	DrawLinePattern
 >;
@@ -298,8 +258,6 @@ using Command = std::variant<
 class RenderIR
 {
 public:
-	static constexpr std::uint32_t format_version = 1;
-
 	Revision revision = 0;
 	Rect world_bounds;
 	std::vector<Command> commands;
@@ -316,24 +274,18 @@ public:
 	void popClip();
 	void pushLayer(double opacity, BlendMode blend = BlendMode::SourceOver);
 	void popLayer();
-	void fillPath(PathPtr path, Color color, ObjectId object_id = 0,
+	void fillPath(PathPtr path, Color color,
 	              QualityHint quality = QualityHint::Default);
 	void strokePath(PathPtr path, Color color, StrokeStyle style,
-	                ObjectId object_id = 0,
 	                QualityHint quality = QualityHint::Default);
-	void fillEllipse(Rect bounds, Color color, ObjectId object_id = 0,
+	void fillEllipse(Rect bounds, Color color,
 	                 QualityHint quality = QualityHint::Default);
 	void strokeEllipse(Rect bounds, Color color, StrokeStyle style,
-	                   ObjectId object_id = 0,
 	                   QualityHint quality = QualityHint::Default);
-	void drawGlyphRun(std::shared_ptr<const GlyphRun> run, Color color,
-	                  StrokeStyle stroke = {}, bool outline = false,
-	                  ObjectId object_id = 0);
 	void drawImage(std::shared_ptr<const ImageData> image, Rect target,
-	               double opacity = 1, ObjectId object_id = 0);
+	               double opacity = 1);
 	void drawLinePattern(PathPtr outline, Color color, double angle,
-	                     double spacing, double offset, double line_width,
-	                     ObjectId object_id = 0);
+	                     double spacing, double offset, double line_width);
 	void append(const RenderIR& scene);
 
 	std::size_t commandCount() const noexcept;

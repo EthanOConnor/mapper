@@ -88,13 +88,13 @@ Dependencies point in one direction:
 
 1. **Domain:** maps, objects, symbols, templates, undo, and formats.
 2. **Render snapshot:** immutable, revisioned drawable state.
-3. **Render IR:** ordered geometry, color, clip, blend, glyph, image, and object
-   identity operations.
+3. **Render IR:** ordered geometry, color, clip, blend, and image operations;
+   production text is shaped by Qt and frozen into ordinary paths.
 4. **Frame planner:** camera, visibility, retained scenes, raster order, and
    overlays; emits an immutable frame packet.
 5. **Backends:** QPainter reference/output and Vello screen rendering.
 6. **Presentation:** Qt window lifecycle, native handles, input routing, and
-   frame requests.
+   frame submission.
 
 The map-to-snapshot render path knows nothing about backends, GPU resources,
 native surfaces, or widgets. The IR contains no `QPainter`, QRhi, wgpu, Vello,
@@ -105,18 +105,21 @@ or caches.
 
 An edit publishes a new document revision. Workers read an immutable render
 snapshot, never a live mutable `Map` or spatial index. Snapshots share unchanged
-renderable, path, and font data between revisions; a single edit must not clone
+renderable and path data between revisions; a single edit must not clone
 the whole map or hold a global map lock while workers render.
 
-The small versioned IR expresses transforms, clips, fills, strokes, opacity,
-blend/overprint semantics, glyph runs, images, line patterns, world bounds, and
-stable object ids. Paths and font faces have explicit shared ownership. That
-avoids Qt 6.11 `QPainterPath` deep copies and prevents each scene from embedding
-the same font bytes.
+The small IR expresses transforms, clips, fills, strokes, opacity,
+blend/overprint semantics, images, line patterns, and world bounds. Paths have
+explicit shared ownership. Map text, overlay labels, and track labels are
+shaped with Qt before publication and frozen into the same immutable fill and
+stroke paths as other geometry. The backend therefore needs no font registry
+or font-byte ownership contract.
 
 QPainter consumes this IR as the deterministic reference, headless, print, and
 PDF path. Once the cutover is complete there is no second direct
-model-to-QPainter map-output path.
+model-to-QPainter map-output path. Vello screen rendering has one fixed Area-AA
+policy. QPainter inherits its caller's render hint unless a direct caller
+explicitly disallows antialiasing.
 
 ### Retained vector rendering
 
@@ -152,21 +155,22 @@ a frame id; the caller never treats the previous frame's status as the current
 submission.
 
 Checkpoint 3 made the contract concrete as an immutable `FramePacket`. It owns
-the camera, viewport/DPR, render request, ordered IR passes, document revision,
-and monotonic frame id. Pass isolation is explicit: an overprint separation is
-rendered to transparent intermediate storage before multiply composition, so
-knockout white can erase earlier marks within that separation. At that recovery
-point QPainter consumed the packet in `MapWidget`; checkpoint 6 replaced that
-temporary screen path with Vello while retaining QPainter as the exact reference
-and output backend.
+the camera, viewport/DPR, ordered IR passes, document revision, and monotonic
+frame id. Pass isolation is explicit: an overprint
+separation is rendered to transparent intermediate storage before multiply
+composition, so knockout white can erase earlier marks within that separation.
+At that recovery point QPainter consumed the packet in `MapWidget`; checkpoint
+6 replaced that temporary screen path with Vello while retaining QPainter as
+the exact reference and output backend.
 
 The corresponding `NativeSurfaceWindow` uses public Qt APIs only. It owns a
 render-only `QWindow`, emits sequenced unavailable/hidden/exposed/suspended
-state, reports logical and physical size, and exposes Qt's opaque `WId` plus
-the public XCB/Wayland application display handle where required. It contains
-no map, snapshot, cache, renderer, input policy, render policy, or private
-`qpa` dependency. Its single input callback lets the canvas translate native
-window events to the parent widget without teaching the surface about Mapper.
+state, reports physical size and device-pixel ratio, and exposes Qt's opaque
+`WId` plus the public XCB/Wayland application display handle where required. It
+contains no map, snapshot, cache, renderer, input policy, render policy, or
+private `qpa` dependency. Its single input callback lets the canvas translate
+native window events to the parent widget without teaching the surface about
+Mapper.
 Presentation readiness and surface-loss recovery use bounded event-driven
 retries because those are ordinary lifecycle states.
 
@@ -181,7 +185,7 @@ backend selection. Its native child owns platform hit-testing so standard and
 custom cursors work; the host forwards mouse, wheel, trackpad, tablet, touch,
 enter/leave, and key events once to its parent input authority.
 
-On Apple platforms, public raw-window APIs require deriving the AppKit surface
+On macOS, public raw-window APIs require deriving the AppKit surface
 from the `NSView` on the main thread. Only instance/surface preparation occurs
 there; the prepared wgpu objects move to and remain owned by the render thread.
 Windows, XCB, and Wayland descriptors likewise use public Qt native interfaces.
@@ -350,8 +354,9 @@ These are constraints, not code to port:
 - Camera-relative rasterized tiles produced jumps and seams; retained geometry
   stays in world space.
 - Chunk-clipped translucent objects double-blended; each drawable paints once.
-- Native Vello glyph runs and a global content-addressed font registry replace
-  per-scene glyph outlines and repeated font binaries.
+- The exploratory native-glyph registry added a second text representation
+  without a production caller; one immutable path representation is the
+  smaller backend-neutral contract.
 - Vello image minification needs source overviews or a CPU pyramid; GDAL
   decimation needs an explicit low-pass resampler.
 - Per-tile opacity darkened gutter overlaps; template opacity is applied once.
@@ -415,8 +420,8 @@ the two remaining physical/human verdicts, are tracked in
   metrics: SSIM at least 0.995, at least 99.5% of non-edge pixels with
   CIEDE2000 at most 2, and no unexplained error region wider than two physical
   pixels.
-- Clips, fill rules, transparency, overprint, patterns, glyphs, raster gutters,
-  and page seams pass at DPR 1 and 2, rotations, and fractional zooms.
+- Clips, fill rules, transparency, overprint, patterns, path text, raster
+  gutters, and page seams pass at DPR 1 and 2, rotations, and fractional zooms.
 - Pan/zoom/style/edit transitions never show a blank frame, wrong revision,
   destroyed resource, or translucent seam.
 - Print/PDF preserves page geometry, color intent, fonts, and raster placement.

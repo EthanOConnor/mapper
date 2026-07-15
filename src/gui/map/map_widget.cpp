@@ -120,7 +120,7 @@ void dispatchTouchCursorEvent(const TouchCursor::MouseEventTranslation& translat
 
 }  // namespace
 
-MapWidget::MapWidget(bool show_help, bool force_antialiasing, QWidget* parent)
+MapWidget::MapWidget(bool show_help, QWidget* parent)
  : QWidget(parent)
  , view(nullptr)
  , tool(nullptr)
@@ -128,7 +128,6 @@ MapWidget::MapWidget(bool show_help, bool force_antialiasing, QWidget* parent)
  , coords_type(MAP_COORDS)
  , cursorpos_label(nullptr)
  , show_help(show_help)
- , force_antialiasing(force_antialiasing)
  , dragging(false)
  , pinching(false)
  , pinching_factor(1.0)
@@ -1251,12 +1250,6 @@ void MapWidget::renderFrame()
 
 	auto const map_view_rect = view->calculateViewedRect(viewportToView(rect()));
 	RenderConfig::Options options(RenderConfig::Screen | RenderConfig::HelperSymbols);
-	auto use_antialiasing = force_antialiasing
-	                         || Settings::getInstance()
-	                              .getSettingCached(Settings::MapDisplay_Antialiasing)
-	                              .toBool();
-	if (!use_antialiasing)
-		options |= RenderConfig::DisableAntialiasing | RenderConfig::ForceMinSize;
 	auto const map_visibility = view->effectiveMapVisibility();
 	auto const render_request = render::RenderRequest {
 		render::fromQRectF(map_view_rect),

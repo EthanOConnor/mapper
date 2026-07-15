@@ -1509,22 +1509,6 @@
 <context>
     <name>OpenOrienteering::EditorSettingsPage</name>
     <message>
-        <location filename="../src/gui/widgets/editor_settings_page.cpp" line="56"/>
-        <source>High quality map display (antialiasing)</source>
-        <translation>高品質な地図表示 (アンチエイリアス処理)</translation>
-    </message>
-    <message>
-        <location filename="../src/gui/widgets/editor_settings_page.cpp" line="57"/>
-        <location filename="../src/gui/widgets/editor_settings_page.cpp" line="61"/>
-        <source>Antialiasing makes the map look much better, but also slows down the map display</source>
-        <translation>アンチエイリアス処理によって地図の外観が滑らかになりますが、表示速度が遅くなります</translation>
-    </message>
-    <message>
-        <location filename="../src/gui/widgets/editor_settings_page.cpp" line="60"/>
-        <source>High quality text display in map (antialiasing), slow</source>
-        <translation>高品質なテキスト表示 (アンチエイリアス処理)、(表示速度が遅くなります)</translation>
-    </message>
-    <message>
         <location filename="../src/gui/widgets/editor_settings_page.cpp" line="65"/>
         <source>Click tolerance:</source>
         <translation>クリックの許容誤差:</translation>

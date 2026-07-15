@@ -355,7 +355,11 @@ void FillTool::drawObjectIDs(Map* map, QPainter* painter, const RenderConfig &co
 			auto scene = object->renderables().buildIR(
 				c, render::fromQColor(QColor::fromRgba(QRgb(o) | ~RGB_MASK)), request
 			);
-			renderer.render(*painter, *scene, request);
+			renderer.render(
+				*painter,
+				*scene,
+				!request.options.testFlag(RenderConfig::DisableAntialiasing)
+			);
 		}
 	}
 }

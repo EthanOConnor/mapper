@@ -1296,22 +1296,6 @@
 <context>
     <name>OpenOrienteering::EditorSettingsPage</name>
     <message>
-        <location filename="../src/gui/widgets/editor_settings_page.cpp" line="56"/>
-        <source>High quality map display (antialiasing)</source>
-        <translation>高品質地圖顯示（消除鋸齒）</translation>
-    </message>
-    <message>
-        <location filename="../src/gui/widgets/editor_settings_page.cpp" line="57"/>
-        <location filename="../src/gui/widgets/editor_settings_page.cpp" line="61"/>
-        <source>Antialiasing makes the map look much better, but also slows down the map display</source>
-        <translation>消除鋸齒使地圖看起來好多了，但也會减慢地圖顯示速度</translation>
-    </message>
-    <message>
-        <location filename="../src/gui/widgets/editor_settings_page.cpp" line="60"/>
-        <source>High quality text display in map (antialiasing), slow</source>
-        <translation>高品質文字顯示在地圖中（消除鋸齒），顯示速度較慢</translation>
-    </message>
-    <message>
         <location filename="../src/gui/widgets/editor_settings_page.cpp" line="65"/>
         <source>Click tolerance:</source>
         <translation>點擊容許度:</translation>

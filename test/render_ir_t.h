@@ -17,6 +17,7 @@ private slots:
 	void initTestCase();
 	void immutableSnapshotSurvivesEdit();
 	void referenceRendererInterpretsIr();
+	void antialiasPolicyPreservesCallerIntent();
 };
 
 #endif

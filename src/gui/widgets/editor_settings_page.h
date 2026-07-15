@@ -55,8 +55,6 @@ protected:
 private:
 	QDoubleSpinBox* button_size = nullptr;
 	QSpinBox* icon_size;
-	QCheckBox* antialiasing;
-	QCheckBox* text_antialiasing;
 	QSpinBox* tolerance;
 	QSpinBox* snap_distance;
 	QDoubleSpinBox* fixed_angle_stepping;

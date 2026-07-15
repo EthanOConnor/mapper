@@ -1338,22 +1338,6 @@
 <context>
     <name>OpenOrienteering::EditorSettingsPage</name>
     <message>
-        <location filename="../src/gui/widgets/editor_settings_page.cpp" line="56"/>
-        <source>High quality map display (antialiasing)</source>
-        <translation>Висока якість відображення карти (згладжування)</translation>
-    </message>
-    <message>
-        <location filename="../src/gui/widgets/editor_settings_page.cpp" line="57"/>
-        <location filename="../src/gui/widgets/editor_settings_page.cpp" line="61"/>
-        <source>Antialiasing makes the map look much better, but also slows down the map display</source>
-        <translation>Згладжування робить вигляд карти значно кращим, але уповільнює відображення</translation>
-    </message>
-    <message>
-        <location filename="../src/gui/widgets/editor_settings_page.cpp" line="60"/>
-        <source>High quality text display in map (antialiasing), slow</source>
-        <translation>Висока якість відображення тексту на карті (згладжування), повільно</translation>
-    </message>
-    <message>
         <location filename="../src/gui/widgets/editor_settings_page.cpp" line="65"/>
         <source>Click tolerance:</source>
         <translation>Допуск курсора:</translation>

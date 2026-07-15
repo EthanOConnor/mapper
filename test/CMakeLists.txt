@@ -194,6 +194,7 @@ add_system_test(coord_xml_t MANUAL)
 add_system_test(file_format_t)
 add_system_test(duplicate_equals_t)
 add_system_test(frame_pipeline_t)
+target_link_libraries(frame_pipeline_t PRIVATE Mapper::VelloPresentation)
 if(Mapper_USE_GDAL)
 	add_system_test(gdal_tiled_t)
 	target_link_libraries(gdal_tiled_t PRIVATE mapper-gdal GDAL::GDAL)
@@ -204,8 +205,10 @@ add_system_test(object_t)
 add_system_test(object_query_t)
 add_system_test(path_object_t)
 add_system_test(template_layer_planner_t)
+target_link_libraries(template_layer_planner_t PRIVATE Mapper::VelloBackend)
 add_system_test(render_ir_t)
 add_system_test(vello_renderer_t)
+target_link_libraries(vello_renderer_t PRIVATE Mapper::VelloPresentation)
 add_system_test(style_t)
 add_system_test(symbol_set_t)
 add_system_test(symbol_t)
@@ -239,13 +242,15 @@ target_link_libraries(render_benchmark PRIVATE Mapper_Common Qt6::Widgets)
 
 add_executable(vello_benchmark EXCLUDE_FROM_ALL vello_benchmark.cpp)
 mapper_target_defaults(vello_benchmark)
-target_link_libraries(vello_benchmark PRIVATE Mapper_Common Qt6::Widgets)
+target_link_libraries(vello_benchmark PRIVATE
+	Mapper_Common Mapper::VelloBackend Qt6::Widgets
+)
 
 if(Mapper_USE_GDAL)
 	add_executable(raster_benchmark EXCLUDE_FROM_ALL raster_benchmark.cpp)
 	mapper_target_defaults(raster_benchmark)
 	target_link_libraries(raster_benchmark PRIVATE
-		Mapper_Common mapper-gdal GDAL::GDAL Qt6::Widgets
+		Mapper_Common Mapper::VelloBackend mapper-gdal GDAL::GDAL Qt6::Widgets
 	)
 endif()
 

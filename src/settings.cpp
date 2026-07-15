@@ -79,16 +79,6 @@ namespace Util
 	}
 	
 	
-	bool isAntialiasingRequired(qreal ppi)
-	{
-		return ppi < 200;
-	}
-	
-	bool isAntialiasingRequired()
-	{
-		return isAntialiasingRequired(Settings::getInstance().getSettingCached(Settings::General_PixelsPerInch).toReal());
-	}
-	
 }
 
 
@@ -128,7 +118,6 @@ Settings::Settings()
 	if (ppi > 2048.0 || ppi < 16.0)
 		ppi = QGuiApplication::primaryScreen()->logicalDotsPerInch();
 	
-	registerSetting(MapDisplay_TextAntialiasing, "MapDisplay/text_antialiasing", false);
 	registerSetting(MapEditor_ClickToleranceMM, "MapEditor/click_tolerance_mm", map_editor_click_tolerance_default);
 	registerSetting(MapEditor_SnapDistanceMM, "MapEditor/snap_distance_mm", map_editor_snap_distance_default);
 	registerSetting(MapEditor_FixedAngleStepping, "MapEditor/fixed_angle_stepping", 15);
@@ -163,9 +152,6 @@ Settings::Settings()
 	
 	registerSetting(HomeScreen_TipsVisible, "HomeScreen/tipsVisible", true);
 	registerSetting(HomeScreen_CurrentTip, "HomeScreen/currentTip", -1);
-	
-	// Set antialiasing default depending on screen pixels per inch
-	registerSetting(MapDisplay_Antialiasing, "MapDisplay/antialiasing", Util::isAntialiasingRequired(getSetting(General_PixelsPerInch).toReal()));
 	
 	// Paint On Template tool settings
 	registerSetting(PaintOnTemplateTool_Colors, "PaintOnTemplateTool/colors", QLatin1String("FF0000,FFFF00,00FF00,DB00D9,0000FF,D15C00,000000"));

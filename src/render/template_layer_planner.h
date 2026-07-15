@@ -11,7 +11,7 @@
 #include <memory>
 #include <vector>
 
-#include "render/frame_pipeline.h"
+#include "render/frame_packet.h"
 
 namespace OpenOrienteering {
 

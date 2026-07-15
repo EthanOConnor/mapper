@@ -1511,22 +1511,6 @@ Detta fönster låter dig välja en typsnittsstorlek som ger en exakt storlek f�
 <context>
     <name>OpenOrienteering::EditorSettingsPage</name>
     <message>
-        <location filename="../src/gui/widgets/editor_settings_page.cpp" line="56"/>
-        <source>High quality map display (antialiasing)</source>
-        <translation>Högkvalitetsvisning (antialiasing)</translation>
-    </message>
-    <message>
-        <location filename="../src/gui/widgets/editor_settings_page.cpp" line="57"/>
-        <location filename="../src/gui/widgets/editor_settings_page.cpp" line="61"/>
-        <source>Antialiasing makes the map look much better, but also slows down the map display</source>
-        <translation>Antialiasing ger en bättre kartvisning, men kan göra visningen långsammare</translation>
-    </message>
-    <message>
-        <location filename="../src/gui/widgets/editor_settings_page.cpp" line="60"/>
-        <source>High quality text display in map (antialiasing), slow</source>
-        <translation>Högkvalitativ textvisning på karta (antialiasing), långsam</translation>
-    </message>
-    <message>
         <location filename="../src/gui/widgets/editor_settings_page.cpp" line="65"/>
         <source>Click tolerance:</source>
         <translation>Klicktolerans:</translation>

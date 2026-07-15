@@ -148,7 +148,6 @@ bool MapRenderSnapshot::appendObjectColor(RenderIRBuilder& builder,
 			request.scaling,
 			request.options,
 			draw_color,
-			object.id,
 		});
 		emitted |= builder.commandCount() != before;
 	}

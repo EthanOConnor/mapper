@@ -137,7 +137,6 @@ std::shared_ptr<const render::RenderIR> ObjectRenderables::buildIR(
 			request.scaling,
 			request.options,
 			color,
-			0,
 		});
 	}
 	if (active_clip)

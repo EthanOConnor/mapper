@@ -49,8 +49,6 @@ bool sameSurfaceState(const NativeSurfaceState& first, const NativeSurfaceState&
 	       && first.native.platform == second.native.platform
 	       && first.native.window == second.native.window
 	       && first.native.display == second.native.display
-	       && first.logical_width == second.logical_width
-	       && first.logical_height == second.logical_height
 	       && first.physical_width == second.physical_width
 	       && first.physical_height == second.physical_height
 	       && first.device_pixel_ratio == second.device_pixel_ratio;
@@ -85,8 +83,6 @@ ANativeWindow* acquireAndroidNativeWindow(QWindow& window)
 }
 #endif
 
-}  // namespace
-
 NativeSurfaceDescriptor describeNativeSurface(QWindow& window)
 {
 	NativeSurfaceDescriptor descriptor;
@@ -96,9 +92,6 @@ NativeSurfaceDescriptor describeNativeSurface(QWindow& window)
 #if defined(Q_OS_MACOS)
 	if (platform == QLatin1String("cocoa"))
 		descriptor.platform = NativePlatform::AppKit;
-#elif defined(Q_OS_IOS)
-	if (platform == QLatin1String("ios"))
-		descriptor.platform = NativePlatform::UIKit;
 #elif defined(Q_OS_WIN)
 	if (platform == QLatin1String("windows"))
 		descriptor.platform = NativePlatform::Win32;
@@ -129,11 +122,13 @@ NativeSurfaceDescriptor describeNativeSurface(QWindow& window)
 	return descriptor;
 }
 
+}  // namespace
+
 NativeSurfaceWindow::NativeSurfaceWindow(QWindow* parent)
  : QWindow(parent)
  , suspended_(appIsSuspended(QGuiApplication::applicationState()))
 {
-#if defined(Q_OS_MACOS) || defined(Q_OS_IOS)
+#if defined(Q_OS_MACOS)
 	setSurfaceType(QSurface::MetalSurface);
 #elif defined(Q_OS_WIN)
 	setSurfaceType(QSurface::Direct3DSurface);
@@ -157,7 +152,6 @@ NativeSurfaceWindow::~NativeSurfaceWindow()
 		publishState();
 	}
 	state_handler_ = {};
-	frame_request_handler_ = {};
 	input_handler_ = {};
 #if defined(Q_OS_ANDROID)
 	retireAndroidNativeWindow();
@@ -174,11 +168,6 @@ void NativeSurfaceWindow::setStateHandler(StateHandler handler)
 		publishState();
 }
 
-void NativeSurfaceWindow::setFrameRequestHandler(FrameRequestHandler handler)
-{
-	frame_request_handler_ = std::move(handler);
-}
-
 void NativeSurfaceWindow::setInputHandler(InputHandler handler)
 {
 	input_handler_ = std::move(handler);
@@ -187,12 +176,6 @@ void NativeSurfaceWindow::setInputHandler(InputHandler handler)
 const NativeSurfaceState& NativeSurfaceWindow::surfaceState() const noexcept
 {
 	return state_;
-}
-
-void NativeSurfaceWindow::requestFrame()
-{
-	if (state_.phase == SurfacePhase::Exposed)
-		requestUpdate();
 }
 
 void NativeSurfaceWindow::refreshState()
@@ -262,12 +245,6 @@ bool NativeSurfaceWindow::event(QEvent* event)
 	{
 		publishState();
 	}
-	else if (event->type() == QEvent::UpdateRequest)
-	{
-		if (state_.phase == SurfacePhase::Exposed && frame_request_handler_)
-			frame_request_handler_();
-		return true;
-	}
 	if (input_handler_ && input_handler_(event))
 		return true;
 	return QWindow::event(event);
@@ -300,11 +277,10 @@ void NativeSurfaceWindow::hideEvent(QHideEvent* event)
 void NativeSurfaceWindow::publishState(bool force)
 {
 	NativeSurfaceState next;
-	next.logical_width = std::uint32_t(std::max(0, width()));
-	next.logical_height = std::uint32_t(std::max(0, height()));
-	next.device_pixel_ratio = std::max(1.0, double(devicePixelRatio()));
-	next.physical_width = std::uint32_t(std::ceil(next.logical_width * next.device_pixel_ratio));
-	next.physical_height = std::uint32_t(std::ceil(next.logical_height * next.device_pixel_ratio));
+	auto const device_pixel_ratio = std::max(1.0, double(devicePixelRatio()));
+	next.device_pixel_ratio = device_pixel_ratio;
+	next.physical_width = std::uint32_t(std::ceil(std::max(0, width()) * device_pixel_ratio));
+	next.physical_height = std::uint32_t(std::ceil(std::max(0, height()) * device_pixel_ratio));
 
 	if (!platform_surface_available_)
 	{

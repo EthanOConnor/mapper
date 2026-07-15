@@ -1297,22 +1297,6 @@
 <context>
     <name>OpenOrienteering::EditorSettingsPage</name>
     <message>
-        <location filename="../src/gui/widgets/editor_settings_page.cpp" line="56"/>
-        <source>High quality map display (antialiasing)</source>
-        <translation>Висококачествено показване на картата (антиалиасинг)</translation>
-    </message>
-    <message>
-        <location filename="../src/gui/widgets/editor_settings_page.cpp" line="57"/>
-        <location filename="../src/gui/widgets/editor_settings_page.cpp" line="61"/>
-        <source>Antialiasing makes the map look much better, but also slows down the map display</source>
-        <translation>Антиалиасинг прави картата да изглежда много по-добре, но също така забавя показването на картата</translation>
-    </message>
-    <message>
-        <location filename="../src/gui/widgets/editor_settings_page.cpp" line="60"/>
-        <source>High quality text display in map (antialiasing), slow</source>
-        <translation>Висококачествен текст в картата (антиалиасинг), бавен</translation>
-    </message>
-    <message>
         <location filename="../src/gui/widgets/editor_settings_page.cpp" line="65"/>
         <source>Click tolerance:</source>
         <translation>Толерантност при кликване:</translation>

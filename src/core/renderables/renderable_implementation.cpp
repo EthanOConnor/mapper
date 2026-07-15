@@ -71,12 +71,11 @@ void DotRenderable::appendTo(render::RenderIRBuilder& builder,
 		auto const radius = 0.5 / config.scaling;
 		builder.fillEllipse(
 			{ center.x() - radius, center.y() - radius, 2 * radius, 2 * radius },
-			config.color,
-			config.object_id
+			config.color
 		);
 	}
 	else
-		builder.fillEllipse(render::fromQRectF(extent), config.color, config.object_id);
+		builder.fillEllipse(render::fromQRectF(extent), config.color);
 }
 
 
@@ -115,7 +114,6 @@ void CircleRenderable::appendTo(render::RenderIRBuilder& builder,
 	}
 	builder.strokeEllipse(bounds, config.color,
 	                      { .width = width, .dash_pattern = {}, .dash_offset = 0 },
-	                      config.object_id,
 	                      color_priority < 0 ? render::QualityHint::ForceAntialiasing
 	                                         : render::QualityHint::Default);
 }
@@ -447,7 +445,6 @@ void LineRenderable::appendTo(render::RenderIRBuilder& builder,
 			.dash_pattern = {},
 			.dash_offset = 0,
 		},
-		config.object_id,
 		color_priority < 0 ? render::QualityHint::ForceAntialiasing
 		                   : render::QualityHint::Default
 	);
@@ -519,7 +516,7 @@ void AreaRenderable::addSubpath(const VirtualPath& virtual_path, render::PathBui
 void AreaRenderable::appendTo(render::RenderIRBuilder& builder,
 	                          const RenderPrimitiveConfig& config) const
 {
-	builder.fillPath(path, config.color, config.object_id);
+	builder.fillPath(path, config.color);
 }
 
 
@@ -587,7 +584,7 @@ void TextRenderable::appendTo(render::RenderIRBuilder& builder,
 	                          const RenderPrimitiveConfig& config) const
 {
 	builder.pushTransform(transform);
-	builder.fillPath(path, config.color, config.object_id, render::QualityHint::Text);
+	builder.fillPath(path, config.color);
 	builder.popTransform();
 }
 
@@ -624,9 +621,7 @@ void TextFramingRenderable::appendTo(render::RenderIRBuilder& builder,
 			.miter_limit = 0.5,
 			.dash_pattern = {},
 			.dash_offset = 0,
-		},
-		config.object_id,
-		render::QualityHint::Text
+		}
 	);
 	builder.popTransform();
 }

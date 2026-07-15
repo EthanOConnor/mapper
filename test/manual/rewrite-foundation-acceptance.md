@@ -90,15 +90,76 @@ all completed successfully. Its exact package artifacts are:
   78,157,896 bytes, SHA-256
   `5598d6ee39b81dcac09cd3f450ca0f931035d7b80ad1db693a7bb7e968313161`.
 
-`modernization-checkpoint-17-raster-convergence` will point at this evidence
-revision only after its own exact-SHA public matrix is green.
+Annotated tag `modernization-checkpoint-17-raster-convergence` resolves to
+evidence revision `e09e7697db655a50b7a0f3ccdf6e0c53ea55f501`. That exact
+revision passed [run 29455346504](https://github.com/EthanOConnor/mapper/actions/runs/29455346504):
+[macOS](https://github.com/EthanOConnor/mapper/actions/runs/29455346504/job/87487180977),
+[Linux](https://github.com/EthanOConnor/mapper/actions/runs/29455346504/job/87487180998),
+[Android](https://github.com/EthanOConnor/mapper/actions/runs/29455346504/job/87487180945),
+and [Windows](https://github.com/EthanOConnor/mapper/actions/runs/29455346504/job/87487180956)
+all completed successfully. Its exact artifacts are
+[macOS 8359326872](https://github.com/EthanOConnor/mapper/actions/runs/29455346504/artifacts/8359326872),
+[Linux 8359301505](https://github.com/EthanOConnor/mapper/actions/runs/29455346504/artifacts/8359301505),
+[Android 8359294437](https://github.com/EthanOConnor/mapper/actions/runs/29455346504/artifacts/8359294437),
+and [Windows 8359680094](https://github.com/EthanOConnor/mapper/actions/runs/29455346504/artifacts/8359680094).
+
+## 2026-07-15 contract cleanup and boundary closeout
+
+The Phase 2 implementation removes the dead native frame-request callback and
+`UpdateRequest` path, render-command identity, the unused overprinting helper,
+backend-id echo, and stale touch include. `FramePacket` is now a snapshot-free
+backend input in its own header, while native surface state is a Qt-free value
+separate from the `QWindow` owner. The Vello backend consumes those narrow
+headers and no longer links `Qt6::Gui`.
+
+The test-only glyph/font bridge is deleted because every production text path
+already freezes Qt-shaped text into immutable paths. The ineffective separate
+map and text antialiasing preferences and unsupported UIKit/iOS residue are
+removed; the supported Vello screen path has one fixed high-quality policy.
+QPainter still inherits its caller's antialiasing choice unless rendering is
+explicitly disabled, and focused pixel coverage proves that forced-AA commands
+cannot override an explicit disable. Native surface DPR remains part of the
+surface value and drives resubmission after display changes.
+
+This cleanup deliberately retains snapshot/domain object identity, Windows
+WARP runtime coverage, Linux Xvfb, bounded Qt 6 icon loading, the GDAL overlay,
+QPainter reference/print/export rendering, and native-surface input forwarding.
+
+Local evidence from the canonical `worktrees/main` checkout:
+
+- The retained Release cache names
+  `/Users/ethan/dev/oom/worktrees/main` as `CMAKE_HOME_DIRECTORY`; it uses CMake
+  4.4.0, Qt 6.11.1, and Rust/Cargo 1.94.0, with Corrosion output below
+  `build/release-macos/cargo`.
+- The complete Release build passed. On the exact final tree, a serial CTest
+  run excluding the two visible-surface suites passed 34/34 tests in 15.71
+  seconds. The two excluded suites separately passed their packet, convergence,
+  missing-source, offscreen-GPU, map-corpus, and surface-lifecycle-state cases.
+  The current desktop WindowServer session continued to return
+  `TargetUnavailable` for visible AppKit/Metal drawable acquisition after
+  overlapping GUI-test runs, so the exact hosted macOS job remains the
+  authoritative native-presentation gate for this checkpoint.
+- Rust formatting, clippy with warnings denied, and both Rust unit tests pass
+  with `CARGO_TARGET_DIR=build/release-macos/cargo/checks`.
+- The generated `vello_renderer.cpp` compile command contains only canonical
+  source/build paths and no Qt include directory, Qt library definition, or
+  autogen include. The renderer, raster, and reference benchmark targets build.
+- Dead-contract searches are clean outside the authoritative closeout plan and
+  legitimate domain IDs. All 64 translation catalogs pass `xmllint`, and
+  `git diff --check` passes.
+
+Exact implementation SHA, hosted jobs and artifacts, and the checkpoint-18 tag
+remain pending the public exact-SHA matrices. Later phases still own measured
+CI/cache simplification and source-tree Cargo cleanup, documentation and the
+live checkpoint-19 renderer verdict, parity-driver retirement and the final
+tag, and bounded campaign-workspace retirement.
 
 ## Remaining people and hardware checks
 
 These are deliberately small product checks, not missing automation machinery:
 
 1. Before accepting the rewrite as superior in practice, have a club mapper run
-   the same three maps in `main@f106ee2d` and
+   the same three maps at the exact checkpoint-19 candidate SHA and
    `full-speed-ahead@74c36456` on representative hardware. Record whether pan,
    pinch, cursor-anchored zoom, text and pattern stability, crispness, display
    pacing, and input latency are at least as good in the rewrite.

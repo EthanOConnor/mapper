@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::num::{NonZeroIsize, NonZeroU32};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -7,18 +6,17 @@ use std::time::Instant;
 use flume::{Receiver, Sender, TryRecvError, TrySendError};
 use raw_window_handle::{
     AndroidDisplayHandle, AndroidNdkWindowHandle, AppKitDisplayHandle, AppKitWindowHandle,
-    RawDisplayHandle, RawWindowHandle, UiKitDisplayHandle, UiKitWindowHandle, WaylandDisplayHandle,
-    WaylandWindowHandle, Win32WindowHandle, WindowsDisplayHandle, XcbDisplayHandle,
-    XcbWindowHandle,
+    RawDisplayHandle, RawWindowHandle, WaylandDisplayHandle, WaylandWindowHandle,
+    Win32WindowHandle, WindowsDisplayHandle, XcbDisplayHandle, XcbWindowHandle,
 };
 use vello::kurbo::{Affine, BezPath, Cap, Ellipse, Join, Rect, Stroke};
 use vello::peniko::{
-    BlendMode, Blob, Color, ColorStop, Compose, Extend, Fill, FontData, Gradient, ImageAlphaType,
-    ImageBrush, ImageData, ImageFormat, ImageQuality, ImageSampler, Mix,
+    BlendMode, Blob, Color, ColorStop, Compose, Extend, Fill, Gradient, ImageAlphaType, ImageBrush,
+    ImageData, ImageFormat, ImageQuality, ImageSampler, Mix,
 };
 use vello::wgpu;
 use vello::wgpu::util::TextureBlitter;
-use vello::{AaConfig, AaSupport, Glyph as VelloGlyph, RenderParams, Renderer as VelloRenderer};
+use vello::{AaConfig, AaSupport, RenderParams, Renderer as VelloRenderer};
 use vello::{RendererOptions, Scene};
 
 #[cxx::bridge(namespace = "OpenOrienteering::render::vello_ffi")]
@@ -80,24 +78,6 @@ mod ffi {
     }
 
     #[derive(Clone, Copy, Default)]
-    struct Glyph {
-        id: u32,
-        x: f64,
-        y: f64,
-    }
-
-    #[derive(Clone, Copy, Default)]
-    struct GlyphStyle {
-        content_id: u64,
-        size: f64,
-        transform: Transform,
-        color: Color,
-        stroke: Stroke,
-        outline: bool,
-        hint: bool,
-    }
-
-    #[derive(Clone, Copy, Default)]
     struct LinePatternStyle {
         color: Color,
         angle: f64,
@@ -123,20 +103,17 @@ mod ffi {
         revision: u64,
         surface_sequence: u64,
         status: u8,
-        backend: u8,
         scene_count: u32,
         render_cpu_us: u64,
     }
 
     extern "Rust" {
-        type SceneEncoder;
         type SceneBuilder;
         type RetainedScene;
         type RetainedImage;
         type FrameBuilder;
         type Renderer;
 
-        fn new_scene_encoder() -> Box<SceneEncoder>;
         fn begin_scene(revision: u64, world_bounds: Rect) -> Box<SceneBuilder>;
         fn scene_push_transform(scene: &mut SceneBuilder, transform: Transform);
         fn scene_pop_transform(scene: &mut SceneBuilder);
@@ -165,13 +142,6 @@ mod ffi {
             color: Color,
             stroke: Stroke,
         );
-        fn scene_draw_glyphs(
-            encoder: &mut SceneEncoder,
-            scene: &mut SceneBuilder,
-            font_bytes: &[u8],
-            glyphs: &[Glyph],
-            style: GlyphStyle,
-        ) -> bool;
         fn new_retained_image(
             image_bytes: &[u8],
             width: u32,
@@ -217,11 +187,10 @@ const SURFACE_UNAVAILABLE: u8 = 0;
 const SURFACE_EXPOSED: u8 = 2;
 
 const PLATFORM_APPKIT: u8 = 1;
-const PLATFORM_UIKIT: u8 = 2;
-const PLATFORM_WIN32: u8 = 3;
-const PLATFORM_ANDROID_NDK: u8 = 4;
-const PLATFORM_WAYLAND: u8 = 5;
-const PLATFORM_XCB: u8 = 6;
+const PLATFORM_WIN32: u8 = 2;
+const PLATFORM_ANDROID_NDK: u8 = 3;
+const PLATFORM_WAYLAND: u8 = 4;
+const PLATFORM_XCB: u8 = 5;
 
 const FRAME_NONE: u8 = 0;
 const FRAME_PRESENTED: u8 = 1;
@@ -229,10 +198,6 @@ const FRAME_TARGET_UNAVAILABLE: u8 = 2;
 const FRAME_DROPPED_STALE: u8 = 3;
 const FRAME_SURFACE_LOST: u8 = 4;
 const FRAME_ERROR: u8 = 5;
-
-pub struct SceneEncoder {
-    fonts: HashMap<u64, FontData>,
-}
 
 pub struct SceneBuilder {
     scene: Scene,
@@ -268,12 +233,6 @@ struct FramePass {
 struct OffscreenRequest {
     frame: Box<FrameBuilder>,
     response: Sender<Result<Vec<u8>, String>>,
-}
-
-fn new_scene_encoder() -> Box<SceneEncoder> {
-    Box::new(SceneEncoder {
-        fonts: HashMap::new(),
-    })
 }
 
 fn finite_transform(value: ffi::Transform) -> Option<Affine> {
@@ -524,59 +483,6 @@ fn scene_stroke_ellipse(
     }
 }
 
-fn scene_draw_glyphs(
-    encoder: &mut SceneEncoder,
-    scene: &mut SceneBuilder,
-    font_bytes: &[u8],
-    glyphs: &[ffi::Glyph],
-    style: ffi::GlyphStyle,
-) -> bool {
-    scene.command_count += 1;
-    if style.content_id == 0
-        || font_bytes.is_empty()
-        || glyphs.is_empty()
-        || !style.size.is_finite()
-        || style.size <= 0.0
-    {
-        return false;
-    }
-    let Some(run_transform) = finite_transform(style.transform) else {
-        return false;
-    };
-    let mut run = Vec::with_capacity(glyphs.len());
-    for glyph in glyphs {
-        if !glyph.x.is_finite() || !glyph.y.is_finite() {
-            return false;
-        }
-        run.push(VelloGlyph {
-            id: glyph.id,
-            x: glyph.x as f32,
-            y: glyph.y as f32,
-        });
-    }
-    let font = encoder
-        .fonts
-        .entry(style.content_id)
-        .or_insert_with(|| FontData::new(Blob::from(font_bytes.to_vec()), 0));
-    let transform = scene.transform() * run_transform;
-    let builder = scene
-        .scene
-        .draw_glyphs(font)
-        .transform(transform)
-        .font_size(style.size as f32)
-        .hint(style.hint)
-        .brush(color(style.color, 1.0));
-    if style.outline {
-        let Some(stroke) = stroke(style.stroke) else {
-            return false;
-        };
-        builder.draw(&stroke, run.into_iter());
-    } else {
-        builder.draw(Fill::NonZero, run.into_iter());
-    }
-    true
-}
-
 fn new_retained_image(
     image_bytes: &[u8],
     width: u32,
@@ -808,7 +714,6 @@ struct SurfaceTarget {
     platform: u8,
     window: u64,
     display: u64,
-    backend: u8,
 }
 
 struct OffscreenTarget {
@@ -855,13 +760,6 @@ fn surface_handles(
                 AppKitWindowHandle::new(view).into(),
             ))
         }
-        PLATFORM_UIKIT => {
-            let view = raw_handle(state.window).ok_or("UIKit surface has no UIView")?;
-            Ok((
-                Some(UiKitDisplayHandle::new().into()),
-                UiKitWindowHandle::new(view).into(),
-            ))
-        }
         PLATFORM_WIN32 => {
             let hwnd =
                 NonZeroIsize::new(state.window as isize).ok_or("Win32 surface has no HWND")?;
@@ -900,7 +798,7 @@ fn surface_handles(
 
 fn platform_backends(platform: u8) -> wgpu::Backends {
     match platform {
-        PLATFORM_APPKIT | PLATFORM_UIKIT => wgpu::Backends::METAL,
+        PLATFORM_APPKIT => wgpu::Backends::METAL,
         PLATFORM_WIN32 => wgpu::Backends::DX12,
         PLATFORM_ANDROID_NDK | PLATFORM_WAYLAND | PLATFORM_XCB => wgpu::Backends::VULKAN,
         _ => wgpu::Backends::PRIMARY,
@@ -928,17 +826,6 @@ async fn request_adapter<'a>(
             compatible_surface,
         })
         .await
-}
-
-fn backend_id(backend: wgpu::Backend) -> u8 {
-    match backend {
-        wgpu::Backend::Vulkan => 1,
-        wgpu::Backend::Metal => 2,
-        wgpu::Backend::Dx12 => 3,
-        wgpu::Backend::Gl => 4,
-        wgpu::Backend::BrowserWebGpu => 5,
-        wgpu::Backend::Noop => 6,
-    }
 }
 
 fn device_descriptor(adapter: &wgpu::Adapter) -> wgpu::DeviceDescriptor<'static> {
@@ -982,7 +869,6 @@ fn create_surface_target(
     let adapter = pollster::block_on(request_adapter(&instance, Some(&surface)))
         .map_err(|error| format!("no compatible wgpu adapter: {error}"))?;
     let adapter_info = adapter.get_info();
-    let backend = backend_id(adapter_info.backend);
     let (device, queue) = pollster::block_on(adapter.request_device(&device_descriptor(&adapter)))
         .map_err(|error| {
             format!(
@@ -1030,7 +916,6 @@ fn create_surface_target(
         platform: state.platform,
         window: state.window,
         display: state.display,
-        backend,
     })
 }
 
@@ -1140,18 +1025,12 @@ fn set_error(last_error: &Mutex<String>, message: impl Into<String>) {
     }
 }
 
-fn frame_result(
-    frame: &FrameBuilder,
-    status: u8,
-    backend: u8,
-    started: Instant,
-) -> ffi::FrameResult {
+fn frame_result(frame: &FrameBuilder, status: u8, started: Instant) -> ffi::FrameResult {
     ffi::FrameResult {
         frame_id: frame.header.frame_id,
         revision: frame.header.revision,
         surface_sequence: frame.header.surface_sequence,
         status,
-        backend,
         scene_count: frame.passes.len().min(u32::MAX as usize) as u32,
         render_cpu_us: started.elapsed().as_micros().min(u128::from(u64::MAX)) as u64,
     }
@@ -1434,7 +1313,7 @@ fn process_frame(
         publish_result(
             result_tx,
             result_replace_rx,
-            frame_result(&frame, FRAME_DROPPED_STALE, 0, started),
+            frame_result(&frame, FRAME_DROPPED_STALE, started),
         );
         return;
     }
@@ -1442,7 +1321,7 @@ fn process_frame(
         publish_result(
             result_tx,
             result_replace_rx,
-            frame_result(&frame, FRAME_TARGET_UNAVAILABLE, 0, started),
+            frame_result(&frame, FRAME_TARGET_UNAVAILABLE, started),
         );
         return;
     }
@@ -1464,13 +1343,12 @@ fn process_frame(
             // lifecycle state. This is distinct from losing an established
             // wgpu surface: callers may retain the current lifecycle and
             // retry without manufacturing resize/expose transitions.
-            frame_result(&frame, FRAME_TARGET_UNAVAILABLE, 0, started),
+            frame_result(&frame, FRAME_TARGET_UNAVAILABLE, started),
         );
         return;
     }
 
     let target_ref = target.as_mut().expect("surface target was created");
-    let backend = target_ref.backend;
     let status = match render_frame(target_ref, &frame) {
         Ok(()) => FRAME_PRESENTED,
         Err(status) => {
@@ -1489,7 +1367,7 @@ fn process_frame(
     publish_result(
         result_tx,
         result_replace_rx,
-        frame_result(&frame, status, backend, started),
+        frame_result(&frame, status, started),
     );
 }
 

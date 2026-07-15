@@ -46,9 +46,7 @@ public:
 	/// List of all application settings to prevent having the QSettings path strings in multiple places
 	enum SettingsEnum
 	{
-		MapDisplay_Antialiasing = 0,
-		MapDisplay_TextAntialiasing,
-		MapEditor_ClickToleranceMM,
+		MapEditor_ClickToleranceMM = 0,
 		MapEditor_SnapDistanceMM,
 		MapEditor_FixedAngleStepping,
 		MapEditor_ChangeSymbolWhenSelecting,

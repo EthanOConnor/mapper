@@ -55,7 +55,6 @@ int main(int argc, char** argv)
 	image.fill(Qt::white);
 	QPainter painter(&image);
 	painter.setRenderHint(QPainter::Antialiasing, true);
-	painter.setRenderHint(QPainter::TextAntialiasing, true);
 	painter.scale(pixels_per_mm, pixels_per_mm);
 	painter.translate(-extent.topLeft());
 	painter.setClipRect(extent);

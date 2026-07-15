@@ -16,7 +16,6 @@
 #include <QMouseEvent>
 #include <QNativeGestureEvent>
 #include <QTabletEvent>
-#include <QTouchEvent>
 #include <QVBoxLayout>
 #include <QWheelEvent>
 
@@ -64,7 +63,6 @@ VelloCanvas::VelloCanvas(QWidget* parent)
 		else
 			retry_timer_.stop();
 	});
-	surface_->setFrameRequestHandler([this] { submitCurrentFrame(); });
 	surface_->setInputHandler([this](QEvent* event) { return forwardInputEvent(event); });
 }
 
@@ -73,7 +71,6 @@ VelloCanvas::~VelloCanvas()
 	completion_timer_.stop();
 	retry_timer_.stop();
 	surface_->setStateHandler({});
-	surface_->setFrameRequestHandler({});
 	surface_->setInputHandler({});
 	renderer_.reset();
 }

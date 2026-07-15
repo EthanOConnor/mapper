@@ -27,14 +27,6 @@ This option controls whether the tip of the day should be included on the home s
 
 ### Editor page
 
-#### High quality map display (antialiasing)
-
-Map elements are drawn more smoothly (and less pixelated) if this option is set, however the drawing speed is lower.
-
-#### High quality text display in map (antialiasing), slow
-
-This controls the same option as the above for map texts. It is separate because text display is particularly slow.
-
 #### Click tolerance
 
 This controls how close you need to click on map objects or object handles for selecting them, but also for cut lines with the [cut tool](toolbars.md#cut_tool) for example. Set a larger value if you have difficulties (or if you use a tablet), however this may lead to some unintentional selections.

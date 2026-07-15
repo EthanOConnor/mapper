@@ -6,25 +6,18 @@
 
 #include "render/qpainter_renderer.h"
 
-#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <type_traits>
 #include <unordered_map>
 
 #include <QBrush>
-#include <QByteArray>
-#include <QGlyphRun>
 #include <QImage>
 #include <QPaintEngine>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPen>
-#include <QRawFont>
 
-#include "settings.h"
-#include "render/frame_pipeline.h"
-#include "render/qpainter_frame_renderer.h"
 #include "render/qt_render_bridge.h"
 
 namespace OpenOrienteering::render {
@@ -117,52 +110,18 @@ private:
 
 template <typename Draw>
 void withQuality(QPainter& painter, QualityHint quality,
-	             bool text_antialiasing, bool force_allowed, Draw&& draw)
+	             bool force_allowed, Draw&& draw)
 {
-	if (quality == QualityHint::Default)
+	if (quality == QualityHint::Default || !force_allowed)
 	{
 		draw();
 		return;
 	}
 
-	if (quality == QualityHint::ForceAntialiasing)
-	{
-		if (!force_allowed)
-		{
-			draw();
-			return;
-		}
-		painter.save();
-		painter.setRenderHint(QPainter::Antialiasing, true);
-		painter.setRenderHint(QPainter::TextAntialiasing, true);
-		draw();
-		painter.restore();
-		return;
-	}
-
-	if (text_antialiasing)
-	{
-		draw();
-		return;
-	}
 	painter.save();
-	painter.setRenderHint(QPainter::Antialiasing, false);
-	painter.setRenderHint(QPainter::TextAntialiasing, false);
+	painter.setRenderHint(QPainter::Antialiasing, true);
 	draw();
 	painter.restore();
-}
-
-QPainterPath glyphPath(const GlyphRun& run, const QRawFont& font)
-{
-	QPainterPath path;
-	path.setFillRule(Qt::WindingFill);
-	for (auto const& glyph : run.glyphs)
-	{
-		auto outline = font.pathForGlyph(glyph.id);
-		outline.translate(glyph.position.x, glyph.position.y);
-		path.addPath(outline);
-	}
-	return path;
 }
 
 void drawLinePattern(QPainter& painter, const QPainterPath& path,
@@ -215,23 +174,12 @@ void drawLinePattern(QPainter& painter, const QPainterPath& path,
 }  // namespace
 
 void QPainterRenderer::render(QPainter& painter, const RenderIR& ir,
-	                          const RenderRequest& request) const
+	                          bool antialiasing_allowed) const
 {
 	PathCache paths;
-	auto const antialiasing_disabled = request.options.testFlag(RenderConfig::DisableAntialiasing);
-	auto text_antialiasing = true;
-	if (request.options.testFlag(RenderConfig::Screen))
-	{
-		text_antialiasing = Settings::getInstance()
-		                    .getSettingCached(Settings::MapDisplay_TextAntialiasing)
-		                    .toBool();
-	}
 	painter.save();
-	if (antialiasing_disabled)
-	{
+	if (!antialiasing_allowed)
 		painter.setRenderHint(QPainter::Antialiasing, false);
-		painter.setRenderHint(QPainter::TextAntialiasing, false);
-	}
 
 	for (auto const& command : ir.commands)
 	{
@@ -267,7 +215,7 @@ void QPainterRenderer::render(QPainter& painter, const RenderIR& ir,
 			}
 			else if constexpr (std::is_same_v<T, FillPath>)
 			{
-				withQuality(painter, op.quality, text_antialiasing, !antialiasing_disabled, [&] {
+				withQuality(painter, op.quality, antialiasing_allowed, [&] {
 					painter.setPen(Qt::NoPen);
 					painter.setBrush(toQColor(op.color));
 					painter.drawPath(paths.get(op.path));
@@ -275,7 +223,7 @@ void QPainterRenderer::render(QPainter& painter, const RenderIR& ir,
 			}
 			else if constexpr (std::is_same_v<T, StrokePath>)
 			{
-				withQuality(painter, op.quality, text_antialiasing, !antialiasing_disabled, [&] {
+				withQuality(painter, op.quality, antialiasing_allowed, [&] {
 					painter.setPen(makePen(op.color, op.style, painter));
 					painter.setBrush(Qt::NoBrush);
 					painter.drawPath(paths.get(op.path));
@@ -283,7 +231,7 @@ void QPainterRenderer::render(QPainter& painter, const RenderIR& ir,
 			}
 			else if constexpr (std::is_same_v<T, FillEllipse>)
 			{
-				withQuality(painter, op.quality, text_antialiasing, !antialiasing_disabled, [&] {
+				withQuality(painter, op.quality, antialiasing_allowed, [&] {
 					painter.setPen(Qt::NoPen);
 					painter.setBrush(toQColor(op.color));
 					painter.drawEllipse(toQRectF(op.bounds));
@@ -291,49 +239,11 @@ void QPainterRenderer::render(QPainter& painter, const RenderIR& ir,
 			}
 			else if constexpr (std::is_same_v<T, StrokeEllipse>)
 			{
-				withQuality(painter, op.quality, text_antialiasing, !antialiasing_disabled, [&] {
+				withQuality(painter, op.quality, antialiasing_allowed, [&] {
 					painter.setPen(makePen(op.color, op.style, painter));
 					painter.setBrush(Qt::NoBrush);
 					painter.drawEllipse(toQRectF(op.bounds));
 				});
-			}
-			else if constexpr (std::is_same_v<T, DrawGlyphRun>)
-			{
-				if (!op.run || !op.run->font || !op.run->font->data)
-					return;
-				auto const& bytes = *op.run->font->data;
-				QByteArray data(reinterpret_cast<const char*>(bytes.data()), qsizetype(bytes.size()));
-				QRawFont font(data, op.run->size,
-				              op.run->hint ? QFont::PreferDefaultHinting : QFont::PreferNoHinting);
-				if (!font.isValid())
-					return;
-				painter.save();
-				painter.setWorldTransform(toQTransform(op.run->transform), true);
-				if (op.outline)
-				{
-					painter.setPen(makePen(op.color, op.stroke, painter));
-					painter.setBrush(Qt::NoBrush);
-					painter.drawPath(glyphPath(*op.run, font));
-				}
-				else
-				{
-					QList<quint32> indexes;
-					QList<QPointF> positions;
-					indexes.reserve(qsizetype(op.run->glyphs.size()));
-					positions.reserve(qsizetype(op.run->glyphs.size()));
-					for (auto const& glyph : op.run->glyphs)
-					{
-						indexes.push_back(glyph.id);
-						positions.push_back({ glyph.position.x, glyph.position.y });
-					}
-					QGlyphRun glyph_run;
-					glyph_run.setRawFont(font);
-					glyph_run.setGlyphIndexes(indexes);
-					glyph_run.setPositions(positions);
-					painter.setPen(toQColor(op.color));
-					painter.drawGlyphRun({}, glyph_run);
-				}
-				painter.restore();
 			}
 			else if constexpr (std::is_same_v<T, DrawImage>)
 			{
@@ -370,7 +280,7 @@ void QPainterRenderer::draw(QPainter& painter, const MapRenderSnapshot& snapshot
 	                        const RenderRequest& request) const
 {
 	auto const ir = snapshot.buildIR(request);
-	render(painter, *ir, request);
+	render(painter, *ir, !request.options.testFlag(RenderConfig::DisableAntialiasing));
 }
 
 void QPainterRenderer::drawColorSeparation(QPainter& painter,
@@ -380,29 +290,7 @@ void QPainterRenderer::drawColorSeparation(QPainter& painter,
 	                                       bool use_color) const
 {
 	auto const ir = snapshot.buildColorSeparationIR(request, separation_priority, use_color);
-	render(painter, *ir, request);
-}
-
-void QPainterRenderer::drawOverprintingSimulation(QPainter& painter,
-	                                              const MapRenderSnapshot& snapshot,
-	                                              const RenderRequest& request) const
-{
-	auto const* device = painter.device();
-	if (!device)
-		return;
-
-	FramePlanner planner;
-	auto frame = planner.plan(snapshot, {
-		{
-			std::uint32_t(std::max(0, device->width())),
-			std::uint32_t(std::max(0, device->height())),
-			std::max(1.0, double(device->devicePixelRatioF())),
-			fromQTransform(painter.worldTransform()),
-		},
-		request,
-		true,
-	});
-	QPainterFrameRenderer().render(painter, *frame);
+	render(painter, *ir, !request.options.testFlag(RenderConfig::DisableAntialiasing));
 }
 
 }  // namespace OpenOrienteering::render

@@ -289,8 +289,6 @@ void TemplateLayerPlannerTest::boundsImageAdmissionAndPreservesVelloIdentity()
 	surface.sequence = 1;
 	surface.phase = presentation::SurfacePhase::Exposed;
 	surface.native.window = 1;
-	surface.logical_width = 16;
-	surface.logical_height = 16;
 	surface.physical_width = 16;
 	surface.physical_height = 16;
 	QVERIFY(renderer.setSurface(surface));

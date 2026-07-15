@@ -7,7 +7,7 @@
 #ifndef OPENORIENTEERING_QPAINTER_FRAME_RENDERER_H
 #define OPENORIENTEERING_QPAINTER_FRAME_RENDERER_H
 
-#include "render/frame_pipeline.h"
+#include "render/frame_packet.h"
 
 class QPainter;
 

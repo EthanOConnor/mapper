@@ -17,14 +17,12 @@ namespace OpenOrienteering::render {
 class QPainterRenderer
 {
 public:
-	void render(QPainter& painter, const RenderIR& ir, const RenderRequest& request) const;
+	void render(QPainter& painter, const RenderIR& ir, bool antialiasing_allowed) const;
 	void draw(QPainter& painter, const MapRenderSnapshot& snapshot,
 	          const RenderRequest& request) const;
 	void drawColorSeparation(QPainter& painter, const MapRenderSnapshot& snapshot,
 	                         const RenderRequest& request, int separation_priority,
 	                         bool use_color) const;
-	void drawOverprintingSimulation(QPainter& painter, const MapRenderSnapshot& snapshot,
-	                                const RenderRequest& request) const;
 };
 
 }  // namespace OpenOrienteering::render

@@ -376,7 +376,7 @@ std::shared_ptr<const render::RenderIR> TemplateTrack::buildRenderIR(
 		auto stroke = render::StrokeStyle{};
 		stroke.width = track_width;
 		builder.strokePath(path.finish(), render::fromQColor(QColor(212, 0, 244)),
-		                   std::move(stroke), 0,
+		                   std::move(stroke),
 		                   render::QualityHint::ForceAntialiasing);
 	}
 
@@ -387,7 +387,7 @@ std::shared_ptr<const render::RenderIR> TemplateTrack::buildRenderIR(
 		auto const& point = track.getWaypoint(waypoint);
 		builder.fillEllipse(
 			{ point.map_coord.x() - 0.25, point.map_coord.y() - 0.25, 0.5, 0.5 },
-			render::fromQColor(QColor(Qt::red)), 0,
+			render::fromQColor(QColor(Qt::red)),
 			render::QualityHint::ForceAntialiasing
 		);
 		auto const& name = track.getWaypointName(waypoint);
@@ -399,8 +399,7 @@ std::shared_ptr<const render::RenderIR> TemplateTrack::buildRenderIR(
 			text.translate(point.map_coord.x() - bounds.center().x(),
 			               point.map_coord.y() - bounds.bottom());
 			builder.fillPath(render::fromQPainterPath(text),
-			                 render::fromQColor(QColor(Qt::red)), 0,
-			                 render::QualityHint::Text);
+			                 render::fromQColor(QColor(Qt::red)));
 		}
 	}
 

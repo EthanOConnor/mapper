@@ -9,12 +9,11 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <stdexcept>
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
-
-#include <QtGlobal>
 
 #include <mapper-vello-cxx/lib.h>
 
@@ -176,8 +175,7 @@ public:
 	};
 
 	Impl()
-	 : scene_encoder(ffi::new_scene_encoder())
-	 , renderer(ffi::new_renderer())
+	 : renderer(ffi::new_renderer())
 	{}
 
 	std::shared_ptr<const RetainedImage> retainImage(
@@ -280,47 +278,16 @@ public:
 						*builder, ffiRect(op.bounds), ffiColor(op.color), ffiStroke(op.style)
 					);
 				}
-				else if constexpr (std::is_same_v<T, DrawGlyphRun>)
-				{
-					if (!op.run || !op.run->font || !op.run->font->data)
-						qFatal("Vello received an invalid immutable glyph run");
-					std::vector<ffi::Glyph> glyphs;
-					glyphs.reserve(op.run->glyphs.size());
-					for (auto const& source : op.run->glyphs)
-					{
-						ffi::Glyph glyph;
-						glyph.id = source.id;
-						glyph.x = source.position.x;
-						glyph.y = source.position.y;
-						glyphs.push_back(glyph);
-					}
-					auto const& font = *op.run->font->data;
-					ffi::GlyphStyle style;
-					style.content_id = op.run->font->content_id;
-					style.size = op.run->size;
-					style.transform = ffiTransform(op.run->transform);
-					style.color = ffiColor(op.color);
-					style.stroke = ffiStroke(op.stroke);
-					style.outline = op.outline;
-					style.hint = op.run->hint;
-					auto const accepted = ffi::scene_draw_glyphs(
-						*scene_encoder, *builder,
-						rust::Slice<const std::uint8_t> { font.data(), font.size() },
-						slice(glyphs), style
-					);
-					if (!accepted)
-						qFatal("Vello rejected an immutable glyph run");
-				}
 				else if constexpr (std::is_same_v<T, DrawImage>)
 				{
 					if (!op.image || !op.image->rgba8)
-						qFatal("Vello received invalid immutable image data");
+						throw std::logic_error("Vello received invalid immutable image data");
 					auto const image = retainImage(op.image);
 					auto const accepted = ffi::scene_draw_image(
 						*builder, *image->image, ffiRect(op.target), op.opacity
 					);
 					if (!accepted)
-						qFatal("Vello rejected immutable image data");
+						throw std::logic_error("Vello rejected immutable image data");
 				}
 				else if constexpr (std::is_same_v<T, DrawLinePattern>)
 				{
@@ -344,7 +311,7 @@ public:
 		if (ffi::retained_scene_revision(*retained->scene) != ir->revision
 		    || ffi::retained_scene_command_count(*retained->scene) != ir->commands.size())
 		{
-			qFatal("Vello scene encoding violated the immutable IR contract");
+			throw std::logic_error("Vello scene encoding violated the immutable IR contract");
 		}
 		scenes.emplace(ir.get(), CacheEntry { ir, retained });
 		++encoded_scene_count;
@@ -392,7 +359,6 @@ public:
 		return request;
 	}
 
-	rust::Box<ffi::SceneEncoder> scene_encoder;
 	rust::Box<ffi::Renderer> renderer;
 	std::unordered_map<const RenderIR*, CacheEntry> scenes;
 	std::unordered_map<const ImageData*, ImageCacheEntry> images;
@@ -415,6 +381,8 @@ bool VelloRenderer::submit(const FramePacketPtr& frame,
 	                       Color background)
 {
 	if (!frame || frame->id == 0 || frame->revision == 0
+	    || !std::isfinite(surface.device_pixel_ratio)
+	    || surface.device_pixel_ratio <= 0
 	    || surface.phase != presentation::SurfacePhase::Exposed
 	    || surface.sequence == 0 || surface.physical_width == 0
 	    || surface.physical_height == 0)
@@ -474,7 +442,6 @@ std::optional<VelloFrameResult> VelloRenderer::takeResult()
 		{ result.frame_id, frameStatus(result.status) },
 		result.revision,
 		result.surface_sequence,
-		result.backend,
 		result.scene_count,
 		result.render_cpu_us,
 	};

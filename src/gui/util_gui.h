@@ -90,14 +90,6 @@ namespace Util
 	qreal pixelToMMLogical(qreal pixels);
 	
 	
-	/** Returns true for low-dpi screens, false for high-dpi screens. */
-	bool isAntialiasingRequired();
-	
-	/** Returns true for low-dpi screens, false for high-dpi screens. */
-	bool isAntialiasingRequired(qreal ppi);
-	
-	
-	
 	/**
 	 * Show the manual in Qt assistant.
 	 * 
@@ -258,7 +250,6 @@ namespace Util
 	namespace Marker
 	{
 		/** Center marker sign for rotate and scale tools. */
-		void drawCenterMarker(QPainter* painter, const QPointF& center);
 		inline void drawCenterMarker(render::OverlaySceneBuilder* painter, const QPointF& center)
 		{
 			const auto larger_radius = mmToPixelPhysical(1.1);

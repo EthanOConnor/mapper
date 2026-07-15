@@ -1407,11 +1407,6 @@
         <translation>Tolerancja kliknięcia:</translation>
     </message>
     <message>
-        <location filename="../src/gui/widgets/editor_settings_page.cpp" line="56"/>
-        <source>High quality map display (antialiasing)</source>
-        <translation>Wyświetlanie mapy w wyskoiej jakości (antialiasing)</translation>
-    </message>
-    <message>
         <location filename="../src/gui/widgets/editor_settings_page.cpp" line="92"/>
         <source>Edit tool:</source>
         <translation>Edycja krzywych:</translation>
@@ -1452,17 +1447,6 @@
         <location filename="../src/gui/widgets/editor_settings_page.cpp" line="54"/>
         <source>Symbol icon size:</source>
         <translation>Wielkość ikony symbolu:</translation>
-    </message>
-    <message>
-        <location filename="../src/gui/widgets/editor_settings_page.cpp" line="57"/>
-        <location filename="../src/gui/widgets/editor_settings_page.cpp" line="61"/>
-        <source>Antialiasing makes the map look much better, but also slows down the map display</source>
-        <translation>Antialiasing sprawia, że mapa wygląda zdecydowanie lepiej, ale spowalnia jej wyświetlanie</translation>
-    </message>
-    <message>
-        <location filename="../src/gui/widgets/editor_settings_page.cpp" line="60"/>
-        <source>High quality text display in map (antialiasing), slow</source>
-        <translation>Wyświetlanie tekstu w wysokiej jakości na mapie (antialiasing), wolniejsze</translation>
     </message>
     <message>
         <location filename="../src/gui/widgets/editor_settings_page.cpp" line="68"/>

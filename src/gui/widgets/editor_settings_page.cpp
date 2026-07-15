@@ -53,14 +53,6 @@ EditorSettingsPage::EditorSettingsPage(QWidget* parent)
 	icon_size = Util::SpinBox::create(1, 25, tr("mm", "millimeters"));
 	layout->addRow(tr("Symbol icon size:"), icon_size);
 	
-	antialiasing = new QCheckBox(tr("High quality map display (antialiasing)"), this);
-	antialiasing->setToolTip(tr("Antialiasing makes the map look much better, but also slows down the map display"));
-	layout->addRow(antialiasing);
-	
-	text_antialiasing = new QCheckBox(tr("High quality text display in map (antialiasing), slow"), this);
-	text_antialiasing->setToolTip(tr("Antialiasing makes the map look much better, but also slows down the map display"));
-	layout->addRow(text_antialiasing);
-	
 	tolerance = Util::SpinBox::create(0, 50, tr("mm", "millimeters"));
 	layout->addRow(tr("Click tolerance:"), tolerance);
 	
@@ -113,8 +105,6 @@ EditorSettingsPage::EditorSettingsPage(QWidget* parent)
 	layout->addRow(rectangle_preview_line_width);
 	
 	
-	connect(antialiasing, &QAbstractButton::toggled, text_antialiasing, &QCheckBox::setEnabled);
-	
 	updateWidgets();
 }
 
@@ -133,8 +123,6 @@ void EditorSettingsPage::apply()
 	if (button_size != nullptr)
 		setSetting(Settings::ActionGridBar_ButtonSizeMM, button_size->value());
 	setSetting(Settings::SymbolWidget_IconSizeMM, icon_size->value());
-	setSetting(Settings::MapDisplay_Antialiasing, antialiasing->isChecked());
-	setSetting(Settings::MapDisplay_TextAntialiasing, text_antialiasing->isChecked());
 	setSetting(Settings::MapEditor_ClickToleranceMM, tolerance->value());
 	setSetting(Settings::MapEditor_SnapDistanceMM, snap_distance->value());
 	setSetting(Settings::MapEditor_FixedAngleStepping, fixed_angle_stepping->value());
@@ -159,9 +147,6 @@ void EditorSettingsPage::updateWidgets()
 	if (button_size != nullptr)
 		button_size->setValue(getSetting(Settings::ActionGridBar_ButtonSizeMM).toDouble());
 	icon_size->setValue(getSetting(Settings::SymbolWidget_IconSizeMM).toInt());
-	antialiasing->setChecked(getSetting(Settings::MapDisplay_Antialiasing).toBool());
-	text_antialiasing->setEnabled(antialiasing->isChecked());
-	text_antialiasing->setChecked(getSetting(Settings::MapDisplay_TextAntialiasing).toBool());
 	tolerance->setValue(getSetting(Settings::MapEditor_ClickToleranceMM).toInt());
 	snap_distance->setValue(getSetting(Settings::MapEditor_SnapDistanceMM).toInt());
 	fixed_angle_stepping->setValue(getSetting(Settings::MapEditor_FixedAngleStepping).toInt());

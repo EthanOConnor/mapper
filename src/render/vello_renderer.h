@@ -14,8 +14,8 @@
 #include <string>
 #include <vector>
 
-#include "presentation/native_surface.h"
-#include "render/frame_pipeline.h"
+#include "presentation/native_surface_state.h"
+#include "render/frame_packet.h"
 
 namespace OpenOrienteering::render {
 
@@ -24,7 +24,6 @@ struct VelloFrameResult
 	FrameCompletion completion;
 	Revision revision = 0;
 	std::uint64_t surface_sequence = 0;
-	std::uint8_t backend = 0;
 	std::uint32_t scene_count = 0;
 	std::uint64_t render_cpu_us = 0;
 };

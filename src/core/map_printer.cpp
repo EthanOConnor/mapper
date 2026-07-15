@@ -87,7 +87,6 @@ bool requiresPrecisionPageSpool(const QPainter* painter)
 
 bool renderFramePasses(QPainter* painter,
 	                   const std::vector<render::VectorPass>& passes,
-	                   const render::RenderRequest& request,
 	                   const QTransform& camera,
 	                   const QRectF& clip,
 	                   double device_pixel_ratio = 1)
@@ -102,7 +101,6 @@ bool renderFramePasses(QPainter* painter,
 		device_pixel_ratio,
 		render::fromQTransform(camera),
 	};
-	frame.render_request = request;
 	frame.vector_passes = passes;
 	painter->save();
 	painter->setWorldTransform(camera, false);
@@ -1125,7 +1123,7 @@ void MapPrinter::drawPage(QPainter* device_painter, const QRectF& page_extent, c
 		
 		page_painter->setRenderHints(render_hints);
 		if (!renderFramePasses(page_painter, template_layers.below_map,
-		                       output_request, cameraFor(page_painter), page_region_used))
+		                       cameraFor(page_painter), page_region_used))
 		{
 			device_painter->end();
 			return;
@@ -1190,7 +1188,7 @@ void MapPrinter::drawPage(QPainter* device_painter, const QRectF& page_extent, c
 		};
 		auto const frame = frame_planner.plan(*snapshot, request);
 		if (!renderFramePasses(map_painter, frame->vector_passes,
-		                       map_request, camera, page_region_used))
+		                       camera, page_region_used))
 		{
 			device_painter->end();
 			return;
@@ -1223,7 +1221,7 @@ void MapPrinter::drawPage(QPainter* device_painter, const QRectF& page_extent, c
 			page_region_used, &map, output_scaling, snapshot->revision()
 		);
 		if (!renderFramePasses(page_painter, { { std::move(grid_scene) } },
-		                       output_request, cameraFor(page_painter), page_region_used))
+		                       cameraFor(page_painter), page_region_used))
 		{
 			device_painter->end();
 			return;
@@ -1261,7 +1259,7 @@ void MapPrinter::drawPage(QPainter* device_painter, const QRectF& page_extent, c
 		
 		painter->setRenderHints(render_hints);
 		if (!renderFramePasses(painter, template_layers.above_map,
-		                       output_request, cameraFor(painter), page_region_used))
+		                       cameraFor(painter), page_region_used))
 		{
 			device_painter->end();
 			return;
@@ -1332,7 +1330,7 @@ void MapPrinter::drawSeparationPages(QPagedPaintDevice* device, QPainter* device
 			request, color->getPriority(), false
 		);
 		auto const rendered = renderFramePasses(
-			painter, { { std::move(scene) } }, request,
+			painter, { { std::move(scene) } },
 			painter->worldTransform(), page_extent
 		);
 		painter->restore();

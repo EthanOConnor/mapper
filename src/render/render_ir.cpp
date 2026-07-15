@@ -147,46 +147,39 @@ void RenderIRBuilder::popLayer()
 	ir_->commands.emplace_back(PopLayer {});
 }
 
-void RenderIRBuilder::fillPath(PathPtr path, Color color, ObjectId object_id, QualityHint quality)
+void RenderIRBuilder::fillPath(PathPtr path, Color color, QualityHint quality)
 {
-	ir_->commands.emplace_back(FillPath { std::move(path), color, object_id, quality });
+	ir_->commands.emplace_back(FillPath { std::move(path), color, quality });
 }
 
 void RenderIRBuilder::strokePath(PathPtr path, Color color, StrokeStyle style,
-	                              ObjectId object_id, QualityHint quality)
+	                              QualityHint quality)
 {
-	ir_->commands.emplace_back(StrokePath { std::move(path), color, style, object_id, quality });
+	ir_->commands.emplace_back(StrokePath { std::move(path), color, style, quality });
 }
 
-void RenderIRBuilder::fillEllipse(Rect bounds, Color color, ObjectId object_id, QualityHint quality)
+void RenderIRBuilder::fillEllipse(Rect bounds, Color color, QualityHint quality)
 {
-	ir_->commands.emplace_back(FillEllipse { bounds, color, object_id, quality });
+	ir_->commands.emplace_back(FillEllipse { bounds, color, quality });
 }
 
 void RenderIRBuilder::strokeEllipse(Rect bounds, Color color, StrokeStyle style,
-	                                 ObjectId object_id, QualityHint quality)
+	                                 QualityHint quality)
 {
-	ir_->commands.emplace_back(StrokeEllipse { bounds, color, style, object_id, quality });
-}
-
-void RenderIRBuilder::drawGlyphRun(std::shared_ptr<const GlyphRun> run, Color color,
-	                                StrokeStyle stroke, bool outline, ObjectId object_id)
-{
-	ir_->commands.emplace_back(DrawGlyphRun { std::move(run), color, stroke, outline, object_id });
+	ir_->commands.emplace_back(StrokeEllipse { bounds, color, style, quality });
 }
 
 void RenderIRBuilder::drawImage(std::shared_ptr<const ImageData> image, Rect target,
-	                             double opacity, ObjectId object_id)
+	                             double opacity)
 {
-	ir_->commands.emplace_back(DrawImage { std::move(image), target, opacity, object_id });
+	ir_->commands.emplace_back(DrawImage { std::move(image), target, opacity });
 }
 
 void RenderIRBuilder::drawLinePattern(PathPtr outline, Color color, double angle,
-	                                   double spacing, double offset, double line_width,
-	                                   ObjectId object_id)
+	                                   double spacing, double offset, double line_width)
 {
 	ir_->commands.emplace_back(DrawLinePattern {
-		std::move(outline), color, angle, spacing, offset, line_width, object_id
+		std::move(outline), color, angle, spacing, offset, line_width
 	});
 }
 

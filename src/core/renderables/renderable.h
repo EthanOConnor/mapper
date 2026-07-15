@@ -15,6 +15,7 @@
 #define OPENORIENTEERING_RENDERABLE_H
 
 #include <cstddef>
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <set>
@@ -34,6 +35,8 @@ class Map;
 class Object;
 
 namespace render {
+using ObjectId = std::uint64_t;
+
 class MapRenderSnapshot;
 struct RenderRequest;
 struct SnapshotObjectBlock;
@@ -71,7 +74,6 @@ struct RenderPrimitiveConfig
 	qreal scaling = 1;
 	RenderConfig::Options options;
 	render::Color color;
-	render::ObjectId object_id = 0;
 };
 
 /**

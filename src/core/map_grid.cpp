@@ -135,7 +135,6 @@ std::shared_ptr<const render::RenderIR> MapGrid::buildRenderIR(
 		path.finish(),
 		render::fromQColor(QColor::fromRgba(color)),
 		std::move(stroke),
-		0,
 		render::QualityHint::ForceAntialiasing
 	);
 	return builder.finish();

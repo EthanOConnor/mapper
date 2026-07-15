@@ -779,7 +779,7 @@ void MapEditorController::attach(MainWindow* window)
 	}
 	
 	// Create map widget
-	map_widget = new MapWidget(mode == MapEditor, mode == SymbolEditor);
+	map_widget = new MapWidget(mode == MapEditor);
 	map_widget->setMapView(main_view);
 	map_widget->setZoomDisplay(zoom_display_function);
 	

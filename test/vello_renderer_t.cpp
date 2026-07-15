@@ -8,7 +8,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <cstring>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -16,10 +15,8 @@
 #include <QtTest>
 #include <QDir>
 #include <QElapsedTimer>
-#include <QFile>
 #include <QImage>
 #include <QPainter>
-#include <QRawFont>
 #include <QTransform>
 #include <QVBoxLayout>
 
@@ -48,74 +45,38 @@ render::PathPtr rectangle(double left, double top, double right, double bottom)
 	return path.finish();
 }
 
-std::shared_ptr<const render::GlyphRun> testGlyphRun()
-{
-#if defined(Q_OS_MACOS)
-	auto const file_name = QStringLiteral("/System/Library/Fonts/SFNSMono.ttf");
-#elif defined(Q_OS_WIN)
-	auto const file_name = QStringLiteral("C:/Windows/Fonts/arial.ttf");
-#elif defined(Q_OS_ANDROID)
-	auto const file_name = QStringLiteral("/system/fonts/Roboto-Regular.ttf");
-#else
-	auto const file_name = QStringLiteral("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf");
-#endif
-	QFile file(file_name);
-	if (!file.open(QIODevice::ReadOnly))
-		return {};
-	auto const data = file.readAll();
-	QRawFont font(data, 20, QFont::PreferNoHinting);
-	auto const indexes = font.glyphIndexesForString(QStringLiteral("A"));
-	if (!font.isValid() || indexes.size() != 1)
-		return {};
-
-	auto mutable_bytes = std::make_shared<std::vector<std::uint8_t>>(std::size_t(data.size()));
-	std::memcpy(mutable_bytes->data(), data.constData(), std::size_t(data.size()));
-	auto bytes = std::shared_ptr<const std::vector<std::uint8_t>>(std::move(mutable_bytes));
-	auto face = std::make_shared<const render::FontFace>(render::FontFace { bytes, 1 });
-	return std::make_shared<const render::GlyphRun>(render::GlyphRun {
-		face, 20, {}, { { indexes.front(), { 40, 115 } } }, false
-	});
-}
-
 render::FramePacketPtr completeOperationFrame(render::FrameId id)
 {
 	render::RenderIRBuilder builder(42, { 0, 0, 128, 128 });
 	auto const full = rectangle(0, 0, 128, 128);
 	auto const clip = rectangle(16, 16, 80, 80);
-	builder.fillPath(full, render::fromQColor(Qt::white), 1);
+	builder.fillPath(full, render::fromQColor(Qt::white));
 	builder.pushTransform({ 1, 0, 0, 1, 4, 4 });
-	builder.fillEllipse({ 4, 4, 12, 12 }, render::fromQColor(Qt::red), 2);
+	builder.fillEllipse({ 4, 4, 12, 12 }, render::fromQColor(Qt::red));
 	builder.popTransform();
 	builder.pushClip(clip);
 	builder.pushLayer(0.5);
-	builder.fillPath(full, render::fromQColor(Qt::blue), 3);
+	builder.fillPath(full, render::fromQColor(Qt::blue));
 	builder.strokePath(full, render::fromQColor(Qt::black),
 	                   { .width = 2, .cap = render::LineCap::Round,
-	                     .join = render::LineJoin::Round, .miter_limit = 4 }, 4);
+	                     .join = render::LineJoin::Round, .miter_limit = 4 });
 	builder.strokeEllipse({ 30, 30, 20, 20 }, render::fromQColor(Qt::yellow),
 	                      { .width = 2, .cap = render::LineCap::Flat,
-	                        .join = render::LineJoin::Miter, .miter_limit = 4 }, 5);
+	                        .join = render::LineJoin::Miter, .miter_limit = 4 });
 	builder.popLayer();
 	builder.popClip();
 	auto pixels = std::make_shared<const std::vector<std::uint8_t>>(
 		std::vector<std::uint8_t> { 0, 255, 0, 255 }
 	);
 	auto image = std::make_shared<const render::ImageData>(render::ImageData { 1, 1, 4, pixels });
-	builder.drawImage(image, { 96, 8, 16, 16 }, 1, 6);
+	builder.drawImage(image, { 96, 8, 16, 16 });
 	builder.drawLinePattern(rectangle(88, 40, 120, 72), render::fromQColor(Qt::magenta),
-	                        0, 4, 0, 1, 7);
-	auto const glyph_run = testGlyphRun();
-	if (!glyph_run)
-		return {};
-	builder.drawGlyphRun(glyph_run, render::fromQColor(Qt::black), {}, false, 8);
+	                        0, 4, 0, 1);
 
 	auto frame = std::make_shared<render::FramePacket>();
 	frame->id = id;
 	frame->revision = 42;
 	frame->view = { 128, 128, 1, {} };
-	frame->render_request = {
-		{ 0, 0, 128, 128 }, 1, RenderConfig::NoOptions, 1,
-	};
 	frame->vector_passes.push_back({ builder.finish() });
 	return frame;
 }
@@ -171,7 +132,6 @@ QImage referenceImage(const render::FramePacket& frame)
 	image.fill(Qt::white);
 	QPainter painter(&image);
 	painter.setRenderHint(QPainter::Antialiasing, true);
-	painter.setRenderHint(QPainter::TextAntialiasing, true);
 	auto const completion = render::QPainterFrameRenderer().render(painter, frame);
 	Q_ASSERT(completion.status == render::FrameStatus::Presented);
 	painter.end();
@@ -259,13 +219,11 @@ void VelloRendererTest::initTestCase()
 void VelloRendererTest::typedEncoderRetainsImmutableScenes()
 {
 	auto const first = completeOperationFrame(1);
-	QVERIFY2(first, "The platform's standard test font is required");
+	QVERIFY(first);
 	presentation::NativeSurfaceState surface;
 	surface.sequence = 1;
 	surface.phase = presentation::SurfacePhase::Exposed;
 	surface.native.window = 1;
-	surface.logical_width = 128;
-	surface.logical_height = 128;
 	surface.physical_width = 128;
 	surface.physical_height = 128;
 
@@ -286,13 +244,11 @@ void VelloRendererTest::typedEncoderRetainsImmutableScenes()
 void VelloRendererTest::missingNativeTargetIsRetriable()
 {
 	auto const frame = completeOperationFrame(3);
-	QVERIFY2(frame, "The platform's standard test font is required");
+	QVERIFY(frame);
 	presentation::NativeSurfaceState surface;
 	surface.sequence = 1;
 	surface.phase = presentation::SurfacePhase::Exposed;
 	surface.native.window = 1;
-	surface.logical_width = 128;
-	surface.logical_height = 128;
 	surface.physical_width = 128;
 	surface.physical_height = 128;
 
@@ -316,7 +272,7 @@ void VelloRendererTest::missingNativeTargetIsRetriable()
 void VelloRendererTest::offscreenGpuMatchesReference()
 {
 	auto const frame = completeOperationFrame(7);
-	QVERIFY2(frame, "The platform's standard test font is required");
+	QVERIFY(frame);
 	render::VelloRenderer renderer;
 	auto const rendered = renderer.renderOffscreen(frame);
 	QVERIFY2(rendered, renderer.lastError().c_str());
@@ -412,6 +368,15 @@ void VelloRendererTest::nativeSurfaceLifecyclePresentsCurrentFrame()
 	host.raise();
 	host.activateWindow();
 	QTRY_COMPARE(canvas.surfaceState().phase, presentation::SurfacePhase::Exposed);
+	QCOMPARE(canvas.surfaceState().device_pixel_ratio, canvas.devicePixelRatioF());
+	QCOMPARE(
+		canvas.surfaceState().physical_width,
+		std::uint32_t(qCeil(canvas.width() * canvas.surfaceState().device_pixel_ratio))
+	);
+	QCOMPARE(
+		canvas.surfaceState().physical_height,
+		std::uint32_t(qCeil(canvas.height() * canvas.surfaceState().device_pixel_ratio))
+	);
 	QTest::qWait(250);
 	auto const first = mapFrame(map, canvas.size());
 	QVERIFY(first);
@@ -421,13 +386,6 @@ void VelloRendererTest::nativeSurfaceLifecyclePresentsCurrentFrame()
 	QCOMPARE(first_result->completion.status, render::FrameStatus::Presented);
 	QCOMPARE(first_result->revision, first->revision);
 	QCOMPARE(first_result->surface_sequence, canvas.surfaceState().sequence);
-#if defined(Q_OS_MACOS)
-	QCOMPARE(first_result->backend, std::uint8_t(2));
-#elif defined(Q_OS_WIN)
-	QCOMPARE(first_result->backend, std::uint8_t(3));
-#else
-	QCOMPARE(first_result->backend, std::uint8_t(1));
-#endif
 	QCOMPARE(first_result->scene_count, std::uint32_t(1));
 	QCOMPARE(canvas.encodedSceneCount(), std::size_t(1));
 

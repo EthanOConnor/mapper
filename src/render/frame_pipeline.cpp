@@ -19,9 +19,11 @@ namespace {
 #define MAPPER_OVERPRINTING_CORRECTION 2
 #endif
 
-void appendNormalFrame(FramePacket& frame, const MapRenderSnapshot& snapshot)
+void appendNormalFrame(std::vector<VectorPass>& passes,
+                       const MapRenderSnapshot& snapshot,
+                       const RenderRequest& request)
 {
-	frame.vector_passes.push_back({ snapshot.buildIR(frame.render_request) });
+	passes.push_back({ snapshot.buildIR(request) });
 }
 
 constexpr double overprintingCorrectionOpacity()
@@ -45,14 +47,16 @@ bool sameRequest(const RenderRequest& left, const RenderRequest& right)
 	       && left.opacity == right.opacity;
 }
 
-void appendOverprintingFrame(FramePacket& frame, const MapRenderSnapshot& snapshot)
+void appendOverprintingFrame(std::vector<VectorPass>& passes,
+                             const MapRenderSnapshot& snapshot,
+                             const RenderRequest& request)
 {
 	for (auto color = snapshot.colors().rbegin(); color != snapshot.colors().rend(); ++color)
 	{
 		if (color->second.spot_method != SpotMethod::Spot)
 			continue;
-		frame.vector_passes.push_back({
-			snapshot.buildColorSeparationIR(frame.render_request, color->first, true),
+		passes.push_back({
+			snapshot.buildColorSeparationIR(request, color->first, true),
 			BlendMode::Multiply,
 			1,
 			true,
@@ -60,9 +64,9 @@ void appendOverprintingFrame(FramePacket& frame, const MapRenderSnapshot& snapsh
 	}
 
 #if MAPPER_OVERPRINTING_CORRECTION > 0
-	auto spot_request = frame.render_request;
+	auto spot_request = request;
 	spot_request.options |= RenderConfig::RequireSpotColor;
-	frame.vector_passes.push_back({
+	passes.push_back({
 		snapshot.buildIR(spot_request),
 		BlendMode::SourceOver,
 		overprintingCorrectionOpacity(),
@@ -70,11 +74,11 @@ void appendOverprintingFrame(FramePacket& frame, const MapRenderSnapshot& snapsh
 	});
 #endif
 
-	if (frame.render_request.options.testFlag(RenderConfig::Screen))
+	if (request.options.testFlag(RenderConfig::Screen))
 	{
-		frame.vector_passes.push_back({
+		passes.push_back({
 			snapshot.buildColorSeparationIR(
-				frame.render_request, MapColor::Reserved, true
+				request, MapColor::Reserved, true
 			),
 		});
 	}
@@ -108,7 +112,6 @@ FramePacketPtr FramePlanner::plan(const MapRenderSnapshot& snapshot, const Frame
 	frame->id = next_frame_id_++;
 	frame->revision = snapshot.revision();
 	frame->view = request.view;
-	frame->render_request = request.render;
 	frame->vector_passes = request.below_map;
 
 	if (cached_snapshot_identity_ != snapshot.identity()
@@ -116,17 +119,16 @@ FramePacketPtr FramePlanner::plan(const MapRenderSnapshot& snapshot, const Frame
 	    || cached_overprinting_ != request.simulate_overprinting
 	    || !sameRequest(cached_request_, request.render))
 	{
-		FramePacket map_frame;
-		map_frame.render_request = request.render;
+		std::vector<VectorPass> map_passes;
 		if (request.simulate_overprinting)
-			appendOverprintingFrame(map_frame, snapshot);
+			appendOverprintingFrame(map_passes, snapshot, request.render);
 		else
-			appendNormalFrame(map_frame, snapshot);
+			appendNormalFrame(map_passes, snapshot, request.render);
 		cached_snapshot_identity_ = snapshot.identity();
 		cached_revision_ = snapshot.revision();
 		cached_request_ = request.render;
 		cached_overprinting_ = request.simulate_overprinting;
-		cached_map_passes_ = std::move(map_frame.vector_passes);
+		cached_map_passes_ = std::move(map_passes);
 	}
 	frame->vector_passes.insert(frame->vector_passes.end(),
 	                            cached_map_passes_.begin(), cached_map_passes_.end());
@@ -162,7 +164,6 @@ FramePacketPtr FramePlanner::plan(const FrameRequest& request)
 	auto frame = std::make_shared<FramePacket>();
 	frame->id = next_frame_id_++;
 	frame->view = request.view;
-	frame->render_request = request.render;
 	frame->vector_passes = request.below_map;
 	frame->vector_passes.insert(
 		frame->vector_passes.end(), request.above_map.begin(), request.above_map.end()

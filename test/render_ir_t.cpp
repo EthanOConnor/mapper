@@ -6,7 +6,6 @@
 
 #include "render_ir_t.h"
 
-#include <cstring>
 #include <map>
 #include <memory>
 #include <vector>
@@ -14,10 +13,8 @@
 #include <QtTest>
 #include <QColor>
 #include <QDir>
-#include <QFile>
 #include <QImage>
 #include <QPainter>
-#include <QRawFont>
 
 #include "global.h"
 #include "test_config.h"
@@ -53,35 +50,6 @@ const RenderableVector* firstGeometry(const render::SnapshotObject& object)
 			return renderables.get();
 	}
 	return nullptr;
-}
-
-std::shared_ptr<const render::GlyphRun> testGlyphRun()
-{
-#if defined(Q_OS_MACOS)
-	auto const file_name = QStringLiteral("/System/Library/Fonts/SFNSMono.ttf");
-#elif defined(Q_OS_WIN)
-	auto const file_name = QStringLiteral("C:/Windows/Fonts/arial.ttf");
-#elif defined(Q_OS_ANDROID)
-	auto const file_name = QStringLiteral("/system/fonts/Roboto-Regular.ttf");
-#else
-	auto const file_name = QStringLiteral("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf");
-#endif
-	QFile file(file_name);
-	if (!file.open(QIODevice::ReadOnly))
-		return {};
-	auto const data = file.readAll();
-	QRawFont font(data, 20, QFont::PreferNoHinting);
-	auto const indexes = font.glyphIndexesForString(QStringLiteral("A"));
-	if (!font.isValid() || indexes.size() != 1)
-		return {};
-
-	auto mutable_bytes = std::make_shared<std::vector<std::uint8_t>>(std::size_t(data.size()));
-	std::memcpy(mutable_bytes->data(), data.constData(), std::size_t(data.size()));
-	auto bytes = std::shared_ptr<const std::vector<std::uint8_t>>(std::move(mutable_bytes));
-	auto face = std::make_shared<const render::FontFace>(render::FontFace { bytes, 1 });
-	return std::make_shared<const render::GlyphRun>(render::GlyphRun {
-		face, 20, {}, { { indexes.front(), { 40, 115 } } }, false
-	});
 }
 
 }  // namespace
@@ -181,19 +149,19 @@ void RenderIrTest::referenceRendererInterpretsIr()
 	auto const clip = rectangle(16, 16, 80, 80);
 	auto const line = rectangle(4, 4, 124, 124);
 
-	builder.fillPath(full, render::fromQColor(Qt::white), 1);
+	builder.fillPath(full, render::fromQColor(Qt::white));
 	builder.pushTransform({ 1, 0, 0, 1, 4, 4 });
-	builder.fillEllipse({ 4, 4, 12, 12 }, render::fromQColor(Qt::red), 2);
+	builder.fillEllipse({ 4, 4, 12, 12 }, render::fromQColor(Qt::red));
 	builder.popTransform();
 	builder.pushClip(clip);
 	builder.pushLayer(0.5);
-	builder.fillPath(full, render::fromQColor(Qt::blue), 3);
+	builder.fillPath(full, render::fromQColor(Qt::blue));
 	builder.strokePath(line, render::fromQColor(Qt::black),
 	                   { .width = 2, .cap = render::LineCap::Round,
-	                     .join = render::LineJoin::Round, .miter_limit = 4 }, 4);
+	                     .join = render::LineJoin::Round, .miter_limit = 4 });
 	builder.strokeEllipse({ 30, 30, 20, 20 }, render::fromQColor(Qt::yellow),
 	                      { .width = 2, .cap = render::LineCap::Flat,
-	                        .join = render::LineJoin::Miter, .miter_limit = 4 }, 5);
+	                        .join = render::LineJoin::Miter, .miter_limit = 4 });
 	builder.popLayer();
 	builder.popClip();
 
@@ -201,29 +169,18 @@ void RenderIrTest::referenceRendererInterpretsIr()
 		std::vector<std::uint8_t> { 0, 255, 0, 255 }
 	);
 	auto image = std::make_shared<const render::ImageData>(render::ImageData { 1, 1, 4, pixels });
-	builder.drawImage(image, { 96, 8, 16, 16 }, 1, 6);
+	builder.drawImage(image, { 96, 8, 16, 16 });
 	builder.drawLinePattern(rectangle(88, 40, 120, 72), render::fromQColor(Qt::magenta),
-	                        0, 4, 0, 1, 7);
-
-	auto const glyph_run = testGlyphRun();
-	QVERIFY2(glyph_run, "The platform's standard test font is required");
-	builder.drawGlyphRun(glyph_run, render::fromQColor(Qt::black), {}, false, 8);
+	                        0, 4, 0, 1);
 
 	auto const ir = builder.finish();
 	QCOMPARE(ir->revision, render::Revision(42));
-	QCOMPARE(render::RenderIR::format_version, std::uint32_t(1));
-	QVERIFY(ir->commands.size() >= 14);
+	QCOMPARE(ir->commands.size(), std::size_t(13));
 
 	QImage output(128, 128, QImage::Format_ARGB32_Premultiplied);
 	output.fill(Qt::transparent);
 	QPainter painter(&output);
-	render::RenderRequest request {
-		{ 0, 0, 128, 128 },
-		1,
-		RenderConfig::NoOptions,
-		1,
-	};
-	render::QPainterRenderer().render(painter, *ir, request);
+	render::QPainterRenderer().render(painter, *ir, true);
 	painter.end();
 
 	QCOMPARE(output.pixelColor(2, 2), QColor(Qt::white));
@@ -231,13 +188,45 @@ void RenderIrTest::referenceRendererInterpretsIr()
 	QVERIFY(output.pixelColor(24, 24).blue() > 100);
 	QCOMPARE(output.pixelColor(104, 16), QColor(Qt::green));
 	QVERIFY(output.pixelColor(100, 48) != QColor(Qt::white));
-	auto glyph_pixels = 0;
-	for (auto y = 90; y < 120; ++y)
-	{
-		for (auto x = 32; x < 64; ++x)
-			glyph_pixels += output.pixelColor(x, y) != QColor(Qt::white);
-	}
-	QVERIFY(glyph_pixels > 10);
+}
+
+void RenderIrTest::antialiasPolicyPreservesCallerIntent()
+{
+	auto render_triangle = [](render::QualityHint quality, bool antialiasing_allowed) {
+		render::PathBuilder path(render::FillRule::Winding);
+		path.moveTo({ 1.25, 1.25 });
+		path.lineTo({ 14.75, 1.25 });
+		path.lineTo({ 1.25, 14.75 });
+		path.close();
+		render::RenderIRBuilder builder(1, { 0, 0, 16, 16 });
+		builder.fillPath(path.finish(), render::fromQColor(Qt::black), quality);
+
+		QImage image(16, 16, QImage::Format_ARGB32_Premultiplied);
+		image.fill(Qt::transparent);
+		QPainter painter(&image);
+		Q_ASSERT(!painter.testRenderHint(QPainter::Antialiasing));
+		render::QPainterRenderer().render(
+			painter, *builder.finish(), antialiasing_allowed
+		);
+		painter.end();
+		return image;
+	};
+	auto has_partial_alpha = [](const QImage& image) {
+		for (auto y = 0; y < image.height(); ++y)
+		{
+			for (auto x = 0; x < image.width(); ++x)
+			{
+				auto const alpha = image.pixelColor(x, y).alpha();
+				if (alpha > 0 && alpha < 255)
+					return true;
+			}
+		}
+		return false;
+	};
+
+	QVERIFY(!has_partial_alpha(render_triangle(render::QualityHint::Default, true)));
+	QVERIFY(has_partial_alpha(render_triangle(render::QualityHint::ForceAntialiasing, true)));
+	QVERIFY(!has_partial_alpha(render_triangle(render::QualityHint::ForceAntialiasing, false)));
 }
 
 #ifndef Q_OS_MACOS

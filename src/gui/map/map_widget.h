@@ -106,12 +106,9 @@ public:
 	 * 
 	 * @param show_help If set to true, the map widget shows help texts for
 	 *     empty maps.
-	 * @param force_antialiasing If set to true, the map widget uses antialiasing
-	 *     for display, even if it is disabled in the program settings.
-	 *     Useful for the symbol editor.
 	 * @param parent Optional QWidget parent.
 	 */
-	MapWidget(bool show_help, bool force_antialiasing, QWidget* parent = nullptr);
+	MapWidget(bool show_help, QWidget* parent = nullptr);
 	
 	/** Destructs the MapWidget. */
 	~MapWidget() override;
@@ -435,7 +432,6 @@ private:
 	MapCoordF last_cursor_pos;
 	
 	bool show_help;
-	bool force_antialiasing;
 	
 	// Dragging (interaction)
 	bool dragging;

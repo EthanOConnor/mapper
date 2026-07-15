@@ -164,7 +164,6 @@ QImage renderDirect(const Fixture& fixture,
 	image.fill(Qt::white);
 	QPainter painter(&image);
 	painter.setRenderHint(QPainter::Antialiasing, true);
-	painter.setRenderHint(QPainter::TextAntialiasing, true);
 	painter.setWorldTransform(fixture.transform);
 	render::QPainterRenderer().draw(painter, snapshot, fixture.render_request);
 	painter.end();
@@ -177,7 +176,6 @@ QImage renderFrame(const Fixture& fixture, const render::FramePacket& frame)
 	image.fill(Qt::white);
 	QPainter painter(&image);
 	painter.setRenderHint(QPainter::Antialiasing, true);
-	painter.setRenderHint(QPainter::TextAntialiasing, true);
 	auto const completion = render::QPainterFrameRenderer().render(painter, frame);
 	Q_ASSERT(completion.frame_id == frame.id);
 	Q_ASSERT(completion.status == render::FrameStatus::Presented);
@@ -192,7 +190,6 @@ QImage renderLegacyOverprint(const Fixture& fixture,
 	image.fill(Qt::white);
 	QPainter painter(&image);
 	painter.setRenderHint(QPainter::Antialiasing, true);
-	painter.setRenderHint(QPainter::TextAntialiasing, true);
 	painter.setWorldTransform(fixture.transform);
 	auto const hints = painter.renderHints();
 	auto const transform = painter.worldTransform();
@@ -480,7 +477,7 @@ void FramePipelineTest::mapWidgetUsesTheFrameContract()
 	auto fixture = makeFixture(example(QStringLiteral("complete map.omap")));
 	QVERIFY(fixture);
 	MapView view(nullptr, &fixture->map);
-	MapWidget widget(false, true);
+	MapWidget widget(false);
 	widget.setWindowFlag(Qt::WindowStaysOnTopHint);
 	widget.resize(800, 600);
 	widget.setMapView(&view);
@@ -603,7 +600,7 @@ void FramePipelineTest::mapWidgetConvergesRasterBatches()
 	auto* source_ptr = source.get();
 	map.addTemplate(0, std::move(source));
 
-	MapWidget widget(false, true);
+	MapWidget widget(false);
 	widget.setMapView(&view);
 	auto* canvas_widget = widget.findChild<QWidget*>(QStringLiteral("mapVelloCanvas"));
 	QVERIFY(canvas_widget);
@@ -629,7 +626,7 @@ void FramePipelineTest::mapWidgetWaitsForMissingRasterSource()
 	auto* source_ptr = source.get();
 	map.addTemplate(0, std::move(source));
 
-	MapWidget widget(false, true);
+	MapWidget widget(false);
 	widget.setMapView(&view);
 	auto* canvas_widget = widget.findChild<QWidget*>(QStringLiteral("mapVelloCanvas"));
 	QVERIFY(canvas_widget);
@@ -704,10 +701,8 @@ void FramePipelineTest::nativeSurfacePublishesOrderedLifecycle()
 	QResizeEvent resized(QSize(320, 200), QSize());
 	QCoreApplication::sendEvent(&window, &resized);
 	QVERIFY(states.back().sequence > created_sequence);
-	QCOMPARE(states.back().logical_width, std::uint32_t(320));
-	QCOMPARE(states.back().logical_height, std::uint32_t(200));
-	QVERIFY(states.back().physical_width >= states.back().logical_width);
-	QVERIFY(states.back().physical_height >= states.back().logical_height);
+	QVERIFY(states.back().physical_width >= std::uint32_t(320));
+	QVERIFY(states.back().physical_height >= std::uint32_t(200));
 	auto const resized_state_count = states.size();
 	QResizeEvent duplicate_resize(QSize(320, 200), QSize(320, 200));
 	QCoreApplication::sendEvent(&window, &duplicate_resize);

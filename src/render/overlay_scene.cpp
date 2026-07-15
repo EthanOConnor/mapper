@@ -199,7 +199,7 @@ void OverlaySceneBuilder::fillRect(const QRectF& rect, const QColor& source)
 	QPainterPath path;
 	path.addRect(rect);
 	pushStateTransform();
-	builder_.fillPath(fromQPainterPath(path), color(source), 0, QualityHint::ForceAntialiasing);
+	builder_.fillPath(fromQPainterPath(path), color(source), QualityHint::ForceAntialiasing);
 	popStateTransform();
 }
 
@@ -225,8 +225,7 @@ void OverlaySceneBuilder::drawText(const QRect& rect, int flags, const QString& 
 	if (states_.back().pen.style() == Qt::NoPen)
 		return;
 	pushStateTransform();
-	builder_.fillPath(fromQPainterPath(path), color(states_.back().pen.color()), 0,
-	                  QualityHint::Text);
+	builder_.fillPath(fromQPainterPath(path), color(states_.back().pen.color()));
 	popStateTransform();
 }
 
@@ -294,7 +293,7 @@ void OverlaySceneBuilder::drawShape(const QPainterPath& path)
 	case Qt::NoBrush:
 		break;
 	case Qt::SolidPattern:
-		builder_.fillPath(immutable_path, color(state.brush.color()), 0,
+		builder_.fillPath(immutable_path, color(state.brush.color()),
 		                  QualityHint::ForceAntialiasing);
 		break;
 	case Qt::HorPattern:
@@ -336,7 +335,7 @@ void OverlaySceneBuilder::drawShape(const QPainterPath& path)
 		qFatal("Unsupported transient overlay brush style %d", int(state.brush.style()));
 	}
 	if (state.pen.style() != Qt::NoPen)
-		builder_.strokePath(std::move(immutable_path), color(state.pen.color()), stroke(), 0,
+		builder_.strokePath(std::move(immutable_path), color(state.pen.color()), stroke(),
 		                    QualityHint::ForceAntialiasing);
 	popStateTransform();
 }

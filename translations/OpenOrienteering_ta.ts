@@ -1297,22 +1297,6 @@
 <context>
     <name>OpenOrienteering::EditorSettingsPage</name>
     <message>
-        <location filename="../src/gui/widgets/editor_settings_page.cpp" line="56"/>
-        <source>High quality map display (antialiasing)</source>
-        <translation>உயர்தர வரைபட காட்சி (ஆன்டிலியாசிங்)</translation>
-    </message>
-    <message>
-        <location filename="../src/gui/widgets/editor_settings_page.cpp" line="57"/>
-        <location filename="../src/gui/widgets/editor_settings_page.cpp" line="61"/>
-        <source>Antialiasing makes the map look much better, but also slows down the map display</source>
-        <translation>ஆன்டிலிசிங் வரைபடத்தை மிகவும் சிறப்பாகக் காட்டுகிறது, ஆனால் வரைபடக் காட்சியை மெதுவாக்குகிறது</translation>
-    </message>
-    <message>
-        <location filename="../src/gui/widgets/editor_settings_page.cpp" line="60"/>
-        <source>High quality text display in map (antialiasing), slow</source>
-        <translation>வரைபடத்தில் உயர் தரமான உரை காட்சி (ஆன்டிலியாசிங்), மெதுவாக</translation>
-    </message>
-    <message>
         <location filename="../src/gui/widgets/editor_settings_page.cpp" line="65"/>
         <source>Click tolerance:</source>
         <translation>சகிப்புத்தன்மையைக் சொடுக்கு செய்க:</translation>

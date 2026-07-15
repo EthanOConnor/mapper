@@ -17,17 +17,14 @@
 #    You should have received a copy of the GNU General Public License
 #    along with OpenOrienteering.  If not, see <http://www.gnu.org/licenses/>.
 
-set(CMAKE_AUTOMOC ON)
-
 corrosion_import_crate(
   MANIFEST_PATH "${CMAKE_CURRENT_SOURCE_DIR}/render/vello/Cargo.toml"
   CRATES mapper-vello
   LOCKED
 )
 corrosion_add_cxxbridge(mapper-vello-cxx CRATE mapper_vello FILES lib.rs)
-target_compile_features(mapper-vello-cxx PUBLIC cxx_std_23)
-get_target_property(mapper_vello_bridge_headers mapper-vello-cxx INTERFACE_SOURCES)
-set_source_files_properties(${mapper_vello_bridge_headers} PROPERTIES SKIP_AUTOMOC ON)
+target_compile_features(mapper-vello-cxx PRIVATE cxx_std_23)
+set_target_properties(mapper-vello-cxx PROPERTIES AUTOMOC OFF AUTOUIC OFF)
 add_feature_info(Vello ON "0.9.0 with wgpu 29.0.4")
 
 
@@ -57,6 +54,7 @@ add_library(mapper-render-ir STATIC
 add_library(Mapper::RenderIR ALIAS mapper-render-ir)
 mapper_target_defaults(mapper-render-ir)
 target_include_directories(mapper-render-ir PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+set_target_properties(mapper-render-ir PROPERTIES AUTOMOC OFF AUTOUIC OFF)
 
 # The production screen backend is a replaceable consumer of immutable frame
 # packets. Keep it out of the application library so a future backend can
@@ -68,10 +66,10 @@ add_library(mapper-vello-backend STATIC
 add_library(Mapper::VelloBackend ALIAS mapper-vello-backend)
 mapper_target_defaults(mapper-vello-backend)
 target_include_directories(mapper-vello-backend PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+set_target_properties(mapper-vello-backend PROPERTIES AUTOMOC OFF AUTOUIC OFF)
 target_link_libraries(mapper-vello-backend
   PUBLIC
   Mapper::RenderIR
-  Qt6::Gui
   PRIVATE
   mapper-vello-cxx
 )
@@ -85,6 +83,7 @@ add_library(mapper-vello-presentation STATIC
 add_library(Mapper::VelloPresentation ALIAS mapper-vello-presentation)
 mapper_target_defaults(mapper-vello-presentation)
 target_include_directories(mapper-vello-presentation PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+set_target_properties(mapper-vello-presentation PROPERTIES AUTOMOC OFF AUTOUIC OFF)
 target_link_libraries(mapper-vello-presentation
   PUBLIC
   Mapper::VelloBackend
@@ -334,6 +333,7 @@ set(Mapper_Common_HEADERS
   
 )
 
+set(CMAKE_AUTOMOC ON)
 add_library(Mapper_Common STATIC
   ${Mapper_Common_SRCS}
   ${Mapper_Common_HEADERS}   # for IDE
@@ -350,11 +350,11 @@ target_link_libraries(Mapper_Common
   PUBLIC
   Clipper2::Clipper2
   Mapper::RenderIR
-  Mapper::VelloPresentation
   ${PROJ_LIBRARIES}
   Qt6::Widgets
   Qt6::Svg
   PRIVATE
+  Mapper::VelloPresentation
   ICU::data
   ICU::uc
 )
