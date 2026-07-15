@@ -174,6 +174,7 @@ private slots:
 		
 		auto powershell_position_source = QStringLiteral("Windows");
 		auto* source = QGeoPositionInfoSource::createSource(powershell_position_source, this);
+		QVERIFY(source);
 		QCOMPARE(source->error(), QGeoPositionInfoSource::NoError);
 		
 		QSignalSpy source_spy(source, &QGeoPositionInfoSource::positionUpdated);
@@ -188,6 +189,12 @@ private slots:
 			break;
 		case QGeoPositionInfoSource::AccessError:
 			qWarning("startUpdates(): QGeoPositionInfoSource::AccessError");
+			break;
+		case QGeoPositionInfoSource::UnknownSourceError:
+			qWarning("startUpdates(): QGeoPositionInfoSource::UnknownSourceError");
+			break;
+		case QGeoPositionInfoSource::UpdateTimeoutError:
+			qWarning("startUpdates(): QGeoPositionInfoSource::UpdateTimeoutError");
 			break;
 		case QGeoPositionInfoSource::ClosedError:
 			QFAIL("startUpdates(): QGeoPositionInfoSource::ClosedError");
