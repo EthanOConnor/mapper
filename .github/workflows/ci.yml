@@ -137,6 +137,32 @@ jobs:
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }}
 
+      - name: Install Windows software GPU test runtime
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # Match wgpu's own headless Windows CI: exercise the production DX12
+          # backend against current Microsoft WARP, Agility SDK, and DXC bits.
+          $runtime = Join-Path $env:RUNNER_TEMP 'mapper-gpu-test'
+          New-Item -ItemType Directory -Force $runtime | Out-Null
+
+          curl.exe -L --retry 5 https://www.nuget.org/api/v2/package/Microsoft.Direct3D.WARP/1.0.20 -o (Join-Path $runtime 'warp.zip')
+          tar.exe -xf (Join-Path $runtime 'warp.zip') -C $runtime build/native/bin/x64/d3d10warp.dll
+          Copy-Item (Join-Path $runtime 'build/native/bin/x64/d3d10warp.dll') build/ci-windows/Release/
+
+          curl.exe -L --retry 5 https://www.nuget.org/api/v2/package/Microsoft.Direct3D.D3D12/1.619.0 -o (Join-Path $runtime 'agility.zip')
+          tar.exe -xf (Join-Path $runtime 'agility.zip') -C $runtime build/native/bin/x64
+
+          curl.exe -L --retry 5 https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.8.2505.1/dxc_2025_07_14.zip -o (Join-Path $runtime 'dxc.zip')
+          Expand-Archive (Join-Path $runtime 'dxc.zip') -DestinationPath (Join-Path $runtime 'dxc')
+
+          "WGPU_BACKEND=dx12" | Out-File -Append $env:GITHUB_ENV
+          "WGPU_DX12_COMPILER=dxc" | Out-File -Append $env:GITHUB_ENV
+          "WGPU_DX12_AGILITY_SDK_PATH=$(Join-Path $runtime 'build/native/bin/x64')" | Out-File -Append $env:GITHUB_ENV
+          "WGPU_DX12_AGILITY_SDK_VERSION=619" | Out-File -Append $env:GITHUB_ENV
+          "WGPU_DX12_AGILITY_SDK_REQUIRE=1" | Out-File -Append $env:GITHUB_ENV
+          Join-Path $runtime 'dxc/bin/x64' | Out-File -Append $env:GITHUB_PATH
+
       - name: Test
         if: runner.os != 'Linux'
         run: ctest --preset ${{ matrix.preset }} --output-on-failure --parallel 4
@@ -144,6 +170,11 @@ jobs:
       - name: Test under Xvfb
         if: runner.os == 'Linux'
         run: xvfb-run --auto-servernum ctest --preset ${{ matrix.preset }} --output-on-failure --parallel 4
+
+      - name: Remove Windows software GPU test runtime
+        if: runner.os == 'Windows' && always()
+        shell: pwsh
+        run: Remove-Item -Force -ErrorAction SilentlyContinue build/ci-windows/Release/d3d10warp.dll
 
       - name: Package
         run: cmake --build --preset ${{ matrix.preset }} --target package

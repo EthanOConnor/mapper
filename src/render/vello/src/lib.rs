@@ -907,6 +907,12 @@ fn platform_backends(platform: u8) -> wgpu::Backends {
     }
 }
 
+fn instance_descriptor(platform_defaults: wgpu::Backends) -> wgpu::InstanceDescriptor {
+    let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle_from_env();
+    descriptor.backends &= platform_defaults;
+    descriptor
+}
+
 fn backend_id(backend: wgpu::Backend) -> u8 {
     match backend {
         wgpu::Backend::Vulkan => 1,
@@ -939,10 +945,7 @@ fn prepare_surface(state: ffi::SurfaceState) -> Result<PreparedSurface, String> 
         return Err("surface is not exposed at a nonzero size".to_owned());
     }
     let (raw_display_handle, raw_window_handle) = surface_handles(state)?;
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-        backends: platform_backends(state.platform),
-        ..wgpu::InstanceDescriptor::new_without_display_handle()
-    });
+    let instance = wgpu::Instance::new(instance_descriptor(platform_backends(state.platform)));
     let surface = unsafe {
         instance
             .create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle {
@@ -1013,10 +1016,7 @@ fn create_surface_target(
 }
 
 fn create_offscreen_target() -> Result<OffscreenTarget, String> {
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-        backends: wgpu::Backends::PRIMARY,
-        ..wgpu::InstanceDescriptor::new_without_display_handle()
-    });
+    let instance = wgpu::Instance::new(instance_descriptor(wgpu::Backends::PRIMARY));
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
         power_preference: wgpu::PowerPreference::HighPerformance,
         force_fallback_adapter: false,

@@ -72,6 +72,13 @@ function(add_test_helper testname)
 		set_tests_properties(${testname} PROPERTIES
 		  WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
 		)
+		if(WIN32)
+			# Qt GUI executables do not inherit the hosted runner's console by
+			# default. Attach it so a failing Qt Test reports its assertion.
+			set_property(TEST ${testname} APPEND PROPERTY ENVIRONMENT
+			  "QT_WIN_DEBUG_CONSOLE=attach"
+			)
+		endif()
 	endif()
 endfunction()
 
