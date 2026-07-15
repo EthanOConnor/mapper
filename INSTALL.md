@@ -27,13 +27,21 @@ then expose its root to CMake:
 
 ```sh
 git clone https://github.com/microsoft/vcpkg.git .vcpkg
-git -C .vcpkg checkout 4b866ceb02b989365b916f93db4f76146a8ec438
+git -C .vcpkg checkout "$(python3 -c 'import json; print(json.load(open("vcpkg.json"))["builtin-baseline"])')"
 .vcpkg/bootstrap-vcpkg.sh -disableMetrics
 export VCPKG_ROOT="$PWD/.vcpkg"
 ```
 
-On Windows, use `.vcpkg\\bootstrap-vcpkg.bat -disableMetrics` and set
-`VCPKG_ROOT` in PowerShell. Select the managed preset for the host:
+On Windows PowerShell, use the same manifest-owned baseline:
+
+```powershell
+$baseline = python -c 'import json; print(json.load(open("vcpkg.json"))["builtin-baseline"])'
+git -C .vcpkg checkout $baseline
+.\.vcpkg\bootstrap-vcpkg.bat -disableMetrics
+$env:VCPKG_ROOT = "$PWD\.vcpkg"
+```
+
+Select the managed preset for the host:
 
 ```sh
 cmake --preset dev-macos-vcpkg

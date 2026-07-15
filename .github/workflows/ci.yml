@@ -51,11 +51,16 @@ jobs:
       - name: Check out Mapper
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
+      - name: Read vcpkg baseline
+        id: vcpkg_baseline
+        shell: bash
+        run: python -c 'import json; print("sha=" + json.load(open("vcpkg.json", encoding="utf-8"))["builtin-baseline"])' >> "$GITHUB_OUTPUT"
+
       - name: Check out vcpkg
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: microsoft/vcpkg
-          ref: 4b866ceb02b989365b916f93db4f76146a8ec438
+          ref: ${{ steps.vcpkg_baseline.outputs.sha }}
           path: .vcpkg
 
       - name: Restore dependency cache
@@ -234,11 +239,16 @@ jobs:
       - name: Check out Mapper
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
+      - name: Read vcpkg baseline
+        id: vcpkg_baseline
+        shell: bash
+        run: python -c 'import json; print("sha=" + json.load(open("vcpkg.json", encoding="utf-8"))["builtin-baseline"])' >> "$GITHUB_OUTPUT"
+
       - name: Check out vcpkg
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: microsoft/vcpkg
-          ref: 4b866ceb02b989365b916f93db4f76146a8ec438
+          ref: ${{ steps.vcpkg_baseline.outputs.sha }}
           path: .vcpkg
 
       - name: Restore dependency cache
