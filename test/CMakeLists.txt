@@ -65,7 +65,10 @@ function(add_test_helper testname)
 		target_link_libraries(${testname} PRIVATE Qt6::Widgets)
 	endif()
 	if(NOT manual_test)
-		add_test(NAME ${testname} COMMAND $<TARGET_FILE:${testname}>)
+		# Send Qt Test output to the console explicitly. In particular, GUI-linked
+		# test executables do not reliably inherit a visible console logger on
+		# hosted Windows runners.
+		add_test(NAME ${testname} COMMAND $<TARGET_FILE:${testname}> -o -,txt)
 		set_tests_properties(${testname} PROPERTIES
 		  WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
 		)
@@ -199,6 +202,16 @@ add_system_test(tools_t)
 add_system_test(track_t)  # Could be unit test, but needs Georeferencing
 add_system_test(transform_t)
 add_system_test(undo_manager_t)
+
+# Hosted Windows exposes one native D3D adapter to the test session. Opening it
+# concurrently from separate renderer processes can crash inside OpenAdapter,
+# so keep the three GPU acceptance tests complete but serialize their access.
+set_tests_properties(
+	frame_pipeline_t
+	template_layer_planner_t
+	vello_renderer_t
+	PROPERTIES RESOURCE_LOCK mapper_gpu
+)
 
 # Manual parity helper used to compare exact upstream and modernization
 # checkpoints without adding another product-facing export path.
