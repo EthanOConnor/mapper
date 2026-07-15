@@ -96,3 +96,30 @@ The captured phase states received direct visual review. A release candidate
 should still be watched continuously by a club mapper on representative
 hardware; still captures and CPU timing cannot replace a person's judgment of
 trackpad feel or display pacing.
+
+## 2026-07-15 hosted-matrix replay
+
+After the Windows native-surface scheduling fix, the trace was repeated on the
+same machine and viewport against the same historical commit. The rewrite was
+`main@f106ee2d8ab8e0c0d419fd1ba011d2d77100a4bc`, the commit tested by the fully
+green hosted matrix and tagged `modernization-checkpoint-12-hosted-matrix`.
+
+All runs used a 1266 x 919 logical-pixel viewport, DPR 2, and Metal. Both
+products reached these same camera states:
+
+| Corpus id | Start zoom | Final zoom |
+|---|---:|---:|
+| `complete-map` | 0.707107 | 1.68179 |
+| `fishtrap-current` | 0.510496 | 1.21417 |
+| `kelsey-dense-contours` | 2.66973 | 6.34972 |
+
+The rewrite produced seven fresh 2532 x 1838 lossless phase images for each
+map. Review found no blank frame, incomplete revision, seam, missing geometry,
+or changed color ordering. Compared with the previously accepted rewrite phase
+images, unchanged captures were byte-identical and the others had normalized
+RMSE no greater than `4.26321e-6`, consistent with negligible raster-level
+variation rather than a graphic change.
+
+This replay closes the post-fix automated and still-image check. It does not
+close the live human gate: a club mapper must still compare continuous trackpad
+feel, display pacing, and perceived graphic quality in the two native apps.

@@ -375,6 +375,10 @@ The repeatable interaction trace and the 2026-07-14 side-by-side evidence
 against `full-speed-ahead` are recorded in
 `test/manual/render-parity.md`.
 
+The six gates for accepting this rewrite as the practical foundation, including
+the two remaining physical/human verdicts, are tracked in
+`test/manual/rewrite-foundation-acceptance.md`.
+
 ## Acceptance thresholds
 
 ### Correctness
