@@ -1,6 +1,7 @@
 .gitignore           export-ignore
 .gitattributes       export-ignore
 *.ocd                binary
+*.xmap               text eol=lf
 #*.ts                 binary diff=xmllint
 3rd-party/*          linguist-vendored
 doc/*                linguist-documentation
