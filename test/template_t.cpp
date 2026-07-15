@@ -49,10 +49,6 @@
 #include <QTemporaryDir>
 #include <QTransform>
 
-#ifdef ACCEPT_USE_OF_DEPRECATED_PROJ_API_H
-#  include <proj_api.h>
-#endif
-
 #include "test_config.h"
 
 #include "global.h"
@@ -410,15 +406,18 @@ private slots:
 	{
 		QTest::addColumn<QString>("map_file");
 		QTest::addColumn<int>("template_index");
+		// Map coordinates use 0.25 mm units. Keep every historical projection
+		// case bounded instead of accepting an arbitrary QEXPECT_FAIL mismatch.
+		QTest::addColumn<double>("max_center_error");
 
-		QTest::newRow("TemplateTrack georef")         << QStringLiteral("testdata:templates/template-track.xmap") << 0;
-		QTest::newRow("TemplateTrack non-georef")     << QStringLiteral("testdata:templates/template-track.xmap") << 1;
-		QTest::newRow("TemplateTrack OGR georef")     << QStringLiteral("testdata:templates/template-track.xmap") << 2;
-		QTest::newRow("TemplateTrack OGR non-georef") << QStringLiteral("testdata:templates/template-track.xmap") << 3;
-		QTest::newRow("TemplateTrack NAD83")          << QStringLiteral("testdata:templates/template-track-NA.xmap") << 0;
-		QTest::newRow("OgrTemplate NAD83")            << QStringLiteral("testdata:templates/template-track-NA.xmap") << 1;
-		QTest::newRow("TemplateTrack from v0.8.4")    << QStringLiteral("testdata:templates/template-track-NA-084.xmap") << 0;
-		QTest::newRow("TemplateTrack from v0.9.3")    << QStringLiteral("testdata:templates/template-track-NA-093-PROJ.xmap") << 0;
+		QTest::newRow("TemplateTrack georef")         << QStringLiteral("testdata:templates/template-track.xmap") << 0 << 0.125;
+		QTest::newRow("TemplateTrack non-georef")     << QStringLiteral("testdata:templates/template-track.xmap") << 1 << 0.125;
+		QTest::newRow("TemplateTrack OGR georef")     << QStringLiteral("testdata:templates/template-track.xmap") << 2 << 0.125;
+		QTest::newRow("TemplateTrack OGR non-georef") << QStringLiteral("testdata:templates/template-track.xmap") << 3 << 0.125;
+		QTest::newRow("TemplateTrack NAD83")          << QStringLiteral("testdata:templates/template-track-NA.xmap") << 0 << 0.125;
+		QTest::newRow("OgrTemplate NAD83")            << QStringLiteral("testdata:templates/template-track-NA.xmap") << 1 << 0.125;
+		QTest::newRow("TemplateTrack from v0.8.4")    << QStringLiteral("testdata:templates/template-track-NA-084.xmap") << 0 << 0.375;
+		QTest::newRow("TemplateTrack from v0.9.3")    << QStringLiteral("testdata:templates/template-track-NA-093-PROJ.xmap") << 0 << 0.125;
 	}
 	
 	void templateTrackTest()
@@ -429,6 +428,7 @@ private slots:
 		
 		QFETCH(QString, map_file);
 		QFETCH(int, template_index);
+		QFETCH(double, max_center_error);
 		
 		Map map;
 		MapView view{ &map };
@@ -440,19 +440,12 @@ private slots:
 		QCOMPARE(temp->getTemplateState(), Template::Unloaded);
 		QVERIFY(map.getTemplate(template_index)->loadTemplateFile());
 		QCOMPARE(temp->getTemplateState(), Template::Loaded);
-
-#if !defined(ACCEPT_USE_OF_DEPRECATED_PROJ_API_H) || PJ_VERSION >= 600
-		QEXPECT_FAIL("TemplateTrack from v0.8.4", "Unsupported WGS 84 -> NAD 83 transformation", Continue);
-#else
-		QEXPECT_FAIL("TemplateTrack NAD83", "Unsupported WGS 84 -> NAD 83 transformation", Continue);
-		QEXPECT_FAIL("OgrTemplate NAD83", "Unsupported WGS 84 -> NAD 83 transformation", Continue);
-		QEXPECT_FAIL("TemplateTrack from v0.9.3", "Unsupported WGS 84 -> NAD 83 transformation", Continue);
-#endif
 		auto const expected_center = map.calculateExtent().center();
-		if (QLineF(center(temp), expected_center).length() > 0.125) // 50 cm
-			QCOMPARE(center(temp), expected_center);
-		else
-			QVERIFY2(true, "Centers do match");
+		auto const center_error = QLineF(center(temp), expected_center).length();
+		QVERIFY2(center_error <= max_center_error,
+		         qPrintable(QStringLiteral("Template center error %1 exceeds %2 map units")
+		                      .arg(center_error, 0, 'g', 8)
+		                      .arg(max_center_error, 0, 'g', 8)));
 	}
 	
 #ifdef MAPPER_USE_GDAL
@@ -460,17 +453,18 @@ private slots:
 	{
 		QTest::addColumn<QString>("map_file");
 		QTest::addColumn<int>("template_index");
+		QTest::addColumn<double>("max_center_error");
 
-		QTest::newRow("TemplateTrack georef")         << QStringLiteral("testdata:templates/template-track.xmap") << 0;
-		QTest::newRow("TemplateTrack non-georef")     << QStringLiteral("testdata:templates/template-track.xmap") << 1;
-		QTest::newRow("TemplateTrack OGR georef")     << QStringLiteral("testdata:templates/template-track.xmap") << 2;
-		QTest::newRow("TemplateTrack OGR non-georef") << QStringLiteral("testdata:templates/template-track.xmap") << 3;
-		QTest::newRow("OgrTemplate basic")            << QStringLiteral("testdata:templates/ogr-template.xmap")   << 0;
-		QTest::newRow("OgrTemplate compatibility")    << QStringLiteral("testdata:templates/ogr-template.xmap")   << 1;
-		QTest::newRow("TemplateTrack NAD83")          << QStringLiteral("testdata:templates/template-track-NA.xmap") << 0;
-		QTest::newRow("OgrTemplate NAD83")            << QStringLiteral("testdata:templates/template-track-NA.xmap") << 1;
-		QTest::newRow("TemplateTrack from v0.8.4")    << QStringLiteral("testdata:templates/template-track-NA-084.xmap") << 0;
-		QTest::newRow("OGRTemplate from v0.9.3")      << QStringLiteral("testdata:templates/template-track-NA-093-GDAL.xmap") << 0;
+		QTest::newRow("TemplateTrack georef")         << QStringLiteral("testdata:templates/template-track.xmap") << 0 << 0.25;
+		QTest::newRow("TemplateTrack non-georef")     << QStringLiteral("testdata:templates/template-track.xmap") << 1 << 0.25;
+		QTest::newRow("TemplateTrack OGR georef")     << QStringLiteral("testdata:templates/template-track.xmap") << 2 << 0.25;
+		QTest::newRow("TemplateTrack OGR non-georef") << QStringLiteral("testdata:templates/template-track.xmap") << 3 << 0.25;
+		QTest::newRow("OgrTemplate basic")            << QStringLiteral("testdata:templates/ogr-template.xmap")   << 0 << 0.25;
+		QTest::newRow("OgrTemplate compatibility")    << QStringLiteral("testdata:templates/ogr-template.xmap")   << 1 << 0.25;
+		QTest::newRow("TemplateTrack NAD83")          << QStringLiteral("testdata:templates/template-track-NA.xmap") << 0 << 0.375;
+		QTest::newRow("OgrTemplate NAD83")            << QStringLiteral("testdata:templates/template-track-NA.xmap") << 1 << 0.375;
+		QTest::newRow("TemplateTrack from v0.8.4")    << QStringLiteral("testdata:templates/template-track-NA-084.xmap") << 0 << 0.25;
+		QTest::newRow("OGRTemplate from v0.9.3")      << QStringLiteral("testdata:templates/template-track-NA-093-GDAL.xmap") << 0 << 0.25;
 	}
 	
 	void ogrTemplateTest()
@@ -479,6 +473,7 @@ private slots:
 		
 		QFETCH(QString, map_file);
 		QFETCH(int, template_index);
+		QFETCH(double, max_center_error);
 		
 		Map map;
 		MapView view{ &map };
@@ -490,14 +485,12 @@ private slots:
 		QCOMPARE(temp->getTemplateState(), Template::Unloaded);
 		QVERIFY(map.getTemplate(template_index)->loadTemplateFile());
 		QCOMPARE(temp->getTemplateState(), Template::Loaded);
-
-		QEXPECT_FAIL("TemplateTrack NAD83", "Unsupported WGS 84 -> NAD 83 transformation", Continue);
-		QEXPECT_FAIL("OgrTemplate NAD83", "Unsupported WGS 84 -> NAD 83 transformation", Continue);
 		auto const expected_center = map.calculateExtent().center();
-		if (QLineF(center(temp), expected_center).length() > 0.25) // 1 m
-			QCOMPARE(center(temp), expected_center);
-		else
-			QVERIFY2(true, "Centers do match");
+		auto const center_error = QLineF(center(temp), expected_center).length();
+		QVERIFY2(center_error <= max_center_error,
+		         qPrintable(QStringLiteral("OGR template center error %1 exceeds %2 map units")
+		                      .arg(center_error, 0, 'g', 8)
+		                      .arg(max_center_error, 0, 'g', 8)));
 		
 		// Test boundingRect for OgrTemplate
 		QCOMPARE(temp->boundingRect().center(), center(temp));
@@ -518,17 +511,19 @@ private slots:
 	{
 		QTest::addColumn<QString>("map_file");
 		QTest::addColumn<int>("template_index");
+		QTest::addColumn<double>("max_center_error");
 
-		QTest::newRow("TemplateTrack georef")     << QStringLiteral("testdata:templates/template-track.xmap") << 0;
-		QTest::newRow("OgrTemplate georef")       << QStringLiteral("testdata:templates/template-track.xmap") << 2;
-		QTest::newRow("TemplateTrack NAD83")      << QStringLiteral("testdata:templates/template-track-NA.xmap") << 0;
-		QTest::newRow("OgrTemplate NAD83")        << QStringLiteral("testdata:templates/template-track-NA.xmap") << 1;
+		QTest::newRow("TemplateTrack georef")     << QStringLiteral("testdata:templates/template-track.xmap") << 0 << 0.1;
+		QTest::newRow("OgrTemplate georef")       << QStringLiteral("testdata:templates/template-track.xmap") << 2 << 0.1;
+		QTest::newRow("TemplateTrack NAD83")      << QStringLiteral("testdata:templates/template-track-NA.xmap") << 0 << 0.375;
+		QTest::newRow("OgrTemplate NAD83")        << QStringLiteral("testdata:templates/template-track-NA.xmap") << 1 << 0.375;
 	}
 	
 	void templateTypesConsistentTest()
 	{
 		QFETCH(QString, map_file);
 		QFETCH(int, template_index);
+		QFETCH(double, max_center_error);
 		
 		GdalManager().setFormatEnabled(GdalManager::GPX, false);
 		QPointF template_track_center;
@@ -563,15 +558,12 @@ private slots:
 
 			ogr_template_center = center(temp);
 		}
-		
-#if !defined(ACCEPT_USE_OF_DEPRECATED_PROJ_API_H) || PJ_VERSION >= 600
-		QEXPECT_FAIL("TemplateTrack NAD83", "Unsupported WGS 84 -> NAD 83 transformation", Continue);
-		QEXPECT_FAIL("OgrTemplate NAD83", "Unsupported WGS 84 -> NAD 83 transformation", Continue);
-#endif
-		if (QLineF(ogr_template_center, template_track_center).length() > 0.1) // 40 cm
-			QCOMPARE(ogr_template_center, template_track_center);
-		else
-			QVERIFY2(true, "Centers do match");
+
+		auto const center_error = QLineF(ogr_template_center, template_track_center).length();
+		QVERIFY2(center_error <= max_center_error,
+		         qPrintable(QStringLiteral("Template implementation center difference %1 exceeds %2 map units")
+		                      .arg(center_error, 0, 'g', 8)
+		                      .arg(max_center_error, 0, 'g', 8)));
 	}
 #endif
 	
