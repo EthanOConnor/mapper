@@ -197,7 +197,6 @@ int main(int argc, char** argv)
 	};
 	request.below_map = template_plan.below_map;
 	request.above_map = template_plan.above_map;
-	request.raster_complete = template_plan.complete;
 	render::FramePlanner frame_planner;
 	auto const base_frame = frame_planner.plan(*snapshot, request);
 

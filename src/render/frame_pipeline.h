@@ -57,7 +57,6 @@ public:
 	FrameView view;
 	RenderRequest render_request;
 	std::vector<VectorPass> vector_passes;
-	bool raster_complete = true;
 };
 
 using FramePacketPtr = std::shared_ptr<const FramePacket>;
@@ -76,7 +75,6 @@ struct FrameRequest
 	bool simulate_overprinting = false;
 	std::vector<VectorPass> below_map;
 	std::vector<VectorPass> above_map;
-	bool raster_complete = true;
 };
 
 /** Produces monotonically identified immutable frames from published state. */

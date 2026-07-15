@@ -109,7 +109,6 @@ FramePacketPtr FramePlanner::plan(const MapRenderSnapshot& snapshot, const Frame
 	frame->revision = snapshot.revision();
 	frame->view = request.view;
 	frame->render_request = request.render;
-	frame->raster_complete = request.raster_complete;
 	frame->vector_passes = request.below_map;
 
 	if (cached_snapshot_identity_ != snapshot.identity()
@@ -164,7 +163,6 @@ FramePacketPtr FramePlanner::plan(const FrameRequest& request)
 	frame->id = next_frame_id_++;
 	frame->view = request.view;
 	frame->render_request = request.render;
-	frame->raster_complete = request.raster_complete;
 	frame->vector_passes = request.below_map;
 	frame->vector_passes.insert(
 		frame->vector_passes.end(), request.above_map.begin(), request.above_map.end()

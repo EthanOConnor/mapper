@@ -1327,8 +1327,6 @@ void MapWidget::renderFrame()
 		render::BlendMode::SourceOver, 1, false,
 		render::VectorPass::Space::Viewport,
 	});
-	frame_request.raster_complete = template_layers.complete;
-
 	auto const snapshot = map->publishRenderSnapshot();
 	auto frame = frame_planner.plan(*snapshot, frame_request);
 	vello_canvas->setFrame(
@@ -1337,6 +1335,8 @@ void MapWidget::renderFrame()
 			show_help && no_contents ? QColor(Qt::gray) : QColor(Qt::white)
 		)
 	);
+	if (!template_layers.complete && template_layers.newly_resident_images > 0)
+		scheduleFrameUpdate();
 }
 
 void MapWidget::resizeEvent(QResizeEvent* event)

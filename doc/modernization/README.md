@@ -239,7 +239,10 @@ immutable images per frame. C++ image identity remains stable across scene
 growth, Rust copies each image into one retained `peniko::Blob`, and stock
 Vello owns atlas upload and eviction. The residency test grows from four to six
 tiles and observes six retained Vello images total, not ten cumulative uploads.
-`FramePacket::raster_complete` makes coarse or missing coverage explicit.
+The template plan reports both coverage completeness and image-admission
+progress to the product frame coordinator. A frame that admits ready images
+continues through coalesced product requests; one waiting for source pixels
+sleeps until the existing source-ready notification.
 
 On the Apple M3 Max checkpoint machine, the Release heavy-raster gate used the
 831 MiB Fishtrap source at 2068 x 1906 physical pixels for 300 synchronized

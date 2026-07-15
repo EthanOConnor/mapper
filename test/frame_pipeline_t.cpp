@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include <QtTest>
@@ -20,6 +21,7 @@
 #include <QPixmap>
 #include <QResizeEvent>
 #include <QTransform>
+#include <QVector>
 
 #include "global.h"
 #include "test_config.h"
@@ -35,6 +37,7 @@
 #include "render/qpainter_frame_renderer.h"
 #include "render/qpainter_renderer.h"
 #include "render/qt_render_bridge.h"
+#include "templates/template_image.h"
 
 using namespace OpenOrienteering;
 
@@ -50,6 +53,82 @@ struct Fixture
 	render::RenderRequest render_request;
 	render::FrameView view;
 };
+
+class ControllableRasterTemplate final : public TemplateImage
+{
+public:
+	ControllableRasterTemplate(Map* map,
+	                           QVector<RasterTemplateTile> ready_tiles,
+	                           QRectF extent,
+	                           bool ready)
+	 : TemplateImage(QString(), map)
+	 , ready_tiles_(std::move(ready_tiles))
+	 , extent_(extent)
+	 , ready_(ready)
+	{
+		image = QImage(1, 1, QImage::Format_RGBA8888);
+		image.fill(Qt::transparent);
+		setTemplateState(Loaded);
+	}
+
+	QRectF getTemplateExtent() const override
+	{
+		return extent_;
+	}
+
+	void collectRasterTiles(const QRectF&, double, bool,
+	                        QVector<RasterTemplateTile>& out) const override
+	{
+		++collection_count_;
+		if (ready_)
+			out += ready_tiles_;
+		else
+			out.push_back({ {}, extent_, {}, 0, true, false });
+	}
+
+	void setReady(bool ready)
+	{
+		ready_ = ready;
+	}
+
+	int collectionCount() const
+	{
+		return collection_count_;
+	}
+
+private:
+	QVector<RasterTemplateTile> ready_tiles_;
+	QRectF extent_;
+	bool ready_ = false;
+	mutable int collection_count_ = 0;
+};
+
+RasterTemplateTile rasterTile(QColor color, QRectF target)
+{
+	QImage image(target.size().toSize(), QImage::Format_RGBA8888);
+	image.fill(color);
+	return {
+		image,
+		target,
+		QRectF(QPointF(0, 0), QSizeF(image.size())),
+		quint64(image.cacheKey()),
+		false,
+	};
+}
+
+std::size_t frameImageCount(const render::FramePacket& frame)
+{
+	auto count = std::size_t(0);
+	for (auto const& pass : frame.vector_passes)
+	{
+		if (!pass.scene)
+			continue;
+		count += std::ranges::count_if(pass.scene->commands, [](auto const& command) {
+			return std::holds_alternative<render::DrawImage>(command);
+		});
+	}
+	return count;
+}
 
 std::unique_ptr<Fixture> makeFixture(const QString& file_name)
 {
@@ -504,6 +583,75 @@ void FramePipelineTest::mapWidgetUsesTheFrameContract()
 		qPrintable(state_description()),
 		30000
 	);
+}
+
+void FramePipelineTest::mapWidgetConvergesRasterBatches()
+{
+	Map map;
+	MapView view(nullptr, &map);
+	QVector<RasterTemplateTile> tiles;
+	for (int index = 0; index < 10; ++index)
+	{
+		tiles.push_back(rasterTile(
+			QColor::fromHsv(index * 30, 255, 255),
+			{ -10.0 + index * 2.0, -1, 2, 2 }
+		));
+	}
+	auto source = std::make_unique<ControllableRasterTemplate>(
+		&map, std::move(tiles), QRectF(-10, -1, 20, 2), true
+	);
+	auto* source_ptr = source.get();
+	map.addTemplate(0, std::move(source));
+
+	MapWidget widget(false, true);
+	widget.setMapView(&view);
+	auto* canvas_widget = widget.findChild<QWidget*>(QStringLiteral("mapVelloCanvas"));
+	QVERIFY(canvas_widget);
+	auto* canvas = dynamic_cast<presentation::VelloCanvas*>(canvas_widget);
+	QVERIFY(canvas);
+	QTRY_VERIFY_WITH_TIMEOUT(
+		canvas->currentFrame() && frameImageCount(*canvas->currentFrame()) == 10,
+		5000
+	);
+	QCOMPARE(source_ptr->collectionCount(), 3);
+}
+
+void FramePipelineTest::mapWidgetWaitsForMissingRasterSource()
+{
+	Map map;
+	MapView view(nullptr, &map);
+	auto source = std::make_unique<ControllableRasterTemplate>(
+		&map,
+		QVector<RasterTemplateTile> { rasterTile(Qt::red, { -1, -1, 2, 2 }) },
+		QRectF(-1, -1, 2, 2),
+		false
+	);
+	auto* source_ptr = source.get();
+	map.addTemplate(0, std::move(source));
+
+	MapWidget widget(false, true);
+	widget.setMapView(&view);
+	auto* canvas_widget = widget.findChild<QWidget*>(QStringLiteral("mapVelloCanvas"));
+	QVERIFY(canvas_widget);
+	auto* canvas = dynamic_cast<presentation::VelloCanvas*>(canvas_widget);
+	QVERIFY(canvas);
+	QTRY_VERIFY_WITH_TIMEOUT(canvas->currentFrame(), 5000);
+	QCOMPARE(source_ptr->collectionCount(), 1);
+	QCOMPARE(frameImageCount(*canvas->currentFrame()), std::size_t(0));
+	auto const waiting_frame_id = canvas->currentFrame()->id;
+
+	QTest::qWait(50);
+	QCOMPARE(source_ptr->collectionCount(), 1);
+	QCOMPARE(canvas->currentFrame()->id, waiting_frame_id);
+
+	source_ptr->setReady(true);
+	map.setTemplateAreaDirty(source_ptr, QRectF(-1, -1, 2, 2), 0);
+	QTRY_VERIFY_WITH_TIMEOUT(
+		canvas->currentFrame()->id > waiting_frame_id
+		&& frameImageCount(*canvas->currentFrame()) == 1,
+		5000
+	);
+	QCOMPARE(source_ptr->collectionCount(), 2);
 }
 
 void FramePipelineTest::nativeSurfacePublishesOrderedLifecycle()

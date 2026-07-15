@@ -38,6 +38,36 @@ macOS app and accepted panning, tool selection, object interaction, zoom, and
 custom cursor behavior. This is a pass for the defect and product scenario; it
 does not substitute for the remaining continuous three-map comparison below.
 
+## 2026-07-15 raster convergence closeout
+
+The product frame coordinator now consumes the template planner's real outcome.
+If an incomplete frame admits ready raster images, `MapWidget` schedules one
+coalesced continuation; if the source is incomplete and admits nothing, it
+waits for the existing source-ready notification instead of polling. The dead
+`FramePacket::raster_complete` and request plumbing are removed.
+
+The product-level regression starts with ten ready images, makes one external
+`MapWidget::setMapView()` request, and requires all ten images to appear after
+exactly three bounded planning passes (4, 4, 2). A second case holds a source
+missing, proves the frame id and collection count remain unchanged while the
+event loop runs, then marks the source ready and requires exactly one notified
+plan to complete it.
+
+Local evidence from the canonical `worktrees/main` checkout:
+
+- Release configure/build used CMake 4.4.0, AppleClang 21.0.0, Qt 6.11.1,
+  Rust 1.94.0, and build-owned Corrosion output under
+  `build/release-macos/cargo`.
+- `ctest --test-dir build/release-macos --output-on-failure --parallel 8`
+  passed all 36 discovered tests, including the native AppKit/Metal surface.
+- The focused convergence, missing-source, bounded-admission, and provisional
+  coverage cases passed; `raster_benchmark` also rebuilt successfully.
+
+The exact hosted run and artifact links remain pending for this implementation
+revision. `modernization-checkpoint-17-raster-convergence` must not be created
+until that revision and the final evidence record are both green on the public
+matrix.
+
 ## Remaining people and hardware checks
 
 These are deliberately small product checks, not missing automation machinery:

@@ -113,7 +113,6 @@ render::FramePacketPtr frameFor(
 	};
 	request.below_map = std::move(raster.below_map);
 	request.above_map = std::move(raster.above_map);
-	request.raster_complete = raster.complete;
 	return planner.plan(snapshot, request);
 }
 
@@ -129,7 +128,6 @@ render::FramePacketPtr scaledFrameFor(
 	};
 	request.below_map = std::move(raster.below_map);
 	request.above_map = std::move(raster.above_map);
-	request.raster_complete = raster.complete;
 	return planner.plan(snapshot, request);
 }
 
@@ -214,7 +212,6 @@ void TemplateLayerPlannerTest::preservesLayerOrderAndRetainedScenes()
 	QCOMPARE(frame->vector_passes.size(), std::size_t(3));
 	QCOMPARE(frame->vector_passes.front().scene, below_scene);
 	QCOMPARE(frame->vector_passes.back().scene, above_scene);
-	QVERIFY(frame->raster_complete);
 
 	auto const reference = renderReference(*frame);
 	render::VelloRenderer renderer;
