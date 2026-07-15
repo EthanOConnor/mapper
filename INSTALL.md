@@ -1,7 +1,7 @@
 # Building Mapper
 
 Mapper uses one CMake/Ninja build on Linux, macOS, Windows, and Android. The
-project baseline is CMake 4.4.0, Ninja 1.13.2, a C++23 compiler, and Qt 6.10.2.
+project baseline is CMake 4.4.0, Ninja 1.13.0, a C++23 compiler, and Qt 6.10.2.
 Desktop and Android packages are built by the same presets used in GitHub
 Actions.
 
@@ -14,7 +14,9 @@ together when the next release reaches the complete platform matrix.
 The distributable-build dependency set is declared in `vcpkg.json` and pinned
 by its builtin baseline. It currently resolves PROJ 9.8.1, GDAL 3.13.1, and ICU
 78.3. Clipper2 2.0.1 and KDSingleApplication 1.2.1 are content-addressed CMake
-dependencies. Qt is installed from the official Qt binary repository.
+dependencies. Qt is installed from the official Qt binary repository. The
+portable CMake and Ninja tools used by CI are pinned in
+`requirements-build.txt`; weekly dependency updates cover that file too.
 
 GDAL 3.13.1 temporarily uses `cmake/vcpkg/ports/gdal`; remove that overlay as
 soon as the pinned vcpkg baseline provides the same or a newer release.

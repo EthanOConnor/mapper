@@ -25,3 +25,9 @@ updates:
       rust-renderer:
         patterns:
           - "*"
+
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 2
