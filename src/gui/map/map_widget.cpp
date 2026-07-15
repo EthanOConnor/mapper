@@ -153,6 +153,7 @@ MapWidget::MapWidget(bool show_help, bool force_antialiasing, QWidget* parent)
 	setFocusPolicy(Qt::ClickFocus);
 	setSizePolicy(QSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding));
 	vello_canvas->setGeometry(rect());
+	vello_canvas->setPresentationCursor(cursor());
 }
 
 MapWidget::~MapWidget()
@@ -1127,6 +1128,10 @@ bool MapWidget::event(QEvent* event)
 		if (static_cast<QKeyEvent*>(event)->key() == Qt::Key_Tab
 		    && keyPressEventFilter(static_cast<QKeyEvent*>(event)))
 			return true;
+		break;
+
+	case QEvent::CursorChange:
+		vello_canvas->setPresentationCursor(cursor());
 		break;
 		
 	default:

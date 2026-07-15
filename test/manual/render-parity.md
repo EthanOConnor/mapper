@@ -123,3 +123,19 @@ variation rather than a graphic change.
 This replay closes the post-fix automated and still-image check. It does not
 close the live human gate: a club mapper must still compare continuous trackpad
 feel, display pacing, and perceived graphic quality in the two native apps.
+
+## 2026-07-15 dense-map interaction acceptance
+
+The native rewrite was exercised on `kelsey-dense-contours` after a live review
+found that the embedded render window prevented normal map input and tool
+cursor changes. The corrected presentation boundary now keeps that native
+window responsible for platform hit-testing and custom cursor presentation,
+while forwarding input once to `MapWidget`.
+
+Live review accepted panning, selection and tool interaction, button and wheel
+zoom, and standard and custom cursor transitions. The automated regression also
+sends a middle-button drag through the real `QWindow`, verifies the committed
+camera movement, and requires closed-hand and custom-bitmap cursor transitions.
+This closes the discovered dense-map interaction regression. The continuous
+three-map comparison of perceived pacing, trackpad feel, and overall graphic
+quality remains the final human renderer gate.

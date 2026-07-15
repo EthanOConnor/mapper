@@ -158,6 +158,7 @@ NativeSurfaceWindow::~NativeSurfaceWindow()
 	}
 	state_handler_ = {};
 	frame_request_handler_ = {};
+	input_handler_ = {};
 #if defined(Q_OS_ANDROID)
 	retireAndroidNativeWindow();
 	for (auto* window : retired_android_native_windows_)
@@ -176,6 +177,11 @@ void NativeSurfaceWindow::setStateHandler(StateHandler handler)
 void NativeSurfaceWindow::setFrameRequestHandler(FrameRequestHandler handler)
 {
 	frame_request_handler_ = std::move(handler);
+}
+
+void NativeSurfaceWindow::setInputHandler(InputHandler handler)
+{
+	input_handler_ = std::move(handler);
 }
 
 const NativeSurfaceState& NativeSurfaceWindow::surfaceState() const noexcept
@@ -262,6 +268,8 @@ bool NativeSurfaceWindow::event(QEvent* event)
 			frame_request_handler_();
 		return true;
 	}
+	if (input_handler_ && input_handler_(event))
+		return true;
 	return QWindow::event(event);
 }
 

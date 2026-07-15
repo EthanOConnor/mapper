@@ -71,12 +71,14 @@ class NativeSurfaceWindow : public QWindow
 public:
 	using StateHandler = std::function<void(const NativeSurfaceState&)>;
 	using FrameRequestHandler = std::function<void()>;
+	using InputHandler = std::function<bool(QEvent*)>;
 
 	explicit NativeSurfaceWindow(QWindow* parent = nullptr);
 	~NativeSurfaceWindow() override;
 
 	void setStateHandler(StateHandler handler);
 	void setFrameRequestHandler(FrameRequestHandler handler);
+	void setInputHandler(InputHandler handler);
 	const NativeSurfaceState& surfaceState() const noexcept;
 	void requestFrame();
 	void refreshState();
@@ -98,6 +100,7 @@ private:
 
 	StateHandler state_handler_;
 	FrameRequestHandler frame_request_handler_;
+	InputHandler input_handler_;
 	NativeSurfaceState state_;
 	std::uint64_t next_sequence_ = 1;
 	bool platform_surface_available_ = false;

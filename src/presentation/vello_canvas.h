@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 
+#include <QCursor>
 #include <QWidget>
 #include <QTimer>
 
@@ -25,8 +26,9 @@ namespace OpenOrienteering::presentation {
 /**
  * QWidget host for the render-only native Vello surface.
  *
- * The host is transparent to input. It owns no Map or MapView; its caller owns
- * interaction, frame planning, and revision selection.
+ * It owns no Map or MapView. Native-surface events are forwarded once to the
+ * parent QWidget, which remains the input authority and owns all interaction,
+ * frame planning, and revision selection.
  */
 class VelloCanvas : public QWidget
 {
@@ -44,8 +46,11 @@ public:
 	std::string lastError() const;
 	const NativeSurfaceState& surfaceState() const noexcept;
 	std::size_t encodedSceneCount() const noexcept;
+	void setPresentationCursor(const QCursor& cursor);
+	QCursor presentationCursor() const;
 
 private:
+	bool forwardInputEvent(QEvent* event);
 	void submitCurrentFrame();
 	void pollResults();
 

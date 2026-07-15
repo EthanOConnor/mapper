@@ -415,6 +415,51 @@ void FramePipelineTest::mapWidgetUsesTheFrameContract()
 	QVERIFY(QTest::qWaitForWindowExposed(&widget));
 	widget.raise();
 	widget.activateWindow();
+	widget.setCursor(Qt::CrossCursor);
+	QCOMPARE(canvas->presentationCursor().shape(), Qt::CrossCursor);
+	QPixmap custom_cursor(16, 16);
+	custom_cursor.fill(QColor(40, 90, 180));
+	widget.setCursor(QCursor(custom_cursor, 3, 5));
+	QCOMPARE(canvas->presentationCursor().shape(), Qt::BitmapCursor);
+	QCOMPARE(canvas->presentationCursor().hotSpot(), QPoint(3, 5));
+	QCOMPARE(canvas->presentationCursor().pixmap().toImage(), custom_cursor.toImage());
+	presentation::NativeSurfaceWindow* native_surface = nullptr;
+	for (auto* window : QGuiApplication::allWindows())
+	{
+		auto* candidate = dynamic_cast<presentation::NativeSurfaceWindow*>(window);
+		if (candidate
+		    && candidate->surfaceState().native.window == canvas->surfaceState().native.window)
+		{
+			native_surface = candidate;
+			break;
+		}
+	}
+	QVERIFY(native_surface);
+	auto const drag_start = QPointF(300, 240);
+	auto const drag_end = QPointF(365, 275);
+	auto const global_start = QPointF(native_surface->mapToGlobal(drag_start.toPoint()));
+	auto const global_end = QPointF(native_surface->mapToGlobal(drag_end.toPoint()));
+	auto const center_before_drag = view.center();
+	QMouseEvent press(
+		QEvent::MouseButtonPress, drag_start, drag_start, global_start,
+		Qt::MiddleButton, Qt::MiddleButton, Qt::NoModifier
+	);
+	QCoreApplication::sendEvent(native_surface, &press);
+	QCOMPARE(canvas->presentationCursor().shape(), Qt::ClosedHandCursor);
+	QMouseEvent move(
+		QEvent::MouseMove, drag_end, drag_end, global_end,
+		Qt::NoButton, Qt::MiddleButton, Qt::NoModifier
+	);
+	QCoreApplication::sendEvent(native_surface, &move);
+	QCOMPARE(view.panOffset(), (drag_end - drag_start).toPoint());
+	QMouseEvent release(
+		QEvent::MouseButtonRelease, drag_end, drag_end, global_end,
+		Qt::MiddleButton, Qt::NoButton, Qt::NoModifier
+	);
+	QCoreApplication::sendEvent(native_surface, &release);
+	QCOMPARE(view.panOffset(), QPoint());
+	QVERIFY(view.center() != center_before_drag);
+	QCOMPARE(canvas->presentationCursor().shape(), Qt::BitmapCursor);
 	auto const frame_is_current = [canvas] {
 		return canvas->currentFrame() && canvas->lastResult()
 		       && canvas->lastResult()->completion.frame_id == canvas->currentFrame()->id
@@ -466,6 +511,20 @@ void FramePipelineTest::nativeSurfacePublishesOrderedLifecycle()
 	using namespace presentation;
 	NativeSurfaceWindow window;
 	QVERIFY(window.flags().testFlag(Qt::WindowDoesNotAcceptFocus));
+	QVERIFY(!window.flags().testFlag(Qt::WindowTransparentForInput));
+	auto input_events = 0;
+	window.setInputHandler([&input_events](QEvent* event) {
+		if (event->type() != QEvent::MouseMove)
+			return false;
+		++input_events;
+		return true;
+	});
+	QMouseEvent mouse_move(
+		QEvent::MouseMove, QPointF(20, 30), QPointF(20, 30),
+		Qt::NoButton, Qt::NoButton, Qt::NoModifier
+	);
+	QCoreApplication::sendEvent(&window, &mouse_move);
+	QCOMPARE(input_events, 1);
 	std::vector<NativeSurfaceState> states;
 	window.setStateHandler([&states](auto const& state) { states.push_back(state); });
 

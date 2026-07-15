@@ -10,7 +10,15 @@
 #include <utility>
 
 #include <QtGlobal>
+#include <QCoreApplication>
+#include <QEnterEvent>
+#include <QKeyEvent>
+#include <QMouseEvent>
+#include <QNativeGestureEvent>
+#include <QTabletEvent>
+#include <QTouchEvent>
 #include <QVBoxLayout>
+#include <QWheelEvent>
 
 namespace OpenOrienteering::presentation {
 
@@ -57,6 +65,7 @@ VelloCanvas::VelloCanvas(QWidget* parent)
 			retry_timer_.stop();
 	});
 	surface_->setFrameRequestHandler([this] { submitCurrentFrame(); });
+	surface_->setInputHandler([this](QEvent* event) { return forwardInputEvent(event); });
 }
 
 VelloCanvas::~VelloCanvas()
@@ -65,6 +74,7 @@ VelloCanvas::~VelloCanvas()
 	retry_timer_.stop();
 	surface_->setStateHandler({});
 	surface_->setFrameRequestHandler({});
+	surface_->setInputHandler({});
 	renderer_.reset();
 }
 
@@ -108,6 +118,144 @@ const NativeSurfaceState& VelloCanvas::surfaceState() const noexcept
 std::size_t VelloCanvas::encodedSceneCount() const noexcept
 {
 	return renderer_->encodedSceneCount();
+}
+
+void VelloCanvas::setPresentationCursor(const QCursor& cursor)
+{
+	setCursor(cursor);
+	container_->setCursor(cursor);
+	surface_->setCursor(cursor);
+}
+
+QCursor VelloCanvas::presentationCursor() const
+{
+	return surface_->cursor();
+}
+
+bool VelloCanvas::forwardInputEvent(QEvent* event)
+{
+	auto* target = parentWidget();
+	if (!target || !target->isVisible())
+		return false;
+
+	auto const target_origin = QPointF(mapTo(target, QPoint(0, 0)));
+	auto const container_origin = QPointF(container_->pos());
+	auto const map_to_target = [&](const QPointF& surface_position) {
+		return target_origin + container_origin + surface_position;
+	};
+	auto const deliver = [&](QEvent& forwarded) {
+		QCoreApplication::sendEvent(target, &forwarded);
+		event->setAccepted(forwarded.isAccepted());
+		return true;
+	};
+
+	switch (event->type())
+	{
+	case QEvent::KeyPress:
+	case QEvent::KeyRelease:
+	{
+		auto const* key = static_cast<QKeyEvent*>(event);
+		QKeyEvent forwarded(
+			key->type(), key->key(), key->modifiers(), key->nativeScanCode(),
+			key->nativeVirtualKey(), key->nativeModifiers(), key->text(),
+			key->isAutoRepeat(), quint16(key->count()), key->device()
+		);
+		forwarded.setTimestamp(key->timestamp());
+		return deliver(forwarded);
+	}
+
+	case QEvent::MouseButtonPress:
+	case QEvent::MouseButtonRelease:
+	case QEvent::MouseButtonDblClick:
+	case QEvent::MouseMove:
+	{
+		auto const* mouse = static_cast<QMouseEvent*>(event);
+		auto const local_position = map_to_target(mouse->position());
+		if (event->type() == QEvent::MouseButtonPress
+		    && (target->focusPolicy() & Qt::ClickFocus) == Qt::ClickFocus)
+			target->setFocus(Qt::MouseFocusReason);
+		QMouseEvent forwarded(
+			mouse->type(), local_position, local_position, mouse->globalPosition(),
+			mouse->button(), mouse->buttons(), mouse->modifiers(), mouse->source(),
+			mouse->pointingDevice()
+		);
+		forwarded.setTimestamp(mouse->timestamp());
+		return deliver(forwarded);
+	}
+
+	case QEvent::Wheel:
+	{
+		auto const* wheel = static_cast<QWheelEvent*>(event);
+		QWheelEvent forwarded(
+			map_to_target(wheel->position()), wheel->globalPosition(),
+			wheel->pixelDelta(), wheel->angleDelta(), wheel->buttons(),
+			wheel->modifiers(), wheel->phase(), wheel->inverted(), wheel->source(),
+			wheel->pointingDevice()
+		);
+		forwarded.setTimestamp(wheel->timestamp());
+		return deliver(forwarded);
+	}
+
+	case QEvent::NativeGesture:
+	{
+		auto const* gesture = static_cast<QNativeGestureEvent*>(event);
+		auto const local_position = map_to_target(gesture->position());
+		QNativeGestureEvent forwarded(
+			gesture->gestureType(), gesture->pointingDevice(), gesture->fingerCount(),
+			local_position, local_position, gesture->globalPosition(), gesture->value(),
+			gesture->delta()
+		);
+		forwarded.setTimestamp(gesture->timestamp());
+		return deliver(forwarded);
+	}
+
+	case QEvent::TabletPress:
+	case QEvent::TabletMove:
+	case QEvent::TabletRelease:
+	{
+		auto const* tablet = static_cast<QTabletEvent*>(event);
+		QTabletEvent forwarded(
+			tablet->type(), tablet->pointingDevice(),
+			map_to_target(tablet->position()), tablet->globalPosition(),
+			tablet->pressure(), float(tablet->xTilt()), float(tablet->yTilt()),
+			float(tablet->tangentialPressure()), tablet->rotation(), float(tablet->z()),
+			tablet->modifiers(), tablet->button(), tablet->buttons()
+		);
+		forwarded.setTimestamp(tablet->timestamp());
+		return deliver(forwarded);
+	}
+
+	case QEvent::Enter:
+	{
+		auto const* enter = static_cast<QEnterEvent*>(event);
+		auto const local_position = map_to_target(enter->position());
+		QEnterEvent forwarded(
+			local_position, local_position, enter->globalPosition(),
+			enter->pointingDevice()
+		);
+		forwarded.setTimestamp(enter->timestamp());
+		return deliver(forwarded);
+	}
+
+	case QEvent::Leave:
+	{
+		QEvent forwarded(QEvent::Leave);
+		return deliver(forwarded);
+	}
+
+	case QEvent::TouchBegin:
+	case QEvent::TouchUpdate:
+	case QEvent::TouchEnd:
+	case QEvent::TouchCancel:
+		// The canvas covers its input authority exactly, so touch point local
+		// coordinates already match. Reusing the public event preserves every
+		// point's pressure, history, velocity, and device metadata.
+		QCoreApplication::sendEvent(target, event);
+		return true;
+
+	default:
+		return false;
+	}
 }
 
 void VelloCanvas::submitCurrentFrame()

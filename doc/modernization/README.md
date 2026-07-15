@@ -151,9 +151,11 @@ The corresponding `NativeSurfaceWindow` uses public Qt APIs only. It owns a
 render-only `QWindow`, emits sequenced unavailable/hidden/exposed/suspended
 state, reports logical and physical size, and exposes Qt's opaque `WId` plus
 the public XCB/Wayland application display handle where required. It contains
-no map, snapshot, cache, renderer, input forwarding, render policy, or private
-`qpa` dependency. Presentation readiness and surface-loss recovery use bounded
-event-driven retries because those are ordinary lifecycle states.
+no map, snapshot, cache, renderer, input policy, render policy, or private
+`qpa` dependency. Its single input callback lets the canvas translate native
+window events to the parent widget without teaching the surface about Mapper.
+Presentation readiness and surface-loss recovery use bounded event-driven
+retries because those are ordinary lifecycle states.
 
 Checkpoint 4 connects this boundary to a typed `cxx` bridge and Vello 0.9.0.
 Rust owns the wgpu instance, surface, adapter, device, queue, Vello renderer,
@@ -161,8 +163,10 @@ render thread, and presentation. `RenderIR` instances are encoded once and held
 as shared retained scenes while their immutable C++ source remains alive. The
 ordered lifecycle channel is bounded independently from the capacity-one,
 latest-wins frame channel; synchronous offscreen requests use their own bounded
-reliable channel. The QWidget host stays transparent to input and contains no
-map, planner, cache policy, or backend selection.
+reliable channel. The QWidget host contains no map, planner, cache policy, or
+backend selection. Its native child owns platform hit-testing so standard and
+custom cursors work; the host forwards mouse, wheel, trackpad, tablet, touch,
+enter/leave, and key events once to its parent input authority.
 
 On Apple platforms, public raw-window APIs require deriving the AppKit surface
 from the `NSView` on the main thread. Only instance/surface preparation occurs

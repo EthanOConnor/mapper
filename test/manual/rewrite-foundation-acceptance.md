@@ -16,6 +16,28 @@ source branch to merge or transplant.
 | iOS decision | `SUPPORT.md` declares iOS unsupported until there is a maintained preset, package, runtime-surface acceptance, and release owner. No historical cross-build is carried as a support promise. | Pass |
 | Renderer comparison | `test/manual/render-parity.md` records the repeatable three-map trace against `full-speed-ahead@74c364569059f8e83f1f9e2623671ff9fe2b9fff`. A fresh replay at `f106ee2d` matched the viewport, DPR, committed zooms, and final camera states and produced complete lossless phase images for all three maps. | Automated and still-image pass; live trackpad/display verdict remains open |
 
+## 2026-07-15 native interaction correction
+
+Live review of the rewritten app on `kelsey-dense-contours` found that its
+embedded native render window won platform input hit-testing. Toolbar zoom
+worked, but map panning, selection, editing, and tool cursors did not. Making
+the native window input-transparent restored interactions but prevented macOS
+from presenting its custom cursor, because AppKit only updates the cursor for
+the native view selected by hit-testing.
+
+`modernization-checkpoint-16-input-parity` keeps the render window as the
+native input and cursor surface, then forwards its public Qt mouse, wheel,
+trackpad, tablet, touch, enter/leave, and key events through `VelloCanvas` to
+the parent `MapWidget`. The surface contains no Mapper behavior. The regression
+test sends a real middle-button drag to the native window and requires the map
+camera to pan and the presentation cursor to change from a custom bitmap to a
+closed hand and back. The complete 36-test Release suite passes with this path.
+
+A club mapper then repeated the dense-contour interaction check in the native
+macOS app and accepted panning, tool selection, object interaction, zoom, and
+custom cursor behavior. This is a pass for the defect and product scenario; it
+does not substitute for the remaining continuous three-map comparison below.
+
 ## Remaining people and hardware checks
 
 These are deliberately small product checks, not missing automation machinery:

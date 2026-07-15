@@ -223,6 +223,9 @@ set_tests_properties(
 	vello_renderer_t
 	PROPERTIES RESOURCE_LOCK mapper_gpu
 )
+# This test presents and activates a real native child window. Competing GUI
+# tests can prevent the hosted window system from reporting it exposed.
+set_tests_properties(frame_pipeline_t PROPERTIES RUN_SERIAL TRUE)
 
 # Manual parity helper used to compare exact upstream and modernization
 # checkpoints without adding another product-facing export path.
