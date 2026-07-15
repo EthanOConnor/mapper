@@ -16,19 +16,26 @@ source branch to merge or transplant.
 | iOS decision | `SUPPORT.md` declares iOS unsupported until there is a maintained preset, package, runtime-surface acceptance, and release owner. No historical cross-build is carried as a support promise. | Pass |
 | Renderer comparison | `test/manual/render-parity.md` records the repeatable three-map trace against `full-speed-ahead@74c364569059f8e83f1f9e2623671ff9fe2b9fff`. A fresh replay at `f106ee2d` matched the viewport, DPR, committed zooms, and final camera states and produced complete lossless phase images for all three maps. | Automated and still-image pass; live trackpad/display verdict remains open |
 
-## Release-candidate decisions still requiring people and hardware
+## Remaining people and hardware checks
 
 These are deliberately small product checks, not missing automation machinery:
 
-1. On Windows 11, complete `windows-print-acceptance.md` with one physical
-   printer, a measured 100 mm map distance, retained driver properties, and a
-   scan or calibrated photograph.
-2. Have a club mapper run the same three maps in `main@f106ee2d` and
+1. Before accepting the rewrite as superior in practice, have a club mapper run
+   the same three maps in `main@f106ee2d` and
    `full-speed-ahead@74c36456` on representative hardware. Record whether pan,
    pinch, cursor-anchored zoom, text and pattern stability, crispness, display
    pacing, and input latency are at least as good in the rewrite.
+2. Before shipping a release candidate, complete
+   `windows-print-acceptance.md` on Windows 11 with one physical printer, a
+   measured 100 mm map distance, retained driver properties, and a scan or
+   calibrated photograph. This is defense against real driver behavior; the
+   modernization foundation gate is already satisfied by the tested public-Qt
+   precision spool.
+3. Before shipping an Android release candidate, repeat the surface and
+   document-access smoke test on a physical supported device.
 
 Do not describe the rewritten foundation as superior in practice, or begin
-feature work on it, until both verdicts are recorded as passes. A failure is a
-renderer or print defect to fix in the rewrite; it is not a reason to transplant
-the exploratory port wholesale.
+feature work on it, until the live renderer verdict is recorded as a pass. Do
+not ship a release candidate until the applicable physical-device gates pass.
+A failure is a renderer or platform defect to fix in the rewrite; it is not a
+reason to transplant the exploratory port wholesale.
