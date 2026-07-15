@@ -58,15 +58,40 @@ Local evidence from the canonical `worktrees/main` checkout:
 - Release configure/build used CMake 4.4.0, AppleClang 21.0.0, Qt 6.11.1,
   Rust 1.94.0, and build-owned Corrosion output under
   `build/release-macos/cargo`.
+- `cmake --build build/release-macos --parallel 8` with CMake 4.4.0 rebuilt
+  the complete Release tree; focused builds also covered
+  `frame_pipeline_t`, `template_layer_planner_t`, and `raster_benchmark`.
 - `ctest --test-dir build/release-macos --output-on-failure --parallel 8`
   passed all 36 discovered tests, including the native AppKit/Metal surface.
 - The focused convergence, missing-source, bounded-admission, and provisional
-  coverage cases passed; `raster_benchmark` also rebuilt successfully.
+  coverage cases passed. Rust formatting, clippy with warnings denied, and the
+  two Rust unit tests also passed with `CARGO_TARGET_DIR` under
+  `build/release-macos/cargo/checks`.
 
-The exact hosted run and artifact links remain pending for this implementation
-revision. `modernization-checkpoint-17-raster-convergence` must not be created
-until that revision and the final evidence record are both green on the public
-matrix.
+Public implementation commit
+`60424e3fd6f87d7492758060d820eaa946d806b4` passed exact-SHA GitHub Actions
+[run 29452783584](https://github.com/EthanOConnor/mapper/actions/runs/29452783584):
+[macOS](https://github.com/EthanOConnor/mapper/actions/runs/29452783584/job/87479032959),
+[Linux](https://github.com/EthanOConnor/mapper/actions/runs/29452783584/job/87479032980),
+[Android](https://github.com/EthanOConnor/mapper/actions/runs/29452783584/job/87479032940),
+and [Windows](https://github.com/EthanOConnor/mapper/actions/runs/29452783584/job/87479032956)
+all completed successfully. Its exact package artifacts are:
+
+- [Mapper-macOS, ID 8358295018](https://github.com/EthanOConnor/mapper/actions/runs/29452783584/artifacts/8358295018),
+  74,534,334 bytes, SHA-256
+  `24cd86d5c7211ca64272d0e6256cc3a22b1bac7b86f59ea0aa19b5f715db7e2c`.
+- [Mapper-Linux, ID 8358356688](https://github.com/EthanOConnor/mapper/actions/runs/29452783584/artifacts/8358356688),
+  87,085,439 bytes, SHA-256
+  `80f41d9ca005087a9cdb985892d4652027baf9a84050272861cae9d3f702d5a2`.
+- [Mapper-Android, ID 8358368297](https://github.com/EthanOConnor/mapper/actions/runs/29452783584/artifacts/8358368297),
+  255,953,487 bytes, SHA-256
+  `1a99ef7738a08ba6e7aa19536432ef2f5d61002668ed57fe958a0bf4efc3d8b4`.
+- [Mapper-Windows, ID 8358760724](https://github.com/EthanOConnor/mapper/actions/runs/29452783584/artifacts/8358760724),
+  78,157,896 bytes, SHA-256
+  `5598d6ee39b81dcac09cd3f450ca0f931035d7b80ad1db693a7bb7e968313161`.
+
+`modernization-checkpoint-17-raster-convergence` will point at this evidence
+revision only after its own exact-SHA public matrix is green.
 
 ## Remaining people and hardware checks
 
