@@ -12,6 +12,19 @@ exploratory code survives only if, after re-deriving its responsibility, it is
 still the simplest readable solution. Historical structure has no presumption
 of survival.
 
+## Current closeout authority
+
+The campaign has reached its foundation-closeout stage. Before doing more
+modernization work, read and execute the
+[`foundation closeout plan`](foundation-closeout-plan.md). A concise reusable
+handoff is in the
+[`foundation closeout agent prompt`](foundation-closeout-agent-prompt.md).
+
+The plan is authoritative for remaining work and acceptance after
+`modernization-checkpoint-16-input-parity`. The seven recovery items below are
+architectural layers, not a claim that the repository has only seven checkpoint
+tags. Feature work remains frozen through `modernization-foundation-final`.
+
 ## Scope
 
 This is pure modernization. There is no feature work in this campaign. GNSS,
