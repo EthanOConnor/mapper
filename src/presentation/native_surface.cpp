@@ -43,6 +43,19 @@ bool appIsSuspended(Qt::ApplicationState state)
 	return state == Qt::ApplicationHidden || state == Qt::ApplicationSuspended;
 }
 
+bool sameSurfaceState(const NativeSurfaceState& first, const NativeSurfaceState& second)
+{
+	return first.phase == second.phase
+	       && first.native.platform == second.native.platform
+	       && first.native.window == second.native.window
+	       && first.native.display == second.native.display
+	       && first.logical_width == second.logical_width
+	       && first.logical_height == second.logical_height
+	       && first.physical_width == second.physical_width
+	       && first.physical_height == second.physical_height
+	       && first.device_pixel_ratio == second.device_pixel_ratio;
+}
+
 #if defined(Q_OS_ANDROID)
 ANativeWindow* acquireAndroidNativeWindow(QWindow& window)
 {
@@ -181,7 +194,7 @@ void NativeSurfaceWindow::refreshState()
 #if defined(Q_OS_ANDROID)
 	refreshAndroidNativeWindow(true);
 #endif
-	publishState();
+	publishState(true);
 }
 
 #if defined(Q_OS_ANDROID)
@@ -276,7 +289,7 @@ void NativeSurfaceWindow::hideEvent(QHideEvent* event)
 	publishState();
 }
 
-void NativeSurfaceWindow::publishState()
+void NativeSurfaceWindow::publishState(bool force)
 {
 	NativeSurfaceState next;
 	next.logical_width = std::uint32_t(std::max(0, width()));
@@ -314,6 +327,8 @@ void NativeSurfaceWindow::publishState()
 			scheduleAndroidSurfaceRefresh();
 #endif
 	}
+	if (!force && state_.sequence != 0 && sameSurfaceState(next, state_))
+		return;
 
 	// Handle acquisition can synchronously create a platform surface and thus
 	// re-enter this function. Allocate the sequence only after that work so

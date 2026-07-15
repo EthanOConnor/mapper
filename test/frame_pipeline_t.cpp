@@ -414,11 +414,33 @@ void FramePipelineTest::mapWidgetUsesTheFrameContract()
 	QVERIFY(canvas_widget);
 	auto* canvas = dynamic_cast<presentation::VelloCanvas*>(canvas_widget);
 	QVERIFY(canvas);
-	QTRY_VERIFY_WITH_TIMEOUT(
-		canvas->currentFrame() && canvas->lastResult()
-		&& canvas->lastResult()->completion.frame_id == canvas->currentFrame()->id
-		&& canvas->lastResult()->surface_sequence == canvas->surfaceState().sequence
-		&& canvas->lastResult()->completion.status == render::FrameStatus::Presented,
+	auto const frame_is_current = [canvas] {
+		return canvas->currentFrame() && canvas->lastResult()
+		       && canvas->lastResult()->completion.frame_id == canvas->currentFrame()->id
+		       && canvas->lastResult()->surface_sequence == canvas->surfaceState().sequence
+		       && canvas->lastResult()->completion.status == render::FrameStatus::Presented;
+	};
+	auto const state_description = [canvas] {
+		auto const frame_id = canvas->currentFrame() ? canvas->currentFrame()->id : 0;
+		auto const result_id = canvas->lastResult()
+		                     ? canvas->lastResult()->completion.frame_id : 0;
+		auto const result_status = canvas->lastResult()
+		                         ? int(canvas->lastResult()->completion.status) : -1;
+		auto const result_surface = canvas->lastResult()
+		                          ? canvas->lastResult()->surface_sequence : 0;
+		return QStringLiteral(
+			"frame %1, result %2 status %3, result surface %4, current surface %5 phase %6, error: %7"
+		).arg(frame_id)
+		 .arg(result_id)
+		 .arg(result_status)
+		 .arg(result_surface)
+		 .arg(canvas->surfaceState().sequence)
+		 .arg(int(canvas->surfaceState().phase))
+		 .arg(QString::fromStdString(canvas->lastError()));
+	};
+	QTRY_VERIFY2_WITH_TIMEOUT(
+		frame_is_current(),
+		qPrintable(state_description()),
 		30000
 	);
 	auto const first_frame = canvas->currentFrame();
@@ -431,11 +453,9 @@ void FramePipelineTest::mapWidgetUsesTheFrameContract()
 	widget.updateEverything();
 	QTRY_VERIFY(canvas->currentFrame()->id > first_frame->id);
 	QVERIFY(canvas->currentFrame()->revision >= first_frame->revision);
-	QTRY_VERIFY_WITH_TIMEOUT(
-		canvas->lastResult()
-		&& canvas->lastResult()->completion.frame_id == canvas->currentFrame()->id
-		&& canvas->lastResult()->surface_sequence == canvas->surfaceState().sequence
-		&& canvas->lastResult()->completion.status == render::FrameStatus::Presented,
+	QTRY_VERIFY2_WITH_TIMEOUT(
+		frame_is_current(),
+		qPrintable(state_description()),
 		30000
 	);
 }
@@ -480,6 +500,13 @@ void FramePipelineTest::nativeSurfacePublishesOrderedLifecycle()
 	QCOMPARE(states.back().logical_height, std::uint32_t(200));
 	QVERIFY(states.back().physical_width >= states.back().logical_width);
 	QVERIFY(states.back().physical_height >= states.back().logical_height);
+	auto const resized_state_count = states.size();
+	QResizeEvent duplicate_resize(QSize(320, 200), QSize(320, 200));
+	QCoreApplication::sendEvent(&window, &duplicate_resize);
+	QCOMPARE(states.size(), resized_state_count);
+	window.refreshState();
+	QCOMPARE(states.size(), resized_state_count + 1);
+	QVERIFY(states.back().sequence > created_sequence);
 
 	QPlatformSurfaceEvent destroying(QPlatformSurfaceEvent::SurfaceAboutToBeDestroyed);
 	QCoreApplication::sendEvent(&window, &destroying);

@@ -89,7 +89,7 @@ protected:
 	void hideEvent(QHideEvent* event) override;
 
 private:
-	void publishState();
+	void publishState(bool force = false);
 #if defined(Q_OS_ANDROID)
 	void refreshAndroidNativeWindow(bool retire_if_missing);
 	void retireAndroidNativeWindow();
