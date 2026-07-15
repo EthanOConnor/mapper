@@ -981,9 +981,15 @@ fn create_surface_target(
     let PreparedSurface { instance, surface } = prepared;
     let adapter = pollster::block_on(request_adapter(&instance, Some(&surface)))
         .map_err(|error| format!("no compatible wgpu adapter: {error}"))?;
-    let backend = backend_id(adapter.get_info().backend);
+    let adapter_info = adapter.get_info();
+    let backend = backend_id(adapter_info.backend);
     let (device, queue) = pollster::block_on(adapter.request_device(&device_descriptor(&adapter)))
-        .map_err(|error| format!("wgpu device creation failed: {error}"))?;
+        .map_err(|error| {
+            format!(
+                "wgpu device creation failed on {} ({:?}, {:?}): {error}",
+                adapter_info.name, adapter_info.backend, adapter_info.device_type
+            )
+        })?;
     let capabilities = surface.get_capabilities(&adapter);
     let mut config = surface
         .get_default_config(&adapter, state.width, state.height)
@@ -1032,8 +1038,14 @@ fn create_offscreen_target() -> Result<OffscreenTarget, String> {
     let instance = wgpu::Instance::new(instance_descriptor(wgpu::Backends::PRIMARY));
     let adapter = pollster::block_on(request_adapter(&instance, None))
         .map_err(|error| format!("no headless wgpu adapter: {error}"))?;
+    let adapter_info = adapter.get_info();
     let (device, queue) = pollster::block_on(adapter.request_device(&device_descriptor(&adapter)))
-        .map_err(|error| format!("headless wgpu device creation failed: {error}"))?;
+        .map_err(|error| {
+            format!(
+                "headless wgpu device creation failed on {} ({:?}, {:?}): {error}",
+                adapter_info.name, adapter_info.backend, adapter_info.device_type
+            )
+        })?;
     let renderer = VelloRenderer::new(
         &device,
         RendererOptions {

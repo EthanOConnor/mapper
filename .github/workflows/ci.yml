@@ -170,7 +170,7 @@ jobs:
 
           curl.exe -L --retry 5 https://www.nuget.org/api/v2/package/Microsoft.Direct3D.WARP/1.0.20 -o (Join-Path $runtime 'warp.zip')
           tar.exe -xf (Join-Path $runtime 'warp.zip') -C $runtime build/native/bin/x64/d3d10warp.dll
-          Copy-Item (Join-Path $runtime 'build/native/bin/x64/d3d10warp.dll') build/ci-windows/Release/
+          Copy-Item (Join-Path $runtime 'build/native/bin/x64/d3d10warp.dll') build/ci-windows/test/Release/
 
           curl.exe -L --retry 5 https://www.nuget.org/api/v2/package/Microsoft.Direct3D.D3D12/1.619.0 -o (Join-Path $runtime 'agility.zip')
           tar.exe -xf (Join-Path $runtime 'agility.zip') -C $runtime build/native/bin/x64
@@ -207,7 +207,7 @@ jobs:
       - name: Remove Windows software GPU test runtime
         if: runner.os == 'Windows' && always()
         shell: pwsh
-        run: Remove-Item -Force -ErrorAction SilentlyContinue build/ci-windows/Release/d3d10warp.dll
+        run: Remove-Item -Force -ErrorAction SilentlyContinue build/ci-windows/test/Release/d3d10warp.dll
 
       - name: Package
         run: cmake --build --preset ${{ matrix.preset }} --target package
