@@ -167,6 +167,7 @@ jobs:
           Expand-Archive (Join-Path $runtime 'dxc.zip') -DestinationPath (Join-Path $runtime 'dxc')
 
           "WGPU_BACKEND=dx12" | Out-File -Append $env:GITHUB_ENV
+          "WGPU_ADAPTER_NAME=Microsoft Basic Render Driver" | Out-File -Append $env:GITHUB_ENV
           "WGPU_DX12_COMPILER=dxc" | Out-File -Append $env:GITHUB_ENV
           "WGPU_DX12_AGILITY_SDK_PATH=$(Join-Path $runtime 'build/native/bin/x64')" | Out-File -Append $env:GITHUB_ENV
           "WGPU_DX12_AGILITY_SDK_VERSION=619" | Out-File -Append $env:GITHUB_ENV

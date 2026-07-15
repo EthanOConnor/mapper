@@ -215,9 +215,8 @@ add_system_test(track_t)  # Could be unit test, but needs Georeferencing
 add_system_test(transform_t)
 add_system_test(undo_manager_t)
 
-# Hosted Windows exposes one native D3D adapter to the test session. Opening it
-# concurrently from separate renderer processes can crash inside OpenAdapter,
-# so keep the three GPU acceptance tests complete but serialize their access.
+# Hosted Windows runs these against one explicitly selected software D3D adapter.
+# Keep the three GPU acceptance tests complete but serialize their device access.
 set_tests_properties(
 	frame_pipeline_t
 	template_layer_planner_t

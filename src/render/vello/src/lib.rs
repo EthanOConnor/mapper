@@ -913,6 +913,23 @@ fn instance_descriptor(platform_defaults: wgpu::Backends) -> wgpu::InstanceDescr
     descriptor
 }
 
+async fn request_adapter<'a>(
+    instance: &wgpu::Instance,
+    compatible_surface: Option<&'a wgpu::Surface<'a>>,
+) -> Result<wgpu::Adapter, wgpu::RequestAdapterError> {
+    if std::env::var_os("WGPU_ADAPTER_NAME").is_some() {
+        return wgpu::util::initialize_adapter_from_env(instance, compatible_surface).await;
+    }
+
+    instance
+        .request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            force_fallback_adapter: false,
+            compatible_surface,
+        })
+        .await
+}
+
 fn backend_id(backend: wgpu::Backend) -> u8 {
     match backend {
         wgpu::Backend::Vulkan => 1,
@@ -962,12 +979,8 @@ fn create_surface_target(
     prepared: PreparedSurface,
 ) -> Result<SurfaceTarget, String> {
     let PreparedSurface { instance, surface } = prepared;
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        power_preference: wgpu::PowerPreference::HighPerformance,
-        force_fallback_adapter: false,
-        compatible_surface: Some(&surface),
-    }))
-    .map_err(|error| format!("no compatible wgpu adapter: {error}"))?;
+    let adapter = pollster::block_on(request_adapter(&instance, Some(&surface)))
+        .map_err(|error| format!("no compatible wgpu adapter: {error}"))?;
     let backend = backend_id(adapter.get_info().backend);
     let (device, queue) = pollster::block_on(adapter.request_device(&device_descriptor(&adapter)))
         .map_err(|error| format!("wgpu device creation failed: {error}"))?;
@@ -1017,12 +1030,8 @@ fn create_surface_target(
 
 fn create_offscreen_target() -> Result<OffscreenTarget, String> {
     let instance = wgpu::Instance::new(instance_descriptor(wgpu::Backends::PRIMARY));
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        power_preference: wgpu::PowerPreference::HighPerformance,
-        force_fallback_adapter: false,
-        compatible_surface: None,
-    }))
-    .map_err(|error| format!("no headless wgpu adapter: {error}"))?;
+    let adapter = pollster::block_on(request_adapter(&instance, None))
+        .map_err(|error| format!("no headless wgpu adapter: {error}"))?;
     let (device, queue) = pollster::block_on(adapter.request_device(&device_descriptor(&adapter)))
         .map_err(|error| format!("headless wgpu device creation failed: {error}"))?;
     let renderer = VelloRenderer::new(
