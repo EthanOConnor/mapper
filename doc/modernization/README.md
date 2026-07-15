@@ -354,7 +354,7 @@ Do not add a package for a tiny readable standard-library helper or pull in a
 second application framework. Prefer imported/package targets over copied
 source. A local patch needs a removal condition and a test.
 
-The development baseline is CMake 4.4.0, Ninja 1.13.0, C++23, Qt 6.11.1,
+The development baseline is CMake 4.4.0, Ninja 1.13.0, C++23, Qt 6.10.2,
 PROJ 9.8.1, GDAL 3.13.1, ICU 78.3, and Rust stable with committed `Cargo.lock`.
 Distributable builds use the pinned vcpkg manifest; fast local builds may use
 system packages that satisfy the same minimums. Build properties are
