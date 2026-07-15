@@ -27,7 +27,7 @@ then expose its root to CMake:
 
 ```sh
 git clone https://github.com/microsoft/vcpkg.git .vcpkg
-git -C .vcpkg checkout db4723bd0a99eab031f1a3dee4336dca43049c87
+git -C .vcpkg checkout 4b866ceb02b989365b916f93db4f76146a8ec438
 .vcpkg/bootstrap-vcpkg.sh -disableMetrics
 export VCPKG_ROOT="$PWD/.vcpkg"
 ```

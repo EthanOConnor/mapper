@@ -366,6 +366,8 @@ StrokeStyle OverlaySceneBuilder::stroke() const
 		.cap = lineCap(pen.capStyle()),
 		.join = lineJoin(pen.joinStyle()),
 		.miter_limit = pen.miterLimit(),
+		.dash_pattern = {},
+		.dash_offset = 0,
 	};
 	if (pen.style() != Qt::SolidLine && pen.style() != Qt::NoPen)
 	{

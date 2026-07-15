@@ -58,6 +58,42 @@ add_library(Mapper::RenderIR ALIAS mapper-render-ir)
 mapper_target_defaults(mapper-render-ir)
 target_include_directories(mapper-render-ir PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 
+# The production screen backend is a replaceable consumer of immutable frame
+# packets. Keep it out of the application library so a future backend can
+# reuse the same planner/IR contract without introducing a runtime plugin
+# system or teaching document code about GPU implementation details.
+add_library(mapper-vello-backend STATIC
+  render/vello_renderer.cpp
+)
+add_library(Mapper::VelloBackend ALIAS mapper-vello-backend)
+mapper_target_defaults(mapper-vello-backend)
+target_include_directories(mapper-vello-backend PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(mapper-vello-backend
+  PUBLIC
+  Mapper::RenderIR
+  Qt6::Gui
+  PRIVATE
+  mapper-vello-cxx
+)
+
+# Qt owns window lifecycle and input; this target only adapts an immutable
+# frame packet to the production native-surface backend.
+add_library(mapper-vello-presentation STATIC
+  presentation/native_surface.cpp
+  presentation/vello_canvas.cpp
+)
+add_library(Mapper::VelloPresentation ALIAS mapper-vello-presentation)
+mapper_target_defaults(mapper-vello-presentation)
+target_include_directories(mapper-vello-presentation PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(mapper-vello-presentation
+  PUBLIC
+  Mapper::VelloBackend
+  Qt6::Widgets
+)
+if(ANDROID)
+  target_link_libraries(mapper-vello-presentation PRIVATE android)
+endif()
+
 
 # Resources (from project root)
 
@@ -114,11 +150,6 @@ set(Mapper_Common_SRCS
   render/qpainter_frame_renderer.cpp
   render/qpainter_renderer.cpp
   render/template_layer_planner.cpp
-  render/vello_renderer.cpp
-
-  presentation/native_surface.cpp
-  presentation/vello_canvas.cpp
-  
   core/symbols/area_symbol.cpp
   core/symbols/combined_symbol.cpp
   core/symbols/html_symbol_report.cpp
@@ -319,17 +350,14 @@ target_link_libraries(Mapper_Common
   PUBLIC
   Clipper2::Clipper2
   Mapper::RenderIR
+  Mapper::VelloPresentation
   ${PROJ_LIBRARIES}
   Qt6::Widgets
   Qt6::Svg
   PRIVATE
-  mapper-vello-cxx
   ICU::data
   ICU::uc
 )
-if(ANDROID)
-	target_link_libraries(Mapper_Common PRIVATE android)
-endif()
 foreach(lib
   cove
   mapper-config

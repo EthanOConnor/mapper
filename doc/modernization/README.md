@@ -83,9 +83,10 @@ Dependencies point in one direction:
 6. **Presentation:** Qt window lifecycle, native handles, input routing, and
    frame requests.
 
-The domain knows nothing about backends, GPU resources, native surfaces, or
-widgets. The IR contains no `QPainter`, QRhi, wgpu, Vello, or platform handles.
-Presentation does not own maps, snapshots, spatial policy, or caches.
+The map-to-snapshot render path knows nothing about backends, GPU resources,
+native surfaces, or widgets. The IR contains no `QPainter`, QRhi, wgpu, Vello,
+or platform handles. Presentation does not own maps, snapshots, spatial policy,
+or caches.
 
 ### Snapshot and IR
 
@@ -287,9 +288,13 @@ calculation to use viewport-local bounds. A focused `Map` test exercises every
 presentation request without constructing a widget.
 
 The renderer-neutral contract is an explicit `Mapper::RenderIR` CMake target.
-It has no Qt or backend link dependency, and the full runtime depends on it in
-the ordinary forward direction. Source and test include paths and compile
-definitions are target-scoped; no directory-wide CMake build state remains.
+It has no Qt or backend link dependency. The production GPU consumer and its
+Qt native-surface adapter are separate `Mapper::VelloBackend` and
+`Mapper::VelloPresentation` targets, with `FramePacket` as the replacement
+seam. This is deliberately a static build boundary rather than a runtime plugin
+mechanism. The full runtime depends on these targets in the ordinary forward
+direction. Source and test include paths and compile definitions are
+target-scoped; no directory-wide CMake build state remains.
 Static GDAL and ICU dependencies are resolved through their maintained imported
 targets, including the image/database primitives and ICU data archive required
 by the Android cross-link. This is intentionally the whole enforcement

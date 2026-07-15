@@ -14,6 +14,11 @@ purposes unambiguous.
   dependency updates, CI, packaging, and releases converge here.
 - Product topic branches start from `main` and are short-lived.
 
+GitHub blocks deletion and non-fast-forward updates of `main` and `master`.
+This is intentionally a small safety rail rather than a mandatory pull-request
+workflow: maintainers may push reviewed fast-forward commits directly, while
+rewriting either canonical branch remains prohibited.
+
 If a product change is suitable upstream, re-derive the smallest maintained
 change from `master`. The product branch is evidence and a behavioral oracle,
 not ancestry for the pull request.

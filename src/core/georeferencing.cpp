@@ -128,7 +128,7 @@ namespace
 			{
 				QFile version_file(cache.filePath(version_filename));
 				if (!version_file.open(QIODevice::WriteOnly)
-				    || version_file.write(APP_VERSION) != qstrlen(APP_VERSION))
+				    || version_file.write(APP_VERSION) != qint64(qstrlen(APP_VERSION)))
 				{
 					qDebug("Failed to write PROJ cache version file");
 				}
