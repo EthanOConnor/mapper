@@ -44,7 +44,6 @@
 #include <QMessageBox>
 #include <QMouseEvent>
 #include <QObjectList>
-#include <QPaintEvent>
 #include <QPinchGesture>
 #include <QPointer>
 #include <QResizeEvent>
@@ -249,7 +248,7 @@ void MapWidget::setMapView(MapView* view)
 			scheduleRenderContextUpdate();
 		}
 		
-		update();
+		scheduleFrameUpdate();
 		maybeStartRenderValidationDriver();
 	}
 }
@@ -505,7 +504,7 @@ void MapWidget::visibilityChanged(MapView::VisibilityFeature feature, bool activ
 	case MapView::VisibilityFeature::GridVisible:
 	case MapView::VisibilityFeature::MapVisible:
 	case MapView::VisibilityFeature::AllTemplatesHidden:
-		update();
+		scheduleFrameUpdate();
 		break;
 		
 	default:
@@ -520,7 +519,7 @@ void MapWidget::setPanOffset(const QPoint& offset)
 {
 	pan_offset = offset;
 	scheduleRenderContextUpdate();
-	update();
+	scheduleFrameUpdate();
 }
 
 void MapWidget::startDragging(const QPoint& cursor_pos)
@@ -571,7 +570,7 @@ void MapWidget::updatePinching(const QPoint& center, qreal factor)
 	pinching_center = center;
 	pinching_factor = factor;
 	updateZoomDisplay();
-	update();
+	scheduleFrameUpdate();
 }
 
 void MapWidget::finishPinching(const QPoint& center, qreal factor)
@@ -585,7 +584,7 @@ void MapWidget::cancelPinching()
 {
 	pinching = false;
 	pinching_factor = 1.0;
-	update();
+	scheduleFrameUpdate();
 }
 
 void MapWidget::maybeStartRenderValidationDriver()
@@ -847,7 +846,7 @@ void MapWidget::markTemplateAreaDirty(const QRectF& view_rect, int pixel_border)
 							   viewport_rect.width() + 2*(1+pixel_border), viewport_rect.height() + 2*(1+pixel_border));
 	
 	if (integer_rect.intersects(rect()))
-		update(integer_rect);
+		scheduleFrameUpdate();
 }
 
 void MapWidget::markObjectAreaDirty(const QRectF& map_rect)
@@ -871,7 +870,7 @@ void MapWidget::setDrawingBoundingBox(QRectF map_rect, int pixel_border, bool do
 		drawing_dirty_rect = {};
 	}
 	if (do_update && redraw.isValid())
-		update(redraw);
+		scheduleFrameUpdate();
 }
 
 void MapWidget::clearDrawingBoundingBox()
@@ -879,7 +878,7 @@ void MapWidget::clearDrawingBoundingBox()
 	drawing_dirty_rect_map.setWidth(0);
 	if (drawing_dirty_rect.isValid())
 	{
-		update(drawing_dirty_rect);
+		scheduleFrameUpdate();
 		drawing_dirty_rect.setWidth(0);
 	}
 }
@@ -900,7 +899,7 @@ void MapWidget::setActivityBoundingBox(QRectF map_rect, int pixel_border, bool d
 		activity_dirty_rect = {};
 	}
 	if (do_update && redraw.isValid())
-		update(redraw);
+		scheduleFrameUpdate();
 }
 
 void MapWidget::clearActivityBoundingBox()
@@ -908,7 +907,7 @@ void MapWidget::clearActivityBoundingBox()
 	activity_dirty_rect_map.setWidth(0);
 	if (activity_dirty_rect.isValid())
 	{
-		update(activity_dirty_rect);
+		scheduleFrameUpdate();
 		activity_dirty_rect.setWidth(0);
 	}
 }
@@ -918,7 +917,7 @@ void MapWidget::updateDrawing(const QRectF& map_rect, int pixel_border)
 	QRect viewport_rect = calculateViewportBoundingBox(map_rect, pixel_border);
 	
 	if (viewport_rect.intersects(rect()))
-		update(viewport_rect);
+		scheduleFrameUpdate();
 }
 
 void MapWidget::updateDrawingLater(const QRectF& map_rect, int pixel_border)
@@ -946,12 +945,13 @@ void MapWidget::updateDrawingLaterSlot()
 
 void MapWidget::updateEverything()
 {
-	update();
+	scheduleFrameUpdate();
 }
 
 void MapWidget::updateEverythingInRect(const QRect& dirty_rect)
 {
-	update(dirty_rect);
+	Q_UNUSED(dirty_rect)
+	scheduleFrameUpdate();
 }
 
 QRect MapWidget::calculateViewportBoundingBox(const QRectF& map_rect, int pixel_border) const
@@ -1181,9 +1181,17 @@ void MapWidget::gestureEvent(QGestureEvent* event)
 	}
 }
 
-void MapWidget::paintEvent(QPaintEvent* event)
+void MapWidget::scheduleFrameUpdate()
 {
-	Q_UNUSED(event)
+	if (frame_update_scheduled)
+		return;
+	frame_update_scheduled = true;
+	QTimer::singleShot(0, this, &MapWidget::renderFrame);
+}
+
+void MapWidget::renderFrame()
+{
+	frame_update_scheduled = false;
 	if (overlay_revision == std::numeric_limits<render::Revision>::max())
 		qFatal("Map viewport revision space exhausted");
 
@@ -1329,6 +1337,7 @@ void MapWidget::paintEvent(QPaintEvent* event)
 void MapWidget::resizeEvent(QResizeEvent* event)
 {
 	vello_canvas->setGeometry(QRect(QPoint(), event->size()));
+	scheduleFrameUpdate();
 	
 	for (QObject* const child : children())
 	{
@@ -1660,7 +1669,7 @@ void MapWidget::updatePlaceholder()
 	    || map->getNumSymbols() < 2
 	    || map->getNumTemplates() < 2)
 	{
-		update();
+		scheduleFrameUpdate();
 	}
 }
 

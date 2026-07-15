@@ -53,7 +53,6 @@ class QInputMethodEvent;
 class QKeyEvent;
 class QLabel;
 class QMouseEvent;
-class QPaintEvent;
 class QResizeEvent;
 class QWheelEvent;
 
@@ -352,7 +351,6 @@ protected:
 	
 	virtual void gestureEvent(QGestureEvent* event);
 	
-	void paintEvent(QPaintEvent* event) override;
 	void resizeEvent(QResizeEvent* event) override;
 	
 	// Mouse input
@@ -374,6 +372,8 @@ protected:
 	void contextMenuEvent(QContextMenuEvent* event) override;
 	
 private:
+	void scheduleFrameUpdate();
+	void renderFrame();
 	void updatePlaceholder();
 	
 	/**
@@ -449,6 +449,7 @@ private:
 	QPoint pinching_center;
 	bool render_validation_driver_started = false;
 	int render_validation_driver_step = 0;
+	bool frame_update_scheduled = false;
 	bool render_context_update_scheduled;
 	
 	// Panning (operation)

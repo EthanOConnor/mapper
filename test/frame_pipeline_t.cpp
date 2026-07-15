@@ -406,14 +406,15 @@ void FramePipelineTest::mapWidgetUsesTheFrameContract()
 	widget.resize(800, 600);
 	widget.setMapView(&view);
 	widget.adjustViewToRect(fixture->extent, MapWidget::ContinuousZoom);
-	widget.show();
-	QVERIFY(QTest::qWaitForWindowExposed(&widget));
-	widget.raise();
-	widget.activateWindow();
 	auto* canvas_widget = widget.findChild<QWidget*>(QStringLiteral("mapVelloCanvas"));
 	QVERIFY(canvas_widget);
 	auto* canvas = dynamic_cast<presentation::VelloCanvas*>(canvas_widget);
 	QVERIFY(canvas);
+	QTRY_VERIFY_WITH_TIMEOUT(canvas->currentFrame(), 5000);
+	widget.show();
+	QVERIFY(QTest::qWaitForWindowExposed(&widget));
+	widget.raise();
+	widget.activateWindow();
 	auto const frame_is_current = [canvas] {
 		return canvas->currentFrame() && canvas->lastResult()
 		       && canvas->lastResult()->completion.frame_id == canvas->currentFrame()->id
