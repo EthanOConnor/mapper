@@ -18,8 +18,8 @@ env:
   CACHE_SCHEMA: v3
   CARGO_ABOUT_VERSION: "0.9.1"
   CMAKE_BUILD_PARALLEL_LEVEL: 4
-  # Newest official Qt binary currently published for every supported target.
-  QT_VERSION: "6.10.3"
+  # Newest stable Qt release published for every supported target.
+  QT_VERSION: "6.11.1"
   VCPKG_MAX_CONCURRENCY: 4
   VCPKG_ROOT: ${{ github.workspace }}/.vcpkg
   VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.vcpkg-cache
@@ -135,8 +135,13 @@ jobs:
           path: build/${{ matrix.preset }}/tools/cargo-about/bin
           key: mapper-${{ env.CACHE_SCHEMA }}-cargo-about-${{ matrix.os }}-${{ runner.arch }}-${{ matrix.preset }}-${{ env.CARGO_ABOUT_VERSION }}-${{ steps.cache_identity.outputs.rust }}
 
+      - name: Set up Python for Qt installation
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13.3"
+
       - name: Install Qt
-        uses: jurplel/install-qt-action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4.3.1
+        uses: jurplel/install-qt-action/action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4.3.1
         with:
           version: ${{ env.QT_VERSION }}
           arch: ${{ matrix.qt-arch }}
@@ -619,8 +624,13 @@ jobs:
           distribution: temurin
           java-version: 21
 
+      - name: Set up Python for Qt installation
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13.3"
+
       - name: Install host Qt tools
-        uses: jurplel/install-qt-action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4.3.1
+        uses: jurplel/install-qt-action/action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4.3.1
         with:
           version: ${{ env.QT_VERSION }}
           host: linux
@@ -630,10 +640,10 @@ jobs:
           install-deps: true
 
       - name: Install Qt for Android
-        uses: jurplel/install-qt-action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4.3.1
+        uses: jurplel/install-qt-action/action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4.3.1
         with:
           version: ${{ env.QT_VERSION }}
-          host: linux
+          host: all_os
           target: android
           arch: android_arm64_v8a
           modules: qtimageformats qtpositioning qtsensors qtserialport
