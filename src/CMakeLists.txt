@@ -436,6 +436,7 @@ if(ANDROID)
 	set_target_properties(Mapper PROPERTIES
 		QT_ANDROID_APP_NAME "OpenOrienteering Mapper"
 		QT_ANDROID_APP_ICON "@drawable/icon"
+		QT_ANDROID_COMPILE_SDK_VERSION 36
 		QT_ANDROID_MIN_SDK_VERSION 28
 		QT_ANDROID_PACKAGE_NAME "org.openorienteering.mapper"
 		QT_ANDROID_PACKAGE_SOURCE_DIR "${mapper_android_package_dir}"

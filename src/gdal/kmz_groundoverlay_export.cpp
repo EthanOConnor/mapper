@@ -226,7 +226,7 @@ bool KmzGroundOverlayExport::doExport(const MapPrinter& map_printer, int tile_wi
 	VSIErrorReset();
 	
 	// Create the KMZ container file if needed.
-	auto* kmz_file = is_kmz ? VSIFOpenL(basepath_utf8, "wb") : nullptr;
+	auto* kmz_file = is_kmz ? VSIFOpenL(basepath_utf8.constData(), "wb") : nullptr;
 	if (is_kmz && !kmz_file)
 	{
 		error_message = QString::fromUtf8(VSIGetLastErrorMsg());
@@ -240,11 +240,11 @@ bool KmzGroundOverlayExport::doExport(const MapPrinter& map_printer, int tile_wi
 	{
 		VSIFCloseL(kmz_file);
 		if (wasCanceled())
-			VSIUnlink(basepath_utf8);
+			VSIUnlink(basepath_utf8.constData());
 	}
 	else if (wasCanceled())
 	{
-		VSIUnlink(doc_filepath_utf8);
+		VSIUnlink(doc_filepath_utf8.constData());
 	}
 	setProgress(maximumProgress());
 	return result;
@@ -408,10 +408,10 @@ void KmzGroundOverlayExport::saveToBuffer(const QImage& image, QByteArray& data)
 // static
 void KmzGroundOverlayExport::writeToVSI(const QByteArray& filepath_utf8, const QByteArray& data)
 {
-	auto* file = VSIFOpenL(filepath_utf8, "wb");
+	auto* file = VSIFOpenL(filepath_utf8.constData(), "wb");
 	if (!file)
 		throw FileFormatException(QString::fromUtf8(VSIGetLastErrorMsg()));
-	VSIFWriteL(data, 1, data.size(), file);
+	VSIFWriteL(data.constData(), 1, data.size(), file);
 	VSIFCloseL(file);
 }
 

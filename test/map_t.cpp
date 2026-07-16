@@ -143,23 +143,23 @@ void MapTest::presentationRequestsTest()
 	auto received_border = 0;
 	auto received_update = false;
 
-	connect(&map, &Map::redrawRequested, [&] { ++redraws; });
-	connect(&map, &Map::drawingBoundingBoxChanged,
+	connect(&map, &Map::redrawRequested, &map, [&] { ++redraws; });
+	connect(&map, &Map::drawingBoundingBoxChanged, &map,
 	        [&](const QRectF& rect, int border, bool update) {
 			++drawing_changes;
 			received_rect = rect;
 			received_border = border;
 			received_update = update;
 		});
-	connect(&map, &Map::drawingBoundingBoxCleared, [&] { ++drawing_clears; });
-	connect(&map, &Map::activityBoundingBoxChanged,
+	connect(&map, &Map::drawingBoundingBoxCleared, &map, [&] { ++drawing_clears; });
+	connect(&map, &Map::activityBoundingBoxChanged, &map,
 	        [&](const QRectF&, int, bool) { ++activity_changes; });
-	connect(&map, &Map::activityBoundingBoxCleared, [&] { ++activity_clears; });
-	connect(&map, &Map::drawingUpdateRequested,
+	connect(&map, &Map::activityBoundingBoxCleared, &map, [&] { ++activity_clears; });
+	connect(&map, &Map::drawingUpdateRequested, &map,
 	        [&](const QRectF&, int) { ++drawing_updates; });
-	connect(&map, &Map::templateAreaDirty,
+	connect(&map, &Map::templateAreaDirty, &map,
 	        [&](Template*, const QRectF&, int) { ++template_updates; });
-	connect(&map, &Map::objectAreaDirty,
+	connect(&map, &Map::objectAreaDirty, &map,
 	        [&](const QRectF&) { ++object_updates; });
 
 	const QRectF area(1, 2, 3, 4);

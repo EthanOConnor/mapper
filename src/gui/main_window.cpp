@@ -37,6 +37,7 @@
 #include <QStackedWidget>
 #include <QStatusBar>
 #include <QToolBar>
+#include <QUrl>
 #include <QVBoxLayout>
 #include <QWhatsThis>
 
@@ -45,7 +46,6 @@
 #  include <QJniObject>
 #  include <QScreen>
 #  include <QTimer>
-#  include <QUrl>
 #endif
 
 #include "mapper_config.h"
@@ -1396,7 +1396,7 @@ void MainWindow::linkClicked(const QString &link)
 	else if (link.startsWith(QLatin1String("examples:"), Qt::CaseInsensitive))
 		openPathLater(QLatin1String("data:/examples/") + QStringView{link}.mid(9));
 	else
-		QDesktopServices::openUrl(link);
+		QDesktopServices::openUrl(QUrl{link});
 }
 
 bool MainWindow::eventFilter(QObject *object, QEvent *event)

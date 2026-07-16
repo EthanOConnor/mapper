@@ -93,7 +93,7 @@ int buttonSizePixel(const Settings& settings)
 // Cf. dpiScaled in qstylehelper.cpp, qt_defaultDpiX in qfont.cpp
 qreal dpiScaled(qreal value)
 {
-#ifdef Q_OS_MAC
+#ifdef Q_OS_MACOS
 	return value;
 #else
 	if (QCoreApplication::instance()->testAttribute(Qt::AA_Use96Dpi))

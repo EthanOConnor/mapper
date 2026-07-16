@@ -364,7 +364,9 @@ void GeoreferencingTest::testCRS()
 		QCOMPARE(t.isGeographic(), is_geographic);
 		
 		Georeferencing georef;
-		QVERIFY2(georef.setProjectedCRS(id, id), georef.getErrorText().toLatin1());
+		const auto success = georef.setProjectedCRS(id, id);
+		const auto error_text = georef.getErrorText().toLatin1();
+		QVERIFY2(success, error_text.constData());
 		QCOMPARE(georef.isGeographic(), is_geographic);
 	}
 #endif
@@ -376,7 +378,9 @@ void GeoreferencingTest::testCRS()
 		QCOMPARE(t.isGeographic(), is_geographic);
 		
 		Georeferencing georef;
-		QVERIFY2(georef.setProjectedCRS(id, spec), georef.getErrorText().toLatin1());
+		const auto success = georef.setProjectedCRS(id, spec);
+		const auto error_text = georef.getErrorText().toLatin1();
+		QVERIFY2(success, error_text.constData());
 		QCOMPARE(georef.isGeographic(), is_geographic);
 	}
 }
@@ -447,7 +451,8 @@ void GeoreferencingTest::testProjection()
 	QFETCH(QString, proj);
 	
 	Georeferencing georef;
-	QVERIFY2(georef.setProjectedCRS(proj, proj), proj.toLatin1());
+	const auto proj_latin1 = proj.toLatin1();
+	QVERIFY2(georef.setProjectedCRS(proj, proj), proj_latin1.constData());
 	QCOMPARE(georef.getErrorText(), QString{});
 	
 	QFETCH(double, easting);
@@ -481,7 +486,7 @@ void GeoreferencingTest::testProjection()
 	OSRSetProjCS(map_srs, "Projected map SRS");
 	OSRSetWellKnownGeogCS(map_srs, "WGS84");
 	auto spec = QByteArray(georef.getProjectedCRSSpec().toLatin1());
-	QCOMPARE(OSRImportFromProj4(map_srs, spec), OGRERR_NONE);
+	QCOMPARE(OSRImportFromProj4(map_srs, spec.constData()), OGRERR_NONE);
 	auto* geo_srs = OSRNewSpatialReference(nullptr);
 	OSRSetWellKnownGeogCS(geo_srs, "WGS84");
 #if GDAL_VERSION_MAJOR >= 3

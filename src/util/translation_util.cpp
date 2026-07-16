@@ -20,6 +20,7 @@
 
 #include "translation_util.h"
 
+#include <algorithm>
 #include <vector>
 
 #include <Qt>
@@ -59,9 +60,12 @@ const std::vector<QString>& searchPath()
 	return search_path;
 }
 
-QString default_language()
+QString language_from_settings(const QSettings& settings)
 {
-	return QLocale::system().name().left(2);
+	const auto key = QLatin1String("language");
+	if (settings.contains(key))
+		return settings.value(key).toString();
+	return OpenOrienteering::TranslationUtil::languageFromSystem().code;
 }
 
 }  // namespace
@@ -81,7 +85,7 @@ TranslationUtil::TranslationUtil()
 
 
 TranslationUtil::TranslationUtil(const QSettings& settings)
-: TranslationUtil{ settings.value(QLatin1String("language"), default_language()).toString(),
+: TranslationUtil{ language_from_settings(settings),
                    settings.value(QLatin1String("translationFile")).toString() }
 {
 	// nothing else
@@ -200,10 +204,41 @@ TranslationUtil::Language TranslationUtil::languageFromCode(const QString& code)
 }
 
 // static
+TranslationUtil::Language TranslationUtil::languageFromUiLanguages(
+	const QStringList& ui_languages,
+	const LanguageList& available_languages)
+{
+	for (const auto& code : ui_languages)
+	{
+		auto found = std::ranges::find_if(available_languages, [&code](const auto& language) {
+			return language.code.compare(code, Qt::CaseInsensitive) == 0;
+		});
+		if (found != available_languages.end())
+			return *found;
+	}
+
+	auto english = std::ranges::find_if(available_languages, [](const auto& language) {
+		return language.code == QLatin1String("en");
+	});
+	if (english != available_languages.end())
+		return *english;
+	return languageFromCode(QLatin1String("en"));
+}
+
+// static
+TranslationUtil::Language TranslationUtil::languageFromSystem()
+{
+	return languageFromUiLanguages(
+		QLocale::system().uiLanguages(QLocale::TagSeparator::Underscore),
+		availableLanguages()
+	);
+}
+
+// static
 TranslationUtil::Language TranslationUtil::languageFromSettings(const QSettings& settings)
 {
 	// Only the stored code matters. The stored filename must match the code or is inactive.
-	auto language_code = settings.value(QLatin1String("language"), default_language()).toString();
+	auto language_code = language_from_settings(settings);
 	return languageFromCode(language_code);
 }
 

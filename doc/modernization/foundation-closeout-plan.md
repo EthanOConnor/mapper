@@ -1,7 +1,8 @@
 # Modernization foundation closeout plan
 
-Status: authoritative remaining-work contract for the modernization foundation
-after `modernization-checkpoint-16-input-parity`.
+Status: completed at public tag `modernization-foundation-final` on
+2026-07-16. This plan is retained as historical design and verification
+context.
 
 This plan incorporates the implementation retrospective and its independent
 verification. It supersedes any older closeout sequence or acceptance wording

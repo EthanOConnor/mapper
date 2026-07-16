@@ -40,6 +40,8 @@
 #include <QStringView>
 #include <QVector>
 
+#include "util/translation_util.h"
+
 
 namespace OpenOrienteering {
 
@@ -142,7 +144,7 @@ Settings::Settings()
 	registerSetting(General_RetainCompatiblity, "retainCompatiblity", false);
 	registerSetting(General_SaveUndoRedo, "saveUndoRedo", true);
 	registerSetting(General_AutosaveInterval, "autosave", 15); // unit: minutes
-	registerSetting(General_Language, "language", QLocale::system().name().left(2));
+	registerSetting(General_Language, "language", TranslationUtil::languageFromSystem().code);
 	registerSetting(General_PixelsPerInch, "pixelsPerInch", ppi);
 	registerSetting(General_TranslationFile, "translationFile", QVariant(QString{}));
 	registerSetting(General_RecentFilesList, "recentFileList", QVariant(QStringList()));

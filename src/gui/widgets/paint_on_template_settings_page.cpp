@@ -372,10 +372,8 @@ void PaintOnTemplateSettingsPage::moveColorDown(bool clicked)
 }
 
 
-void PaintOnTemplateSettingsPage::editColor(bool clicked)
+void PaintOnTemplateSettingsPage::editColor()
 {
-	Q_UNUSED(clicked);
-
 	auto const color = color_table->item(color_table->currentRow(), 1)->background().color();
 
 	auto const new_color = spawnColorDialog(color, this);

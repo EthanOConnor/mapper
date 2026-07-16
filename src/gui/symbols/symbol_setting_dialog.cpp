@@ -458,7 +458,7 @@ void SymbolSettingDialog::showHelp()
 		fragment = "symbol-type-";
 		fragment.append(QByteArray::number(symbol->getType()));
 	}
-	Util::showHelp(preview_controller->getWindow(), "symbol_dock_widget.html", fragment);
+	Util::showHelp(preview_controller->getWindow(), "symbol_dock_widget.html", fragment.constData());
 }
 
 void SymbolSettingDialog::reset()

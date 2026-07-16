@@ -34,19 +34,19 @@ namespace GdalFile {
 bool exists(const QByteArray& filepath)
 {
 	VSIStatBufL stat_buf;
-	return VSIStatExL(filepath, &stat_buf, VSI_STAT_EXISTS_FLAG) == 0;
+	return VSIStatExL(filepath.constData(), &stat_buf, VSI_STAT_EXISTS_FLAG) == 0;
 }
 
 bool isRelative(const QByteArray& filepath)
 {
-	return CPLIsFilenameRelative(filepath) == TRUE;
+	return CPLIsFilenameRelative(filepath.constData()) == TRUE;
 }
 
 
 bool isDir(const QByteArray& filepath)
 {
 	VSIStatBufL stat_buf;
-	return VSIStatExL(filepath, &stat_buf, VSI_STAT_EXISTS_FLAG | VSI_STAT_NATURE_FLAG) == 0
+	return VSIStatExL(filepath.constData(), &stat_buf, VSI_STAT_EXISTS_FLAG | VSI_STAT_NATURE_FLAG) == 0
 	       && VSI_ISDIR(stat_buf.st_mode);
 }
 
@@ -54,7 +54,7 @@ bool mkdir(const QByteArray& filepath)
 {
 	// 0777 would be right for POSIX mkdir with umask, but we
 	// cannot rely on umask for all paths supported by VSIMkdir.
-	return VSIMkdir(filepath, 0755) == 0;
+	return VSIMkdir(filepath.constData(), 0755) == 0;
 }
 
 
@@ -62,7 +62,7 @@ QByteArray tryToFindRelativeTemplateFile(const QByteArray& template_path, const 
 {
 	QByteArray filepath = map_path + '/' + template_path;
 	if (!exists(filepath))
-		filepath = QByteArray(CPLGetDirname(map_path)) + '/' + template_path;
+		filepath = QByteArray(CPLGetDirname(map_path.constData())) + '/' + template_path;
 	if (!exists(filepath))
 		filepath.clear();
 	return filepath;

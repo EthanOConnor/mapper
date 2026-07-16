@@ -23,7 +23,10 @@
 #include <QtTest>
 #include <QLatin1String>
 #include <QLocale>
+#include <QSettings>
 #include <QString>
+#include <QStringList>
+#include <QTemporaryDir>
 
 #include "util/translation_util.h"
 
@@ -75,6 +78,47 @@ void LocaleTest::testEsperantoTranslationUtil()
 	
 	auto test_filename = QString { QLatin1String("some_dir/") + test_basename + QLatin1String("_eo.qm") };
 	QCOMPARE(TranslationUtil::languageFromFilename(test_filename), TranslationUtil::languageFromCode(eo));
+}
+
+void LocaleTest::testPreferredTranslationLanguage()
+{
+	const TranslationUtil::LanguageList available_languages = {
+		TranslationUtil::languageFromCode(QString::fromLatin1("en")),
+		TranslationUtil::languageFromCode(QString::fromLatin1("pt")),
+		TranslationUtil::languageFromCode(QString::fromLatin1("pt_BR")),
+		TranslationUtil::languageFromCode(QString::fromLatin1("zh_CN")),
+		TranslationUtil::languageFromCode(QString::fromLatin1("zh_Hant")),
+	};
+
+	auto preferred = [&available_languages](const QLocale& locale) {
+		return TranslationUtil::languageFromUiLanguages(
+			locale.uiLanguages(QLocale::TagSeparator::Underscore),
+			available_languages
+		).code;
+	};
+
+	QCOMPARE(preferred(QLocale(QString::fromLatin1("pt_BR"))), QString::fromLatin1("pt_BR"));
+	QCOMPARE(preferred(QLocale(QString::fromLatin1("pt_PT"))), QString::fromLatin1("pt"));
+	QCOMPARE(preferred(QLocale(QString::fromLatin1("zh_Hant_TW"))), QString::fromLatin1("zh_Hant"));
+	QCOMPARE(
+		TranslationUtil::languageFromUiLanguages(
+			{ QString::fromLatin1("fr_CA"), QString::fromLatin1("fr") },
+			available_languages
+		).code,
+		QString::fromLatin1("en")
+	);
+}
+
+void LocaleTest::testExplicitTranslationLanguage()
+{
+	QTemporaryDir directory;
+	QVERIFY(directory.isValid());
+
+	QSettings settings(directory.filePath(QString::fromLatin1("settings.ini")), QSettings::IniFormat);
+	settings.setValue(QString::fromLatin1("language"), QString::fromLatin1("zz_Explicit"));
+
+	QCOMPARE(TranslationUtil::languageFromSettings(settings).code,
+	         QString::fromLatin1("zz_Explicit"));
 }
 
 

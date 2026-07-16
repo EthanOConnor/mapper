@@ -785,7 +785,7 @@ ogr::unique_srs OgrFileImport::srsFromMap()
 		// Cf. https://github.com/OSGeo/PROJ/pull/1573
 		spec.replace("+datum=potsdam", "+ellps=bessel +nadgrids=@BETA2007.gsb");
 #endif
-		auto error = OSRImportFromProj4(srs.get(), spec);
+		auto error = OSRImportFromProj4(srs.get(), spec.constData());
 		if (!error)
 			return srs;
 		
@@ -1949,9 +1949,10 @@ bool OgrFileExport::exportImplementation()
 	setupGeoreferencing(po_driver);
 
 	// Create output dataset
+	const auto path_latin1 = path.toLatin1();
 	po_ds = ogr::unique_datasource(OGR_Dr_CreateDataSource(
 	                                   po_driver,
-	                                   path.toLatin1(),
+	                                   path_latin1.constData(),
 	                                   nullptr));
 	if (!po_ds)
 		throw FileFormatException(tr("Failed to create dataset: %1").arg(QString::fromLatin1(CPLGetLastErrorMsg())));
@@ -2113,7 +2114,7 @@ void OgrFileExport::setupGeoreferencing(GDALDriverH po_driver)
 		OSRSetProjCS(map_srs.get(), "Projected map SRS");
 		OSRSetWellKnownGeogCS(map_srs.get(), "WGS84");
 		auto spec = QByteArray(georef.getProjectedCRSSpec().toLatin1());
-		if (OSRImportFromProj4(map_srs.get(), spec) != OGRERR_NONE)
+		if (OSRImportFromProj4(map_srs.get(), spec.constData()) != OGRERR_NONE)
 		{
 			local_only = true;
 			addWarning(tr("Failed to properly export the georeferencing info. Local georeferencing only."));
@@ -2199,7 +2200,8 @@ void OgrFileExport::addPointsToLayer(OGRLayerH layer, const std::function<bool (
 
 		OGR_F_SetGeometry(po_feature.get(), pt.get());
 
-		OGR_F_SetStyleString(po_feature.get(), OGR_STBL_Find(table.get(), symbolId(symbol)));
+		const auto symbol_id = symbolId(symbol);
+		OGR_F_SetStyleString(po_feature.get(), OGR_STBL_Find(table.get(), symbol_id.constData()));
 
 		if (OGR_L_CreateFeature(layer, po_feature.get()) != OGRERR_NONE)
 			throw FileFormatException(tr("Failed to create feature in layer: %1").arg(QString::fromLatin1(CPLGetLastErrorMsg())));
@@ -2240,7 +2242,8 @@ void OgrFileExport::addTextToLayer(OGRLayerH layer, const std::function<bool (co
 
 		OGR_F_SetGeometry(po_feature.get(), pt.get());
 
-		QByteArray style = OGR_STBL_Find(table.get(), symbolId(symbol));
+		const auto symbol_id = symbolId(symbol);
+		QByteArray style = OGR_STBL_Find(table.get(), symbol_id.constData());
 		if (!o_name_field || text.length() > 32)
 		{
 			// There is no label field, or the text is too long.
@@ -2248,7 +2251,7 @@ void OgrFileExport::addTextToLayer(OGRLayerH layer, const std::function<bool (co
 			text.replace(QRegularExpression(QLatin1String("([\"\\\\])"), QRegularExpression::MultilineOption), QLatin1String("\\\\1"));
 			style.replace("{Name}", text.toUtf8());
 		}
-		OGR_F_SetStyleString(po_feature.get(), style);
+		OGR_F_SetStyleString(po_feature.get(), style.constData());
 
 		if (OGR_L_CreateFeature(layer, po_feature.get()) != OGRERR_NONE)
 			throw FileFormatException(tr("Failed to create feature in layer: %1").arg(QString::fromLatin1(CPLGetLastErrorMsg())));
@@ -2288,7 +2291,8 @@ void OgrFileExport::addLinesToLayer(OGRLayerH layer, const std::function<bool (c
 
 			OGR_F_SetGeometry(po_feature.get(), line_string.get());
 
-			OGR_F_SetStyleString(po_feature.get(), OGR_STBL_Find(table.get(), symbolId(symbol)));
+			const auto symbol_id = symbolId(symbol);
+			OGR_F_SetStyleString(po_feature.get(), OGR_STBL_Find(table.get(), symbol_id.constData()));
 
 			if (OGR_L_CreateFeature(layer, po_feature.get()) != OGRERR_NONE)
 				throw FileFormatException(tr("Failed to create feature in layer: %1").arg(QString::fromLatin1(CPLGetLastErrorMsg())));
@@ -2334,7 +2338,8 @@ void OgrFileExport::addAreasToLayer(OGRLayerH layer, const std::function<bool (c
 
 		OGR_F_SetGeometry(po_feature.get(), polygon.get());
 
-		OGR_F_SetStyleString(po_feature.get(), OGR_STBL_Find(table.get(), symbolId(symbol)));
+		const auto symbol_id = symbolId(symbol);
+		OGR_F_SetStyleString(po_feature.get(), OGR_STBL_Find(table.get(), symbol_id.constData()));
 
 		if (OGR_L_CreateFeature(layer, po_feature.get()) != OGRERR_NONE)
 			throw FileFormatException(tr("Failed to create feature in layer: %1").arg(QString::fromLatin1(CPLGetLastErrorMsg())));
@@ -2343,9 +2348,9 @@ void OgrFileExport::addAreasToLayer(OGRLayerH layer, const std::function<bool (c
 	map->applyOnMatchingObjects(add_feature, condition);
 }
 
-OGRLayerH OgrFileExport::createLayer(const char* layer_name, OGRwkbGeometryType type)
+OGRLayerH OgrFileExport::createLayer(QByteArray layer_name, OGRwkbGeometryType type)
 {
-	auto po_layer = GDALDatasetCreateLayer(po_ds.get(), layer_name, map_srs.get(), type, nullptr);
+	auto po_layer = GDALDatasetCreateLayer(po_ds.get(), layer_name.constData(), map_srs.get(), type, nullptr);
 	if (!po_layer) {
 		addWarning(tr("Failed to create layer %1: %2").arg(QString::fromUtf8(layer_name), QString::fromLatin1(CPLGetLastErrorMsg())));
 		return nullptr;
@@ -2395,7 +2400,8 @@ void OgrFileExport::populateStyleTable(const std::vector<const Symbol*>& symbols
 		if (qEnvironmentVariableIsSet("MAPPER_DEBUG_OGR"))
 			qDebug("%s:\t \"%s\"", qPrintable(symbol->getPlainTextName()), style_string.constData());
 #endif
-		OGR_SM_AddStyle(manager.get(), symbolId(symbol), style_string);
+		const auto symbol_id = symbolId(symbol);
+		OGR_SM_AddStyle(manager.get(), symbol_id.constData(), style_string.constData());
 	}
 }
 

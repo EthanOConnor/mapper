@@ -1059,7 +1059,11 @@ QString Map::raw_translation(const QString& symbol_text) const
 {
 	auto result = QString{};
 	if (map_symbol_translator)
-		result = map_symbol_translator->translate(symbol_set_id.toUtf8(), symbol_text.toUtf8());
+	{
+		const auto context = symbol_set_id.toUtf8();
+		const auto source_text = symbol_text.toUtf8();
+		result = map_symbol_translator->translate(context.constData(), source_text.constData());
+	}
 	return result;
 }
 

@@ -344,7 +344,8 @@ private:
 			auto gdal_data = osm_conf_ini.absolutePath();
 			Q_ASSERT(!gdal_data.contains(QStringLiteral("data:")));
 			// The user may overwrite this default in the settings.
-			CPLSetConfigOption("GDAL_DATA", QDir::toNativeSeparators(gdal_data).toLocal8Bit());
+			const auto gdal_data_path = QDir::toNativeSeparators(gdal_data).toLocal8Bit();
+			CPLSetConfigOption("GDAL_DATA", gdal_data_path.constData());
 		}
 		
 		const char* defaults[][2] = {

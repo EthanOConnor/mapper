@@ -176,7 +176,7 @@ namespace
 			       QString::fromUtf8(#a), fill_a, \
 			       QString::fromUtf8(#b), fill_b) \
 			  .arg(a).arg(b) \
-			  .toUtf8()); \
+			  .toUtf8().constData()); \
 		} \
 	}
 	
@@ -194,7 +194,7 @@ namespace
 		} \
 		else \
 		{ \
-			QVERIFY2(cond, QByteArray((symbol).getNumberAndPlainTextName().toUtf8())); \
+			QVERIFY2(cond, (symbol).getNumberAndPlainTextName().toUtf8().constData()); \
 		} \
 	}
 	
@@ -679,7 +679,7 @@ void FileFormatTest::fixupExtensionTest()
 	QFETCH(QByteArray, format_id);
 	QFETCH(QString, expected);
 	
-	auto const* format = FileFormats.findFormat(format_id);
+	auto const* format = FileFormats.findFormat(format_id.constData());
 	QVERIFY(format);
 	
 	auto const filename = QString::fromUtf8(QTest::currentDataTag());
@@ -729,7 +729,7 @@ void FileFormatTest::understandsTest()
 	QFETCH(QByteArray, data);
 	QFETCH(int, support);
 	
-	auto format = FileFormats.findFormat(format_id);
+	auto format = FileFormats.findFormat(format_id.constData());
 #ifdef MAPPER_BIG_ENDIAN
 	if (format_id.startsWith("OCD"))
 		QEXPECT_FAIL("", "OCD format not support on big endian systems", Abort);
@@ -855,7 +855,7 @@ void FileFormatTest::saveAndLoad_data()
 		id.reserve(int(qstrlen(raw_path) + qstrlen(format_id) + 5u));
 		id.append(raw_path).append(" <> ").append(format_id);
 		
-		QTest::newRow(id) << id << QByteArray{format_id} << 0 << QString::fromLatin1(raw_path);
+		QTest::newRow(id.constData()) << id << QByteArray{format_id} << 0 << QString::fromLatin1(raw_path);
 	}
 	
 	// Add all file formats which support import and export
@@ -887,15 +887,15 @@ void FileFormatTest::saveAndLoad_data()
 				{
 					auto ocd_id = id;
 					ocd_id.append(QByteArray::number(i));
-					QTest::newRow(ocd_id) << ocd_id << QByteArray{format_id}+QByteArray::number(i) << i << path;
+					QTest::newRow(ocd_id.constData()) << ocd_id << QByteArray{format_id}+QByteArray::number(i) << i << path;
 				}
 				auto ocd_id = id;
 				ocd_id.append(" (default)");
-				QTest::newRow(ocd_id) << ocd_id << QByteArray{format_id} << int(OcdFileExport::default_version) << path;
+				QTest::newRow(ocd_id.constData()) << ocd_id << QByteArray{format_id} << int(OcdFileExport::default_version) << path;
 			}
 			else
 			{
-				QTest::newRow(id) << id << QByteArray{format_id} << 0 << path;
+				QTest::newRow(id.constData()) << id << QByteArray{format_id} << 0 << path;
 			}
 		}
 	}
@@ -910,7 +910,7 @@ void FileFormatTest::saveAndLoad()
 	QVERIFY(QFileInfo::exists(filepath));
 	
 	// Find the file format and verify that it exists
-	const FileFormat* format = FileFormats.findFormat(format_id);
+	const FileFormat* format = FileFormats.findFormat(format_id.constData());
 	QVERIFY(format);
 	
 	// Load the test map
@@ -943,7 +943,7 @@ void FileFormatTest::saveAndLoad()
 	
 	if (format_version)
 	{
-		if (qstrncmp(format_id, "OCD", 3) == 0)
+		if (qstrncmp(format_id.constData(), "OCD", 3) == 0)
 		{
 			QCOMPARE(new_map->property(OcdFileFormat::versionProperty()).toInt(), format_version);
 		}
@@ -1011,6 +1011,27 @@ void FileFormatTest::pristineMapTest()
 
 
 
+void FileFormatTest::xmlInvalidCharacterExportTest()
+{
+	Map map;
+	auto notes = QStringLiteral("before");
+	notes.append(QChar::fromUcs2(char16_t{1}));
+	notes.append(QStringLiteral("after"));
+	map.setMapNotes(notes);
+
+	XMLFileFormat format;
+	auto exporter = format.makeExporter({}, &map, nullptr);
+	QVERIFY(bool(exporter));
+
+	QBuffer output;
+	exporter->setDevice(&output);
+	QVERIFY(!exporter->doExport());
+	QVERIFY(!exporter->warnings().empty());
+	QVERIFY(!exporter->warnings().back().isEmpty());
+}
+
+
+
 void FileFormatTest::ogrExportTest_data()
 {
 	QTest::addColumn<QString>("map_filepath");
@@ -1046,7 +1067,7 @@ void FileFormatTest::ogrExportTest()
 		QCOMPARE(qRound(exported_latlon.latitude()), latitude);
 		QCOMPARE(qRound(exported_latlon.longitude()), longitude);
 		
-		auto const* format = FileFormats.findFormat(ogr_format_id);
+		auto const* format = FileFormats.findFormat(ogr_format_id.constData());
 		QVERIFY(format);
 		
 		auto exporter = format->makeExporter(ogr_filepath, &map, nullptr);
@@ -1921,7 +1942,7 @@ void FileFormatTest::dxfExportTest()
 	{
 		QVERIFY(map.loadFrom(map_filepath));
 		
-		auto const* format = FileFormats.findFormat(ogr_format_id);
+		auto const* format = FileFormats.findFormat(ogr_format_id.constData());
 		QVERIFY(format);
 		
 		auto exporter = format->makeExporter(ogr_filepath, &map, nullptr);
@@ -2007,7 +2028,7 @@ void FileFormatTest::shpExportTest()
 	{
 		QVERIFY(map.loadFrom(map_filepath));
 		
-		auto const* format = FileFormats.findFormat(ogr_format_id);
+		auto const* format = FileFormats.findFormat(ogr_format_id.constData());
 		QVERIFY(format);
 		
 		auto exporter = format->makeExporter(ogr_filepath, &map, nullptr);

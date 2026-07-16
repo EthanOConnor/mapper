@@ -111,7 +111,7 @@ TextParameter::TextParameter(const QString& id, const QString& name)
 QWidget* TextParameter::createEditor(WidgetObserver& observer) const
 {
 	auto* widget = new Editor();
-	QObject::connect(widget, &TextParameter::Editor::textChanged, [&observer](){ observer.crsParameterEdited(); });
+	QObject::connect(widget, &TextParameter::Editor::textChanged, widget, [&observer](){ observer.crsParameterEdited(); });
 	return widget;
 }
 
@@ -173,7 +173,7 @@ UTMZoneParameter::UTMZoneParameter(const QString& id, const QString& name)
 QWidget* UTMZoneParameter::createEditor(WidgetObserver& observer) const
 {
 	auto* widget = new UTMZoneEdit(observer, nullptr);
-	QObject::connect(widget, &UTMZoneEdit::textChanged, [&observer](){ observer.crsParameterEdited(); });
+	QObject::connect(widget, &UTMZoneEdit::textChanged, widget, [&observer](){ observer.crsParameterEdited(); });
 	return widget;
 }
 
@@ -246,7 +246,7 @@ IntRangeParameter::IntRangeParameter(const QString& id, const QString& name, int
 QWidget* IntRangeParameter::createEditor(WidgetObserver& observer) const
 {
 	auto* widget = Util::SpinBox::create(min_value, max_value);
-	QObject::connect(widget, QOverload<int>::of(&QSpinBox::valueChanged), [&observer](){ observer.crsParameterEdited(); });
+	QObject::connect(widget, QOverload<int>::of(&QSpinBox::valueChanged), widget, [&observer](){ observer.crsParameterEdited(); });
 	return widget;
 }
 

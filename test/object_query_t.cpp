@@ -42,7 +42,7 @@ namespace QTest
 	template<>
 	char* toString(const ObjectQuery& query)
 	{
-		return qstrdup(query.toString().toLatin1());
+		return qstrdup(query.toString().toLatin1().constData());
 	}
 }
 

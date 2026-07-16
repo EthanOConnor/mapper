@@ -317,7 +317,7 @@ void CoordXmlTest::writeCompressed_implementation(MapCoordVector& coords, QXmlSt
 		buffer[j] = sign;
 		++j;
 		
-		stream << QString::fromUtf8(buffer, j);
+		stream << QString::fromUtf8(buffer.constData(), j);
 	}
 	stream.flush();
 	xml.writeCharacters(data);

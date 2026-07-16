@@ -25,6 +25,7 @@
 #include <memory>
 
 #include <QString>
+#include <QStringList>
 #include <QTranslator>
 
 class QSettings;
@@ -131,6 +132,17 @@ public:
 	 * Returns the language for a language name.
 	 */
 	static Language languageFromCode(const QString& code);
+
+	/**
+	 * Returns the first available language from an ordered list of UI languages.
+	 */
+	static Language languageFromUiLanguages(const QStringList& ui_languages,
+	                                        const LanguageList& available_languages);
+
+	/**
+	 * Returns the first available language preferred by the system locale.
+	 */
+	static Language languageFromSystem();
 	
 	/**
 	 * Returns the language for the given settings object.

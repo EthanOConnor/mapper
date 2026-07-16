@@ -87,7 +87,12 @@ private slots:
 	 * through an implicit export-import-cycle before the test.
 	 */
 	void pristineMapTest();
-	
+
+	/**
+	 * Tests that invalid XML characters make map export fail.
+	 */
+	void xmlInvalidCharacterExportTest();
+
 	/**
 	 * Tests export of geospatial vector data via OGR.
 	 */

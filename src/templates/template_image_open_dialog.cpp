@@ -72,7 +72,7 @@ TemplateImageOpenDialog::TemplateImageOpenDialog(TemplateImage* templ, QWidget* 
 	if (georef_source == "GTiff")
 		georef_source = "GeoTIFF";
 	
-	georef_radio = new QRadioButton(tr("Georeferenced (%1)").arg(tr(georef_source)));
+	georef_radio = new QRadioButton(tr("Georeferenced (%1)").arg(tr(georef_source.constData())));
 	georef_radio->setEnabled(georef_radio_enabled);
 	
 	mpp_radio = new QRadioButton(tr("Meters per pixel:"));

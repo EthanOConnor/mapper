@@ -12,18 +12,14 @@ exploratory code survives only if, after re-deriving its responsibility, it is
 still the simplest readable solution. Historical structure has no presumption
 of survival.
 
-## Current closeout authority
+## Foundation status
 
-The campaign has reached its foundation-closeout stage. Before doing more
-modernization work, read and execute the
-[`foundation closeout plan`](foundation-closeout-plan.md). A concise reusable
-handoff is in the
-[`foundation closeout agent prompt`](foundation-closeout-agent-prompt.md).
-
-The plan is authoritative for remaining work and acceptance after
-`modernization-checkpoint-16-input-parity`. The seven recovery items below are
-architectural layers, not a claim that the repository has only seven checkpoint
-tags. Feature work remains frozen through `modernization-foundation-final`.
+The modernization foundation was completed and published at
+`modernization-foundation-final`. The
+[`foundation closeout plan`](foundation-closeout-plan.md), its
+[`agent prompt`](foundation-closeout-agent-prompt.md), and the acceptance record
+are historical design and verification context. The architecture and product
+scenarios below remain current guidance for descendants of the tag.
 
 ## Scope
 
@@ -62,7 +58,7 @@ The architecture is judged against these existing uses:
 
 These seven items describe the architecture recovered by one sustained
 campaign. They are layers, not product phases or a count of checkpoint tags.
-Feature work stays frozen until the foundation closeout is complete.
+The feature freeze ended when `modernization-foundation-final` became public.
 
 1. Modern CMake/dependency model and Qt 6 application stand-up.
 2. Immutable render snapshot/IR and QPainter reference renderer.

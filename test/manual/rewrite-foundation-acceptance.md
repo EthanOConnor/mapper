@@ -361,4 +361,12 @@ These are deliberately small product checks, not missing automation machinery:
 
 These physical checks do not block the modernized foundation tag. They do
 block accepting the corresponding platform package as a release candidate.
-Feature work remains frozen until `modernization-foundation-final` is public.
+
+## 2026-07-16 final foundation tag
+
+Public tag `modernization-foundation-final` points to
+`02df5c49be59b202e70eec5c5f285cbe94b04921`. Exact-SHA hosted
+[run 29482147610](https://github.com/EthanOConnor/mapper/actions/runs/29482147610)
+passed macOS, Linux, Android, and Windows and produced the four supported
+platform artifacts. The closeout plan and this acceptance record are now
+historical context; the feature freeze ended when the tag became public.

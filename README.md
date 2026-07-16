@@ -5,11 +5,11 @@
 > [!IMPORTANT]
 > This public fork carries two deliberately separate lines. `master` mirrors
 > [OpenOrienteering Mapper](https://github.com/OpenOrienteering/mapper)
-> exactly. `main` is the forward COC product and is completing its
-> modernization foundation before feature development resumes. Clean upstream
+> exactly. `main` is the forward COC product built on the completed
+> modernization foundation recorded by `modernization-foundation-final`.
+> Feature development continues on descendants of that tag. Clean upstream
 > candidates start from `master`; the product line is never merged into them.
-> The feature freeze remains in force until the public
-> `modernization-foundation-final` tag. See [CONTRIBUTING.md](CONTRIBUTING.md).
+> See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 OpenOrienteering Mapper is an orienteering mapmaking program and provides
 a free and open source alternative to existing commercial software.

@@ -106,7 +106,7 @@ TemplatePlaceholder* TemplatePlaceholder::duplicate() const
 
 const char* TemplatePlaceholder::getTemplateType() const
 {
-	return original_type;
+	return original_type.constData();
 }
 
 std::unique_ptr<Template> TemplatePlaceholder::makeActualTemplate() const
@@ -125,7 +125,7 @@ std::unique_ptr<Template> TemplatePlaceholder::makeActualTemplate() const
 	{
 		auto const property_names = dynamicPropertyNames();
 		for (auto const& name : property_names)
-			actual_template->setProperty(name, property(name));
+			actual_template->setProperty(name.constData(), property(name.constData()));
 	}
 	return actual_template;
 }

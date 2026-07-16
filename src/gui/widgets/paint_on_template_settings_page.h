@@ -51,7 +51,7 @@ public:
 	void reset() override;
 
 public slots:
-	void editColor(bool clicked);
+	void editColor();
 	void moveColorUp(bool clicked);
 	void moveColorDown(bool clicked);
 	void dropColor(bool clicked);

@@ -69,15 +69,21 @@ bool IofCourseExport::exportImplementation()
 	}
 	
 	simple_course = &course_export;
-	
+
 	QXmlStreamWriter writer(device());
 	writer.setAutoFormatting(true);
+	writer.setStopWritingOnError(true);
 	xml = &writer;
 	xml->writeStartDocument();
 	writeXml(*object);
 	xml = nullptr;
-	
+
 	simple_course = nullptr;
+	if (writer.hasError())
+	{
+		addWarning(writer.errorString());
+		return false;
+	}
 	return true;
 }
 

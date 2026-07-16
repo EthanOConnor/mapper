@@ -48,6 +48,8 @@ function(add_test_helper testname)
 	target_compile_definitions(${testname} PRIVATE
 	  QT_NO_CAST_FROM_ASCII
 	  QT_NO_CAST_TO_ASCII
+	  QTEST_THROW_ON_FAIL
+	  QTEST_THROW_ON_SKIP
 	  QT_USE_QSTRINGBUILDER
 	)
 	target_include_directories(${testname} PRIVATE
@@ -137,12 +139,14 @@ add_unit_test(tst_qglobal)
 add_unit_test(autosave_t MANUAL ../src/core/autosave
 	../src/core/document_path
 	../src/settings
+	../src/util/translation_util
 )
 add_unit_test(document_path_t ../src/core/document_path)
 add_unit_test(encoding_t ../src/util/encoding)
 target_link_libraries(encoding_t PRIVATE ICU::uc)
 add_unit_test(georef_ocd_mapping_t
 	../src/settings
+	../src/util/translation_util
 	../src/gui/util_gui
 	../src/gui/widgets/crs_param_widgets
 	../src/core/georeferencing
@@ -157,6 +161,7 @@ add_unit_test(georef_ocd_mapping_t
 )
 add_unit_test(georeferencing_t ../src/core/georeferencing
 	../src/settings
+	../src/util/translation_util
 	../src/core/crs_template
 	../src/core/crs_template_implementation
 	../src/core/latlon
@@ -185,6 +190,7 @@ add_unit_test(ocd_parameter_stream_reader_t ../src/fileformats/ocd_parameter_str
 add_unit_test(qpainter_t)
 add_unit_test(util_t ../src/util/util
 	../src/settings
+	../src/util/translation_util
 )
 
 # Benchmarks

@@ -517,9 +517,7 @@ public:
 	/**
 	 * Inserts a parameter string with the given type number.
 	 * 
-	 * The string_data is expected to have the trailing '\0' maintained
-	 * by QByteArray at size(), i.e. it must not be constructed using
-	 * QByteArray::fromRawData().
+	 * The string is stored with a trailing '\0'.
 	 */
 	EntryType& insert(qint32 string_type, const QByteArray& string_data);
 	
@@ -800,9 +798,10 @@ template< class F, class T >
 typename OcdEntityIndex<F,T>::EntryType& OcdEntityIndex<F,T>::insert(qint32 string_type, const QByteArray& string_data)
 {
 	// Ocd parameters are zero-terminated.
-	// QByteArray normally maintains a '\0' at the position size().
-	auto size = string_data.size() + 1;
-	return insert(QByteArray::fromRawData(string_data.constData(), size), { 0, quint32(size), string_type, 0 });
+	auto terminated_data = string_data;
+	terminated_data.nullTerminate();
+	auto size = terminated_data.size() + 1;
+	return insert(QByteArray::fromRawData(terminated_data.constData(), size), { 0, quint32(size), string_type, 0 });
 }
 
 

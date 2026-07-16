@@ -417,7 +417,7 @@ ProjTransform ProjTransform::crs(const QString& crs_spec)
 	// Cf. https://github.com/OSGeo/PROJ/pull/1573
 	crs_spec_utf8.replace("+datum=potsdam", "+ellps=bessel +nadgrids=@BETA2007.gsb");
 #endif
-	result.pj = proj_create(PJ_DEFAULT_CTX, crs_spec_utf8);
+	result.pj = proj_create(PJ_DEFAULT_CTX, crs_spec_utf8.constData());
 	return result;
 }
 

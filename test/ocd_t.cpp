@@ -248,6 +248,21 @@ private slots:
 		QCOMPARE(t.trailing, expected_trailing);
 	}
 	
+	/**
+	 * Verifies that parameter strings from raw data are explicitly terminated.
+	 */
+	void parameterStringTerminationTest()
+	{
+		const char raw_data[] = { 'a', 'b', 'c', 'x' };
+		const auto input = QByteArray::fromRawData(raw_data, 3);
+		OcdFile<Ocd::FormatV9> file;
+
+		file.strings().insert(1, input);
+
+		const auto stored = static_cast<QByteArray>(*file.strings().begin());
+		QCOMPARE(stored, QByteArray("abc\0", 4));
+	}
+
 };  // class OcdTest
 
 

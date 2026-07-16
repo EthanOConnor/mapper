@@ -42,6 +42,16 @@ private slots:
 	 * Tests handling of Esperanto in TranslationUtil.
 	 */
 	void testEsperantoTranslationUtil();
+
+	/**
+	 * Tests ordered matching of system UI languages to available translations.
+	 */
+	void testPreferredTranslationLanguage();
+
+	/**
+	 * Tests that an explicit stored language takes precedence over locale defaults.
+	 */
+	void testExplicitTranslationLanguage();
 	
 };
 

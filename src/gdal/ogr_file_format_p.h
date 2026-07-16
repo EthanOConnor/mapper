@@ -433,7 +433,7 @@ protected:
 	void addLinesToLayer(OGRLayerH layer, const std::function<bool (const Object*)>& condition);
 	void addAreasToLayer(OGRLayerH layer, const std::function<bool (const Object*)>& condition);
 
-	OGRLayerH createLayer(const char* layer_name, OGRwkbGeometryType type);
+	OGRLayerH createLayer(QByteArray layer_name, OGRwkbGeometryType type);
 
 	static QByteArray symbolId(const Symbol* symbol) { return QByteArray::number(quint64(symbol), 16); }
 	

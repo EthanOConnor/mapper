@@ -230,7 +230,8 @@ XMLFileExporter::~XMLFileExporter() = default;
 bool XMLFileExporter::exportImplementation()
 {
 	xml.setDevice(device());
-	
+	xml.setStopWritingOnError(true);
+
 	if (option(QString::fromLatin1("autoFormatting")).toBool())
 		xml.setAutoFormatting(true);
 	
@@ -303,8 +304,13 @@ bool XMLFileExporter::exportImplementation()
 			writeLineBreak(xml);
 		}
 	}
-	
+
 	xml.writeEndDocument();
+	if (xml.hasError())
+	{
+		addWarning(xml.errorString());
+		return false;
+	}
 	return true;
 }
 

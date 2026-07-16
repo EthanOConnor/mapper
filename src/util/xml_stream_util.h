@@ -58,11 +58,11 @@ QString numberToString(double value, int precision);
  * This class provides recovery from invalid characters in an XML stream.
  * 
  * Some characters are not allowed in well-formed XML 1.0 (cf.
- * https://www.w3.org/TR/2008/REC-xml-20081126/#NT-Char). While QXmlStreamWriter
- * will not complain when writing such characters, QXmlStreamReader will raise
- * a NotWellFormedError. This class will remove offending characters from the
- * input and reset the stream reader to the state it had when the helper object
- * was initialized.
+ * https://www.w3.org/TR/2008/REC-xml-20081126/#NT-Char). QXmlStreamWriter
+ * reports these characters as errors, but legacy or third-party files may still
+ * contain them, causing QXmlStreamReader to raise a NotWellFormedError. This
+ * class will remove offending characters from the input and reset the stream
+ * reader to the state it had when the helper object was initialized.
  * 
  * In a single recovery attempt, the utility tries to handle all offending
  * characters from the element for which the tool was constructed. For each

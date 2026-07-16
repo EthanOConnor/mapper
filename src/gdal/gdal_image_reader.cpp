@@ -64,7 +64,8 @@ GdalImageReader::GdalImageReader(const QString& path)
 {
 	GdalManager();
 	CPLErrorReset();
-	dataset = GDALOpen(path.toUtf8(), GA_ReadOnly);
+	const auto path_utf8 = path.toUtf8();
+	dataset = GDALOpen(path_utf8.constData(), GA_ReadOnly);
 	if (dataset)
 		raster_count = GDALGetRasterCount(dataset);
 	if (!canRead())
@@ -341,7 +342,7 @@ TemplateImage::GeoreferencingOption GdalImageReader::readGeoTransform()
 // static
 QString GdalImageReader::toProjSpec(const QByteArray& gdal_spec)
 {
-	auto const spatial_reference = OSRNewSpatialReference(gdal_spec);
+	auto const spatial_reference = OSRNewSpatialReference(gdal_spec.constData());
 	char* proj_spec_cstring;
 	auto const ogr_error = OSRExportToProj4(spatial_reference, &proj_spec_cstring);
 	auto result = QByteArray(ogr_error == OGRERR_NONE ? proj_spec_cstring : nullptr);
