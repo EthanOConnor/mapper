@@ -18,8 +18,8 @@ env:
   CACHE_SCHEMA: v3
   CARGO_ABOUT_VERSION: "0.9.1"
   CMAKE_BUILD_PARALLEL_LEVEL: 4
-  # Newest stable Qt release published for every supported target.
-  QT_VERSION: "6.11.1"
+  # Newest stable Qt release supported by the complete public installer matrix.
+  QT_VERSION: "6.10.3"
   VCPKG_MAX_CONCURRENCY: 4
   VCPKG_ROOT: ${{ github.workspace }}/.vcpkg
   VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.vcpkg-cache

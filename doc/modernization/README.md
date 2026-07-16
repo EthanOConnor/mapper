@@ -384,10 +384,12 @@ Do not add a package for a tiny readable standard-library helper or pull in a
 second application framework. Prefer imported/package targets over copied
 source. A local patch needs a removal condition and a test.
 
-The development baseline is CMake 4.4.0, Ninja 1.13.0, C++23, Qt 6.11.1,
-PROJ 9.8.1, GDAL 3.13.1, ICU 78.3, and Rust stable. Qt 6.11.1 is the newest
-stable release with published packages for the complete supported target
-matrix; the available Qt 6.12.0 packages are still Beta 2 pre-releases. Ninja
+The development baseline is CMake 4.4.0, Ninja 1.13.0, C++23, Qt 6.10.3,
+PROJ 9.8.1, GDAL 3.13.1, ICU 78.3, and Rust stable. Qt 6.10.3 is the newest
+stable release whose normal public installer channel currently covers the
+whole supported matrix; released `aqtinstall` cannot consume Qt 6.11.1's split
+Windows metadata layout, so the project does not add credentials or unreleased
+download machinery merely to claim it. Ninja
 1.13.0 is retained because 1.13.2 was unavailable from the selected simple
 PyPI install channel; a custom download path would add maintenance without
 changing product behavior.
