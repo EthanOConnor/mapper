@@ -54,6 +54,16 @@
       }
     },
     {
+      "name": "release-macos",
+      "displayName": "macOS local release",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "Mapper_DEVELOPMENT_BUILD": "OFF",
+        "Mapper_PACKAGE_BUILD": "OFF"
+      }
+    },
+    {
       "name": "dev-macos-sanitize",
       "displayName": "macOS development with ASan and UBSan",
       "inherits": "dev-macos",
@@ -152,6 +162,7 @@
   ],
   "buildPresets": [
     { "name": "dev-macos", "configurePreset": "dev-macos" },
+    { "name": "release-macos", "configurePreset": "release-macos" },
     { "name": "dev-macos-sanitize", "configurePreset": "dev-macos-sanitize" },
     { "name": "dev-linux", "configurePreset": "dev-linux" },
     { "name": "dev-windows", "configurePreset": "dev-windows", "configuration": "Debug" },
@@ -167,6 +178,11 @@
     {
       "name": "dev-macos",
       "configurePreset": "dev-macos",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "release-macos",
+      "configurePreset": "release-macos",
       "output": { "outputOnFailure": true }
     },
     {

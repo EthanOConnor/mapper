@@ -1,7 +1,7 @@
 # Building Mapper
 
 Mapper uses one CMake/Ninja build on Linux, macOS, Windows, and Android. The
-project baseline is CMake 4.4.0, Ninja 1.13.0, a C++23 compiler, and Qt 6.10.2.
+project baseline is CMake 4.4.0, Ninja 1.13.0, a C++23 compiler, and Qt 6.10.3.
 Desktop and Android packages are built by the same presets used in GitHub
 Actions.
 
@@ -23,7 +23,7 @@ soon as the pinned vcpkg baseline provides the same or a newer release.
 
 ## Reproducible desktop build
 
-Install Qt 6.10.2 with the Image Formats, Positioning, Sensors, and Serial Port
+Install Qt 6.10.3 with the Image Formats, Positioning, Sensors, and Serial Port
 modules. Clone and bootstrap the vcpkg baseline recorded in `vcpkg.json`,
 then expose its root to CMake:
 
@@ -82,11 +82,30 @@ Use `dev-linux` or `dev-windows` on the other desktop hosts. If CMake cannot
 locate a nonstandard installation, pass its standard package root or
 `CMAKE_PREFIX_PATH`; the project has no parallel dependency-discovery system.
 
+The optimized macOS build used for local renderer and live-parity acceptance
+has its own ordinary preset:
+
+```sh
+cmake --preset release-macos
+cmake --build --preset release-macos
+ctest --preset release-macos
+```
+
+Direct Rust checks must also keep their compiler output in that active build
+tree rather than creating `src/render/vello/target`:
+
+```sh
+export CARGO_TARGET_DIR="$PWD/build/release-macos/cargo/checks"
+cargo fmt --manifest-path src/render/vello/Cargo.toml -- --check
+cargo clippy --manifest-path src/render/vello/Cargo.toml --locked --all-targets -- -D warnings
+cargo test --manifest-path src/render/vello/Cargo.toml --locked
+```
+
 ## Android
 
 Android targets API 36, has a minimum API of 28, and currently ships arm64-v8a.
 Install JDK 21, Android SDK platform/build tools 36, NDK 27.2.12479018, and the
-Qt 6.10.2 `android_arm64_v8a` kit. Set `QT_ROOT_DIR`, `VCPKG_ROOT`,
+Qt 6.10.3 `android_arm64_v8a` kit. Set `QT_ROOT_DIR`, `VCPKG_ROOT`,
 `ANDROID_SDK_ROOT`, and `ANDROID_NDK_ROOT`, then run:
 
 ```sh

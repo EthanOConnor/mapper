@@ -6,7 +6,6 @@ CMakeLists.txt.user
 CMakeLists.txt.user*
 *~
 build*/
-src/render/vello/target/
 vcpkg_installed/
 aqtinstall.log
 /test/acceptance/corpus.local.toml
