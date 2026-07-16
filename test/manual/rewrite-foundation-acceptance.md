@@ -131,14 +131,12 @@ Local evidence from the canonical `worktrees/main` checkout:
   `/Users/ethan/dev/oom/worktrees/main` as `CMAKE_HOME_DIRECTORY`; it uses CMake
   4.4.0, Qt 6.11.1, and Rust/Cargo 1.94.0, with Corrosion output below
   `build/release-macos/cargo`.
-- The complete Release build passed. On the exact final tree, a serial CTest
-  run excluding the two visible-surface suites passed 34/34 tests in 15.71
-  seconds. The two excluded suites separately passed their packet, convergence,
-  missing-source, offscreen-GPU, map-corpus, and surface-lifecycle-state cases.
-  The current desktop WindowServer session continued to return
-  `TargetUnavailable` for visible AppKit/Metal drawable acquisition after
-  overlapping GUI-test runs, so the exact hosted macOS job remains the
-  authoritative native-presentation gate for this checkpoint.
+- The complete Release build passed. On the exact committed tree,
+  `ctest --test-dir build/release-macos --output-on-failure -j 1` passed all 36
+  discovered tests in 29.98 seconds, including both visible AppKit/Metal
+  presentation suites. This final serial run followed a transient occluded
+  WindowServer session; no source, retry, assertion, or test change was made
+  between the occluded attempt and the full pass.
 - Rust formatting, clippy with warnings denied, and both Rust unit tests pass
   with `CARGO_TARGET_DIR=build/release-macos/cargo/checks`.
 - The generated `vello_renderer.cpp` compile command contains only canonical
@@ -148,11 +146,35 @@ Local evidence from the canonical `worktrees/main` checkout:
   legitimate domain IDs. All 64 translation catalogs pass `xmllint`, and
   `git diff --check` passes.
 
-Exact implementation SHA, hosted jobs and artifacts, and the checkpoint-18 tag
-remain pending the public exact-SHA matrices. Later phases still own measured
-CI/cache simplification and source-tree Cargo cleanup, documentation and the
-live checkpoint-19 renderer verdict, parity-driver retirement and the final
-tag, and bounded campaign-workspace retirement.
+Public implementation commit
+`36d44b62984ab6673075c5bce8f691ed62307fcf` passed exact-SHA GitHub Actions
+[run 29460058561](https://github.com/EthanOConnor/mapper/actions/runs/29460058561):
+[Android](https://github.com/EthanOConnor/mapper/actions/runs/29460058561/job/87501457660),
+[macOS](https://github.com/EthanOConnor/mapper/actions/runs/29460058561/job/87501457667),
+[Windows](https://github.com/EthanOConnor/mapper/actions/runs/29460058561/job/87501457679),
+and [Linux](https://github.com/EthanOConnor/mapper/actions/runs/29460058561/job/87501457709)
+all completed successfully. The hosted macOS CTest run passed 36/36 in 16.25
+seconds, including `vello_renderer_t` and `frame_pipeline_t`. Its exact package
+artifacts are:
+
+- [Mapper-Android, ID 8360947606](https://github.com/EthanOConnor/mapper/actions/runs/29460058561/artifacts/8360947606),
+  255,302,653 bytes, SHA-256
+  `493a3c781a0e34eb697ca6de7dcdefa9000c2333089bf85ccf843b281f22be2b`.
+- [Mapper-macOS, ID 8360952622](https://github.com/EthanOConnor/mapper/actions/runs/29460058561/artifacts/8360952622),
+  74,395,574 bytes, SHA-256
+  `fa53db7ef359e61979b4982fb666963864959909aef8c954b5ff6cca136d1087`.
+- [Mapper-Windows, ID 8361226328](https://github.com/EthanOConnor/mapper/actions/runs/29460058561/artifacts/8361226328),
+  77,957,438 bytes, SHA-256
+  `b0b263a4c1708aa253a7420395d7cf4d398e5c1da5035ba833d5fd840a87aabe`.
+- [Mapper-Linux, ID 8360916779](https://github.com/EthanOConnor/mapper/actions/runs/29460058561/artifacts/8360916779),
+  86,922,945 bytes, SHA-256
+  `7c2f1b3cfaffecf85aaead28e77534fd51096f78cdbe5d064825e3fc882da3e8`.
+
+The checkpoint-18 evidence revision and annotated tag remain pending that
+revision's own public exact-SHA matrix. Later phases still own measured CI/cache
+simplification and source-tree Cargo cleanup, documentation and the live
+checkpoint-19 renderer verdict, parity-driver retirement and the final tag, and
+bounded campaign-workspace retirement.
 
 ## Remaining people and hardware checks
 
