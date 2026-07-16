@@ -314,6 +314,9 @@ public slots:
 	 * the [new] window's current path.
 	 */
 	void showOpenDialog();
+
+	/** Reconnect legacy Android OOMapper paths through the system folder picker. */
+	void reconnectLegacyAndroidStorage(const QString& requested_path = {});
 	
 	/**
 	 * Show a file-save dialog.
@@ -566,6 +569,7 @@ private:
 	QStringList path_backlog;
 	/// A flag indicating that backlog procession is currently active.
 	bool path_backlog_busy = false;
+	bool legacy_android_storage_prompted = false;
 };
 
 

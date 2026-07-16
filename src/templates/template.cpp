@@ -49,6 +49,7 @@
 #include <QXmlStreamReader>
 #include <QXmlStreamWriter>
 
+#include "core/document_path.h"
 #include "core/georeferencing.h"
 #include "core/map_view.h"
 #include "core/map.h"
@@ -231,11 +232,9 @@ bool Template::suppressAbsolutePaths = false;
 Template::Template(const QString& path, not_null<Map*> map)
 : map(map)
 {
-	QFileInfo file_info{path};
-	template_file = file_info.fileName();
-	
-	auto canonical_path = file_info.canonicalFilePath();
-	template_path = canonical_path.isEmpty() ? path : canonical_path;
+	const auto resolved_path = DocumentPath::resolveForAccess(path);
+	template_file = DocumentPath::displayName(resolved_path);
+	template_path = DocumentPath::canonical(resolved_path);
 	
 	updateTransformationMatrices();
 }
@@ -482,8 +481,8 @@ void Template::switchTemplateFile(const QString& new_path, bool load_file)
 		unloadTemplateFile();
 	}
 	
-	template_path          = new_path;
-	template_file          = QFileInfo(new_path).fileName();
+	template_path          = DocumentPath::canonical(DocumentPath::resolveForAccess(new_path));
+	template_file          = DocumentPath::displayName(template_path);
 	template_relative_path = QString();
 	template_state         = Template::Unloaded;
 	
@@ -897,7 +896,9 @@ void Template::setTemplateFileInfo(const QFileInfo& file_info)
 
 void Template::setTemplatePath(const QString& value)
 {
-	setTemplateFileInfo(QFileInfo(value));
+	const auto resolved_path = DocumentPath::resolveForAccess(value);
+	template_path = DocumentPath::canonical(resolved_path);
+	template_file = DocumentPath::displayName(template_path);
 }
 
 QString Template::getTemplateRelativePath(const QDir* map_dir) const

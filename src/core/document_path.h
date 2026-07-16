@@ -21,6 +21,30 @@ namespace OpenOrienteering::DocumentPath {
 /** Returns true for an Android Storage Access Framework document URI. */
 bool isContentUri(QStringView path);
 
+/** Returns true for a pre-scoped-storage path in a public OOMapper folder. */
+bool isLegacyAndroidSharedPath(QStringView path);
+
+/** Returns the system-picker URI for the legacy path's OOMapper folder. */
+QUrl legacyAndroidFolderUrl(QStringView path);
+
+/** Maps a legacy public path into a document URI below an authorized tree. */
+QString legacyAndroidDocumentUri(QStringView tree_uri, QStringView path);
+
+/** Resolves a legacy public path through the previously authorized tree. */
+QString resolveForAccess(QStringView path);
+
+/** Returns the persisted Android document-tree URI, if any. */
+QString androidDocumentTreeUri();
+
+/** Stores the Android document-tree URI after access has been verified. */
+void setAndroidDocumentTreeUri(QStringView tree_uri);
+
+/** Persists the Android system picker's read/write grant for a document tree. */
+bool persistAndroidDocumentTreeAccess(QStringView tree_uri);
+
+/** Returns true if Android can open the document for reading and writing. */
+bool canReadWriteAndroidDocument(QStringView document_uri);
+
 /** Converts a file or document URL to the identifier accepted by QFile. */
 QString fromUrl(const QUrl& url);
 

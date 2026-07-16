@@ -454,6 +454,12 @@ void HomeScreenWidgetMobile::itemClicked(QListWidgetItem* item)
 		                     ::OpenOrienteering::MainWindow::tr("Warning"),
 		                     StorageLocation::fileHintTextTemplate(hint).arg(file_path));
 	}
+#ifdef Q_OS_ANDROID
+	else if (DocumentPath::isLegacyAndroidSharedPath(file_path))
+	{
+		controller->getWindow()->reconnectLegacyAndroidStorage(file_path);
+	}
+#endif
 	else if (DocumentPath::isContentUri(file_path))
 	{
 		setEnabled(false);
@@ -520,6 +526,18 @@ void HomeScreenWidgetMobile::updateFileListWidget()
 		auto recent_files = settings.getSetting(Settings::General_RecentFilesList).toStringList();
 		for (auto& file_path : recent_files)
 		{
+#ifdef Q_OS_ANDROID
+			if (DocumentPath::isLegacyAndroidSharedPath(file_path))
+			{
+				auto* item = new QListWidgetItem(
+					tr("Reconnect access to %1").arg(DocumentPath::displayName(file_path)));
+				item->setData(pathRole(), file_path);
+				item->setData(hintRole(), StorageLocation::HintNormal);
+				item->setToolTip(tr("Choose the existing OOMapper folder to restore access."));
+				file_list_widget->addItem(item);
+				continue;
+			}
+#endif
 			if (DocumentPath::isContentUri(file_path))
 			{
 				auto* item = new QListWidgetItem(DocumentPath::displayName(file_path));

@@ -20,6 +20,7 @@ Q_OBJECT
 private slots:
 	void localPathRoundTrip();
 	void contentUriRoundTrip();
+	void legacyAndroidPathMigration();
 	void autosaveLocation();
 };
 

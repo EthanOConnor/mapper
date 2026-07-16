@@ -22,6 +22,8 @@
 #include "main_window.h"
 #include "gui/action_icon.h"
 
+#include <algorithm>
+
 #include <QApplication>
 #include <QCloseEvent>
 #include <QDialogButtonBox>
@@ -190,14 +192,114 @@ void MainWindow::applicationStateChanged()
 	{
 		starting_up = false;
 		QSettings settings;
+		const auto files = settings.value(QLatin1String("recentFileList")).toStringList();
+#ifdef Q_OS_ANDROID
+		const auto legacy_file = std::find_if(files.cbegin(), files.cend(), [](const auto& path) {
+			return DocumentPath::isLegacyAndroidSharedPath(path);
+		});
+		const auto open_mru = settings.value(QLatin1String("openMRUFile")).toBool();
+		if (legacy_file != files.cend() && !legacy_android_storage_prompted)
+		{
+			legacy_android_storage_prompted = true;
+			const auto requested_path = open_mru && !files.isEmpty()
+			                            && DocumentPath::isLegacyAndroidSharedPath(files.front())
+			                          ? files.front() : QString{};
+			QTimer::singleShot(250, this, [this, requested_path]() {
+				reconnectLegacyAndroidStorage(requested_path);
+			});
+			if (!requested_path.isEmpty())
+				return;
+		}
+#endif
 		if (path_backlog.isEmpty()
 		    && settings.value(QLatin1String("openMRUFile")).toBool())
 		{
-			const auto files = settings.value(QLatin1String("recentFileList")).toStringList();
 			if (!files.isEmpty())
 				openPathLater(files[0]);
 		}
 	}
+}
+
+void MainWindow::reconnectLegacyAndroidStorage(const QString& requested_path)
+{
+#ifdef Q_OS_ANDROID
+	Settings& settings = Settings::getInstance();
+	auto recent_files = settings.getSetting(Settings::General_RecentFilesList).toStringList();
+	auto first_legacy = requested_path;
+	if (first_legacy.isEmpty())
+	{
+		const auto found = std::find_if(recent_files.cbegin(), recent_files.cend(), [](const auto& path) {
+			return DocumentPath::isLegacyAndroidSharedPath(path);
+		});
+		if (found != recent_files.cend())
+			first_legacy = *found;
+	}
+	if (first_legacy.isEmpty())
+		return;
+
+	const auto answer = QMessageBox::information(
+		this,
+		tr("Reconnect existing maps"),
+		tr("Android now requires Mapper to reconnect your existing OOMapper folder. "
+		   "Choose that folder on the next screen. Your maps will stay where they are."),
+		QMessageBox::Ok | QMessageBox::Cancel,
+		QMessageBox::Ok);
+	if (answer != QMessageBox::Ok)
+		return;
+
+	const auto selected_url = QFileDialog::getExistingDirectoryUrl(
+		this,
+		tr("Choose your existing OOMapper folder"),
+		DocumentPath::legacyAndroidFolderUrl(first_legacy),
+		QFileDialog::ShowDirsOnly);
+	const auto tree_uri = DocumentPath::fromUrl(selected_url);
+	if (tree_uri.isEmpty())
+		return;
+
+	auto migrated_files = recent_files;
+	QString requested_uri;
+	int migrated_count = 0;
+	for (qsizetype i = 0; i < recent_files.size(); ++i)
+	{
+		if (!DocumentPath::isLegacyAndroidSharedPath(recent_files[i]))
+			continue;
+		const auto document_uri = DocumentPath::legacyAndroidDocumentUri(tree_uri, recent_files[i]);
+		if (document_uri.isEmpty() || !DocumentPath::canReadWriteAndroidDocument(document_uri))
+			continue;
+		migrated_files[i] = document_uri;
+		if (recent_files[i] == requested_path)
+			requested_uri = document_uri;
+		++migrated_count;
+	}
+
+	if (migrated_count == 0)
+	{
+		QMessageBox::warning(
+			this,
+			tr("Folder not connected"),
+			tr("Mapper could not read and write any recent maps in that folder. "
+			   "Please choose the existing OOMapper folder itself."));
+		return;
+	}
+	if (!DocumentPath::persistAndroidDocumentTreeAccess(tree_uri))
+	{
+		QMessageBox::warning(
+			this,
+			tr("Folder access not retained"),
+			tr("Android did not allow Mapper to retain access to that folder. "
+			   "No recent-file entries were changed."));
+		return;
+	}
+
+	DocumentPath::setAndroidDocumentTreeUri(tree_uri);
+	settings.setSetting(Settings::General_RecentFilesList, migrated_files);
+	updateRecentFileActions();
+	showStatusBarMessage(tr("Reconnected %n existing map(s).", nullptr, migrated_count), 5000);
+	if (!requested_uri.isEmpty())
+		openPathLater(requested_uri);
+#else
+	Q_UNUSED(requested_path)
+#endif
 }
 
 
@@ -896,14 +998,19 @@ void MainWindow::showOpenDialog()
 
 bool MainWindow::openPath(const QString &path)
 {
-	auto format = FileFormats.findFormatForFilename(path, &FileFormat::supportsFileOpen);
+	const auto access_path = DocumentPath::resolveForAccess(path);
+	auto format = FileFormats.findFormatForFilename(access_path, &FileFormat::supportsFileOpen);
 	if (!format)
-		format = FileFormats.findFormatForData(path, FileFormat::AllFiles);
-	return openPath(path, format);
+		format = FileFormats.findFormatForData(access_path, FileFormat::AllFiles);
+	return openPath(access_path, format);
 }
 
 bool MainWindow::openPath(const QString& path, const FileFormat* format)
 {
+	const auto access_path = DocumentPath::resolveForAccess(path);
+	if (access_path != path)
+		return openPath(access_path, format);
+
 	// Empty path does nothing. This also helps with the single instance application code.
 	if (path.isEmpty())
 		return true;

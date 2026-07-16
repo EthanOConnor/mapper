@@ -26,6 +26,7 @@ import android.content.pm.ActivityInfo;
 import android.location.LocationManager;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.ParcelFileDescriptor;
 import android.os.PowerManager;
 import android.provider.Settings;
 import android.view.Display;
@@ -98,6 +99,41 @@ public class MapperActivity extends QtActivity
 			return uri.toString();
 		}
 		return "";
+	}
+
+	/** Keep read/write access to a directory selected through Android's document picker. */
+	public boolean persistDocumentTreeUri(String uriString)
+	{
+		if (uriString == null || uriString.isEmpty())
+			return false;
+		try
+		{
+			Uri uri = Uri.parse(uriString);
+			getContentResolver().takePersistableUriPermission(
+				uri,
+				Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+			return true;
+		}
+		catch (RuntimeException ignored)
+		{
+			return false;
+		}
+	}
+
+	/** Check a migrated document without modifying it. */
+	public boolean canReadWriteDocument(String uriString)
+	{
+		if (uriString == null || uriString.isEmpty())
+			return false;
+		try (ParcelFileDescriptor descriptor =
+			     getContentResolver().openFileDescriptor(Uri.parse(uriString), "rw"))
+		{
+			return descriptor != null;
+		}
+		catch (Exception ignored)
+		{
+			return false;
+		}
 	}
 
 	/** Offer the system battery-optimization exemption required by live tracking. */

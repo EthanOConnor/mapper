@@ -46,6 +46,47 @@ void DocumentPathTest::contentUriRoundTrip()
 	QCOMPARE(DocumentPath::suffix(uri), QLatin1String("omap"));
 }
 
+void DocumentPathTest::legacyAndroidPathMigration()
+{
+	const auto primary_path = QStringLiteral(
+		"/storage/emulated/0/OOMapper/Club Maps/Forest.omap");
+	const auto primary_tree = QStringLiteral(
+		"content://com.android.externalstorage.documents/tree/primary%3AOOMapper");
+	QVERIFY(DocumentPath::isLegacyAndroidSharedPath(primary_path));
+	QCOMPARE(DocumentPath::legacyAndroidFolderUrl(primary_path).toString(QUrl::FullyEncoded),
+	         QStringLiteral("content://com.android.externalstorage.documents/"
+	                        "document/primary%3AOOMapper"));
+	QCOMPARE(DocumentPath::legacyAndroidDocumentUri(primary_tree, primary_path),
+	         QStringLiteral("content://com.android.externalstorage.documents/"
+	                        "tree/primary%3AOOMapper/document/"
+	                        "primary%3AOOMapper%2FClub%20Maps%2FForest.omap"));
+	QCOMPARE(DocumentPath::legacyAndroidDocumentUri(
+		QStringLiteral("content://com.android.externalstorage.documents/tree/primary%3Aoomapper"),
+		primary_path),
+		QStringLiteral("content://com.android.externalstorage.documents/"
+		               "tree/primary%3Aoomapper/document/"
+		               "primary%3Aoomapper%2FClub%20Maps%2FForest.omap"));
+
+	const auto card_path = QStringLiteral("/storage/1234-ABCD/OOMapper/Event/map.omap");
+	const auto card_tree = QStringLiteral(
+		"content://com.android.externalstorage.documents/tree/1234-ABCD%3AOOMapper/"
+		"document/1234-ABCD%3AOOMapper");
+	QVERIFY(DocumentPath::isLegacyAndroidSharedPath(card_path));
+	QCOMPARE(DocumentPath::legacyAndroidDocumentUri(card_tree, card_path),
+	         QStringLiteral("content://com.android.externalstorage.documents/"
+	                        "tree/1234-ABCD%3AOOMapper/document/"
+	                        "1234-ABCD%3AOOMapper%2FEvent%2Fmap.omap"));
+
+	QVERIFY(!DocumentPath::isLegacyAndroidSharedPath(
+		QStringLiteral("/storage/emulated/0/Download/map.omap")));
+	QVERIFY(DocumentPath::legacyAndroidDocumentUri(
+		QStringLiteral("content://com.android.externalstorage.documents/tree/primary%3ADownload"),
+		primary_path).isEmpty());
+	QVERIFY(DocumentPath::legacyAndroidDocumentUri(primary_tree, card_path).isEmpty());
+	QVERIFY(!DocumentPath::isLegacyAndroidSharedPath(
+		QStringLiteral("/storage/emulated/0/OOMapper/../Download/map.omap")));
+}
+
 void DocumentPathTest::autosaveLocation()
 {
 	const auto local = QDir::temp().filePath(QLatin1String("map.omap"));

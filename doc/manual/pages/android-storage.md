@@ -7,32 +7,36 @@ nav_order: 0.3
 
 ## Storage locations
 
-Android organizes storage and permissions different than PCs.
-Especially on SD cards, write access for apps is restricted.
+Android requires apps to use its system document picker for shared files. Use
+**Open map** to choose a map, or **Save as** to create one. Mapper retains access
+to documents chosen this way, so they remain available after restarting the
+app.
 
-You can choose the following locations for storing data which you want to edit and to display in OpenOrienteering Mapper:
+Maps kept in shared folders such as `OOMapper` remain on the device when Mapper
+is uninstalled. Files in `Android/data/org.openorienteering.mapper/files` are
+app storage and are removed on uninstall, so do not use that location as the
+only copy of important work.
 
- - Folder "OOMapper" at the top level of the primary storage volume. On most devices, the primary storage volume is a part of the built-in storage.
-  Files in this area are stored permanently, until you decide to remove them.
-  Unfortunately, there is usually only limited capacity available - this memory is expensive when buying the device.
+### Upgrading an older installation
 
- - Path "Android/data/org.openorienteering.mapper/files" on arbitrary storage volumes such as built-in memory or SD cards (since Mapper 0.6.5).
-  This is the only convenient way to store map data on cheap extra memory cards.
-  However, you need to be aware of the fact that these folders are removed by Android when you uninstall the Mapper app.
-  So please carefully save your changes to a PC.
+Older Mapper versions recorded direct paths such as
+`/storage/emulated/0/OOMapper/map.omap`. Current Android versions no longer let
+apps use those paths directly. When Mapper detects them, it asks you to choose
+the existing `OOMapper` folder in Android's system picker. Choose the folder
+itself. Mapper keeps the maps in place and reconnects recent maps and templates
+below that folder.
 
-OpenOrienteering Mapper for Android will create these folders when they are missing, and scan them for map files. It will display warnings when you open maps from the non-permanent app-specific folders or from read-only locations. (Top-level "OOMapper" folders on secondary storage volumes are scanned, but cannot be written to.)
+Files outside the chosen folder may need to be selected once through the system
+picker. Do not uninstall Mapper or clear its app data before reconnecting your
+files.
 
 
 ## File transfer
 
 You can transfer files from and to a PC via a USB cable. Android supports multiple file transfer protocols.
 
-- MTP is the preferred method now. There is hardly any interference for apps while the device is connected to the PC.
-  Via MTP, Android will only show files which are known to its Media Scanner.
-  
-  On macOS, the Android File Transfer software must be installed and used for MTP.
-  This software can be downloaded from https://www.android.com/filetransfer/.
+- MTP or another Android-compatible file transfer application can copy shared
+  map folders between Android and a computer.
 
 - Mass Storage makes the storage unavailable for apps for the duration of the connection with the PC.
   (Android also needs to terminate apps which are stored on the volume which is provided as mass storage.)
@@ -44,12 +48,6 @@ Note that after mapping, you might want to transfer back not only the modified m
 ## Data loss prevention and recovery
 
 *Remember to keep backups and to verify transferred files.*
-
-If a file appears to be corrupted after transfer back to PC, or you cannot find
-a new file such as a recorded GPX track, a reboot of the Android device could
-solve the issue. After the reboot, Android's media scanner will take notice of
-new files and changed file sizes. However, Mapper v0.8.3 is expected to bring a
-solution to this issue.
 
 In some situations, the Mapper app might not be able to properly save data and
 shutdown as quickly as requested by the Android operating system, for example
