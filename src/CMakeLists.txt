@@ -350,6 +350,7 @@ qt_add_resources(Mapper_Common "mapper-translations"
 target_link_libraries(Mapper_Common
   PUBLIC
   Clipper2::Clipper2
+  Mapper::ImageryCore
   Mapper::RenderIR
   ${PROJ_LIBRARIES}
   Qt6::Widgets

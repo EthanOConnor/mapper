@@ -187,6 +187,10 @@ add_unit_test(util_t ../src/util/util
 	../src/settings
 )
 
+# Low-level imagery contracts stay independent of the full Mapper runtime.
+add_test_helper(imagery_core_t)
+target_link_libraries(imagery_core_t PRIVATE Mapper::ImageryCore)
+
 # Benchmarks
 add_system_test(coord_xml_t MANUAL)
 
