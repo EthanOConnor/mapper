@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <defs>
+    <linearGradient id="c" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#d99a27"/><stop offset="1" stop-color="#a86608"/></linearGradient>
+    <linearGradient id="m" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#d8d8cf"/><stop offset="1" stop-color="#898b82"/></linearGradient>
+  </defs>
+  <path fill="url(#c)" stroke="#7f5513" stroke-width="1.4" d="M3 7h26v22H3z"/>
+  <path fill="#eee" stroke="#9b9b93" d="M7 10h18v15l-4 4H7z"/>
+  <path fill="#c7c7c1" d="M21 25h4l-4 4z"/>
+  <path fill="url(#m)" stroke="#666a62" stroke-width="1.2" stroke-linejoin="round" d="M10 5h3V3h6v2h3v6H10z"/>
+  <g fill="#050505">
+    <circle cx="16" cy="12" r="1.25"/><circle cx="16" cy="16" r="1.25"/><circle cx="16" cy="20" r="1.25"/><circle cx="16" cy="24" r="1.25"/><circle cx="16" cy="28" r="1.25"/>
+    <circle cx="4" cy="20" r="1.25"/><circle cx="8" cy="20" r="1.25"/><circle cx="12" cy="20" r="1.25"/><circle cx="20" cy="20" r="1.25"/><circle cx="24" cy="20" r="1.25"/><circle cx="28" cy="20" r="1.25"/>
+  </g>
+</svg>

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>Duplicate</title>
+  <defs>
+    <linearGradient id="back" x1="18" y1="8" x2="18" y2="30" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#dce7f6"/><stop offset="1" stop-color="#7893bf"/>
+    </linearGradient>
+    <linearGradient id="front" x1="12" y1="3" x2="12" y2="26" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fbfcfe"/><stop offset="1" stop-color="#d3dfef"/>
+    </linearGradient>
+  </defs>
+  <rect x="10.5" y="7.5" width="19" height="22" fill="url(#back)" stroke="#48658d" stroke-width="1.5"/>
+  <rect x="2.5" y="2.5" width="21" height="24" fill="url(#front)" stroke="#48658d" stroke-width="1.5"/>
+  <path d="M5 5h16v19H5z" fill="none" stroke="#fff" stroke-opacity=".65"/>
+</svg>

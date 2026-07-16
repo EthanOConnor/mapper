@@ -6,6 +6,8 @@
 
 #include "render_ir_t.h"
 
+#include <algorithm>
+#include <cmath>
 #include <map>
 #include <memory>
 #include <vector>
@@ -15,12 +17,14 @@
 #include <QDir>
 #include <QImage>
 #include <QPainter>
+#include <QPainterPath>
 
 #include "global.h"
 #include "test_config.h"
 #include "core/map.h"
 #include "core/map_part.h"
 #include "core/objects/object.h"
+#include "core/symbols/line_symbol.h"
 #include "render/qpainter_renderer.h"
 #include "render/qt_render_bridge.h"
 #include "render/render_ir.h"
@@ -140,6 +144,84 @@ void RenderIrTest::immutableSnapshotSurvivesEdit()
 	QVERIFY(third->revision() > second->revision());
 	QVERIFY(third->buildIR(request)->commands.size() < second_command_count);
 	QCOMPARE(first->buildIR(request)->commands.size(), old_command_count);
+}
+
+void RenderIrTest::curvedLineKeepsBothBorders()
+{
+	Map map;
+	auto* fill = new MapColor;
+	fill->setRgb(MapColorRgb(QColor(246, 218, 197)));
+	map.addColor(fill, 0);
+	auto* border = new MapColor;
+	border->setRgb(MapColorRgb(Qt::black));
+	map.addColor(border, 1);
+
+	auto* symbol = new LineSymbol;
+	symbol->setColor(fill);
+	symbol->setLineWidth(0.55);
+	symbol->setHasBorder(true);
+	symbol->getBorder().color = border;
+	symbol->getBorder().width = 70;
+	symbol->getBorder().shift = 35;
+	symbol->getRightBorder() = symbol->getBorder();
+	map.addSymbol(symbol, 0);
+
+	MapCoord start(-96.926, -52.501);
+	start.setCurveStart(true);
+	auto* object = new PathObject(symbol, {
+		start,
+		MapCoord(-96.327, -53.305),
+		MapCoord(-95.862, -53.873),
+		MapCoord(-95.644, -54.852),
+	}, &map);
+	map.addObject(object);
+
+	auto const snapshot = map.publishRenderSnapshot();
+	auto const ir = snapshot->buildIR({
+		render::fromQRectF(map.calculateExtent(true).adjusted(-1, -1, 1, 1)),
+		20,
+		RenderConfig::NoOptions,
+		1,
+	});
+
+	std::vector<QPainterPath> border_paths;
+	for (auto const& command : ir->commands)
+	{
+		auto const* stroke = std::get_if<render::StrokePath>(&command);
+		if (!stroke || std::abs(stroke->style.width - 0.07) > 1.0e-9 || !stroke->path)
+		{
+			continue;
+		}
+		QVERIFY(std::ranges::any_of(stroke->path->elements(), [](const auto& element) {
+			return element.verb == render::PathVerb::CubicTo;
+		}));
+		border_paths.push_back(render::toQPainterPath(*stroke->path));
+	}
+	QCOMPARE(border_paths.size(), std::size_t(2));
+
+	QPainterPath center;
+	center.moveTo(-96.926, -52.501);
+	center.cubicTo(-96.327, -53.305, -95.862, -53.873, -95.644, -54.852);
+	auto signed_side = [&center](const QPainterPath& candidate, double percent) {
+		const auto before = center.pointAtPercent(std::max(0.0, percent - 0.01));
+		const auto after = center.pointAtPercent(std::min(1.0, percent + 0.01));
+		const auto tangent = after - before;
+		const auto right = QPointF{-tangent.y(), tangent.x()};
+		const auto delta = candidate.pointAtPercent(percent) - center.pointAtPercent(percent);
+		return QPointF::dotProduct(delta, right) / std::hypot(right.x(), right.y());
+	};
+
+	std::vector<double> middle_sides;
+	for (auto const& border_path : border_paths)
+	{
+		const auto start_side = signed_side(border_path, 0);
+		const auto middle_side = signed_side(border_path, 0.5);
+		QVERIFY(std::abs(start_side) > 0.2);
+		QVERIFY(std::abs(middle_side) > 0.2);
+		QVERIFY(start_side * middle_side > 0);
+		middle_sides.push_back(middle_side);
+	}
+	QVERIFY(middle_sides[0] * middle_sides[1] < 0);
 }
 
 void RenderIrTest::referenceRendererInterpretsIr()

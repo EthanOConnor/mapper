@@ -61,7 +61,10 @@ ffi::Stroke ffiStroke(StrokeStyle value)
 	out.width = value.width;
 	out.cap = std::uint8_t(value.cap);
 	out.join = std::uint8_t(value.join);
-	out.miter_limit = value.miter_limit;
+	// RenderIR follows QPen's full-width miter units; Kurbo follows SVG/PDF units.
+	out.miter_limit = value.join == LineJoin::Miter && value.miter_limit > 0
+	                ? std::hypot(1.0, 2.0 * value.miter_limit)
+	                : value.miter_limit;
 	return out;
 }
 

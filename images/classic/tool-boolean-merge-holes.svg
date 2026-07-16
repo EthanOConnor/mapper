@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>Merge holes</title>
+  <circle cx="15.5" cy="15.5" r="14.5" fill="#6eabe5" stroke="#969696"/>
+  <path d="M7 5h7.5L18 8v7.5L15 18H8l-3-3V8z" fill="#e3e3e3" stroke="#969696" stroke-width="1.2"/>
+  <path d="m22 21 7-2v10h-9z" fill="#e3e3e3" stroke="#969696" stroke-width="1.2" stroke-linejoin="miter"/>
+  <path d="m15.5 14.5 8.2 8.2m-4.8-.2 5.1.5-.5-5.1" fill="none" stroke="#969696" stroke-width="1.7" stroke-linecap="square" stroke-linejoin="miter"/>
+</svg>

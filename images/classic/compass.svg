@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <defs>
+    <linearGradient id="rim" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#8b5b5b"/><stop offset="1" stop-color="#4b2b2b"/></linearGradient>
+    <linearGradient id="red" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#a40f17"/><stop offset=".5" stop-color="#ef2929"/><stop offset="1" stop-color="#9c1016"/></linearGradient>
+    <linearGradient id="blue" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#183f91"/><stop offset=".5" stop-color="#4f74ca"/><stop offset="1" stop-color="#183f91"/></linearGradient>
+  </defs>
+  <circle cx="16" cy="16" r="13.2" fill="#f4f4f4" stroke="#382424" stroke-width="1.5"/>
+  <circle cx="16" cy="16" r="11.5" fill="none" stroke="url(#rim)" stroke-width="3.2"/>
+  <path d="M16 4l4.2 12H16z" fill="url(#red)" stroke="#a20e18" stroke-width=".7"/>
+  <path d="M16 28l-4.2-12H16z" fill="url(#blue)" stroke="#173d89" stroke-width=".7"/>
+  <path d="M16 6v20M13 14l3-8 3 8M13 18l3 8 3-8" fill="none" stroke="#fff" stroke-width=".6" opacity=".45"/>
+  <circle cx="16" cy="16" r="2.1" fill="#888a85" stroke="#555753" stroke-width=".8"/>
+</svg>

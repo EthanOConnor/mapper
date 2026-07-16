@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>Measure</title>
+  <defs>
+    <linearGradient id="metal" x1="8" y1="2" x2="23" y2="30" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#b9d3ee"/><stop offset="1" stop-color="#5475a8"/>
+    </linearGradient>
+  </defs>
+  <ellipse cx="16" cy="29.2" rx="10" ry="1.2" fill="#888" opacity=".2"/>
+  <path d="M14 1.5h4v8h-4z" fill="url(#metal)" stroke="#6484ae"/>
+  <path d="M14.2 11 5.8 29M17.8 11 26.2 29" fill="none" stroke="#5475a8" stroke-width="3" stroke-linecap="round"/>
+  <path d="M15.3 12 9 26.5M16.7 12 23 26.5" fill="none" stroke="#b7d0ea" stroke-width="1"/>
+  <path d="M3 16h8M21 16h8" stroke="#5475a8" stroke-width="2.3" stroke-linecap="square"/>
+  <circle cx="16" cy="10.5" r="4" fill="url(#metal)" stroke="#5475a8" stroke-width="1.3"/>
+  <circle cx="16" cy="10.5" r="1.4" fill="#e6eef8" stroke="#5475a8"/>
+  <path d="m14.3 18 1.7-2 1.7 2-1.7 5z" fill="#5a78a7" stroke="#455f89"/>
+</svg>

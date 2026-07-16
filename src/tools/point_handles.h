@@ -24,7 +24,6 @@
 
 #include <limits>
 
-#include <QImage>
 #include <QPointF>  // IWYU pragma: no_forward_declare QPointF
 #include <QRgb>
 
@@ -46,8 +45,6 @@ class PointHandles
 public:
 	/**
 	 * @brief Types of point handle.
-	 * 
-	 * The numbers correspond to the columns in point-handles.png
 	 */
 	enum PointHandleType
 	{
@@ -60,8 +57,6 @@ public:
 	
 	/**
 	 * @brief States of point handles.
-	 * 
-	 * The numbers correspond to the rows in point-handles.png
 	 */
 	enum PointHandleState
 	{
@@ -87,8 +82,7 @@ public:
 	
 	/**
 	 * @brief The factor by which all drawing shall be scaled.
-	 * 
-	 * The control point handles image matches this factor, too.
+	 *
 	 * Currently, this value is either 0, 1, 2, or 4.
 	 * (0 represents a default constructed object.)
 	 */
@@ -106,14 +100,6 @@ public:
 	 * The number of covered pixels around the center of a point handle.
 	 */
 	int displayRadius() const { return display_radius; }
-	
-	
-	/**
-	 * @brief The control point handles image.
-	 * 
-	 * The image matches the current scale factor.
-	 */
-	const QImage image() const { return handle_image; }
 	
 	
 	/**
@@ -152,18 +138,8 @@ public:
 	 */
 	void drawCurveHandleLine(render::OverlaySceneBuilder* painter, QPointF anchor_point, QPointF curve_handle, PointHandleType type, PointHandleState state) const;
 	
+
 private:
-	/**
-	 * @brief Loads and returns the image for a for a particular scale factor.
-	 * 
-	 * Since scale depends on the pixels-per-inch setting and doesn't change
-	 * very often, the image is loaded only when the scale changes and returned
-	 * from an internal cache otherwise.
-	 */
-	static const QImage loadHandleImage(unsigned int factor);
-	
-	
-	QImage handle_image;
 	unsigned int scale_factor = 0;
 	int display_radius = 0;
 };

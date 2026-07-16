@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>Simplify path</title>
+  <defs>
+    <linearGradient id="blue" x1="5" y1="4" x2="27" y2="28" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#a8d5f1"/><stop offset=".55" stop-color="#3d8cc2"/><stop offset="1" stop-color="#2c669e"/>
+    </linearGradient>
+    <linearGradient id="red" x1="7" y1="5" x2="25" y2="27" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#f5a18f"/><stop offset="1" stop-color="#dc654f"/>
+    </linearGradient>
+  </defs>
+  <circle cx="16" cy="16" r="13.2" fill="#fff" stroke="#ef8f7d" stroke-width="3.4" opacity=".75"/>
+  <circle cx="16" cy="16" r="11.2" fill="none" stroke="url(#blue)" stroke-width="3.2"/>
+  <circle cx="16" cy="16" r="8.1" fill="#fff" stroke="url(#red)" stroke-width="3.2"/>
+  <path d="M8.2 8.5a10.7 10.7 0 0 1 15.5-.2" fill="none" stroke="#d9ecfa" stroke-width="1.3"/>
+</svg>

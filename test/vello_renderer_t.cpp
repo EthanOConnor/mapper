@@ -25,10 +25,12 @@
 #include "core/map.h"
 #include "presentation/vello_canvas.h"
 #include "render/frame_pipeline.h"
+#include "render/overlay_scene.h"
 #include "render/qpainter_frame_renderer.h"
 #include "render/qt_render_bridge.h"
 #include "render/render_ir.h"
 #include "render/vello_renderer.h"
+#include "tools/point_handles.h"
 
 using namespace OpenOrienteering;
 
@@ -291,6 +293,86 @@ void VelloRendererTest::offscreenGpuMatchesReference()
 	        << "high-delta pixels" << difference.high_delta_pixels;
 	QVERIFY(difference.mean_channel_delta < 3);
 	QVERIFY(difference.high_delta_pixels < actual.width() * actual.height() / 50);
+}
+
+void VelloRendererTest::miterLimitOneMatchesReference()
+{
+	render::RenderIRBuilder builder(43, { 0, 0, 64, 64 });
+	builder.fillPath(rectangle(0, 0, 64, 64), render::fromQColor(Qt::white));
+	render::PathBuilder corner;
+	corner.moveTo({ 12, 48 });
+	corner.lineTo({ 32, 48 });
+	corner.lineTo({ 32, 16 });
+	builder.strokePath(
+		corner.finish(), render::fromQColor(Qt::black),
+		{
+			.width = 12,
+			.cap = render::LineCap::Flat,
+			.join = render::LineJoin::Miter,
+			.miter_limit = 1,
+		}
+	);
+
+	auto frame = std::make_shared<render::FramePacket>();
+	frame->id = 8;
+	frame->revision = 43;
+	frame->view = { 64, 64, 1, {} };
+	frame->vector_passes.push_back({ builder.finish() });
+
+	render::VelloRenderer renderer;
+	auto const rendered = renderer.renderOffscreen(frame);
+	QVERIFY2(rendered, renderer.lastError().c_str());
+	auto const actual = imageFromVello(*rendered);
+	auto const expected = referenceImage(*frame);
+
+	// This pixel is inside QPen's 90-degree miter but outside a bevel fallback.
+	QVERIFY(expected.pixelColor(35, 52).lightness() < 30);
+	QVERIFY(actual.pixelColor(35, 52).lightness() < 30);
+}
+
+void VelloRendererTest::selectionHandleGlyphsSurviveHighDpi()
+{
+	render::OverlaySceneBuilder builder;
+	builder.begin(43, { 0, 0, 64, 64 });
+	PointHandles handles;
+	handles.setScaleFactor(2);
+	handles.drawCurveHandleLine(
+		&builder, { 16, 32 }, { 48, 32 },
+		PointHandles::NormalHandle, PointHandles::NormalHandleState
+	);
+	handles.draw(
+		&builder, { 16, 32 },
+		PointHandles::NormalHandle, PointHandles::NormalHandleState
+	);
+	handles.draw(
+		&builder, { 48, 32 },
+		PointHandles::CurveHandle, PointHandles::NormalHandleState
+	);
+
+	render::FrameRequest request;
+	request.view = { 64, 64, 2, {} };
+	request.above_map.push_back({
+		builder.finish(), render::BlendMode::SourceOver, 1, false,
+		render::VectorPass::Space::Viewport,
+	});
+	render::FramePlanner planner;
+	auto const frame = planner.plan(request);
+	render::VelloRenderer renderer;
+	auto const rendered = renderer.renderOffscreen(frame, render::fromQColor(Qt::black));
+	QVERIFY2(rendered, renderer.lastError().c_str());
+	auto const image = imageFromVello(*rendered);
+
+	auto is_blue = [&image](int x, int y) {
+		auto const color = image.pixelColor(2 * x, 2 * y);
+		return color.blue() > 200 && color.red() < 80 && color.green() < 80;
+	};
+	QVERIFY(image.pixelColor(32, 64).lightness() < 30);
+	QVERIFY(is_blue(16, 38));
+	QVERIFY(image.pixelColor(32, 73).lightness() > 220);
+	QVERIFY(is_blue(32, 32));
+	QVERIFY(image.pixelColor(96, 64).lightness() < 30);
+	QVERIFY(is_blue(48, 38));
+	QVERIFY(image.pixelColor(96, 73).lightness() > 220);
 }
 
 void VelloRendererTest::mapCorpusMatchesReference()

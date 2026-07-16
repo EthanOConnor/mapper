@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>Edit objects</title>
+  <defs>
+    <linearGradient id="pointer" x1="7" y1="4" x2="19" y2="28" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff"/><stop offset="1" stop-color="#d8e5f5"/>
+    </linearGradient>
+  </defs>
+  <path d="M6.5 3.5v26l19-6.7z" fill="url(#pointer)" stroke="#243b63" stroke-width="1.5" stroke-linejoin="miter"/>
+  <path d="M8.5 7v18.8" stroke="#fff" stroke-opacity=".75"/>
+</svg>

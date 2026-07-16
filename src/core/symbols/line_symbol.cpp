@@ -149,17 +149,40 @@ std::vector<CubicSegment> offsetCubic(
 	stroker.setCurveThreshold(curve_threshold);
 	const auto outline = stroker.createStroke(path);
 
-	std::vector<CubicSegment> right_side;
-	std::vector<CubicSegment> left_side_reverse;
 	if (outline.elementCount() == 0)
 		return {};
 
-	auto current = QPointF{outline.elementAt(0)};
-	auto* side = &right_side;
-	for (int i = 1; i < outline.elementCount();)
+	using CubicRun = std::vector<CubicSegment>;
+	std::vector<CubicRun> runs;
+	CubicRun run;
+	QPointF current;
+	auto have_current = false;
+	auto finish_run = [&]() {
+		if (!run.empty())
+			runs.push_back(std::exchange(run, {}));
+	};
+
+	for (int i = 0; i < outline.elementCount();)
 	{
 		const auto element = outline.elementAt(i);
+		if (element.type == QPainterPath::MoveToElement)
+		{
+			finish_run();
+			current = QPointF{element};
+			have_current = true;
+			++i;
+			continue;
+		}
+		if (element.type == QPainterPath::LineToElement)
+		{
+			finish_run();
+			current = QPointF{element};
+			have_current = true;
+			++i;
+			continue;
+		}
 		if (element.type == QPainterPath::CurveToElement
+		    && have_current
 		    && i + 2 < outline.elementCount())
 		{
 			const auto data1 = outline.elementAt(i + 1);
@@ -168,31 +191,69 @@ std::vector<CubicSegment> offsetCubic(
 			    || data2.type != QPainterPath::CurveToDataElement)
 				return {};
 
-			side->push_back({current, QPointF{element}, QPointF{data1}, QPointF{data2}});
+			run.push_back({current, QPointF{element}, QPointF{data1}, QPointF{data2}});
 			current = QPointF{data2};
 			i += 3;
 			continue;
 		}
+		return {};
+	}
+	finish_run();
+	if (runs.empty())
+		return {};
 
-		if (element.type != QPainterPath::LineToElement)
-			return {};
-
-		if (side == &left_side_reverse)
-			break;
-
-		side = &left_side_reverse;
-		current = QPointF{element};
-		++i;
+	auto squared_distance = [](const QPointF& left, const QPointF& right) {
+		const auto delta = left - right;
+		return QPointF::dotProduct(delta, delta);
+	};
+	auto reverse_run = [](const CubicRun& source) {
+		CubicRun reversed;
+		reversed.reserve(source.size());
+		for (auto i = source.rbegin(); i != source.rend(); ++i)
+			reversed.push_back({i->end, i->control2, i->control1, i->start});
+		return reversed;
+	};
+	for (auto& candidate : runs)
+	{
+		if (squared_distance(candidate.back().end, start)
+		    < squared_distance(candidate.front().start, start))
+		{
+			candidate = reverse_run(candidate);
+		}
 	}
 
-	if (offset > 0.0)
-		return right_side;
+	auto offset_endpoint = [offset](const QPointF& point, QPointF tangent) {
+		auto length = std::hypot(tangent.x(), tangent.y());
+		if (qFuzzyIsNull(length))
+			return point;
+		tangent /= length;
+		return point + QPointF{-offset * tangent.y(), offset * tangent.x()};
+	};
+	auto start_tangent = control1 - start;
+	if (qFuzzyIsNull(std::hypot(start_tangent.x(), start_tangent.y())))
+		start_tangent = end - start;
+	auto end_tangent = end - control2;
+	if (qFuzzyIsNull(std::hypot(end_tangent.x(), end_tangent.y())))
+		end_tangent = end - start;
+	const auto expected_start = offset_endpoint(start, start_tangent);
+	const auto expected_end = offset_endpoint(end, end_tangent);
 
-	std::vector<CubicSegment> left_side;
-	left_side.reserve(left_side_reverse.size());
-	for (auto i = left_side_reverse.rbegin(); i != left_side_reverse.rend(); ++i)
-		left_side.push_back({i->end, i->control2, i->control1, i->start});
-	return left_side;
+	auto best = runs.begin();
+	auto score = [&](const CubicRun& candidate) {
+		return squared_distance(candidate.front().start, expected_start)
+		       + squared_distance(candidate.back().end, expected_end);
+	};
+	auto best_score = score(*best);
+	for (auto candidate = std::next(best); candidate != runs.end(); ++candidate)
+	{
+		const auto candidate_score = score(*candidate);
+		if (candidate_score < best_score)
+		{
+			best = candidate;
+			best_score = candidate_score;
+		}
+	}
+	return std::move(*best);
 }
 
 bool equalDimensions(const LineSymbolBorder& lhs, const LineSymbolBorder& rhs)

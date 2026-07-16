@@ -16,6 +16,7 @@ Q_OBJECT
 private slots:
 	void initTestCase();
 	void immutableSnapshotSurvivesEdit();
+	void curvedLineKeepsBothBorders();
 	void referenceRendererInterpretsIr();
 	void antialiasPolicyPreservesCallerIntent();
 };

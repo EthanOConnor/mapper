@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>Switch dashes</title>
+  <g stroke="#4a638f" stroke-width="1.5">
+    <path d="M2 14.5h28M2 18.5h28"/>
+    <path d="M9.5 14.5V6.5h4v8M20.5 14.5V6.5h4v8" fill="#4a638f"/>
+    <path d="M9.5 18.5v8h4v-8M20.5 18.5v8h4v-8" fill="#eef3fa"/>
+  </g>
+  <path d="M10.5 19.5v6h2M21.5 19.5v6h2" fill="none" stroke="#c4d2e7"/>
+</svg>

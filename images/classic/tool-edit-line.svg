@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>Edit line</title>
+  <defs>
+    <linearGradient id="pointer" x1="10" y1="5" x2="21" y2="28" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff"/><stop offset="1" stop-color="#d8e5f5"/>
+    </linearGradient>
+  </defs>
+  <rect x="2.5" y="3.5" width="27" height="3.5" fill="#f6f8fc" stroke="#243b63" stroke-width="1.5"/>
+  <path d="M9.5 4.5v25l17-6.2z" fill="url(#pointer)" stroke="#243b63" stroke-width="1.5" stroke-linejoin="miter"/>
+  <path d="M11.5 8v18" stroke="#fff" stroke-opacity=".75"/>
+</svg>

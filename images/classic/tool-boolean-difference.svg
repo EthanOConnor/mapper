@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>Boolean difference</title>
+  <circle cx="11.5" cy="11.5" r="11.5" fill="#ffe223"/>
+  <circle cx="19.5" cy="19.5" r="11.5" fill="#e3e3e3"/>
+  <circle cx="11.5" cy="11.5" r="11.5" fill="none" stroke="#969696"/>
+  <circle cx="19.5" cy="19.5" r="11.5" fill="none" stroke="#969696"/>
+</svg>

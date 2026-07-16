@@ -21,15 +21,15 @@
 #include "point_handles.h"
 
 #include <cmath>
-#include <type_traits>
 #include <vector>
 
 #include <Qt>
 #include <QtGlobal>
 #include <QBrush>
+#include <QColor>
+#include <QPainterPath>
 #include <QPen>
 #include <QPoint>
-#include <QString>
 
 #include "core/objects/object.h"
 #include "core/objects/text_object.h"
@@ -45,10 +45,9 @@ PointHandles::PointHandles() noexcept
 
 
 PointHandles::PointHandles(unsigned int factor)
-: handle_image(loadHandleImage(factor))
-, scale_factor(factor)
+: scale_factor(factor)
 {
-	; // nothing
+	display_radius = 6 * int(scale_factor);
 }
 
 
@@ -57,7 +56,6 @@ void PointHandles::setScaleFactor(unsigned int factor)
 {
 	scale_factor = factor;
 	display_radius = 6 * int(scale_factor); // = (image width + 1) / 2
-	handle_image = loadHandleImage(factor);
 }
 
 
@@ -167,9 +165,75 @@ void PointHandles::draw(
 
 void PointHandles::draw(render::OverlaySceneBuilder* painter, const QPointF& position, PointHandleType type, PointHandleState state) const
 {
-	auto width = int(scale_factor) * 11;  // = displayRadius() * 2 - 1
-	auto offset = (width - 1) / 2;
-	painter->drawImage(qRound(position.x()) - offset, qRound(position.y()) - offset, image(), int(type) * width, int(state) * width, width, width);
+	const auto factor = qreal(scale_factor > 0 ? scale_factor : 1);
+	const QPointF center(qRound(position.x()), qRound(position.y()));
+	const auto state_color = QColor::fromRgb(stateColor(state));
+	const auto color_band = factor;
+	const auto white_band = qMax<qreal>(1, factor / 2);
+
+	auto square = [center](qreal radius) {
+		QPainterPath path;
+		path.addRect(QRectF(center.x() - radius, center.y() - radius,
+		                    2 * radius, 2 * radius));
+		return path;
+	};
+	auto circle = [center](qreal radius) {
+		QPainterPath path;
+		path.addEllipse(center, radius, radius);
+		return path;
+	};
+	auto diamond = [center](qreal radius) {
+		QPainterPath path;
+		path.moveTo(center + QPointF(0, -radius));
+		path.lineTo(center + QPointF(radius, 0));
+		path.lineTo(center + QPointF(0, radius));
+		path.lineTo(center + QPointF(-radius, 0));
+		path.closeSubpath();
+		return path;
+	};
+	auto draw_ring = [painter](QPainterPath outer, const QPainterPath& inner, const QColor& color) {
+		outer.addPath(inner);
+		outer.setFillRule(Qt::OddEvenFill);
+		painter->setBrush(color);
+		painter->drawPath(outer);
+	};
+	auto draw_classic_ring = [&](const auto& shape, qreal radius) {
+		auto const color_inner = radius - color_band;
+		auto const white_inner = color_inner - white_band;
+		draw_ring(shape(radius), shape(color_inner), state_color);
+		draw_ring(shape(color_inner), shape(white_inner), Qt::white);
+	};
+
+	painter->save();
+	painter->setPen(Qt::NoPen);
+	switch (type)
+	{
+	case StartHandle:
+		draw_classic_ring(square, 5.5 * factor);
+		break;
+	case EndHandle:
+	{
+		const auto radius = 3.5 * factor;
+		painter->setBrush(Qt::NoBrush);
+		painter->setPen(QPen(state_color, 3 * factor, Qt::SolidLine, Qt::SquareCap, Qt::RoundJoin));
+		painter->drawLine(center + QPointF(-radius, -radius), center + QPointF(radius, radius));
+		painter->drawLine(center + QPointF(-radius, radius), center + QPointF(radius, -radius));
+		painter->setPen(QPen(Qt::white, factor, Qt::SolidLine, Qt::SquareCap, Qt::RoundJoin));
+		painter->drawLine(center + QPointF(-radius, -radius), center + QPointF(radius, radius));
+		painter->drawLine(center + QPointF(-radius, radius), center + QPointF(radius, -radius));
+		break;
+	}
+	case NormalHandle:
+		draw_classic_ring(square, 3.5 * factor);
+		break;
+	case CurveHandle:
+		draw_classic_ring(circle, 3.5 * factor);
+		break;
+	case DashHandle:
+		draw_classic_ring(diamond, 4.5 * factor);
+		break;
+	}
+	painter->restore();
 }
 
 
@@ -204,35 +268,5 @@ void PointHandles::drawCurveHandleLine(render::OverlaySceneBuilder* painter, QPo
 	
 	painter->drawLine(anchor_point, curve_handle);
 }
-
-
-
-// static
-const QImage PointHandles::loadHandleImage(unsigned int factor)
-{
-	static const QString image_names[5] = {
-	    {}, // not used
-	    QStringLiteral(":/images/point-handles.png"),
-	    QStringLiteral(":/images/point-handles-2x.png"),
-	    {}, // not used
-	    QStringLiteral(":/images/point-handles-4x.png")
-	};
-	
-	Q_ASSERT(factor < std::extent<decltype(image_names)>::value);
-	
-	// NOTE: If this fails, check MapEditorTool::newScaleFactor()!
-	Q_ASSERT(!image_names[factor].isEmpty());
-	
-	static auto shared_image_factor = factor;
-	static QImage shared_image = QImage(image_names[shared_image_factor]);
-	if (shared_image_factor != factor)
-	{
-		shared_image_factor = factor;
-		shared_image = QImage(image_names[shared_image_factor]);
-	}
-	
-	return shared_image;
-}
-
 
 }  // namespace OpenOrienteering

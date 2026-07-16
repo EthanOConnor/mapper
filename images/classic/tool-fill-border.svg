@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>Fill border</title>
+  <defs>
+    <linearGradient id="yellow" x1="5" y1="6" x2="25" y2="25" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff07b"/><stop offset="1" stop-color="#ffda16"/>
+    </linearGradient>
+  </defs>
+  <ellipse cx="15.5" cy="15.5" rx="13" ry="10.5" fill="url(#yellow)" stroke="#969696" stroke-width="1.4"/>
+  <path d="m17 14 2.1 15 3.5-5.1 4.3 5 2.6-2.3-4.4-4.8 5.2-2.8z" fill="#fff" stroke="#111" stroke-width="1.6" stroke-linejoin="miter"/>
+</svg>

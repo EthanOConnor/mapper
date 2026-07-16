@@ -844,6 +844,15 @@ fn device_descriptor(adapter: &wgpu::Adapter) -> wgpu::DeviceDescriptor<'static>
     }
 }
 
+fn presentation_format(formats: &[wgpu::TextureFormat]) -> Option<wgpu::TextureFormat> {
+    formats.iter().copied().find(|format| {
+        matches!(
+            format,
+            wgpu::TextureFormat::Rgba8Unorm | wgpu::TextureFormat::Bgra8Unorm
+        )
+    })
+}
+
 fn prepare_surface(state: ffi::SurfaceState) -> Result<PreparedSurface, String> {
     if state.phase != SURFACE_EXPOSED || state.width == 0 || state.height == 0 {
         return Err("surface is not exposed at a nonzero size".to_owned());
@@ -877,10 +886,13 @@ fn create_surface_target(
             )
         })?;
     let capabilities = surface.get_capabilities(&adapter);
+    let format = presentation_format(&capabilities.formats)
+        .ok_or("wgpu surface has no supported non-sRGB 8-bit presentation format")?;
     let mut config = surface
         .get_default_config(&adapter, state.width, state.height)
         .ok_or("wgpu surface has no supported default configuration")?;
     config.usage = wgpu::TextureUsages::RENDER_ATTACHMENT;
+    config.format = format;
     if capabilities
         .present_modes
         .contains(&wgpu::PresentMode::Fifo)
@@ -1659,6 +1671,25 @@ mod tests {
         }
 
         assert_eq!(frame_rx.recv().unwrap().header.frame_id, 129);
+    }
+
+    #[test]
+    fn presentation_avoids_a_second_srgb_encoding() {
+        let formats = [
+            wgpu::TextureFormat::Bgra8UnormSrgb,
+            wgpu::TextureFormat::Rgba16Float,
+            wgpu::TextureFormat::Bgra8Unorm,
+            wgpu::TextureFormat::Rgba8Unorm,
+        ];
+
+        assert_eq!(
+            presentation_format(&formats),
+            Some(wgpu::TextureFormat::Bgra8Unorm)
+        );
+        assert_eq!(
+            presentation_format(&[wgpu::TextureFormat::Rgba8UnormSrgb]),
+            None
+        );
     }
 
     #[test]

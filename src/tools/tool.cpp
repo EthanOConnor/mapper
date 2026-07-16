@@ -351,7 +351,7 @@ namespace
 	 */
 	unsigned int calculateScaleFactor()
 	{
-		// NOTE: The returned value must be supported by PointHandles::loadHandleImage() !
+		// PointHandles uses these discrete factors for consistent UI sizing.
 		const auto base_dpi = qreal(96);
 		const auto ppi = Settings::getInstance().getSettingCached(Settings::General_PixelsPerInch).toReal();
 		if (ppi <= base_dpi)

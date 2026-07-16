@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>Touch cursor</title>
+  <defs>
+    <linearGradient id="face" x1="7" y1="5" x2="25" y2="28" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff"/><stop offset="1" stop-color="#eef2f8"/>
+    </linearGradient>
+    <linearGradient id="pointer" x1="12" y1="8" x2="21" y2="23" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff"/><stop offset="1" stop-color="#d8e5f5"/>
+    </linearGradient>
+  </defs>
+  <circle cx="16" cy="16" r="13.5" fill="url(#face)" stroke="#586887" stroke-width="2"/>
+  <path d="M12 8v16l11-5.6z" fill="url(#pointer)" stroke="#4b628e" stroke-width="1.5"/>
+</svg>
