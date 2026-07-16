@@ -12,7 +12,6 @@
 #include <memory>
 #include <optional>
 #include <string>
-#include <vector>
 
 #include <QCursor>
 #include <QWidget>
@@ -64,8 +63,6 @@ private:
 	QTimer retry_timer_;
 	std::deque<render::VelloFrameResult> results_;
 	std::optional<render::VelloFrameResult> last_result_;
-	std::vector<std::uint64_t> timing_samples_us_;
-	int timing_window_ = 0;
 };
 
 }  // namespace OpenOrienteering::presentation

@@ -1,38 +1,18 @@
 # Renderer interaction parity
 
-This is the small manual gate for comparing the rewritten retained renderer
-with a named historical renderer. It is not a product automation framework.
-The hook is inert unless `OOM_RENDER_VALIDATION_DRIVER` is set.
+This records the small manual gate used to compare the rewritten retained
+renderer with a named historical renderer. The temporary product hook was
+removed after the gate passed.
 
 ## Trace
 
-At a 1266 x 919 logical-pixel viewport and DPR 2, the driver waits for the map
-to settle and then performs the following deterministic input sequence at a
-nominal 16 ms cadence:
+At a 1266 x 919 logical-pixel viewport and DPR 2, the comparison used this
+deterministic input sequence at a nominal 16 ms cadence:
 
 1. 60 pan updates ending at `(260, -140)` pixels, then commit.
 2. 31 anchored pinch updates from 1x to 2x, then commit.
 3. An anchored two-step zoom in and 1.5-step zoom out.
 4. 40 pan updates ending at `(-220, 110)` pixels, then commit.
-
-The start, every committed camera state, and the final state may be captured as
-lossless backend output by setting `OOM_RENDER_VALIDATION_CAPTURE_DIR`. Native
-render CPU timings are enabled with `OOM_RENDER_TIMING`; the default summary
-window is 120 presented frames and can be changed with
-`OOM_RENDER_TIMING_WINDOW`. `OOM_RENDER_VALIDATION_EXIT` closes any file-load
-warning dialog, allows its callback to unwind, and then quits the application
-so a noninteractive run terminates safely.
-
-Example Release run:
-
-```sh
-OOM_RENDER_VALIDATION_DRIVER=1 \
-OOM_RENDER_VALIDATION_CAPTURE_DIR=/tmp/mapper-trace \
-OOM_RENDER_VALIDATION_EXIT=1 \
-OOM_RENDER_TIMING=1 \
-build/release-macos/src/Mapper.app/Contents/MacOS/Mapper \
-examples/complete\ map.omap
-```
 
 ## 2026-07-14 evidence
 
@@ -94,10 +74,8 @@ for native presentation latency:
   therefore captured at the OS window boundary. The rewrite's lossless capture
   renders its immutable current frame through the same Vello encoder.
 
-The captured phase states received direct visual review. A release candidate
-should still be watched continuously by a club mapper on representative
-hardware; still captures and CPU timing cannot replace a person's judgment of
-trackpad feel or display pacing.
+The captured phase states received direct visual review. The continuous human
+verdict is recorded below.
 
 ## 2026-07-15 hosted-matrix replay
 
@@ -122,9 +100,8 @@ images, unchanged captures were byte-identical and the others had normalized
 RMSE no greater than `4.26321e-6`, consistent with negligible raster-level
 variation rather than a graphic change.
 
-This replay closes the post-fix automated and still-image check. It does not
-close the live human gate: a club mapper must still compare continuous trackpad
-feel, display pacing, and perceived graphic quality in the two native apps.
+This replay closed the post-fix automated and still-image check. The continuous
+human verdict is recorded below.
 
 ## 2026-07-15 dense-map interaction acceptance
 
@@ -138,6 +115,27 @@ Live review accepted panning, selection and tool interaction, button and wheel
 zoom, and standard and custom cursor transitions. The automated regression also
 sends a middle-button drag through the real `QWindow`, verifies the committed
 camera movement, and requires closed-hand and custom-bitmap cursor transitions.
-This closes the discovered dense-map interaction regression. The continuous
-three-map comparison of perceived pacing, trackpad feel, and overall graphic
-quality remains the final human renderer gate.
+This closes the discovered dense-map interaction regression.
+
+## 2026-07-16 checkpoint-19 live acceptance
+
+The public candidate
+`981188513d5491155d1df809e9621e35c3828560` was exercised on all three corpus
+maps after the final color, miter, curved-border, selection-handle, and classic
+SVG corrections.
+
+| Corpus id | Human verdict |
+|---|---|
+| `complete-map` | Pass |
+| `fishtrap-current` | Pass |
+| `kelsey-dense-contours` | Pass |
+
+Pan, pinch and anchored zoom, selection and drawing handles, cursors, text,
+patterns, overlays, blanking, seams, and display pacing were accepted. The
+rewrite was described as gorgeous and notably smoother than classic Mapper.
+Minor icon styling differences were accepted; known defects in the exploratory
+oracle were not copied.
+
+Human verdict: **PASS**. This closes the live three-map renderer gate. The
+temporary validation driver and native timing hook were then removed; ordinary
+renderer tests and benchmarks remain.

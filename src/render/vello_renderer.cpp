@@ -446,7 +446,6 @@ std::optional<VelloFrameResult> VelloRenderer::takeResult()
 		result.revision,
 		result.surface_sequence,
 		result.scene_count,
-		result.render_cpu_us,
 	};
 }
 

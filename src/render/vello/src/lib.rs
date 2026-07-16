@@ -1,7 +1,6 @@
 use std::num::{NonZeroIsize, NonZeroU32};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Instant;
 
 use flume::{Receiver, Sender, TryRecvError, TrySendError};
 use raw_window_handle::{
@@ -104,7 +103,6 @@ mod ffi {
         surface_sequence: u64,
         status: u8,
         scene_count: u32,
-        render_cpu_us: u64,
     }
 
     extern "Rust" {
@@ -1037,14 +1035,13 @@ fn set_error(last_error: &Mutex<String>, message: impl Into<String>) {
     }
 }
 
-fn frame_result(frame: &FrameBuilder, status: u8, started: Instant) -> ffi::FrameResult {
+fn frame_result(frame: &FrameBuilder, status: u8) -> ffi::FrameResult {
     ffi::FrameResult {
         frame_id: frame.header.frame_id,
         revision: frame.header.revision,
         surface_sequence: frame.header.surface_sequence,
         status,
         scene_count: frame.passes.len().min(u32::MAX as usize) as u32,
-        render_cpu_us: started.elapsed().as_micros().min(u128::from(u64::MAX)) as u64,
     }
 }
 
@@ -1320,12 +1317,11 @@ fn process_frame(
     last_error: &Mutex<String>,
     prepared_descriptor: &Mutex<Option<(u8, u64, u64)>>,
 ) {
-    let started = Instant::now();
     if frame.header.surface_sequence != current.sequence {
         publish_result(
             result_tx,
             result_replace_rx,
-            frame_result(&frame, FRAME_DROPPED_STALE, started),
+            frame_result(&frame, FRAME_DROPPED_STALE),
         );
         return;
     }
@@ -1333,7 +1329,7 @@ fn process_frame(
         publish_result(
             result_tx,
             result_replace_rx,
-            frame_result(&frame, FRAME_TARGET_UNAVAILABLE, started),
+            frame_result(&frame, FRAME_TARGET_UNAVAILABLE),
         );
         return;
     }
@@ -1355,7 +1351,7 @@ fn process_frame(
             // lifecycle state. This is distinct from losing an established
             // wgpu surface: callers may retain the current lifecycle and
             // retry without manufacturing resize/expose transitions.
-            frame_result(&frame, FRAME_TARGET_UNAVAILABLE, started),
+            frame_result(&frame, FRAME_TARGET_UNAVAILABLE),
         );
         return;
     }
@@ -1376,11 +1372,7 @@ fn process_frame(
     if status == FRAME_ERROR {
         set_error(last_error, "Vello failed to render the submitted frame");
     }
-    publish_result(
-        result_tx,
-        result_replace_rx,
-        frame_result(&frame, status, started),
-    );
+    publish_result(result_tx, result_replace_rx, frame_result(&frame, status));
 }
 
 fn render_thread(

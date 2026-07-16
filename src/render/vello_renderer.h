@@ -25,7 +25,6 @@ struct VelloFrameResult
 	Revision revision = 0;
 	std::uint64_t surface_sequence = 0;
 	std::uint32_t scene_count = 0;
-	std::uint64_t render_cpu_us = 0;
 };
 
 struct VelloImage

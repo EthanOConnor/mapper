@@ -437,10 +437,10 @@ tracked with exact dated evidence in
   notice evidence, exact run links, and artifact identities are recorded in the
   acceptance report. Build provenance remains a least-privilege, version-tag
   release path and is not claimed for ordinary candidate runs.
-- The same three representative maps and interaction traces are compared live
-  on the candidate and `full-speed-ahead`. A human verdict covers graphic
+- Checkpoint 19 records the completed live three-map verdict covering graphic
   quality, fluidity, blanking and seams, cursors, selection and drawing,
-  pan/zoom/rotation, and overlays.
+  pan/zoom/rotation, and overlays. No product validation control plane is kept
+  after that gate.
 - Dated renderer benchmarks name their hardware, viewport, DPR, fixture,
   warmup, build type, and samples. They are regression evidence, not an
   invented universal frame budget or soak gate.

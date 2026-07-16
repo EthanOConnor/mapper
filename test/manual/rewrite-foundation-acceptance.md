@@ -2,19 +2,19 @@
 
 This record covers the implementation, delivery, and human gates required
 before treating the clean rewrite as the practical foundation. It does not
-authorize feature work. The rewrite stays in place; `full-speed-ahead` remains
-a behavioral and visual reference, not a source branch to merge or transplant.
+authorize feature work. The rewrite stays in place. `full-speed-ahead` was a
+temporary historical oracle; its known defects were not copied.
 
 ## Automated and implementation evidence
 
 | Gate | Evidence | Status |
 |---|---|---|
-| Public hosted matrix and checkpoint | GitHub Actions run [29468215701](https://github.com/EthanOConnor/mapper/actions/runs/29468215701) passed Linux, macOS, Windows, and Android at `fa7658a86cce2aa6a6eb2d52452c98b6f7d1da3c`, including native startup checks of all three desktop packages and structural inspection of the Android APK and app bundle. The latest public annotated checkpoint is `modernization-checkpoint-18-contract-cleanup`; its own exact tagged matrix is recorded below. | Pass |
+| Public hosted matrix and checkpoint | GitHub Actions run [29479217172](https://github.com/EthanOConnor/mapper/actions/runs/29479217172) passed Linux, macOS, Windows, and Android at `981188513d5491155d1df809e9621e35c3828560`. That exact revision is the public annotated `modernization-checkpoint-19-foundation-candidate`. | Pass |
 | Native Android documents | `344dda35` adopted Storage Access Framework `content://` identities throughout open, import, save, autosave, recent documents, and display names; `cbee73c7` completed save/reopen round trips. `document_path_t` passes and an arm64 API 36 emulator completed create, edit, save-as, close, reopen, and relaunch through the system document UI. | Implementation pass; repeat the surface/document smoke test on a physical release-candidate device |
-| Scalable action icons | `cbba3d59` replaced the action bitmap set with licensed SVG assets and a single bounded icon loader. `style_t` verifies all 97 resources at DPR 2, exact requested sizes through 256 x 256, visible output, and the 256 x 256 pathological-request cap. | Pass |
+| Scalable action icons | `98118851` selects 97 project-native classic SVGs through the bounded icon loader; the alternative Material drawings remain inactive for future evaluation. `style_t` verifies the resources at DPR 2 and bounded requested sizes. | Pass |
 | Windows print precision | `f85b0f4e` replaced the private Qt print-engine dependency with a public-Qt full-page image composed at the configured printer resolution for native Windows GDI. `map_printer_t` verifies one raster spool, exact 600-DPI target geometry, rendered ink, no accidental vector calls, and less than 0.022 mm half-pixel placement quantization. | Modern tested equivalent pass; physical printer acceptance remains a release-candidate gate |
 | iOS decision | `SUPPORT.md` declares iOS unsupported until there is a maintained preset, package, runtime-surface acceptance, and release owner. No historical cross-build is carried as a support promise. | Pass |
-| Renderer comparison | `test/manual/render-parity.md` records the repeatable three-map trace against `full-speed-ahead@74c364569059f8e83f1f9e2623671ff9fe2b9fff`. A fresh replay at `f106ee2d` matched the viewport, DPR, committed zooms, and final camera states and produced complete lossless phase images for all three maps. | Automated and still-image pass; live trackpad/display verdict remains open |
+| Renderer comparison | `test/manual/render-parity.md` records the repeatable three-map comparison and the live verdict on `98118851`. Complete Map, Fishtrap, and Kelsey all passed; the rewrite was accepted as notably smoother than classic Mapper. | Pass |
 
 ## 2026-07-15 native interaction correction
 
@@ -333,31 +333,32 @@ configuration. Its exact artifacts are:
   77,978,967 bytes, SHA-256
   `ed7d809d92305549ef335a798625850fae257553466b6358528dc70ab9736cd7`.
 
-The checkpoint-19 candidate matrix and live renderer verdict remain ahead.
-Only after that human pass may the product-embedded parity driver be retired
-and the final tag and bounded campaign-workspace retirement proceed.
+## 2026-07-16 foundation candidate
 
-## Remaining people and hardware checks
+`modernization-checkpoint-19-foundation-candidate` points to public commit
+`981188513d5491155d1df809e9621e35c3828560`. Local Release verification passed
+Rust formatting, clippy, 3/3 Rust tests, SVG parsing, and 36/36 CTests. Exact
+hosted run [29479217172](https://github.com/EthanOConnor/mapper/actions/runs/29479217172)
+passed all four supported targets and produced
+[macOS](https://github.com/EthanOConnor/mapper/actions/runs/29479217172/artifacts/8367952631),
+[Linux](https://github.com/EthanOConnor/mapper/actions/runs/29479217172/artifacts/8368019150),
+[Android](https://github.com/EthanOConnor/mapper/actions/runs/29479217172/artifacts/8368026191),
+and [Windows](https://github.com/EthanOConnor/mapper/actions/runs/29479217172/artifacts/8368326330)
+packages. The live three-map verdict passed.
+
+## Remaining release-candidate hardware checks
 
 These are deliberately small product checks, not missing automation machinery:
 
-1. Before accepting live renderer parity, have a club mapper run the same three
-   maps at the exact checkpoint-19 candidate SHA and
-   `full-speed-ahead@74c36456` on representative hardware. Record whether pan,
-   pinch, cursor-anchored zoom, text and pattern stability, crispness, display
-   pacing, and input latency are at least as good in the rewrite.
-2. Before shipping a release candidate, complete
+1. Before accepting the Windows package as a release candidate, complete
    `windows-print-acceptance.md` on Windows 11 with one physical printer, a
    measured 100 mm map distance, retained driver properties, and a scan or
    calibrated photograph. This is defense against real driver behavior; the
    modernization foundation gate is already satisfied by the tested public-Qt
    precision spool.
-3. Before shipping an Android release candidate, repeat the surface and
-   document-access smoke test on a physical supported device.
+2. Before accepting the Android package as a release candidate, repeat the
+   surface and document-access smoke test on a physical supported device.
 
-Do not treat the rewritten foundation as live-accepted until the renderer
-verdict is recorded as a pass, and do not begin feature work until
-`modernization-foundation-final` is public. Do not ship a release candidate
-until the applicable physical-device gates pass. A failure is a renderer or
-platform defect to fix in the rewrite; it is not a reason to transplant the
-exploratory port wholesale.
+These physical checks do not block the modernized foundation tag. They do
+block accepting the corresponding platform package as a release candidate.
+Feature work remains frozen until `modernization-foundation-final` is public.
