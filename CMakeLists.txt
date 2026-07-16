@@ -76,6 +76,10 @@ option(Mapper_PACKAGE_BUILD
 set(Mapper_PACKAGE_NAME "openorienteering-mapper")
 
 if(WIN32)
+	# Qt snapshots this standard deployment directory when Core is found.
+	# Keep runtime DLLs beside Mapper.exe so the ZIP launches independently
+	# of build-machine PATH entries.
+	set(CMAKE_INSTALL_BINDIR ".")
 	set(MAPPER_RUNTIME_DESTINATION .)
 	set(MAPPER_LIBRARY_DESTINATION .)
 	set(MAPPER_DATA_DESTINATION .)

@@ -266,6 +266,212 @@ jobs:
       - name: Package
         run: cmake --build --preset ${{ matrix.preset }} --target package
 
+      - name: Smoke-test Linux package
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          packages=(build/${{ matrix.preset }}/OpenOrienteering-Mapper-*.tar.gz)
+          if (( ${#packages[@]} != 1 )); then
+            echo "Expected one Linux package, found ${#packages[@]}" >&2
+            exit 1
+          fi
+
+          archive="${packages[0]}"
+          smoke_root="$(mktemp -d "$RUNNER_TEMP/mapper-package-smoke.XXXXXX")"
+          package_root="$smoke_root/$(basename "$archive" .tar.gz)"
+          tar -xzf "$archive" -C "$smoke_root"
+
+          mapper="$package_root/bin/Mapper"
+          for required in \
+            "$mapper" \
+            "$package_root/lib/libQt6Core.so.6" \
+            "$package_root/plugins/platforms/libqxcb.so" \
+            "$package_root/share/openorienteering-mapper/proj/proj.db" \
+            "$package_root/share/doc/openorienteering-mapper/manual/index.html"
+          do
+            test -e "$required" || {
+              echo "Required packaged file is missing: $required" >&2
+              exit 1
+            }
+          done
+          test -x "$mapper"
+
+          unset LD_LIBRARY_PATH QT_PLUGIN_PATH QML2_IMPORT_PATH
+          ldd "$mapper" > "$smoke_root/ldd.txt"
+          cat "$smoke_root/ldd.txt"
+          if grep -Fq "not found" "$smoke_root/ldd.txt"; then
+            echo "Packaged Mapper has unresolved runtime dependencies" >&2
+            exit 1
+          fi
+
+          mkdir -p "$smoke_root/home"
+          set +e
+          HOME="$smoke_root/home" \
+            timeout --signal=TERM --kill-after=5s 10s \
+            xvfb-run --auto-servernum "$mapper" \
+            > "$smoke_root/mapper.log" 2>&1
+          status=$?
+          set -e
+          if (( status != 124 )); then
+            cat "$smoke_root/mapper.log" >&2
+            echo "Packaged Mapper exited during startup smoke with status $status" >&2
+            exit 1
+          fi
+
+          echo "Packaged Mapper remained alive for the 10-second startup smoke"
+
+      - name: Smoke-test macOS package
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          packages=(build/${{ matrix.preset }}/OpenOrienteering-Mapper-*.dmg)
+          if (( ${#packages[@]} != 1 )); then
+            echo "Expected one macOS package, found ${#packages[@]}" >&2
+            exit 1
+          fi
+
+          dmg="${packages[0]}"
+          smoke_root="$(mktemp -d "$RUNNER_TEMP/mapper-package-smoke.XXXXXX")"
+          mountpoint="$smoke_root/mount"
+          mkdir -p "$mountpoint" "$smoke_root/home"
+
+          mounted=0
+          pid=""
+          cleanup() {
+            if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+              kill "$pid" 2>/dev/null || true
+              wait "$pid" 2>/dev/null || true
+            fi
+            if (( mounted )); then
+              hdiutil detach "$mountpoint" || true
+            fi
+          }
+          trap cleanup EXIT
+
+          hdiutil verify "$dmg"
+          hdiutil attach -readonly -nobrowse -mountpoint "$mountpoint" "$dmg"
+          mounted=1
+
+          mounted_app="$mountpoint/Mapper.app"
+          for required in \
+            "$mounted_app/Contents/MacOS/Mapper" \
+            "$mounted_app/Contents/PlugIns/platforms/libqcocoa.dylib" \
+            "$mounted_app/Contents/Resources/proj/proj.db" \
+            "$mounted_app/Contents/Resources/doc/manual/index.html"
+          do
+            test -e "$required" || {
+              echo "Required packaged file is missing: $required" >&2
+              exit 1
+            }
+          done
+
+          copied_app="$smoke_root/Mapper.app"
+          ditto "$mounted_app" "$copied_app"
+          hdiutil detach "$mountpoint"
+          mounted=0
+
+          plutil -lint "$copied_app/Contents/Info.plist"
+          unset DYLD_LIBRARY_PATH DYLD_FRAMEWORK_PATH QT_PLUGIN_PATH QML2_IMPORT_PATH
+
+          mapper="$copied_app/Contents/MacOS/Mapper"
+          log="$smoke_root/mapper.log"
+          HOME="$smoke_root/home" "$mapper" > "$log" 2>&1 &
+          pid=$!
+          for _ in {1..10}; do
+            sleep 1
+            if ! kill -0 "$pid" 2>/dev/null; then
+              status=0
+              wait "$pid" || status=$?
+              pid=""
+              cat "$log" >&2
+              echo "Packaged Mapper exited during startup smoke with status $status" >&2
+              exit 1
+            fi
+          done
+
+          kill "$pid" 2>/dev/null || true
+          wait "$pid" 2>/dev/null || true
+          pid=""
+          echo "Packaged Mapper remained alive for the 10-second startup smoke"
+
+      - name: Smoke-test Windows package
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $packages = @(Get-ChildItem `
+            -Path 'build/${{ matrix.preset }}/OpenOrienteering-Mapper-*.zip' `
+            -File)
+          if ($packages.Count -ne 1) {
+            throw "Expected one Windows package, found $($packages.Count)"
+          }
+
+          $archive = $packages[0]
+          $smokeRoot = Join-Path $env:RUNNER_TEMP "mapper-package-smoke-$PID"
+          Expand-Archive -LiteralPath $archive.FullName -DestinationPath $smokeRoot
+          $packageRoot = Join-Path $smokeRoot $archive.BaseName
+          $exe = Join-Path $packageRoot 'Mapper.exe'
+
+          foreach ($required in @(
+            $exe,
+            (Join-Path $packageRoot 'Qt6Core.dll'),
+            (Join-Path $packageRoot 'qt.conf'),
+            (Join-Path $packageRoot 'plugins/platforms/qwindows.dll'),
+            (Join-Path $packageRoot 'proj/proj.db'),
+            (Join-Path $packageRoot 'doc/manual/index.html')
+          )) {
+            if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
+              throw "Required packaged file is missing: $required"
+            }
+          }
+
+          # The ZIP must launch with only its own DLLs and Windows itself.
+          $env:Path = "$env:SystemRoot\System32;$env:SystemRoot"
+          foreach ($name in @(
+            'QT_PLUGIN_PATH',
+            'QML2_IMPORT_PATH',
+            'QT_ROOT_DIR'
+          )) {
+            Remove-Item -Path "Env:$name" -ErrorAction SilentlyContinue
+          }
+
+          $env:APPDATA = Join-Path $smokeRoot 'appdata'
+          $env:LOCALAPPDATA = Join-Path $smokeRoot 'localappdata'
+          New-Item -ItemType Directory -Force $env:APPDATA, $env:LOCALAPPDATA |
+            Out-Null
+
+          $stdout = Join-Path $smokeRoot 'mapper.stdout.log'
+          $stderr = Join-Path $smokeRoot 'mapper.stderr.log'
+          $process = $null
+          try {
+            $process = Start-Process `
+              -FilePath $exe `
+              -WorkingDirectory $packageRoot `
+              -RedirectStandardOutput $stdout `
+              -RedirectStandardError $stderr `
+              -PassThru
+            Start-Sleep -Seconds 10
+            $process.Refresh()
+            if ($process.HasExited) {
+              Get-Content $stdout, $stderr -ErrorAction SilentlyContinue
+              throw "Packaged Mapper exited during startup smoke with code $($process.ExitCode)"
+            }
+          }
+          finally {
+            if ($null -ne $process) {
+              $process.Refresh()
+              if (-not $process.HasExited) {
+                Stop-Process -Id $process.Id -Force
+                $process.WaitForExit()
+              }
+            }
+          }
+
+          Write-Host 'Packaged Mapper remained alive for the 10-second startup smoke'
+
       - name: Upload package
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -487,6 +693,41 @@ jobs:
         run: |
           cmake --build --preset ci-android --target apk
           cmake --build --preset ci-android --target aab
+
+      - name: Inspect Android packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk=build/ci-android/src/android-build/Mapper.apk
+          aab=build/ci-android/src/android-build/build/outputs/bundle/release/android-build-release.aab
+          build_tools="${ANDROID_SDK_ROOT}/build-tools/36.0.0"
+
+          test -s "$apk"
+          test -s "$aab"
+          test -x "$build_tools/aapt"
+          test -x "$build_tools/zipalign"
+          unzip -tqq "$apk"
+          unzip -tqq "$aab"
+          "$build_tools/zipalign" -c -P 16 4 "$apk"
+
+          apk_entries="$RUNNER_TEMP/mapper-apk-entries.txt"
+          aab_entries="$RUNNER_TEMP/mapper-aab-entries.txt"
+          badging="$RUNNER_TEMP/mapper-apk-badging.txt"
+          unzip -Z1 "$apk" > "$apk_entries"
+          unzip -Z1 "$aab" > "$aab_entries"
+          "$build_tools/aapt" dump badging "$apk" > "$badging"
+
+          grep -Fx 'AndroidManifest.xml' "$apk_entries"
+          grep -Fx 'classes.dex' "$apk_entries"
+          grep -Fx 'lib/arm64-v8a/libMapper_arm64-v8a.so' "$apk_entries"
+          grep -Fx 'BundleConfig.pb' "$aab_entries"
+          grep -Fx 'base/manifest/AndroidManifest.xml' "$aab_entries"
+          grep -Fx 'base/dex/classes.dex' "$aab_entries"
+          grep -Fx 'base/lib/arm64-v8a/libMapper_arm64-v8a.so' "$aab_entries"
+          grep -F "package: name='org.openorienteering.mapper'" "$badging"
+          grep -Fx "sdkVersion:'28'" "$badging"
+          grep -Fx "targetSdkVersion:'36'" "$badging"
+          grep -Fx "native-code: 'arm64-v8a'" "$badging"
 
       - name: Upload Android packages
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
