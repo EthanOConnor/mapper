@@ -19,6 +19,8 @@ private slots:
 	void recordsVectorMapAndTrackTemplates();
 	void boundsImageAdmissionAndPreservesVelloIdentity();
 	void marksFallbackLayersIncomplete();
+	void respectsExplicitImageToMapTransform();
+	void preservesOpaqueGuttersWithoutTileSeams();
 	void preservesTransparentGuttersWithoutTileSeams();
 };
 

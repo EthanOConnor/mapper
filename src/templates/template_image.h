@@ -23,6 +23,7 @@
 #define OPENORIENTEERING_TEMPLATE_IMAGE_H
 
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include <QtGlobal>
@@ -53,12 +54,34 @@ class MapCoordF;
 
 struct RasterTemplateTile
 {
+	RasterTemplateTile() = default;
+	RasterTemplateTile(
+		QImage image,
+		QRectF template_rect,
+		QRectF source_rect,
+		quint64 cache_key = 0,
+		bool missing = false,
+		bool provisional = false,
+		QTransform image_to_map = {},
+		bool has_image_to_map = false)
+	 : image(std::move(image))
+	 , template_rect(std::move(template_rect))
+	 , source_rect(std::move(source_rect))
+	 , cache_key(cache_key)
+	 , missing(missing)
+	 , provisional(provisional)
+	 , image_to_map(std::move(image_to_map))
+	 , has_image_to_map(has_image_to_map)
+	{}
+
 	QImage image;
 	QRectF template_rect;
 	QRectF source_rect;
 	quint64 cache_key = 0;
 	bool missing = false;
 	bool provisional = false;
+	QTransform image_to_map;
+	bool has_image_to_map = false;
 };
 
 

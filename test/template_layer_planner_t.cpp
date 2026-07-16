@@ -347,20 +347,54 @@ void TemplateLayerPlannerTest::marksFallbackLayersIncomplete()
 	QCOMPARE(imageCommandCount(plan.below_map.front()), std::size_t(1));
 }
 
-void TemplateLayerPlannerTest::preservesTransparentGuttersWithoutTileSeams()
+void TemplateLayerPlannerTest::respectsExplicitImageToMapTransform()
 {
-	QImage source(16, 8, QImage::Format_RGBA8888);
-	for (int y = 0; y < source.height(); ++y)
-	{
-		for (int x = 0; x < source.width(); ++x)
-		{
-			source.setPixelColor(
-				x, y,
-				QColor(20 + x * 12, 190 - x * 7, 30 + y * 20, 80 + x * 8)
-			);
-		}
-	}
+	Map map;
+	MapView view { &map };
+	auto direct = tile(solidImage({ 4, 3 }, Qt::magenta), { 100, 200, 4, 3 });
+	direct.image_to_map = QTransform(1.25, 0.2, -0.15, 0.9, -2.5, -1.25);
+	direct.has_image_to_map = true;
+	auto raster = std::make_unique<SyntheticRasterTemplate>(
+		&map, QVector<RasterTemplateTile> { std::move(direct) }, QRectF(-4, -3, 8, 6)
+	);
+	raster->setTemplateX(5000);
+	raster->setTemplateY(-3000);
+	raster->setTemplateScaleX(7);
+	raster->setTemplateRotation(0.35);
+	map.addTemplate(0, std::move(raster));
+	map.setFirstFrontTemplate(1);
+	view.setTemplateVisibility(map.getTemplate(0), { 1, true });
 
+	render::TemplateLayerPlanner planner;
+	auto const plan = planner.plan(map, view, { -8, -8, 16, 16 }, 1);
+	QVERIFY(plan.complete);
+	QCOMPARE(plan.below_map.size(), std::size_t(1));
+	QCOMPARE(imageCommandCount(plan.below_map.front()), std::size_t(1));
+	auto const command = std::ranges::find_if(
+		plan.below_map.front().scene->commands,
+		[](auto const& value) { return std::holds_alternative<render::DrawImage>(value); }
+	);
+	QVERIFY(command != plan.below_map.front().scene->commands.end());
+	auto const& image = std::get<render::DrawImage>(*command);
+	QCOMPARE(image.source.x, 0.0);
+	QCOMPARE(image.source.y, 0.0);
+	QCOMPARE(image.source.width, 4.0);
+	QCOMPARE(image.source.height, 3.0);
+	QCOMPARE(image.image_to_scene.m11, 1.25);
+	QCOMPARE(image.image_to_scene.m12, 0.2);
+	QCOMPARE(image.image_to_scene.m21, -0.15);
+	QCOMPARE(image.image_to_scene.m22, 0.9);
+	QCOMPARE(image.image_to_scene.dx, -2.5);
+	QCOMPARE(image.image_to_scene.dy, -1.25);
+}
+
+namespace {
+
+void verifyGutterSeams(
+	QImage source,
+	std::size_t expected_images,
+	int max_channel_delta)
+{
 	Map tiled_map;
 	MapView tiled_view { &tiled_map };
 	auto left = source.copy(0, 0, 9, 8);
@@ -394,9 +428,9 @@ void TemplateLayerPlannerTest::preservesTransparentGuttersWithoutTileSeams()
 	auto whole_plan = whole_planner.plan(whole_map, whole_view, { -10, -7, 20, 14 }, 3.2);
 	QVERIFY(tiled_plan.complete);
 	QVERIFY(whole_plan.complete);
-	QCOMPARE(tiled_plan.newly_resident_images, std::size_t(1));
+	QCOMPARE(tiled_plan.newly_resident_images, expected_images);
 	QCOMPARE(tiled_plan.below_map.size(), std::size_t(1));
-	QCOMPARE(imageCommandCount(tiled_plan.below_map.front()), std::size_t(1));
+	QCOMPARE(imageCommandCount(tiled_plan.below_map.front()), expected_images);
 
 	auto const tiled_snapshot = tiled_map.publishRenderSnapshot();
 	auto const whole_snapshot = whole_map.publishRenderSnapshot();
@@ -427,25 +461,59 @@ void TemplateLayerPlannerTest::preservesTransparentGuttersWithoutTileSeams()
 			auto const reference_actual = tiled_reference.pixelColor(x, y);
 			auto const reference_expected = whole_reference.pixelColor(x, y);
 			QVERIFY2(
-				std::abs(actual.red() - expected.red()) <= 2
-				&& std::abs(actual.green() - expected.green()) <= 2
-				&& std::abs(actual.blue() - expected.blue()) <= 2
-				&& std::abs(actual.alpha() - expected.alpha()) <= 2,
+				std::abs(actual.red() - expected.red()) <= max_channel_delta
+				&& std::abs(actual.green() - expected.green()) <= max_channel_delta
+				&& std::abs(actual.blue() - expected.blue()) <= max_channel_delta
+				&& std::abs(actual.alpha() - expected.alpha()) <= max_channel_delta,
 				qPrintable(QStringLiteral("tile seam at %1,%2: %3 vs %4")
 				           .arg(x).arg(y).arg(actual.name(QColor::HexArgb),
 				                              expected.name(QColor::HexArgb)))
 			);
 			QVERIFY2(
-				std::abs(reference_actual.red() - reference_expected.red()) <= 2
-				&& std::abs(reference_actual.green() - reference_expected.green()) <= 2
-				&& std::abs(reference_actual.blue() - reference_expected.blue()) <= 2
-				&& std::abs(reference_actual.alpha() - reference_expected.alpha()) <= 2,
+				std::abs(reference_actual.red() - reference_expected.red()) <= max_channel_delta
+				&& std::abs(reference_actual.green() - reference_expected.green()) <= max_channel_delta
+				&& std::abs(reference_actual.blue() - reference_expected.blue()) <= max_channel_delta
+				&& std::abs(reference_actual.alpha() - reference_expected.alpha()) <= max_channel_delta,
 				qPrintable(QStringLiteral("reference tile seam at %1,%2: %3 vs %4")
 				           .arg(x).arg(y).arg(reference_actual.name(QColor::HexArgb),
 				                              reference_expected.name(QColor::HexArgb)))
 			);
 		}
 	}
+}
+
+}  // namespace
+
+void TemplateLayerPlannerTest::preservesOpaqueGuttersWithoutTileSeams()
+{
+	QImage source(16, 8, QImage::Format_RGB32);
+	for (int y = 0; y < source.height(); ++y)
+	{
+		for (int x = 0; x < source.width(); ++x)
+		{
+			source.setPixelColor(
+				x, y,
+				QColor(20 + x * 12, 190 - x * 7, 30 + y * 20)
+			);
+		}
+	}
+	verifyGutterSeams(std::move(source), 2, 8);
+}
+
+void TemplateLayerPlannerTest::preservesTransparentGuttersWithoutTileSeams()
+{
+	QImage source(16, 8, QImage::Format_RGBA8888);
+	for (int y = 0; y < source.height(); ++y)
+	{
+		for (int x = 0; x < source.width(); ++x)
+		{
+			source.setPixelColor(
+				x, y,
+				QColor(20 + x * 12, 190 - x * 7, 30 + y * 20, 80 + x * 8)
+			);
+		}
+	}
+	verifyGutterSeams(std::move(source), 1, 2);
 }
 
 QTEST_MAIN(TemplateLayerPlannerTest)

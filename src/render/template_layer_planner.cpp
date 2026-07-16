@@ -50,6 +50,8 @@ struct TileKey
 	ImageKey image;
 	Rect target;
 	Rect source;
+	Transform image_to_scene;
+	bool direct_to_map = false;
 
 	bool operator==(const TileKey& other) const
 	{
@@ -57,7 +59,14 @@ struct TileKey
 		       && target.x == other.target.x && target.y == other.target.y
 		       && target.width == other.target.width && target.height == other.target.height
 		       && source.x == other.source.x && source.y == other.source.y
-		       && source.width == other.source.width && source.height == other.source.height;
+		       && source.width == other.source.width && source.height == other.source.height
+		       && image_to_scene.m11 == other.image_to_scene.m11
+		       && image_to_scene.m12 == other.image_to_scene.m12
+		       && image_to_scene.m21 == other.image_to_scene.m21
+		       && image_to_scene.m22 == other.image_to_scene.m22
+		       && image_to_scene.dx == other.image_to_scene.dx
+		       && image_to_scene.dy == other.image_to_scene.dy
+		       && direct_to_map == other.direct_to_map;
 	}
 };
 
@@ -212,6 +221,18 @@ RasterMosaic transparentMosaic(const std::vector<SourceTile>& tiles)
 	return {
 		snapshotImage(mosaic),
 		{ left, top, target_width, target_height },
+	};
+}
+
+Rect fullImageTarget(const TileKey& tile)
+{
+	auto const scale_x = tile.target.width / tile.source.width;
+	auto const scale_y = tile.target.height / tile.source.height;
+	return {
+		tile.target.x - tile.source.x * scale_x,
+		tile.target.y - tile.source.y * scale_y,
+		tile.image.width * scale_x,
+		tile.image.height * scale_y,
 	};
 }
 
@@ -416,6 +437,10 @@ private:
 				image_key,
 				fromQRectF(tile.template_rect),
 				fromQRectF(tile.source_rect),
+				tile.has_image_to_map
+					? fromQTransform(tile.image_to_map)
+					: Transform {},
+				tile.has_image_to_map,
 			};
 			full_key.tiles.push_back(tile_key);
 			source_images.push_back({ std::move(tile_key), tile.image });
@@ -436,7 +461,11 @@ private:
 				return !isOpaque(tile.key.image, tile.image);
 			}
 		);
-		if (has_transparency)
+		auto const has_direct_tiles = std::ranges::any_of(
+			source_images,
+			[](auto const& tile) { return tile.key.direct_to_map; }
+		);
+		if (has_transparency && !has_direct_tiles)
 		{
 			if (on_screen && result.newly_resident_images >= max_new_images_per_frame)
 			{
@@ -488,10 +517,19 @@ private:
 		if (next_revision_ == std::numeric_limits<Revision>::max())
 			qFatal("Raster layer revision space exhausted");
 		RenderIRBuilder builder(next_revision_++);
-		builder.pushTransform(key.template_to_map);
 		for (auto const& [tile, image] : tiles)
-			builder.drawImage(image, tile.source, tile.target);
-		builder.popTransform();
+		{
+			if (tile.direct_to_map)
+			{
+				builder.drawImage(image, tile.source, tile.image_to_scene);
+			}
+			else
+			{
+				builder.pushTransform(key.template_to_map);
+				builder.drawImage(image, fullImageTarget(tile));
+				builder.popTransform();
+			}
+		}
 		auto scene = builder.finish();
 		layers_[&source] = { std::move(key), scene };
 		return scene;
