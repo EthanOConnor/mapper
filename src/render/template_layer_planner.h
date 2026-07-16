@@ -44,6 +44,9 @@ public:
 	TemplateLayerPlanner(const TemplateLayerPlanner&) = delete;
 	TemplateLayerPlanner& operator=(const TemplateLayerPlanner&) = delete;
 
+	/** Releases all retained template scenes and immutable image snapshots. */
+	void clear();
+
 	TemplateLayerPlan plan(const Map& map,
 	                     const MapView& view,
 	                     Rect visible_map_rect,

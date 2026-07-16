@@ -52,6 +52,7 @@ struct TileKey
 	Rect source;
 	Transform image_to_scene;
 	bool direct_to_map = false;
+	bool provisional = false;
 
 	bool operator==(const TileKey& other) const
 	{
@@ -66,7 +67,8 @@ struct TileKey
 		       && image_to_scene.m22 == other.image_to_scene.m22
 		       && image_to_scene.dx == other.image_to_scene.dx
 		       && image_to_scene.dy == other.image_to_scene.dy
-		       && direct_to_map == other.direct_to_map;
+		       && direct_to_map == other.direct_to_map
+		       && provisional == other.provisional;
 	}
 };
 
@@ -120,25 +122,97 @@ bool imageIsOpaque(const QImage& source)
 	return true;
 }
 
-std::shared_ptr<const ImageData> snapshotImage(const QImage& source)
+std::shared_ptr<const ImageData> snapshotImage(
+		const QImage& source,
+		const RasterMemoryReserver& reserve_memory = {},
+		bool shrink_memory = true)
 {
-	auto const image = source.convertToFormat(QImage::Format_RGBA8888);
-	if (image.isNull())
+	auto const retained_bytes =
+		qint64(source.width()) * source.height() * 4;
+	if (retained_bytes <= 0
+	    || retained_bytes > std::numeric_limits<qint64>::max() / 2)
+		return {};
+	auto const direct_format =
+		source.format() == QImage::Format_RGBA8888
+		|| source.format()
+		     == QImage::Format_RGBA8888_Premultiplied;
+	auto memory = reserve_memory
+	            ? reserve_memory(
+	                  direct_format
+	                      ? retained_bytes
+	                      : 2 * retained_bytes)
+	            : std::shared_ptr<RasterMemoryLease> {};
+	if (reserve_memory && !memory)
 		return {};
 
 	auto bytes = std::make_shared<std::vector<std::uint8_t>>();
-	auto const row_bytes = std::size_t(image.width()) * 4;
-	bytes->reserve(row_bytes * std::size_t(image.height()));
-	for (int y = 0; y < image.height(); ++y)
+	auto const width = source.width();
+	auto const height = source.height();
+	auto const row_bytes = std::size_t(width) * 4;
+	bytes->resize(row_bytes * std::size_t(height));
+	if (source.format() == QImage::Format_RGBA8888)
 	{
-		auto const* row = image.constScanLine(y);
-		bytes->insert(bytes->end(), row, row + row_bytes);
+		for (int y = 0; y < height; ++y)
+		{
+			std::copy_n(
+				source.constScanLine(y),
+				row_bytes,
+				bytes->data()
+					+ std::size_t(y) * row_bytes);
+		}
 	}
+	else if (source.format()
+	         == QImage::Format_RGBA8888_Premultiplied)
+	{
+		for (int y = 0; y < height; ++y)
+		{
+			auto const* input = source.constScanLine(y);
+			auto* output =
+				bytes->data() + std::size_t(y) * row_bytes;
+			for (int x = 0; x < width; ++x)
+			{
+				auto const alpha = int(input[4 * x + 3]);
+				output[4 * x + 3] =
+					std::uint8_t(alpha);
+				for (int channel = 0; channel < 3; ++channel)
+				{
+					output[4 * x + channel] =
+						alpha == 0
+							? 0
+							: std::uint8_t(std::min(
+							      255,
+							      (int(input[4 * x + channel])
+							       * 255 + alpha / 2)
+							      / alpha));
+				}
+			}
+		}
+	}
+	else
+	{
+		auto image =
+			source.convertToFormat(
+				QImage::Format_RGBA8888);
+		if (image.isNull())
+			return {};
+		for (int y = 0; y < height; ++y)
+		{
+			std::copy_n(
+				image.constScanLine(y),
+				row_bytes,
+				bytes->data()
+					+ std::size_t(y) * row_bytes);
+		}
+		image = {};
+	}
+	if (memory && shrink_memory)
+		memory->shrinkTo(retained_bytes);
 	return std::make_shared<const ImageData>(ImageData {
-		std::uint32_t(image.width()),
-		std::uint32_t(image.height()),
+		std::uint32_t(width),
+		std::uint32_t(height),
 		std::uint32_t(row_bytes),
 		std::move(bytes),
+		std::move(memory),
 	});
 }
 
@@ -146,6 +220,8 @@ struct SourceTile
 {
 	TileKey key;
 	QImage image;
+	std::shared_ptr<RasterMemoryLease> pixel_memory;
+	RasterMemoryReserver reserve_render_memory;
 };
 
 struct RasterMosaic
@@ -184,10 +260,19 @@ RasterMosaic transparentMosaic(const std::vector<SourceTile>& tiles)
 		return {};
 	}
 
+	#ifdef Q_OS_ANDROID
+	constexpr double max_dimension = 4096;
+	constexpr double max_pixels = 4.0 * 1024 * 1024;
+	#else
 	constexpr double max_dimension = 8192;
-	constexpr double max_pixels = 64.0 * 1024 * 1024;
+	constexpr double max_pixels = 16.0 * 1024 * 1024;
+	#endif
 	auto desired_width = std::ceil(target_width * density_x);
 	auto desired_height = std::ceil(target_height * density_y);
+	if (!std::isfinite(desired_width)
+	    || !std::isfinite(desired_height)
+	    || desired_width <= 0 || desired_height <= 0)
+		return {};
 	auto reduction = std::min({
 		1.0,
 		max_dimension / desired_width,
@@ -196,6 +281,29 @@ RasterMosaic transparentMosaic(const std::vector<SourceTile>& tiles)
 	});
 	auto const width = std::max(1, int(std::floor(desired_width * reduction)));
 	auto const height = std::max(1, int(std::floor(desired_height * reduction)));
+	auto const retained_bytes = qint64(width) * height * 4;
+	if (retained_bytes <= 0
+	    || retained_bytes > std::numeric_limits<qint64>::max() / 2)
+		return {};
+
+	RasterMemoryReserver reserve_memory;
+	for (auto const& tile : tiles)
+	{
+		if (tile.reserve_render_memory)
+		{
+			reserve_memory = tile.reserve_render_memory;
+			break;
+		}
+	}
+	std::shared_ptr<RasterMemoryLease> peak_memory;
+	if (reserve_memory)
+	{
+		// The premultiplied mosaic and immutable straight-RGBA snapshot coexist
+		// during conversion. Admit both before either large allocation exists.
+		peak_memory = reserve_memory(2 * retained_bytes);
+		if (!peak_memory)
+			return {};
+	}
 
 	QImage mosaic(width, height, QImage::Format_RGBA8888_Premultiplied);
 	if (mosaic.isNull())
@@ -218,8 +326,23 @@ RasterMosaic transparentMosaic(const std::vector<SourceTile>& tiles)
 	}
 	painter.end();
 
+	RasterMemoryReserver admitted_snapshot;
+	if (peak_memory)
+	{
+		admitted_snapshot =
+			[memory = peak_memory, retained_bytes](qint64 bytes) {
+				return bytes > 0 && bytes <= retained_bytes
+					? memory
+					: std::shared_ptr<RasterMemoryLease> {};
+			};
+	}
+	auto snapshot = snapshotImage(
+		mosaic, admitted_snapshot, false);
+	mosaic = {};
+	if (peak_memory)
+		peak_memory->shrinkTo(retained_bytes);
 	return {
-		snapshotImage(mosaic),
+		std::move(snapshot),
 		{ left, top, target_width, target_height },
 	};
 }
@@ -441,30 +564,47 @@ private:
 					? fromQTransform(tile.image_to_map)
 					: Transform {},
 				tile.has_image_to_map,
+				tile.provisional,
 			};
 			full_key.tiles.push_back(tile_key);
-			source_images.push_back({ std::move(tile_key), tile.image });
+			source_images.push_back({
+				std::move(tile_key),
+				tile.image,
+				tile.pixel_memory,
+				tile.reserve_render_memory,
+			});
 		}
 
-		auto const found = layers_.find(&source);
+		auto found = layers_.find(&source);
 		if (found != layers_.end() && found->second.key == full_key)
 			return found->second.scene;
+		if (!on_screen && found != layers_.end())
+		{
+			// Exact multi-page output does not need the previous page as a
+			// fallback. Release its immutable pixel snapshots before admitting
+			// the next page so both pages never count against the global raster
+			// budget at once.
+			layers_.erase(found);
+			found = layers_.end();
+		}
 		if (source_images.empty())
 		{
 			layers_.erase(&source);
 			return {};
 		}
 
-		auto const has_transparency = std::ranges::any_of(
-			source_images,
-			[this](auto const& tile) {
-				return !isOpaque(tile.key.image, tile.image);
-			}
-		);
 		auto const has_direct_tiles = std::ranges::any_of(
 			source_images,
 			[](auto const& tile) { return tile.key.direct_to_map; }
 		);
+		auto const has_transparency =
+			!has_direct_tiles
+			&& std::ranges::any_of(
+				source_images,
+				[this](auto const& tile) {
+					return !isOpaque(tile.key.image, tile.image);
+				}
+			);
 		if (has_transparency && !has_direct_tiles)
 		{
 			if (on_screen && result.newly_resident_images >= max_new_images_per_frame)
@@ -497,7 +637,12 @@ private:
 		tiles.reserve(source_images.size());
 		for (auto const& tile : source_images)
 		{
-			auto image = imageFor(tile.key.image, tile.image, result, on_screen);
+			auto image = imageFor(
+				tile.key.image,
+				tile.image,
+				tile.reserve_render_memory,
+				result,
+				on_screen);
 			if (!image)
 			{
 				result.complete = false;
@@ -513,6 +658,11 @@ private:
 			layers_.erase(&source);
 			return {};
 		}
+		std::stable_sort(
+			tiles.begin(), tiles.end(),
+			[](auto const& lhs, auto const& rhs) {
+				return lhs.first.provisional && !rhs.first.provisional;
+			});
 
 		if (next_revision_ == std::numeric_limits<Revision>::max())
 			qFatal("Raster layer revision space exhausted");
@@ -546,6 +696,7 @@ private:
 
 	std::shared_ptr<const ImageData> imageFor(const ImageKey& key,
 	                                          const QImage& image,
+	                                          const RasterMemoryReserver& reserve_memory,
 	                                          TemplateLayerPlan& result,
 	                                          bool on_screen)
 	{
@@ -558,7 +709,7 @@ private:
 		if (on_screen && result.newly_resident_images >= max_new_images_per_frame)
 			return {};
 
-		auto snapshot = snapshotImage(image);
+		auto snapshot = snapshotImage(image, reserve_memory);
 		if (!snapshot)
 			return {};
 		images_[key] = snapshot;
@@ -578,6 +729,11 @@ TemplateLayerPlanner::TemplateLayerPlanner()
 {}
 
 TemplateLayerPlanner::~TemplateLayerPlanner() = default;
+
+void TemplateLayerPlanner::clear()
+{
+	impl_ = std::make_unique<Impl>();
+}
 
 TemplateLayerPlan TemplateLayerPlanner::plan(const Map& map,
 	                                     const MapView& view,

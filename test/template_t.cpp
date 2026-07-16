@@ -21,6 +21,7 @@
 #include <cmath>
 #include <iosfwd>
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include <Qt>
@@ -35,6 +36,7 @@
 #include <QFile>
 #include <QFileDevice>
 #include <QFileInfo>
+#include <QIcon>
 #include <QImageWriter>
 #include <QIODevice>
 #include <QLineF>
@@ -86,6 +88,17 @@ QPointF center(const Template* temp)
 		return template_track->calculateTemplateBoundingBox().center();
 	return temp->templateToMap(temp->getTemplateExtent().center());
 }
+
+class ResourceStatusTemplate final : public TemplateImage
+{
+public:
+	using TemplateImage::TemplateImage;
+
+	void publishResourceStatus(TemplateResourceStatus status)
+	{
+		setResourceStatus(std::move(status));
+	}
+};
 
 }  // namespace
 
@@ -733,6 +746,104 @@ private slots:
 		QCOMPARE(model.insertionRowFromPos(0, true), 2);
 		QCOMPARE(model.insertionRowFromPos(0, false), 1);
 		QCOMPARE(model.insertionRowFromPos(1, false), 0);
+	}
+
+	void templateResourceStatusTest()
+	{
+		Map map;
+		ResourceStatusTemplate temp{QStringLiteral("online-imagery"), &map};
+		QSignalSpy status_changed{&temp, &Template::resourceStatusChanged};
+
+		TemplateResourceStatus first;
+		first.ready_resources = -1;
+		first.loading_resources = 2;
+		temp.publishResourceStatus(first);
+		QCOMPARE(temp.resourceStatus().ready_resources, qsizetype{0});
+
+		TemplateResourceStatus latest;
+		latest.ready_resources = 4;
+		latest.loading_resources = 3;
+		latest.offline_resources = 2;
+		latest.transient_failures = 1;
+		latest.permanent_failures = 1;
+		latest.message = QStringLiteral("Authentication is required.");
+		temp.publishResourceStatus(latest);
+
+		QCOMPARE(status_changed.count(), 0);
+		QTRY_COMPARE(status_changed.count(), 1);
+		QVERIFY(temp.resourceStatus() == latest);
+		QVERIFY(
+			temp.resourceStatus().dominantCondition()
+			== TemplateResourceStatus::Condition::PermanentFailure);
+		QCOMPARE(temp.resourceStatus().totalResources(), qsizetype{11});
+
+		temp.publishResourceStatus(latest);
+		QCoreApplication::processEvents();
+		QCOMPARE(status_changed.count(), 1);
+	}
+
+	void templateResourceStatusModelTest()
+	{
+		Map map;
+		MapView view{&map};
+
+		auto owned =
+			std::make_unique<ResourceStatusTemplate>(
+				QStringLiteral("online-imagery"), &map);
+		auto* temp = owned.get();
+		map.addTemplate(0, std::move(owned));
+
+		TemplateTableModel model{map, view};
+		QSignalSpy data_changed{&model, &QAbstractItemModel::dataChanged};
+		auto const row = model.rowFromPos(0);
+		auto const name_index =
+			model.index(row, TemplateTableModel::nameColumn());
+		QVERIFY(
+			model.data(name_index, Qt::DecorationRole)
+				.value<QIcon>()
+				.isNull());
+
+		TemplateResourceStatus status;
+		status.ready_resources = 8;
+		status.loading_resources = 2;
+		status.offline_resources = 1;
+		status.transient_failures = 1;
+		status.permanent_failures = 1;
+		status.message = QStringLiteral("Using cached imagery.");
+		temp->publishResourceStatus(status);
+
+		QTRY_COMPARE(data_changed.count(), 1);
+
+		QVERIFY(
+			model.data(
+				name_index,
+				TemplateTableModel::ResourceStatusRole)
+				.value<TemplateResourceStatus>()
+			== status);
+		auto const status_text =
+			model.data(
+				name_index,
+				TemplateTableModel::ResourceStatusTextRole)
+				.toString();
+		QVERIFY(status_text.contains(QStringLiteral("8 ready")));
+		QVERIFY(status_text.contains(QStringLiteral("2 loading")));
+		QVERIFY(status_text.contains(
+			QStringLiteral("1 waiting for network")));
+		QVERIFY(status_text.contains(
+			QStringLiteral("1 retrying after an error")));
+		QVERIFY(status_text.contains(QStringLiteral("1 unavailable")));
+		QVERIFY(status_text.contains(status.message));
+		QCOMPARE(
+			model.data(name_index, Qt::AccessibleDescriptionRole)
+				.toString(),
+			status_text);
+		QVERIFY(
+			model.data(name_index, Qt::ToolTipRole)
+				.toString()
+				.contains(status_text));
+		QVERIFY(!model.data(name_index, Qt::DecorationRole)
+			.value<QIcon>()
+			.isNull());
 	}
 	
 };

@@ -15,11 +15,24 @@ Q_OBJECT
 
 private slots:
 	void rejectsUnsafeUrls();
+	void canonicalizesIpv6OriginsExactly();
+	void approvesPrivateOriginsExplicitly();
 	void handlesRedirectsEmptyTilesAndBodyLimits();
+	void reportsExactPrivateRedirectTarget();
+	void boundsAndExpiresNegativeCache();
+	void negativeCacheRespectsRepresentationPolicy();
+	void digestsLongNegativeCacheRepresentationsWithoutCollision();
+	void fetchesCatalogsConditionally();
 	void retriesTransientFailures();
 	void cancelsClientGenerations();
+	void enteringOfflineModeAbortsActiveRequests();
+	void offlineTransitionRejectsQueuedOnlineSuccess();
+	void revokingPrivateOriginRejectsActiveAndQueuedRequests();
+	void revocationRejectsQueuedPrivateSuccess();
 	void enforcesFairnessAndQueueBounds();
+	void boundsOutstandingResultDelivery();
 	void servesFreshDiskCacheOffline();
+	void servesHostnameDiskCacheOfflineWithoutDns();
 	void timesOutWithoutBlockingTheCaller();
 };
 

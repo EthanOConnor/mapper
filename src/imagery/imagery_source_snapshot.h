@@ -39,6 +39,8 @@ class ImagerySourceSnapshotCodec
 public:
 	static constexpr int version = 1;
 	static constexpr qsizetype maximum_size = 1024 * 1024;
+	static constexpr qsizetype maximum_base64_size =
+		((maximum_size + 2) / 3) * 4;
 
 	static QString formatIdentifier();
 	static std::optional<ImagerySourceSnapshot> encode(

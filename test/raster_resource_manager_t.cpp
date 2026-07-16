@@ -384,6 +384,49 @@ private slots:
 		QCOMPARE(manager.pendingCount(Lane::BlockingIo), std::size_t(2));
 	}
 
+	void completionBacklogBoundsWorkerAdmission()
+	{
+		RasterResourceManager::Limits limits;
+		limits.blocking_io_threads = 2;
+		limits.decode_threads = 1;
+		limits.max_outstanding_per_lane = 2;
+		RasterResourceManager manager(limits);
+		auto owner = manager.createOwner(2);
+		QSemaphore started;
+		std::atomic_int completed = 0;
+		WorkDrain drain(manager, { &owner }, {});
+
+		for (int index = 0; index < 4; ++index)
+		{
+			QVERIFY(manager.submit(
+				owner, Lane::BlockingIo, Priority::Visible, this,
+				[&](const RasterResourceManager::CancellationToken&) {
+					started.release();
+					return RasterResourceManager::Completion {
+						[&] {
+							completed.fetch_add(
+								1, std::memory_order_relaxed);
+						}
+					};
+				}
+			));
+		}
+
+		QVERIFY(started.tryAcquire(2, 1000));
+		QThread::msleep(50);
+		QVERIFY(!started.tryAcquire(1, 100));
+		QCOMPARE(completed.load(std::memory_order_relaxed), 0);
+		QCOMPARE(
+			manager.pendingCount(Lane::BlockingIo),
+			std::size_t(2));
+
+		QTRY_COMPARE_WITH_TIMEOUT(
+			completed.load(std::memory_order_relaxed), 4, 2000);
+		QTRY_COMPARE_WITH_TIMEOUT(
+			manager.pendingCount(Lane::BlockingIo),
+			std::size_t(0), 1000);
+	}
+
 	void exceptionReleasesSlotAndCompletionUsesManagerThread()
 	{
 		RasterResourceManager manager({ 1, 1 });

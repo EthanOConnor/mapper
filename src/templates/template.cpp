@@ -25,6 +25,7 @@
 #include <cmath>
 #include <iosfwd>
 #include <iterator>
+#include <limits>
 #include <new>
 #include <stdexcept>
 #include <type_traits>
@@ -40,10 +41,13 @@
 #include <QFileInfo>
 #include <QLatin1Char>
 #include <QLatin1String>
+#include <QMetaObject>
 #include <QMessageBox>
 #include <QRectF>
 #include <QSizeF>
 #include <QStringView>
+#include <QThread>
+#include <QTimer>
 #include <QTransform>
 #include <QXmlStreamAttributes>
 #include <QXmlStreamReader>
@@ -59,6 +63,7 @@
 #include "gui/file_dialog.h"
 #include "templates/template_image.h"
 #include "templates/template_map.h"
+#include "templates/online_raster_template.h"
 #include "templates/template_placeholder.h"
 #include "templates/template_track.h"
 #include "util/util.h"
@@ -66,6 +71,64 @@
 
 
 namespace OpenOrienteering {
+
+TemplateResourceStatus::Condition TemplateResourceStatus::dominantCondition() const noexcept
+{
+	if (permanent_failures > 0)
+		return Condition::PermanentFailure;
+	if (offline_resources > 0)
+		return Condition::Offline;
+	if (transient_failures > 0)
+		return Condition::TransientFailure;
+	if (loading_resources > 0)
+		return Condition::Loading;
+	return Condition::Ready;
+}
+
+bool TemplateResourceStatus::isReported() const noexcept
+{
+	return ready_resources > 0
+	       || loading_resources > 0
+	       || offline_resources > 0
+	       || transient_failures > 0
+	       || permanent_failures > 0
+	       || !message.isEmpty();
+}
+
+qsizetype TemplateResourceStatus::totalResources() const noexcept
+{
+	constexpr auto maximum = std::numeric_limits<qsizetype>::max();
+	qsizetype total = 0;
+	for (auto count : {
+	         ready_resources,
+	         loading_resources,
+	         offline_resources,
+	         transient_failures,
+	         permanent_failures })
+	{
+		if (count <= 0)
+			continue;
+		if (count > maximum - total)
+			return maximum;
+		total += count;
+	}
+	return total;
+}
+
+bool operator==(const TemplateResourceStatus& lhs, const TemplateResourceStatus& rhs) noexcept
+{
+	return lhs.ready_resources == rhs.ready_resources
+	       && lhs.loading_resources == rhs.loading_resources
+	       && lhs.offline_resources == rhs.offline_resources
+	       && lhs.transient_failures == rhs.transient_failures
+	       && lhs.permanent_failures == rhs.permanent_failures
+	       && lhs.message == rhs.message;
+}
+
+bool operator!=(const TemplateResourceStatus& lhs, const TemplateResourceStatus& rhs) noexcept
+{
+	return !(lhs == rhs);
+}
 
 class Template::ScopedOffsetReversal
 {
@@ -117,6 +180,75 @@ Q_STATIC_ASSERT(std::is_nothrow_move_assignable<TemplateTransform>::value);
 void Template::updateRenderContext(const ViewRenderContext& context)
 {
 	Q_UNUSED(context)
+}
+
+OutputRenderPreparation Template::prepareForOutput(
+	const QRectF& map_rect,
+	double pixels_per_map_unit)
+{
+	Q_UNUSED(map_rect)
+	Q_UNUSED(pixels_per_map_unit)
+	return {};
+}
+
+void Template::finishOutputPreparation(bool cancelled)
+{
+	Q_UNUSED(cancelled)
+}
+
+TemplateResourceStatus Template::resourceStatus() const
+{
+	return resource_status;
+}
+
+void Template::setResourceStatus(TemplateResourceStatus status)
+{
+	if (QThread::currentThread() != thread())
+	{
+		QMetaObject::invokeMethod(
+			this,
+			[this, status = std::move(status)]() mutable {
+				setResourceStatus(std::move(status));
+			},
+			Qt::QueuedConnection);
+		return;
+	}
+
+	auto normalize = [](qsizetype value) {
+		return qMax<qsizetype>(0, value);
+	};
+	status.ready_resources = normalize(status.ready_resources);
+	status.loading_resources = normalize(status.loading_resources);
+	status.offline_resources = normalize(status.offline_resources);
+	status.transient_failures = normalize(status.transient_failures);
+	status.permanent_failures = normalize(status.permanent_failures);
+
+	if (resource_status == status)
+		return;
+
+	resource_status = std::move(status);
+	notifyResourceStatusChanged();
+}
+
+void Template::notifyResourceStatusChanged()
+{
+	if (QThread::currentThread() != thread())
+	{
+		QMetaObject::invokeMethod(
+			this,
+			[this]() { notifyResourceStatusChanged(); },
+			Qt::QueuedConnection);
+		return;
+	}
+
+	if (resource_status_change_pending)
+		return;
+
+	resource_status_change_pending = true;
+	QTimer::singleShot(0, this, [this]() {
+		resource_status_change_pending = false;
+		emit resourceStatusChanged();
+	});
 }
 
 // static
@@ -1025,6 +1157,8 @@ std::unique_ptr<Template> Template::templateForType(QStringView type, const QStr
 	auto type_cstring = type.toUtf8();
 	if (type_cstring == "TemplateImage")
 		t = std::make_unique<TemplateImage>(path, map);
+	else if (type_cstring == "OnlineRasterTemplate")
+		t = OnlineRasterTemplate::createForType(path, map);
 	else if (type_cstring == "TemplateMap")
 		t = std::make_unique<TemplateMap>(path, map);
 	else if (type_cstring == "OgrTemplate" && is_track && !track_with_gdal)

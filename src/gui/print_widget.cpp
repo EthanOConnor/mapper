@@ -25,29 +25,38 @@
 #include "gui/action_icon.h"
 
 #include <limits>
+#include <optional>
+#include <utility>
 // IWYU pragma: no_include <type_traits>
 
 #include <Qt>
 #include <QtGlobal>
 #include <QAbstractButton> // IWYU pragma: keep
+#include <QApplication>
 #include <QButtonGroup>
 #include <QCheckBox>
 #include <QColor>
 #include <QComboBox>
+#include <QCoreApplication>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QDir>
 #include <QDoubleSpinBox>
+#include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QImage>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLabel>
 #include <QLatin1Char>
 #include <QLatin1String>
 #include <QLayout>
 #include <QLineEdit>
+#include <QLockFile>
 #include <QMargins>
 #include <QMessageBox>
 #include <QPageLayout>
@@ -65,6 +74,7 @@
 #include <QRectF>
 #include <QRegularExpression>
 #include <QRegularExpressionValidator>
+#include <QSaveFile>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSettings>
@@ -75,8 +85,10 @@
 #include <QStringView>
 #include <QStyle>
 #include <QStyleOption>
+#include <QTextStream>
 #include <QToolButton>
 #include <QTransform>
+#include <QUuid>
 #include <QVBoxLayout>
 #include <QVariant>
 #include <QXmlStreamReader>
@@ -107,7 +119,441 @@
 namespace OpenOrienteering {
 
 namespace {
-	
+
+	constexpr qint64 max_world_file_backup_size = 1024 * 1024;
+	constexpr qint64 max_image_transaction_size = 2 * 1024 * 1024;
+	constexpr auto image_transaction_format =
+		"org.openorienteering.image-export-transaction";
+
+	struct FileBackup
+	{
+		bool existed = false;
+		QByteArray contents;
+		QFileDevice::Permissions permissions;
+	};
+
+	struct ImageExportTransaction
+	{
+		bool old_image_existed = false;
+		QString image_backup_name;
+		FileBackup world_backup;
+	};
+
+	void setExportError(QString* error_message, QString message)
+	{
+		if (error_message)
+			*error_message = std::move(message);
+	}
+
+	bool readFileBackup(
+		const QString& path,
+		FileBackup& backup,
+		QString* error_message)
+	{
+		const QFileInfo info(path);
+		backup.existed = info.exists() || info.isSymLink();
+		if (!backup.existed)
+			return true;
+
+		if (info.isSymLink() || !info.isFile())
+		{
+			setExportError(
+				error_message,
+				QCoreApplication::translate(
+					"PrintWidget",
+					"The existing world-file destination is not a regular file."));
+			return false;
+		}
+		if (info.size() > max_world_file_backup_size)
+		{
+			setExportError(
+				error_message,
+				QCoreApplication::translate(
+					"PrintWidget",
+					"The existing world file is unexpectedly large and was not replaced."));
+			return false;
+		}
+
+		QFile file(path);
+		if (!file.open(QIODevice::ReadOnly))
+		{
+			setExportError(
+				error_message,
+				QCoreApplication::translate(
+					"PrintWidget",
+					"Failed to preserve the existing world file:\n%1")
+					.arg(file.errorString()));
+			return false;
+		}
+		backup.contents = file.readAll();
+		backup.permissions = file.permissions();
+		if (file.error() != QFileDevice::NoError)
+		{
+			setExportError(
+				error_message,
+				QCoreApplication::translate(
+					"PrintWidget",
+					"Failed to preserve the existing world file:\n%1")
+					.arg(file.errorString()));
+			return false;
+		}
+		return true;
+	}
+
+	bool writeWorldFile(QIODevice& device, const WorldFile& world_file)
+	{
+		QTextStream stream(&device);
+		stream.setRealNumberPrecision(10);
+		for (auto value : world_file.parameters)
+			stream << value << Qt::endl;
+		return stream.status() == QTextStream::Ok;
+	}
+
+	bool restoreFile(
+		const QString& path,
+		const FileBackup& backup,
+		QString* error_message)
+	{
+		if (!backup.existed)
+		{
+			if (!QFileInfo::exists(path) || QFile::remove(path))
+				return true;
+			setExportError(
+				error_message,
+				QCoreApplication::translate(
+					"PrintWidget",
+					"Failed to remove the incomplete world file."));
+			return false;
+		}
+
+		QSaveFile output(path);
+		output.setDirectWriteFallback(false);
+		if (!output.open(QIODevice::WriteOnly)
+		    || output.write(backup.contents) != qint64(backup.contents.size())
+		    || !output.commit())
+		{
+			output.cancelWriting();
+			setExportError(
+				error_message,
+				QCoreApplication::translate(
+					"PrintWidget",
+					"Failed to restore the previous world file:\n%1")
+					.arg(output.errorString()));
+			return false;
+		}
+		if (!QFile::setPermissions(path, backup.permissions))
+		{
+			setExportError(
+				error_message,
+				QCoreApplication::translate(
+					"PrintWidget",
+					"The previous world-file contents were restored, but its permissions could not be restored."));
+			return false;
+		}
+		return true;
+	}
+
+	QString imageTransactionPath(
+		const QString& image_path)
+	{
+		return QFileInfo(image_path).absoluteFilePath()
+		       + QStringLiteral(".mapper-export.json");
+	}
+
+	QString imageTransactionLockPath(
+		const QString& image_path)
+	{
+		return QFileInfo(image_path).absoluteFilePath()
+		       + QStringLiteral(".mapper-export.lock");
+	}
+
+	QString imageBackupPrefix(
+		const QString& image_path)
+	{
+		return QLatin1Char('.')
+		       + QFileInfo(image_path).fileName()
+		       + QStringLiteral(".mapper-backup-");
+	}
+
+	bool writeImageTransaction(
+		const QString& image_path,
+		const ImageExportTransaction& transaction,
+		QString* error_message)
+	{
+		QJsonObject object {
+			{ QStringLiteral("format"),
+			  QString::fromLatin1(
+				  image_transaction_format) },
+			{ QStringLiteral("version"), 1 },
+			{ QStringLiteral("oldImageExisted"),
+			  transaction.old_image_existed },
+			{ QStringLiteral("imageBackupName"),
+			  transaction.image_backup_name },
+			{ QStringLiteral("worldExisted"),
+			  transaction.world_backup.existed },
+			{ QStringLiteral("worldContentsBase64"),
+			  QString::fromLatin1(
+				  transaction.world_backup.contents
+					  .toBase64()) },
+			{ QStringLiteral("worldPermissions"),
+			  int(transaction.world_backup.permissions) },
+		};
+		auto const bytes =
+			QJsonDocument(object).toJson(
+				QJsonDocument::Compact);
+		if (bytes.size() > max_image_transaction_size)
+		{
+			setExportError(
+				error_message,
+				QCoreApplication::translate(
+					"PrintWidget",
+					"The image export recovery record is too large."));
+			return false;
+		}
+		QSaveFile output(
+			imageTransactionPath(image_path));
+		output.setDirectWriteFallback(false);
+		if (!output.open(QIODevice::WriteOnly)
+		    || output.write(bytes) != bytes.size()
+		    || !output.commit())
+		{
+			output.cancelWriting();
+			setExportError(
+				error_message,
+				QCoreApplication::translate(
+					"PrintWidget",
+					"Failed to create the image export recovery record:\n%1")
+					.arg(output.errorString()));
+			return false;
+		}
+		return true;
+	}
+
+	std::optional<ImageExportTransaction>
+	readImageTransaction(
+		const QString& image_path,
+		QString* error_message)
+	{
+		auto const transaction_path =
+			imageTransactionPath(image_path);
+		QFile input(transaction_path);
+		if (!input.exists())
+			return ImageExportTransaction {};
+		if (!input.open(QIODevice::ReadOnly)
+		    || input.size() < 0
+		    || input.size() > max_image_transaction_size)
+		{
+			setExportError(
+				error_message,
+				QCoreApplication::translate(
+					"PrintWidget",
+					"The image export recovery record cannot be read safely."));
+			return std::nullopt;
+		}
+		QJsonParseError parse_error;
+		auto const document =
+			QJsonDocument::fromJson(
+				input.readAll(),
+				&parse_error);
+		if (parse_error.error
+		      != QJsonParseError::NoError
+		    || !document.isObject())
+		{
+			setExportError(
+				error_message,
+				QCoreApplication::translate(
+					"PrintWidget",
+					"The image export recovery record is invalid."));
+			return std::nullopt;
+		}
+		auto const object = document.object();
+		auto const prefix =
+			imageBackupPrefix(image_path);
+		auto const backup_name =
+			object.value(
+				QStringLiteral("imageBackupName"))
+				.toString();
+		auto const backup_pattern =
+			QRegularExpression(
+				QStringLiteral("^%1[0-9a-f]{32}$")
+					.arg(
+						QRegularExpression::escape(
+							prefix)));
+		auto decoded_world =
+			QByteArray::fromBase64Encoding(
+				object.value(
+					QStringLiteral(
+						"worldContentsBase64"))
+					.toString()
+					.toLatin1(),
+				QByteArray::
+					AbortOnBase64DecodingErrors);
+		if (object.value(QStringLiteral("format"))
+		      .toString()
+		      != QLatin1String(
+			      image_transaction_format)
+		    || object.value(QStringLiteral("version"))
+		             .toInt(-1)
+		         != 1
+		    || !backup_pattern.match(backup_name)
+			        .hasMatch()
+		    || !decoded_world
+		    || decoded_world.decoded.size()
+		         > max_world_file_backup_size)
+		{
+			setExportError(
+				error_message,
+				QCoreApplication::translate(
+					"PrintWidget",
+					"The image export recovery record is invalid."));
+			return std::nullopt;
+		}
+
+		ImageExportTransaction transaction;
+		transaction.old_image_existed =
+			object.value(
+				QStringLiteral("oldImageExisted"))
+				.toBool();
+		transaction.image_backup_name =
+			backup_name;
+		transaction.world_backup.existed =
+			object.value(
+				QStringLiteral("worldExisted"))
+				.toBool();
+		transaction.world_backup.contents =
+			std::move(decoded_world.decoded);
+		transaction.world_backup.permissions =
+			QFileDevice::Permissions::fromInt(
+				object.value(
+					QStringLiteral(
+						"worldPermissions"))
+					.toInt());
+		return transaction;
+	}
+
+	bool recoverImageTransaction(
+		const QString& image_path,
+		const QString& world_path,
+		QString* error_message)
+	{
+		auto const transaction_path =
+			imageTransactionPath(image_path);
+		if (!QFileInfo::exists(transaction_path))
+			return true;
+		auto transaction =
+			readImageTransaction(
+				image_path,
+				error_message);
+		if (!transaction)
+			return false;
+
+		auto const directory =
+			QFileInfo(image_path).absoluteDir();
+		auto const backup_path =
+			directory.filePath(
+				transaction->image_backup_name);
+		auto const image_info =
+			QFileInfo(image_path);
+		auto const backup_info =
+			QFileInfo(backup_path);
+		if ((image_info.exists()
+		     && (image_info.isSymLink()
+		         || !image_info.isFile()))
+		    || (backup_info.exists()
+		        && (backup_info.isSymLink()
+		            || !backup_info.isFile())))
+		{
+			setExportError(
+				error_message,
+				QCoreApplication::translate(
+					"PrintWidget",
+					"The interrupted image export contains an unsafe destination."));
+			return false;
+		}
+
+		auto const image_exists =
+			image_info.exists();
+		auto const backup_exists =
+			backup_info.exists();
+		auto const published =
+			image_exists
+			&& (!transaction->old_image_existed
+			    || backup_exists);
+		auto const unchanged =
+			transaction->old_image_existed
+			&& image_exists
+			&& !backup_exists;
+		if (published || unchanged)
+		{
+			if (backup_exists
+			    && !QFile::remove(backup_path))
+			{
+				setExportError(
+					error_message,
+					QCoreApplication::translate(
+						"PrintWidget",
+						"Failed to remove the completed image export backup."));
+				return false;
+			}
+		}
+		else
+		{
+			// Keep the destination image absent until its matching world file is
+			// restored. If either operation fails, the journal and image backup
+			// remain sufficient for an idempotent retry.
+			if (!restoreFile(
+				    world_path,
+				    transaction->world_backup,
+				    error_message))
+				return false;
+			if (transaction->old_image_existed)
+			{
+				if (!backup_exists)
+				{
+					setExportError(
+						error_message,
+						QCoreApplication::translate(
+							"PrintWidget",
+							"The interrupted image export lost both image copies."));
+					return false;
+				}
+				if ((image_exists
+				     && !QFile::remove(image_path))
+				    || !QFile::rename(
+					    backup_path,
+					    image_path))
+				{
+					setExportError(
+						error_message,
+						QCoreApplication::translate(
+							"PrintWidget",
+							"Failed to restore the previous image after an interrupted export."));
+					return false;
+				}
+			}
+			else if (backup_exists
+			         && !QFile::remove(backup_path))
+			{
+				setExportError(
+					error_message,
+					QCoreApplication::translate(
+						"PrintWidget",
+						"Failed to remove an incomplete image export backup."));
+				return false;
+			}
+		}
+		if (!QFile::remove(transaction_path))
+		{
+			setExportError(
+				error_message,
+				QCoreApplication::translate(
+					"PrintWidget",
+					"Failed to finish recovering an interrupted image export."));
+			return false;
+		}
+		return true;
+	}
+
 	QToolButton* createPrintModeButton(const QIcon& icon, const QString& label, QWidget* parent = nullptr)
 	{
 		static const QSize icon_size(48,48);
@@ -123,6 +569,242 @@ namespace {
 	
 	
 }  // namespace
+
+
+bool PrintWidgetUtil::saveImageExport(
+	const QString& image_path,
+	const QImage& image,
+	const QByteArray& format,
+	const WorldFile* world_file,
+	QString* error_message)
+{
+	if (error_message)
+		error_message->clear();
+
+	auto const absolute_image_path =
+		QFileInfo(image_path).absoluteFilePath();
+	auto const world_path =
+		WorldFile::pathForImage(
+			absolute_image_path);
+	QLockFile output_lock(
+		imageTransactionLockPath(
+			absolute_image_path));
+	if (!output_lock.tryLock())
+	{
+		setExportError(
+			error_message,
+			QCoreApplication::translate(
+				"PrintWidget",
+				"Another process is already exporting this image."));
+		return false;
+	}
+	if (!recoverImageTransaction(
+		    absolute_image_path,
+		    world_path,
+		    error_message))
+		return false;
+
+	QSaveFile image_output(absolute_image_path);
+	image_output.setDirectWriteFallback(false);
+	if (!image_output.open(QIODevice::WriteOnly))
+	{
+		setExportError(
+			error_message,
+			QCoreApplication::translate(
+				"PrintWidget",
+				"Failed to open the image destination:\n%1")
+				.arg(image_output.errorString()));
+		return false;
+	}
+	if (!image.save(
+		    &image_output,
+		    format.isEmpty() ? nullptr : format.constData()))
+	{
+		image_output.cancelWriting();
+		setExportError(
+			error_message,
+			QCoreApplication::translate(
+				"PrintWidget",
+				"Failed to encode the image."));
+		return false;
+	}
+
+	if (!world_file)
+	{
+		if (image_output.commit())
+			return true;
+		setExportError(
+			error_message,
+			QCoreApplication::translate(
+				"PrintWidget",
+				"Failed to finish saving the image:\n%1")
+				.arg(image_output.errorString()));
+		return false;
+	}
+
+	FileBackup world_backup;
+	if (!readFileBackup(world_path, world_backup, error_message))
+	{
+		image_output.cancelWriting();
+		return false;
+	}
+
+	QSaveFile world_output(world_path);
+	world_output.setDirectWriteFallback(false);
+	if (!world_output.open(QIODevice::WriteOnly | QIODevice::Text))
+	{
+		image_output.cancelWriting();
+		setExportError(
+			error_message,
+			QCoreApplication::translate(
+				"PrintWidget",
+				"Failed to open the world-file destination:\n%1")
+				.arg(world_output.errorString()));
+		return false;
+	}
+	if (!writeWorldFile(world_output, *world_file))
+	{
+		world_output.cancelWriting();
+		image_output.cancelWriting();
+		setExportError(
+			error_message,
+			QCoreApplication::translate(
+				"PrintWidget",
+				"Failed to encode the world file."));
+		return false;
+	}
+
+	auto const image_info =
+		QFileInfo(absolute_image_path);
+	ImageExportTransaction transaction;
+	transaction.old_image_existed =
+		image_info.exists()
+		|| image_info.isSymLink();
+	if (transaction.old_image_existed
+	    && (image_info.isSymLink()
+	        || !image_info.isFile()))
+	{
+		world_output.cancelWriting();
+		image_output.cancelWriting();
+		setExportError(
+			error_message,
+			QCoreApplication::translate(
+				"PrintWidget",
+				"The existing image destination is not a regular file."));
+		return false;
+	}
+	transaction.image_backup_name =
+		imageBackupPrefix(absolute_image_path)
+		+ QUuid::createUuid().toString(
+			QUuid::Id128);
+	transaction.world_backup = world_backup;
+	if (!writeImageTransaction(
+		    absolute_image_path,
+		    transaction,
+		    error_message))
+	{
+		world_output.cancelWriting();
+		image_output.cancelWriting();
+		return false;
+	}
+	auto const image_backup_path =
+		QFileInfo(absolute_image_path)
+			.absoluteDir()
+			.filePath(
+				transaction.image_backup_name);
+	if (transaction.old_image_existed
+	    && !QFile::rename(
+		    absolute_image_path,
+		    image_backup_path))
+	{
+		world_output.cancelWriting();
+		image_output.cancelWriting();
+		QFile::remove(
+			imageTransactionPath(
+				absolute_image_path));
+		setExportError(
+			error_message,
+			QCoreApplication::translate(
+				"PrintWidget",
+				"Failed to preserve the previous image before publishing the image and world file."));
+		return false;
+	}
+
+	// Publishing two conventional files cannot be one rename. Remove the old
+	// image into an atomic sibling backup before committing the sidecar, so a
+	// crash can expose either the old pair, no image, or the new pair—but never
+	// the old image with new georeferencing. The bounded journal makes the
+	// missing-image phase recoverable on the next export.
+	if (!world_output.commit())
+	{
+		image_output.cancelWriting();
+		auto const world_error =
+			world_output.errorString();
+		QString recovery_error;
+		auto const recovered =
+			recoverImageTransaction(
+				absolute_image_path,
+				world_path,
+				&recovery_error);
+		setExportError(
+			error_message,
+			recovered
+				? QCoreApplication::translate(
+					"PrintWidget",
+					"Failed to finish saving the world file:\n%1")
+					.arg(world_error)
+				: QCoreApplication::translate(
+					"PrintWidget",
+					"Failed to finish saving the world file:\n%1\n\n"
+					"Recovery also failed:\n%2")
+					.arg(
+						world_error,
+						recovery_error));
+		return false;
+	}
+	if (image_output.commit())
+	{
+		auto const backup_removed =
+			!QFileInfo::exists(image_backup_path)
+			|| QFile::remove(image_backup_path);
+		auto const transaction_path =
+			imageTransactionPath(
+				absolute_image_path);
+		auto const journal_removed =
+			backup_removed
+			&& (!QFileInfo::exists(transaction_path)
+			    || QFile::remove(transaction_path));
+		if (backup_removed && journal_removed)
+			return true;
+		setExportError(
+			error_message,
+			QCoreApplication::translate(
+				"PrintWidget",
+				"The image and world file were saved, but their recovery files could not be removed."));
+		return false;
+	}
+
+	const auto image_error = image_output.errorString();
+	QString recovery_error;
+	const auto recovery_ok =
+		recoverImageTransaction(
+			absolute_image_path,
+			world_path,
+			&recovery_error);
+	setExportError(
+		error_message,
+		recovery_ok
+			? QCoreApplication::translate(
+				"PrintWidget",
+				"Failed to finish saving the image:\n%1")
+				.arg(image_error)
+			: QCoreApplication::translate(
+				"PrintWidget",
+				"Failed to finish saving the image:\n%1\n\n"
+				"Recovery also failed:\n%2")
+				.arg(image_error, recovery_error));
+	return false;
+}
 
 
 //### PrintWidget ###
@@ -1232,18 +1914,44 @@ void PrintWidget::exportToKmz()
 	progress.setWindowModality(Qt::ApplicationModal); // Required for OSX, cf. QTBUG-40112
 	progress.setWindowTitle(tr("Export map ..."));
 	progress.setMinimumDuration(500);
-	progress.setAutoClose(true);
+	progress.setAutoReset(false);
+	progress.setAutoClose(false);
+	progress.setRange(0, 100);
+	connect(
+		map_printer, &MapPrinter::printProgress,
+		&progress,
+		[&progress](int value, const QString& status) {
+			progress.setLabelText(status);
+			progress.setValue(value);
+			QApplication::processEvents(
+				QEventLoop::AllEvents, 100);
+		});
+	connect(
+		&progress, &QProgressDialog::canceled,
+		map_printer, &MapPrinter::cancelPrintMap);
 	
 	KmzGroundOverlayExport exporter(path, *map);
 	exporter.setProgressObserver(&progress);
 	if (!exporter.doExport(*map_printer, tile_size_combo->currentData().toInt()))
 	{
-		progress.cancel();
-		QMessageBox::warning(this, tr("Error"), tr("Failed to save the image:\n%1").arg(exporter.errorString()));
-		main_window->showStatusBarMessage(tr("Canceled."), 4000);
+		progress.hide();
+		if (exporter.wasCanceled())
+		{
+			main_window->showStatusBarMessage(
+				tr("Canceled."), 4000);
+		}
+		else
+		{
+			QMessageBox::warning(
+				this,
+				tr("Error"),
+				tr("Failed to export the map:\n%1")
+					.arg(exporter.errorString()));
+		}
 	}
 	else
 	{
+		progress.hide();
 		main_window->showStatusBarMessage(tr("Exported successfully to %1").arg(path), 4000);
 		emit finished(0);
 	}
@@ -1295,32 +2003,74 @@ void PrintWidget::exportToImage()
 	
 	image.fill(QColor(transparent_background ? Qt::transparent : Qt::white));
 	
-#if 0  // Pointless unless drawPage drives the event loop and sends progress
 	PrintProgressDialog progress(map_printer, main_window);
 	progress.setWindowTitle(tr("Export map ..."));
-#endif
+	if (!map_printer->prepareOutput())
+	{
+		if (!progress.wasCanceled()
+		    && !map_printer->outputWasCanceled())
+		{
+			QMessageBox::warning(
+				this, tr("Error"),
+				map_printer->outputError().isEmpty()
+					? tr("Failed to prepare the image.")
+					: map_printer->outputError());
+		}
+		return;
+	}
 	
 	// Export the map
 	QPainter p(&image);
 	map_printer->drawPage(&p, map_printer->getPrintArea(), &image);
-	p.end();
-	if (!image.save(path))
+	auto const render_ok = p.isActive();
+	if (render_ok)
+		p.end();
+	map_printer->finishOutput(!render_ok);
+	if (!render_ok)
 	{
-		QMessageBox::warning(this, tr("Error"), tr("Failed to save the image. Does the path exist? Do you have sufficient rights?"));
+		QMessageBox::warning(
+			this,
+			tr("Error"),
+			map_printer->outputError().isEmpty()
+				? tr("Failed to render exact template imagery.")
+				: map_printer->outputError());
+		return;
+	}
+
+	auto const format =
+		QFileInfo(path).suffix().toLatin1();
+	const auto save_world_file = world_file_check->isChecked();
+	WorldFile world_file;
+	if (save_world_file)
+		world_file = worldFileForExport();
+	QString save_error;
+	if (!PrintWidgetUtil::saveImageExport(
+		    path,
+		    image,
+		    format,
+		    save_world_file ? &world_file : nullptr,
+		    &save_error))
+	{
+		progress.hide();
+		QMessageBox::warning(
+			this,
+			tr("Error"),
+			save_world_file
+				? tr("Failed to save the image and world file:\n%1")
+					.arg(save_error)
+				: tr("Failed to save the image:\n%1")
+					.arg(save_error));
 	}
 	else
 	{
+		progress.setValue(100);
+		progress.hide();
 		main_window->showStatusBarMessage(tr("Exported successfully to %1").arg(path), 4000);
-		if (world_file_check->isChecked())
-		{
-			if (!exportWorldFile(path))
-				QMessageBox::warning(this, tr("Error"), tr("Failed to save the world file."));
-		}
 		emit finished(0);
 	}
 }
 
-bool PrintWidget::exportWorldFile(const QString& path) const
+WorldFile PrintWidget::worldFileForExport() const
 {
 	const auto& georef = map->getGeoreferencing();
 	const auto& mm_to_world = georef.mapToProjected();
@@ -1331,8 +2081,7 @@ bool PrintWidget::exportWorldFile(const QString& path) const
 	const auto yskew  = mm_to_world.m21() / pixel_per_mm;
 	const auto top_left = georef.toProjectedCoords(MapCoord{map_printer->getPrintArea().topLeft()});
 	const QTransform pixel_to_world(xscale, yskew, xskew, yscale, top_left.x(), top_left.y());
-	const WorldFile world_file(pixel_to_world);
-	return world_file.save(WorldFile::pathForImage(path));
+	return WorldFile(pixel_to_world);
 }
 
 void PrintWidget::exportToPdf()
@@ -1349,7 +2098,17 @@ void PrintWidget::exportToPdf()
 	{
 		path.append(QLatin1String(".pdf"));
 	}
-	auto writer = map_printer->makePdfWriter(path);
+	QSaveFile output(path);
+	if (!output.open(QIODevice::WriteOnly))
+	{
+		QMessageBox::warning(
+			this,
+			tr("Error"),
+			tr("Failed to open the PDF destination:\n%1")
+				.arg(output.errorString()));
+		return;
+	}
+	auto writer = map_printer->makePdfWriter(&output);
 	writer->setCreator(main_window->appName());
 	writer->setTitle(QFileInfo(main_window->currentPath()).baseName());
 
@@ -1357,20 +2116,36 @@ void PrintWidget::exportToPdf()
 	progress.setWindowTitle(tr("Export map ..."));
 	
 	// Export the map
-	if (!map_printer->printMap(writer.get(), copies_edit->value()))
+	auto const success =
+		map_printer->printMap(writer.get(), copies_edit->value());
+	writer.reset();
+	if (progress.wasCanceled()
+	    || map_printer->outputWasCanceled())
 	{
-		QFile(path).remove();
-		QMessageBox::warning(this, tr("Error"), tr("Failed to finish the PDF export."));
+		output.cancelWriting();
+		main_window->showStatusBarMessage(tr("Canceled."), 4000);
 	}
-	else if (!progress.wasCanceled())
+	else if (!success)
 	{
-		main_window->showStatusBarMessage(tr("Exported successfully to %1").arg(path), 4000);
-		emit finished(0);
+		output.cancelWriting();
+		QMessageBox::warning(
+			this, tr("Error"),
+			map_printer->outputError().isEmpty()
+				? tr("Failed to finish the PDF export.")
+				: map_printer->outputError());
+	}
+	else if (!output.commit())
+	{
+		QMessageBox::warning(
+			this,
+			tr("Error"),
+			tr("Failed to finish the PDF export:\n%1")
+				.arg(output.errorString()));
 	}
 	else
 	{
-		QFile(path).remove();
-		main_window->showStatusBarMessage(tr("Canceled."), 4000);
+		main_window->showStatusBarMessage(tr("Exported successfully to %1").arg(path), 4000);
+		emit finished(0);
 	}
 }
 
@@ -1403,22 +2178,39 @@ void PrintWidget::print()
 	progress.setWindowTitle(tr("Printing Progress"));
 	
 	// Print the map
-	if (!map_printer->printMap(printer.get()))
+	auto const success = map_printer->printMap(printer.get());
+	const auto canceled =
+		progress.wasCanceled() || map_printer->outputWasCanceled();
+	if (!success || canceled)
 	{
-		QMessageBox::warning(main_window, tr("Error"), tr("An error occurred during printing."));
-	}
-	else if (!progress.wasCanceled())
-	{
-		main_window->showStatusBarMessage(tr("Successfully created print job"), 4000);
-		emit finished(0);
-	}
-	else if (printer->abort())
-	{
-		main_window->showStatusBarMessage(tr("Canceled."), 4000);
+		const auto aborted = printer->abort();
+		if (canceled)
+		{
+			if (aborted)
+				main_window->showStatusBarMessage(tr("Canceled."), 4000);
+			else
+				QMessageBox::warning(
+					main_window, tr("Error"),
+					tr("The print job could not be stopped."));
+		}
+		else
+		{
+			auto error =
+				map_printer->outputError().isEmpty()
+					? tr("An error occurred during printing.")
+					: map_printer->outputError();
+			if (!aborted)
+				error.append(
+					tr("\n\nThe incomplete print job could not be stopped."));
+			QMessageBox::warning(
+				main_window, tr("Error"),
+				error);
+		}
 	}
 	else
 	{
-		QMessageBox::warning(main_window, tr("Error"), tr("The print job could not be stopped."));
+		main_window->showStatusBarMessage(tr("Successfully created print job"), 4000);
+		emit finished(0);
 	}
 }
 

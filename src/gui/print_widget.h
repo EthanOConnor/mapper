@@ -35,12 +35,14 @@
 
 
 class QAbstractButton;
+class QByteArray;
 class QButtonGroup;
 class QCheckBox;
 class QComboBox;
 class QDialogButtonBox;
 class QDoubleSpinBox;
 class QFormLayout;
+class QImage;
 class QLabel;
 class QPageSize;
 class QPushButton;
@@ -60,6 +62,28 @@ class MapPrinterOptions;
 class MapPrinterPageFormat;
 class MapView;
 class PrintTool;
+struct WorldFile;
+
+
+namespace PrintWidgetUtil {
+
+/**
+ * Transactionally saves an image, optionally with its world-file sidecar.
+ *
+ * Both files are staged and writers are serialized per destination. For a
+ * paired export, the old image is moved to a sibling backup before the world
+ * file is committed, so a crash never exposes old pixels with new
+ * georeferencing. A bounded journal rolls back the missing-image phase or
+ * completes cleanup on the next export.
+ */
+bool saveImageExport(
+	const QString& image_path,
+	const QImage& image,
+	const QByteArray& format,
+	const WorldFile* world_file,
+	QString* error_message = nullptr);
+
+}  // namespace PrintWidgetUtil
 
 
 /**
@@ -259,8 +283,8 @@ protected:
 	/** Exports to an image file. */
 	void exportToImage();
 
-	/** Export a world file */
-	bool exportWorldFile(const QString& path) const;
+	/** Creates the world-file parameters for an image export. */
+	WorldFile worldFileForExport() const;
 	
 	/** Exports to a PDF file. */
 	void exportToPdf();

@@ -239,8 +239,16 @@ TemplateListWidget::TemplateListWidget(Map& map, MapView& main_view, MapEditorCo
 	auto* new_button_menu = new QMenu(this);
 	if (!mobile_mode)
 	{
+		new_button_menu->addAction(
+			controller.getAction("openonlineimagery"));
+		new_button_menu->addSeparator();
 		new_button_menu->addAction(ActionIcon::fromName(u"open"), tr("Open..."), this, &TemplateListWidget::openTemplate);
 		new_button_menu->addAction(controller.getAction("reopentemplate"));
+	}
+	else
+	{
+		new_button_menu->addAction(
+			controller.getAction("openonlineimagery"));
 	}
 	duplicate_action = new_button_menu->addAction(ActionIcon::fromName(u"tool-duplicate"), tr("Duplicate"), this, &TemplateListWidget::duplicateTemplate);
 #if 0

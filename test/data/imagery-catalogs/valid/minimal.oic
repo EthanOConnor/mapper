@@ -1,0 +1,17 @@
+{
+  "format": "org.openorienteering.imagery-catalog",
+  "version": 1,
+  "id": "org.example.imagery.minimal",
+  "revision": 1,
+  "name": "Minimal imagery catalog",
+  "sources": [
+    {
+      "id": "aerial",
+      "name": "Example aerial",
+      "type": "raster-tiles",
+      "tiles": ["https://tiles.example.test/aerial/{z}/{x}/{y}.png"],
+      "scheme": "xyz",
+      "tileMatrixSetURI": "http://www.opengis.net/def/tilematrixset/OGC/1.0/WebMercatorQuad"
+    }
+  ]
+}

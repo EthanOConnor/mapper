@@ -26,7 +26,10 @@ namespace OpenOrienteering {
  *
  * Sources continue to own demand, typed caches, and retry policy. The manager
  * owns only bounded execution, fair ordering, cancellation generations, and
- * receiver-safe delivery back to the application thread.
+ * receiver-safe delivery back to the application thread. Worker admission
+ * reserves a bounded completion slot until the application thread consumes
+ * the result, so a blocked UI event loop cannot accumulate unbounded
+ * completion closures.
  */
 class RasterResourceManager final : public QObject
 {
@@ -50,6 +53,15 @@ public:
 		int decode_threads = 0;
 		std::size_t max_pending_per_owner = 128;
 		std::size_t max_pending_per_lane = 2048;
+		/**
+		 * Maximum active jobs plus completions awaiting manager-thread
+		 * delivery in each lane.
+		 */
+#ifdef Q_OS_ANDROID
+		std::size_t max_outstanding_per_lane = 4;
+#else
+		std::size_t max_outstanding_per_lane = 8;
+#endif
 	};
 
 	class CancellationToken

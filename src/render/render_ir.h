@@ -168,6 +168,8 @@ struct ImageData
 	std::uint32_t height = 0;
 	std::uint32_t bytes_per_row = 0;
 	std::shared_ptr<const std::vector<std::uint8_t>> rgba8;
+	/** Optional accounting lease retained for the pixel buffer's lifetime. */
+	std::shared_ptr<void> memory_keepalive;
 };
 
 struct PushTransform

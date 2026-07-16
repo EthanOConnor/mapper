@@ -195,6 +195,12 @@ set(Mapper_Common_SRCS
   gui/text_browser_dialog.cpp
   gui/touch_cursor.cpp
   gui/util_gui.cpp
+
+  gui/imagery/catalog_import_dialog.cpp
+  gui/imagery/catalog_manager_dialog.cpp
+  gui/imagery/imagery_network_permissions_dialog.cpp
+  gui/imagery/imagery_source_model.cpp
+  gui/imagery/online_imagery_dialog.cpp
   
   gui/map/new_map_dialog.cpp
   gui/map/map_dialog_scale.cpp
@@ -249,6 +255,7 @@ set(Mapper_Common_SRCS
   
   templates/paint_on_template_feature.cpp
   templates/paint_on_template_tool.cpp
+  templates/online_raster_template.cpp
   templates/raster_resource_manager.cpp
   templates/template.cpp
   templates/template_adjust.cpp

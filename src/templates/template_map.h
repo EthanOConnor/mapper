@@ -92,6 +92,10 @@ public:
 	
 	const Map* templateMap() const;
 	virtual bool includesChildTemplates() const noexcept;
+	OutputRenderPreparation prepareForOutput(
+		const QRectF& map_rect,
+		double pixels_per_map_unit) override;
+	void finishOutputPreparation(bool cancelled) override;
 	std::shared_ptr<const render::RenderIR> buildRenderIR(render::Rect map_clip_rect,
 	                                                     double view_scale,
 	                                                     bool on_screen) const;
@@ -147,6 +151,8 @@ private:
 	bool georeferencedStateSupported() const;
 	
 	std::unique_ptr<Map> template_map;
+	std::vector<Template*> output_templates;
+	bool output_preparation_active = false;
 	bool reload_pending = false;
 	
 	/**

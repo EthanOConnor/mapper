@@ -16,6 +16,7 @@
 
 #include <QByteArray>
 #include <QDate>
+#include <QSize>
 #include <QString>
 #include <QUrl>
 #include <QVector>
@@ -23,6 +24,25 @@
 #include "imagery/tile_matrix_set.h"
 
 namespace OpenOrienteering::imagery {
+
+#ifdef Q_OS_ANDROID
+inline constexpr qint64 maximum_runtime_tile_pixels =
+	qint64(1) * 1024 * 1024;
+inline constexpr int maximum_runtime_tile_dimension = 2048;
+#else
+inline constexpr qint64 maximum_runtime_tile_pixels =
+	qint64(4) * 1024 * 1024;
+inline constexpr int maximum_runtime_tile_dimension = 4096;
+#endif
+
+inline bool runtimeSupportsTileSize(const QSize& size) noexcept
+{
+	return size.width() > 0 && size.height() > 0
+	       && size.width() <= maximum_runtime_tile_dimension
+	       && size.height() <= maximum_runtime_tile_dimension
+	       && qint64(size.width()) * size.height()
+	            <= maximum_runtime_tile_pixels;
+}
 
 enum class ImageryCategory
 {

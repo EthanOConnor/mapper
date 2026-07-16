@@ -63,6 +63,33 @@ private:
 	QRectF extent_;
 };
 
+class CountingRasterLease final : public RasterMemoryLease
+{
+public:
+	CountingRasterLease(qint64* counter, qint64 bytes)
+	 : counter(counter)
+	 , bytes(bytes)
+	{
+		*counter += bytes;
+	}
+
+	~CountingRasterLease() override
+	{
+		*counter -= bytes;
+	}
+
+	void shrinkTo(qint64 retained_bytes) noexcept override
+	{
+		retained_bytes = std::clamp<qint64>(
+			retained_bytes, 0, bytes);
+		*counter -= bytes - retained_bytes;
+		bytes = retained_bytes;
+	}
+
+	qint64* counter = nullptr;
+	qint64 bytes = 0;
+};
+
 QImage solidImage(QSize size, QColor color)
 {
 	QImage image(size, QImage::Format_RGBA8888);
@@ -230,6 +257,96 @@ void TemplateLayerPlannerTest::preservesLayerOrderAndRetainedScenes()
 	QVERIFY(std::abs(actual.blue() - expected.blue()) <= 2);
 }
 
+void TemplateLayerPlannerTest::
+	retainsRasterMemoryLeaseWithImmutableScene()
+{
+	Map map;
+	MapView view { &map };
+	qint64 reserved_bytes = 0;
+	auto image = solidImage({ 4, 4 }, Qt::red);
+	auto const target = QRectF(-2, -2, 4, 4);
+	RasterTemplateTile source_tile(
+		image,
+		target,
+		QRectF(QPointF(0, 0), QSizeF(image.size())),
+		quint64(image.cacheKey()),
+		false,
+		false,
+		{},
+		false,
+		{},
+		[&reserved_bytes](qint64 bytes) {
+			return std::make_shared<CountingRasterLease>(
+				&reserved_bytes, bytes);
+		});
+	map.addTemplate(
+		0,
+		std::make_unique<SyntheticRasterTemplate>(
+			&map,
+			QVector<RasterTemplateTile> {
+				std::move(source_tile)
+			},
+			target));
+	view.setTemplateVisibility(
+		map.getTemplate(0), { 1, true });
+
+	{
+		render::TemplateLayerPlanner planner;
+		auto plan = planner.plan(
+			map, view,
+			render::fromQRectF(target), 1);
+		QVERIFY(plan.complete);
+		QCOMPARE(reserved_bytes, qint64(4 * 4 * 4));
+		plan = {};
+		QCOMPARE(reserved_bytes, qint64(4 * 4 * 4));
+	}
+	QCOMPARE(reserved_bytes, qint64(0));
+}
+
+void TemplateLayerPlannerTest::
+	leasesTransparentMosaicPeakAndRetainedMemory()
+{
+	Map map;
+	MapView view { &map };
+	qint64 reserved_bytes = 0;
+	qint64 requested_bytes = 0;
+	auto reserve = [&reserved_bytes, &requested_bytes](qint64 bytes) {
+		requested_bytes = bytes;
+		return std::make_shared<CountingRasterLease>(
+			&reserved_bytes, bytes);
+	};
+	auto left = solidImage({ 4, 4 }, QColor(255, 0, 0, 128));
+	auto right = solidImage({ 4, 4 }, QColor(0, 0, 255, 128));
+	auto left_tile = tile(left, { -4, -2, 4, 4 });
+	auto right_tile = tile(right, { 0, -2, 4, 4 });
+	left_tile.reserve_render_memory = reserve;
+	right_tile.reserve_render_memory = reserve;
+	map.addTemplate(
+		0,
+		std::make_unique<SyntheticRasterTemplate>(
+			&map,
+			QVector<RasterTemplateTile> {
+				std::move(left_tile),
+				std::move(right_tile),
+			},
+			QRectF(-4, -2, 8, 4)));
+	view.setTemplateVisibility(map.getTemplate(0), { 1, true });
+
+	{
+		render::TemplateLayerPlanner planner;
+		auto plan = planner.plan(
+			map, view, { -4, -2, 8, 4 }, 1, false);
+		QVERIFY(plan.complete);
+		QCOMPARE(plan.newly_resident_images, std::size_t(1));
+		QCOMPARE(requested_bytes, qint64(2 * 8 * 4 * 4));
+		QCOMPARE(reserved_bytes, qint64(8 * 4 * 4));
+		plan = {};
+		planner.clear();
+		QCOMPARE(reserved_bytes, qint64(0));
+	}
+	QCOMPARE(reserved_bytes, qint64(0));
+}
+
 void TemplateLayerPlannerTest::recordsVectorMapAndTrackTemplates()
 {
 	auto const test_dir = QDir(QString::fromUtf8(MAPPER_TEST_SOURCE_DIR));
@@ -345,6 +462,42 @@ void TemplateLayerPlannerTest::marksFallbackLayersIncomplete()
 	QVERIFY(!plan.complete);
 	QCOMPARE(plan.below_map.size(), std::size_t(1));
 	QCOMPARE(imageCommandCount(plan.below_map.front()), std::size_t(1));
+}
+
+void TemplateLayerPlannerTest::drawsProvisionalDirectTilesBeforeExactTiles()
+{
+	Map map;
+	MapView view { &map };
+	auto exact = tile(solidImage({ 4, 4 }, Qt::blue), { -2, -2, 4, 4 });
+	exact.image_to_map = QTransform(1, 0, 0, 1, -2, -2);
+	exact.has_image_to_map = true;
+	auto fallback = tile(solidImage({ 4, 4 }, Qt::red), { -2, -2, 4, 4 });
+	fallback.provisional = true;
+	fallback.image_to_map = exact.image_to_map;
+	fallback.has_image_to_map = true;
+	map.addTemplate(0, std::make_unique<SyntheticRasterTemplate>(
+		&map,
+		QVector<RasterTemplateTile> {
+			std::move(exact),
+			std::move(fallback),
+		},
+		QRectF(-2, -2, 4, 4)
+	));
+	map.setFirstFrontTemplate(1);
+	view.setTemplateVisibility(map.getTemplate(0), { 1, true });
+
+	render::TemplateLayerPlanner template_planner;
+	auto plan = template_planner.plan(map, view, { -8, -8, 16, 16 }, 1);
+	QVERIFY(!plan.complete);
+	QCOMPARE(plan.below_map.size(), std::size_t(1));
+	QCOMPARE(imageCommandCount(plan.below_map.front()), std::size_t(2));
+
+	auto const snapshot = map.publishRenderSnapshot();
+	QVERIFY(snapshot);
+	render::FramePlanner frame_planner;
+	auto const frame = frameFor(*snapshot, frame_planner, std::move(plan));
+	auto const rendered = renderReference(*frame, Qt::transparent);
+	QCOMPARE(rendered.pixelColor(8, 8), QColor(Qt::blue));
 }
 
 void TemplateLayerPlannerTest::respectsExplicitImageToMapTransform()

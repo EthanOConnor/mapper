@@ -12,14 +12,17 @@
 #include "imagery/tile_network_manager.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <memory>
 #include <optional>
 #include <utility>
 
 #include <QAuthenticator>
+#include <QAbstractSocket>
 #include <QApplicationStatic>
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
 #include <QElapsedTimer>
@@ -115,9 +118,117 @@ bool isTransientHttpStatus(int status)
 QString hostKey(const QUrl& url)
 {
 	auto const default_port = url.scheme() == QLatin1String("https") ? 443 : 80;
-	return url.scheme().toLower() + QLatin1String("://")
-	       + QString::fromLatin1(QUrl::toAce(url.host()).toLower())
-	       + QLatin1Char(':') + QString::number(url.port(default_port));
+	QHostAddress address;
+	auto const host = address.setAddress(url.host())
+	                ? address.toString().toLower()
+	                : QString::fromLatin1(
+	                      QUrl::toAce(url.host()).toLower());
+	QUrl origin;
+	origin.setScheme(url.scheme().toLower());
+	origin.setHost(host);
+	origin.setPort(url.port(default_port));
+	return origin.toString(QUrl::FullyEncoded);
+}
+
+bool isPublicDestination(const QHostAddress& candidate)
+{
+	auto address = candidate;
+	bool has_ipv4 = false;
+	auto const ipv4 = address.toIPv4Address(&has_ipv4);
+	if (has_ipv4)
+		address = QHostAddress(ipv4);
+
+	auto const in_subnet = [&address](
+		const QHostAddress& prefix,
+		int length) {
+		return address.isInSubnet(prefix, length);
+	};
+	if (address.protocol()
+	    == QAbstractSocket::IPv4Protocol)
+	{
+		static const std::array non_public {
+			std::pair { QHostAddress(QStringLiteral("0.0.0.0")), 8 },
+			std::pair { QHostAddress(QStringLiteral("10.0.0.0")), 8 },
+			std::pair { QHostAddress(QStringLiteral("100.64.0.0")), 10 },
+			std::pair { QHostAddress(QStringLiteral("127.0.0.0")), 8 },
+			std::pair { QHostAddress(QStringLiteral("169.254.0.0")), 16 },
+			std::pair { QHostAddress(QStringLiteral("172.16.0.0")), 12 },
+			std::pair { QHostAddress(QStringLiteral("192.0.0.0")), 24 },
+			std::pair { QHostAddress(QStringLiteral("192.0.2.0")), 24 },
+			std::pair { QHostAddress(QStringLiteral("192.31.196.0")), 24 },
+			std::pair { QHostAddress(QStringLiteral("192.52.193.0")), 24 },
+			std::pair { QHostAddress(QStringLiteral("192.88.99.0")), 24 },
+			std::pair { QHostAddress(QStringLiteral("192.168.0.0")), 16 },
+			std::pair { QHostAddress(QStringLiteral("192.175.48.0")), 24 },
+			std::pair { QHostAddress(QStringLiteral("198.18.0.0")), 15 },
+			std::pair { QHostAddress(QStringLiteral("198.51.100.0")), 24 },
+			std::pair { QHostAddress(QStringLiteral("203.0.113.0")), 24 },
+			std::pair { QHostAddress(QStringLiteral("224.0.0.0")), 4 },
+			std::pair { QHostAddress(QStringLiteral("240.0.0.0")), 4 },
+		};
+		if (std::ranges::any_of(
+			    non_public,
+			    [&in_subnet](auto const& subnet) {
+				    return in_subnet(
+					    subnet.first, subnet.second);
+			    }))
+			return false;
+	}
+	else if (address.protocol()
+	         == QAbstractSocket::IPv6Protocol)
+	{
+		// The well-known NAT64 prefix is globally reachable, but its embedded
+		// IPv4 destination must independently pass this same policy.
+		static const QHostAddress nat64(
+			QStringLiteral("64:ff9b::"));
+		if (address.isInSubnet(nat64, 96))
+		{
+			auto const bytes = address.toIPv6Address();
+			auto const embedded =
+				(quint32(bytes[12]) << 24)
+				| (quint32(bytes[13]) << 16)
+				| (quint32(bytes[14]) << 8)
+				| quint32(bytes[15]);
+			return isPublicDestination(
+				QHostAddress(embedded));
+		}
+
+		static const QHostAddress global_unicast(
+			QStringLiteral("2000::"));
+		if (!address.isInSubnet(global_unicast, 3))
+			return false;
+		static const std::array non_public {
+			std::pair { QHostAddress(QStringLiteral("2001::")), 23 },
+			std::pair { QHostAddress(QStringLiteral("2001:db8::")), 32 },
+			std::pair { QHostAddress(QStringLiteral("2002::")), 16 },
+			std::pair { QHostAddress(QStringLiteral("2620:4f:8000::")), 48 },
+			std::pair { QHostAddress(QStringLiteral("3fff::")), 20 },
+		};
+		if (std::ranges::any_of(
+			    non_public,
+			    [&in_subnet](auto const& subnet) {
+				    return in_subnet(
+					    subnet.first, subnet.second);
+			    }))
+			return false;
+	}
+	else
+	{
+		return false;
+	}
+
+	// QHostAddress::isGlobal() intentionally includes RFC 1918, IPv6 ULA,
+	// and deprecated site-local ranges. Online imagery treats all of those as
+	// permission-gated destinations, while isGlobal() rejects other reserved
+	// and documentation-only ranges.
+	return address.isGlobal()
+	       && !address.isNull()
+	       && !address.isLoopback()
+	       && !address.isLinkLocal()
+	       && !address.isMulticast()
+	       && !address.isBroadcast()
+	       && !address.isPrivateUse()
+	       && !address.isSiteLocal();
 }
 
 bool isLocalHostname(QString host)
@@ -133,8 +244,12 @@ bool isLocalHostname(QString host)
 
 QString validateHttpUrl(
 	const QUrl& url,
-	const TileNetworkManager::Config& config)
+	const TileNetworkManager::Config& config,
+	QUrl* private_network_rejected_url = nullptr,
+	bool enforce_private_network_policy = true)
 {
+	if (private_network_rejected_url)
+		private_network_rejected_url->clear();
 	if (!url.isValid() || url.isRelative())
 		return TileNetworkManager::tr("The imagery URL is invalid.");
 	auto const scheme = url.scheme().toLower();
@@ -149,9 +264,13 @@ QString validateHttpUrl(
 	auto const encoded = url.toEncoded();
 	if (encoded.contains('\r') || encoded.contains('\n') || encoded.contains('\0'))
 		return TileNetworkManager::tr("The imagery URL contains unsafe control characters.");
+	if (encoded.size() > 16 * 1024)
+		return TileNetworkManager::tr("The imagery URL is too long.");
 	auto const port = url.port();
 	if (port == 0 || port > 65535)
 		return TileNetworkManager::tr("The imagery URL has an invalid port.");
+	if (!enforce_private_network_policy)
+		return {};
 
 	if (config.allow_private_networks
 	    || config.approved_private_origins.contains(hostKey(url)))
@@ -160,30 +279,60 @@ QString validateHttpUrl(
 	QHostAddress address;
 	if (address.setAddress(url.host()))
 	{
-		if (address.isNull() || address.isLoopback() || address.isLinkLocal()
-		    || address.isMulticast() || address.isPrivateUse())
+		if (!isPublicDestination(address))
 		{
+			if (private_network_rejected_url)
+				*private_network_rejected_url = url;
 			return TileNetworkManager::tr(
 				"Private, local, and link-local imagery hosts require explicit permission.");
 		}
 	}
 	else if (isLocalHostname(url.host()))
 	{
+		if (private_network_rejected_url)
+			*private_network_rejected_url = url;
 		return TileNetworkManager::tr(
 			"Private, local, and link-local imagery hosts require explicit permission.");
 	}
 	return {};
 }
 
+QByteArray negativeCacheKey(const TileNetworkRequest& request)
+{
+	QCryptographicHash digest(QCryptographicHash::Sha256);
+	QByteArray representation;
+	representation.append(static_cast<char>(
+		request.payload_kind));
+	representation.append('\n');
+	representation.append(
+		request.url.toEncoded(QUrl::FullyEncoded));
+	representation.append('\n');
+	representation.append(request.referer.toUtf8());
+	representation.append('\n');
+	auto statuses = request.empty_http_status_codes;
+	std::sort(statuses.begin(), statuses.end());
+	for (auto const status : std::as_const(statuses))
+	{
+		representation.append(QByteArray::number(status));
+		representation.append(',');
+	}
+	digest.addData(representation);
+	return digest.result();
+}
+
 QString validateRequest(
 	const TileNetworkRequest& request,
-	const TileNetworkManager::Config& config)
+	const TileNetworkManager::Config& config,
+	QUrl* private_network_rejected_url = nullptr)
 {
+	if (private_network_rejected_url)
+		private_network_rejected_url->clear();
 	if (request.client_id == 0)
 		return TileNetworkManager::tr("The imagery request has no client identity.");
 	if (!std::isfinite(request.distance_priority))
 		return TileNetworkManager::tr("The imagery request priority is invalid.");
-	if (auto const error = validateHttpUrl(request.url, config);
+	if (auto const error = validateHttpUrl(
+		    request.url, config, private_network_rejected_url);
 	    !error.isEmpty())
 	{
 		return error;
@@ -191,7 +340,8 @@ QString validateRequest(
 	if (!request.referer.isEmpty())
 	{
 		auto const referer = QUrl(request.referer);
-		if (auto const error = validateHttpUrl(referer, config);
+		if (auto const error = validateHttpUrl(
+			    referer, config, nullptr, false);
 		    !error.isEmpty())
 		{
 			return TileNetworkManager::tr("The imagery Referer is invalid: %1").arg(error);
@@ -205,6 +355,24 @@ QString validateRequest(
 		if (status < 100 || status > 599 || statuses.contains(status))
 			return TileNetworkManager::tr("The empty-tile HTTP status list is invalid.");
 		statuses.insert(status);
+	}
+	auto const valid_header = [](const QByteArray& value) {
+		return value.size() <= 8192
+		       && !value.contains('\r')
+		       && !value.contains('\n')
+		       && !value.contains('\0');
+	};
+	if (!valid_header(request.if_none_match)
+	    || !valid_header(request.if_modified_since))
+	{
+		return TileNetworkManager::tr(
+			"The imagery conditional request headers are invalid.");
+	}
+	if (request.max_response_bytes < 0
+	    || request.max_response_bytes > config.max_response_bytes)
+	{
+		return TileNetworkManager::tr(
+			"The imagery response limit is invalid.");
 	}
 	return {};
 }
@@ -226,10 +394,12 @@ class TileNetworkManager::Worker final : public QObject
 public:
 	Worker(Config config,
 	       QPointer<TileNetworkManager> facade,
-	       std::atomic_bool* offline)
-	 : config_(std::move(config))
-	 , facade_(std::move(facade))
-	 , offline_(offline)
+	       std::atomic_bool* offline,
+	       std::atomic<quint64>* network_mode_generation)
+		 : config_(std::move(config))
+		 , facade_(std::move(facade))
+		 , offline_(offline)
+		 , network_mode_generation_(network_mode_generation)
 	{}
 
 	void initialize()
@@ -239,6 +409,15 @@ public:
 		wake_timer_ = new QTimer(this);
 		wake_timer_->setSingleShot(true);
 		connect(wake_timer_, &QTimer::timeout, this, [this] { dispatch(); });
+		auto* state_prune_timer = new QTimer(this);
+		state_prune_timer->setInterval(std::chrono::minutes(1));
+		connect(state_prune_timer, &QTimer::timeout, this, [this] {
+			pruneNegativeCache();
+			pruneClientHistory();
+			pruneHostBackoff();
+			pruneDestinationCache();
+		});
+		state_prune_timer->start();
 
 		network_ = new QNetworkAccessManager(this);
 		network_->setCookieJar(new RejectingCookieJar(network_));
@@ -286,7 +465,14 @@ public:
 		active_replies_.clear();
 		active_hosts_.clear();
 		active_clients_.clear();
+		client_entry_counts_.clear();
+		client_last_service_.clear();
+		host_not_before_.clear();
+		negative_cache_.clear();
+		destination_cache_.clear();
 		active_total_ = 0;
+		outstanding_results_ = 0;
+		outstanding_response_bytes_ = 0;
 		if (network_)
 		{
 			delete network_;
@@ -300,26 +486,47 @@ public:
 		if (shutting_down_)
 			return;
 
-		if (auto const error = validateRequest(request, config_);
+		QUrl private_network_rejected_url;
+		if (auto const error = validateRequest(
+			    request, config_, &private_network_rejected_url);
 		    !error.isEmpty())
 		{
 			TileNetworkResult result;
 			result.outcome = TileNetworkResult::Outcome::Rejected;
+			result.private_network_rejected =
+				!private_network_rejected_url.isEmpty();
+			result.private_network_rejected_url =
+				private_network_rejected_url;
 			result.error_string = error;
-			deliver(token, request, std::move(result));
+			deliver(
+				token,
+				request,
+				std::move(result),
+				false,
+				0,
+				DeliveryGuard {});
 			return;
 		}
 
 		auto url = request.url;
-		auto const negative = negative_cache_.constFind(url);
-		if (negative != negative_cache_.cend())
+		auto const negative_key = negativeCacheKey(request);
+		auto negative = negative_cache_.find(negative_key);
+		if (request.payload_kind == NetworkPayloadKind::TileImage
+		    && negative != negative_cache_.end())
 		{
-			if (*negative > now())
+			if (negative->expires > now())
 			{
+				negative->last_access = nextStateAccess();
 				TileNetworkResult result;
 				result.outcome = TileNetworkResult::Outcome::EmptyTile;
 				result.from_cache = true;
-				deliver(token, request, std::move(result));
+				deliver(
+					token,
+					request,
+					std::move(result),
+					false,
+					0,
+					DeliveryGuard {});
 				return;
 			}
 			negative_cache_.erase(negative);
@@ -336,10 +543,16 @@ public:
 		    || pending_for_client >= config_.max_pending_per_client)
 		{
 			TileNetworkResult result;
-			result.outcome = TileNetworkResult::Outcome::Rejected;
+			result.outcome = TileNetworkResult::Outcome::Busy;
 			result.error_string = TileNetworkManager::tr(
 				"The imagery request queue is full.");
-			deliver(token, request, std::move(result));
+			deliver(
+				token,
+				request,
+				std::move(result),
+				false,
+				0,
+				DeliveryGuard {});
 			return;
 		}
 
@@ -349,6 +562,7 @@ public:
 		entry->current_url = std::move(url);
 		entry->sequence = next_sequence_++;
 		entries_.insert(token, entry);
+		++client_entry_counts_[entry->request.client_id];
 		queueAfterDestinationCheck(entry);
 	}
 
@@ -388,6 +602,109 @@ public:
 			cancel(token);
 	}
 
+	void setOfflineMode(bool offline)
+	{
+		Q_ASSERT(QThread::currentThread() == thread());
+		if (!offline)
+		{
+			dispatch();
+			return;
+		}
+
+		QVector<std::shared_ptr<Entry>> active;
+		active.reserve(active_replies_.size());
+		for (auto const& entry : std::as_const(active_replies_))
+			active.push_back(entry);
+		for (auto const& entry : std::as_const(active))
+		{
+				if (!entries_.contains(entry->token) || !entry->reply
+				    || entry->cache_only_request)
+					continue;
+			entry->offline_abort = true;
+			entry->body.clear();
+		}
+		for (auto const& entry : std::as_const(active))
+		{
+			if (entry->reply && !entry->cache_only_request)
+				entry->reply->abort();
+		}
+
+		QVector<std::shared_ptr<Entry>> destination_waiters;
+		for (auto const& waiters : std::as_const(destination_waiters_))
+			destination_waiters.append(waiters);
+		for (auto const lookup_id : std::as_const(destination_lookups_))
+			QHostInfo::abortHostLookup(lookup_id);
+		destination_lookups_.clear();
+		destination_waiters_.clear();
+		for (auto const& entry : std::as_const(destination_waiters))
+		{
+			if (!entries_.contains(entry->token))
+				continue;
+			entry->validated_origin.clear();
+			entry->destination_valid_until = 0;
+			enqueue(entry);
+		}
+	}
+
+	void setPrivateOriginApproved(
+		QString origin,
+		bool approved)
+	{
+		Q_ASSERT(QThread::currentThread() == thread());
+		if (approved)
+			config_.approved_private_origins.insert(origin);
+		else
+			config_.approved_private_origins.remove(origin);
+		destination_cache_.remove(origin);
+		if (approved || config_.allow_private_networks)
+			return;
+
+		QVector<std::shared_ptr<Entry>> affected;
+		affected.reserve(entries_.size());
+		for (auto const& entry : std::as_const(entries_))
+		{
+			if (hostKey(entry->request.url) == origin
+			    || hostKey(entry->current_url) == origin)
+			{
+				affected.push_back(entry);
+			}
+		}
+
+		for (auto const& entry : std::as_const(affected))
+		{
+			if (!entries_.contains(entry->token))
+				continue;
+			entry->permission_revoked = true;
+			entry->permission_revoked_url =
+				hostKey(entry->current_url) == origin
+					? entry->current_url
+					: entry->request.url;
+			entry->body.clear();
+		}
+		for (auto const& entry : std::as_const(affected))
+		{
+			if (!entries_.contains(entry->token))
+				continue;
+			if (entry->reply)
+			{
+				entry->reply->abort();
+				continue;
+			}
+			TileNetworkResult result;
+			result.outcome = TileNetworkResult::Outcome::Rejected;
+			result.private_network_rejected = true;
+			result.private_network_rejected_url =
+				entry->permission_revoked_url;
+			result.private_network_permission_revoked = true;
+			result.error_string = TileNetworkManager::tr(
+				"Permission for the private imagery origin was revoked.");
+			finish(entry, std::move(result));
+		}
+
+		pruneDestinationWaiters();
+		dispatch();
+	}
+
 private:
 	struct Entry
 	{
@@ -406,6 +723,27 @@ private:
 		bool absolute_timeout = false;
 		bool authentication_rejected = false;
 		bool received_metadata = false;
+		bool offline_abort = false;
+			bool permission_revoked = false;
+			QUrl permission_revoked_url;
+		bool cache_only_request = false;
+		bool result_slot_reserved = false;
+		qint64 reserved_response_bytes = 0;
+		quint64 network_mode_generation = 0;
+		QString private_permission_origin;
+		QUrl private_permission_url;
+		quint64 private_permission_generation = 0;
+		QString validated_origin;
+		qint64 destination_valid_until = 0;
+	};
+
+	struct DeliveryGuard
+	{
+		quint64 network_mode_generation = 0;
+		bool cache_only_request = false;
+		QString private_permission_origin;
+		QUrl private_permission_url;
+		quint64 private_permission_generation = 0;
 	};
 
 	struct DestinationDecision
@@ -414,11 +752,278 @@ private:
 		bool transient_failure = false;
 		QString error;
 		qint64 expires = 0;
+		quint64 last_access = 0;
+	};
+
+	struct NegativeCacheEntry
+	{
+		qint64 expires = 0;
+		quint64 last_access = 0;
 	};
 
 	qint64 now() const
 	{
 		return clock_.elapsed();
+	}
+
+	qint64 responseLimit(const Entry& entry) const
+	{
+		return entry.request.max_response_bytes > 0
+		         ? entry.request.max_response_bytes
+		         : config_.max_response_bytes;
+	}
+
+	quint64 privateOriginGeneration(const QString& origin) const
+	{
+		auto const facade = facade_;
+		return facade ? facade->privateOriginGeneration(origin) : 0;
+	}
+
+	TileNetworkManager::NetworkModeSnapshot networkModeSnapshot() const
+	{
+		auto const facade = facade_;
+		if (facade)
+			return facade->networkModeSnapshot();
+		return {
+			offline_->load(),
+			network_mode_generation_->load(),
+		};
+	}
+
+	bool privatePermissionChanged(const Entry& entry) const
+	{
+		return entry.private_permission_generation != 0
+		       && privateOriginGeneration(entry.private_permission_origin)
+		            != entry.private_permission_generation;
+	}
+
+	bool networkModeChanged(const Entry& entry) const
+	{
+		return !entry.cache_only_request
+		       && entry.network_mode_generation != 0
+		       && entry.network_mode_generation
+		            != networkModeSnapshot().generation;
+	}
+
+	DeliveryGuard deliveryGuard(const Entry& entry) const
+	{
+		return {
+			entry.network_mode_generation,
+			entry.cache_only_request,
+			entry.private_permission_origin,
+			entry.private_permission_url,
+			entry.private_permission_generation,
+		};
+	}
+
+	quint64 nextStateAccess()
+	{
+		if (next_state_access_ == std::numeric_limits<quint64>::max())
+		{
+			for (auto& entry : negative_cache_)
+				entry.last_access = 0;
+			for (auto& entry : destination_cache_)
+				entry.last_access = 0;
+			next_state_access_ = 1;
+		}
+		return next_state_access_++;
+	}
+
+	void pruneNegativeCache()
+	{
+		auto const current = now();
+		negative_cache_.removeIf([current](
+			QHash<QByteArray, NegativeCacheEntry>::iterator it) {
+			return it->expires <= current;
+		});
+		while (negative_cache_.size() > config_.max_negative_cache_entries)
+		{
+			auto victim = negative_cache_.end();
+			for (auto it = negative_cache_.begin();
+			     it != negative_cache_.end(); ++it)
+			{
+				if (victim == negative_cache_.end()
+				    || it->last_access < victim->last_access
+				    || (it->last_access == victim->last_access
+				        && it.key() < victim.key()))
+				{
+					victim = it;
+				}
+			}
+			if (victim == negative_cache_.end())
+				break;
+			negative_cache_.erase(victim);
+		}
+	}
+
+	void pruneClientHistory()
+	{
+		while (client_last_service_.size()
+		       > config_.max_client_history_entries)
+		{
+			auto victim = client_last_service_.end();
+			for (auto it = client_last_service_.begin();
+			     it != client_last_service_.end(); ++it)
+			{
+				if (victim == client_last_service_.end()
+				    || it.value() < victim.value()
+				    || (it.value() == victim.value()
+				        && it.key() < victim.key()))
+				{
+					victim = it;
+				}
+			}
+			if (victim == client_last_service_.end())
+				break;
+			client_last_service_.erase(victim);
+		}
+	}
+
+	void pruneHostBackoff()
+	{
+		auto const current = now();
+		host_not_before_.removeIf([current](
+			QHash<QString, qint64>::iterator it) {
+			return it.value() <= current;
+		});
+		while (host_not_before_.size() > config_.max_host_backoff_entries)
+		{
+			auto victim = host_not_before_.end();
+			for (auto it = host_not_before_.begin();
+			     it != host_not_before_.end(); ++it)
+			{
+				if (victim == host_not_before_.end()
+				    || it.value() < victim.value()
+				    || (it.value() == victim.value()
+				        && it.key() < victim.key()))
+				{
+					victim = it;
+				}
+			}
+			if (victim == host_not_before_.end())
+				break;
+			host_not_before_.erase(victim);
+		}
+	}
+
+	void pruneDestinationCache()
+	{
+		auto const current = now();
+		destination_cache_.removeIf([current](
+			QHash<QString, DestinationDecision>::iterator it) {
+			return it->expires <= current;
+		});
+		while (destination_cache_.size()
+		       > config_.max_destination_cache_entries)
+		{
+			auto victim = destination_cache_.end();
+			for (auto it = destination_cache_.begin();
+			     it != destination_cache_.end(); ++it)
+			{
+				if (victim == destination_cache_.end()
+				    || it->last_access < victim->last_access
+				    || (it->last_access == victim->last_access
+				        && it.key() < victim.key()))
+				{
+					victim = it;
+				}
+			}
+			if (victim == destination_cache_.end())
+				break;
+			destination_cache_.erase(victim);
+		}
+	}
+
+	void pruneDestinationWaiters()
+	{
+		for (auto it = destination_waiters_.begin();
+		     it != destination_waiters_.end();)
+		{
+			it.value().removeIf([this](auto const& entry) {
+				return !entries_.contains(entry->token);
+			});
+			if (it.value().isEmpty())
+			{
+				if (auto const lookup = destination_lookups_.take(it.key());
+				    lookup != 0)
+				{
+					QHostInfo::abortHostLookup(lookup);
+				}
+				it = destination_waiters_.erase(it);
+			}
+			else
+			{
+				++it;
+			}
+		}
+	}
+
+	bool destinationNeedsPreflight(
+		const Entry& entry,
+		bool offline) const
+	{
+		// AlwaysCache never opens a connection, so offline cache reads must not
+		// depend on DNS being available. URL syntax/private-literal policy was
+		// still enforced by validateRequest().
+		if (offline)
+			return false;
+		auto const origin = hostKey(entry.current_url);
+		if (config_.allow_private_networks
+		    || config_.approved_private_origins.contains(origin))
+		{
+			return false;
+		}
+		QHostAddress literal;
+		return !literal.setAddress(entry.current_url.host());
+	}
+
+	bool destinationNeedsPreflight(const Entry& entry) const
+	{
+		return destinationNeedsPreflight(entry, offline_->load());
+	}
+
+	bool hasResultCapacity(const Entry& entry) const
+	{
+		if (entry.result_slot_reserved)
+			return true;
+		auto const response_bytes = responseLimit(entry);
+		return outstanding_results_ < config_.max_outstanding_results
+		       && response_bytes
+		            <= config_.max_outstanding_response_bytes
+		                 - outstanding_response_bytes_;
+	}
+
+	void reserveResultCapacity(const std::shared_ptr<Entry>& entry)
+	{
+		if (entry->result_slot_reserved)
+			return;
+		Q_ASSERT(hasResultCapacity(*entry));
+		entry->result_slot_reserved = true;
+		entry->reserved_response_bytes = responseLimit(*entry);
+		++outstanding_results_;
+		outstanding_response_bytes_ += entry->reserved_response_bytes;
+	}
+
+	void releaseResultCapacity(const std::shared_ptr<Entry>& entry)
+	{
+		if (!entry->result_slot_reserved)
+			return;
+		entry->result_slot_reserved = false;
+		--outstanding_results_;
+		outstanding_response_bytes_ -= entry->reserved_response_bytes;
+		entry->reserved_response_bytes = 0;
+		Q_ASSERT(outstanding_results_ >= 0);
+		Q_ASSERT(outstanding_response_bytes_ >= 0);
+	}
+
+	void acknowledgeResult(qint64 reserved_response_bytes)
+	{
+		Q_ASSERT(QThread::currentThread() == thread());
+		--outstanding_results_;
+		outstanding_response_bytes_ -= reserved_response_bytes;
+		Q_ASSERT(outstanding_results_ >= 0);
+		Q_ASSERT(outstanding_response_bytes_ >= 0);
+		dispatch();
 	}
 
 	void enqueue(const std::shared_ptr<Entry>& entry)
@@ -440,6 +1045,10 @@ private:
 		result.outcome = decision.transient_failure
 		               ? TileNetworkResult::Outcome::TransientError
 		               : TileNetworkResult::Outcome::Rejected;
+		result.private_network_rejected =
+			!decision.transient_failure;
+		if (result.private_network_rejected)
+			result.private_network_rejected_url = entry->current_url;
 		result.error_string = decision.error;
 		finish(entry, std::move(result));
 	}
@@ -447,31 +1056,32 @@ private:
 	void queueAfterDestinationCheck(const std::shared_ptr<Entry>& entry)
 	{
 		auto const origin = hostKey(entry->current_url);
-		if (config_.allow_private_networks
-		    || config_.approved_private_origins.contains(origin))
+		if (offline_->load())
 		{
+			// This is cache-only admission, not a reusable network decision. If
+			// online mode resumes before dispatch, start() will preflight again.
+			entry->validated_origin.clear();
+			entry->destination_valid_until = 0;
+			enqueue(entry);
+			return;
+		}
+		if (!destinationNeedsPreflight(*entry))
+		{
+			entry->validated_origin = origin;
+			entry->destination_valid_until =
+				std::numeric_limits<qint64>::max();
 			enqueue(entry);
 			return;
 		}
 
-		QHostAddress literal;
-		if (literal.setAddress(entry->current_url.host()))
+		auto cached = destination_cache_.find(origin);
+		if (cached != destination_cache_.end() && cached->expires > now())
 		{
-			// validateHttpUrl() already rejected non-global literals.
-			enqueue(entry);
+			cached->last_access = nextStateAccess();
+			destinationFailure(entry, *cached);
 			return;
 		}
-
-		auto const cached = destination_cache_.constFind(origin);
-		if (cached != destination_cache_.cend() && cached->expires > now())
-		{
-			if (cached->allowed)
-				enqueue(entry);
-			else
-				destinationFailure(entry, *cached);
-			return;
-		}
-		if (cached != destination_cache_.cend())
+		if (cached != destination_cache_.end())
 			destination_cache_.erase(cached);
 
 		auto& waiters = destination_waiters_[origin];
@@ -479,9 +1089,15 @@ private:
 		if (destination_lookups_.contains(origin))
 			return;
 
-		auto const lookup_id = QHostInfo::lookupHost(
+		auto const lookup_id = std::make_shared<int>(0);
+		*lookup_id = QHostInfo::lookupHost(
 			entry->current_url.host(), this,
-			[this, origin](QHostInfo info) {
+			[this, origin, lookup_id](QHostInfo info) {
+				auto const current_lookup =
+					destination_lookups_.constFind(origin);
+				if (current_lookup == destination_lookups_.cend()
+				    || *current_lookup != *lookup_id)
+					return;
 				destination_lookups_.remove(origin);
 				auto waiters = destination_waiters_.take(origin);
 				DestinationDecision decision;
@@ -494,9 +1110,11 @@ private:
 				}
 				else
 				{
-					decision.allowed = std::ranges::all_of(
-						info.addresses(),
-						[](auto const& address) { return address.isGlobal(); });
+						decision.allowed = std::ranges::all_of(
+							info.addresses(),
+							[](auto const& address) {
+								return isPublicDestination(address);
+							});
 					if (!decision.allowed)
 					{
 						decision.error = TileNetworkManager::tr(
@@ -504,22 +1122,39 @@ private:
 					}
 					decision.expires = now() + 5 * 60 * 1000;
 				}
-				destination_cache_.insert(origin, decision);
+				auto const origin_is_approved =
+					config_.allow_private_networks
+					|| config_.approved_private_origins.contains(origin);
+				if (!decision.allowed && !origin_is_approved)
+				{
+					decision.last_access = nextStateAccess();
+					destination_cache_.insert(origin, decision);
+					pruneDestinationCache();
+				}
 				for (auto const& waiter : std::as_const(waiters))
 				{
-					if (decision.allowed)
+					if (decision.allowed || origin_is_approved)
+					{
+						waiter->validated_origin = origin;
+						// Keep the DNS decision close to QNAM's own resolution.
+						// Long scheduler waits force another preflight.
+						waiter->destination_valid_until = now() + 1000;
 						enqueue(waiter);
+					}
 					else
 						destinationFailure(waiter, decision);
 				}
 				dispatch();
 			});
-		destination_lookups_.insert(origin, lookup_id);
+		destination_lookups_.insert(origin, *lookup_id);
 	}
 
 	bool eligible(const std::shared_ptr<Entry>& entry, qint64 current) const
 	{
-		if (entry->cancelled || entry->not_before > current)
+		if (entry->cancelled || entry->permission_revoked
+		    || entry->not_before > current)
+			return false;
+		if (!hasResultCapacity(*entry))
 			return false;
 		if (active_clients_.value(entry->request.client_id)
 		    >= config_.max_active_per_client)
@@ -593,6 +1228,7 @@ private:
 				break;
 			auto entry = queue_.takeAt(*selected);
 			client_last_service_[entry->request.client_id] = next_service_++;
+			pruneClientHistory();
 			start(entry);
 		}
 		scheduleWake();
@@ -622,7 +1258,52 @@ private:
 
 	void start(const std::shared_ptr<Entry>& entry)
 	{
-		if (offline_->load() && !entry->request.referer.isEmpty())
+		auto const origin = hostKey(entry->current_url);
+		auto const network_mode = networkModeSnapshot();
+		auto const needs_preflight =
+			destinationNeedsPreflight(*entry, network_mode.offline);
+		if (needs_preflight
+		    && (entry->validated_origin != origin
+		        || entry->destination_valid_until <= now()))
+		{
+			queueAfterDestinationCheck(entry);
+			return;
+		}
+		if (needs_preflight)
+			entry->destination_valid_until = 0;
+
+		auto const cache_only = network_mode.offline;
+		entry->cache_only_request = cache_only;
+		entry->network_mode_generation =
+			network_mode.generation;
+		entry->private_permission_origin.clear();
+		entry->private_permission_url.clear();
+		entry->private_permission_generation = 0;
+		if (!config_.allow_private_networks
+		    && config_.approved_private_origins.contains(origin))
+		{
+			auto const permission_generation =
+				privateOriginGeneration(origin);
+			if (permission_generation == 0)
+			{
+				TileNetworkResult result;
+				result.outcome = TileNetworkResult::Outcome::Rejected;
+				result.private_network_rejected = true;
+				result.private_network_rejected_url = entry->current_url;
+				result.private_network_permission_revoked = true;
+				result.error_string = TileNetworkManager::tr(
+					"Permission for the private imagery origin was revoked.");
+				finish(entry, std::move(result));
+				return;
+			}
+			entry->private_permission_origin = origin;
+			entry->private_permission_url = entry->current_url;
+			entry->private_permission_generation =
+				permission_generation;
+		}
+		reserveResultCapacity(entry);
+
+		if (cache_only && !entry->request.referer.isEmpty())
 		{
 			TileNetworkResult result;
 			result.outcome = TileNetworkResult::Outcome::OfflineMiss;
@@ -652,7 +1333,36 @@ private:
 				QByteArrayLiteral("Referer"),
 				entry->request.referer.toUtf8());
 		}
-		request.setRawHeader(QByteArrayLiteral("Accept"), QByteArrayLiteral("image/*"));
+		if (entry->request.payload_kind
+		    == NetworkPayloadKind::JsonDocument)
+		{
+			request.setRawHeader(
+				QByteArrayLiteral("Accept"),
+				QByteArrayLiteral(
+					"application/json, application/*+json;q=0.9, "
+					"application/octet-stream;q=0.5"));
+			if (entry->redirects == 0)
+			{
+				if (!entry->request.if_none_match.isEmpty())
+				{
+					request.setRawHeader(
+						QByteArrayLiteral("If-None-Match"),
+						entry->request.if_none_match);
+				}
+				if (!entry->request.if_modified_since.isEmpty())
+				{
+					request.setRawHeader(
+						QByteArrayLiteral("If-Modified-Since"),
+						entry->request.if_modified_since);
+				}
+			}
+		}
+		else
+		{
+			request.setRawHeader(
+				QByteArrayLiteral("Accept"),
+				QByteArrayLiteral("image/*"));
+		}
 		request.setPriority(
 			entry->request.priority == TileRequestPriority::Coverage
 				? QNetworkRequest::HighPriority
@@ -677,15 +1387,21 @@ private:
 			QNetworkRequest::CacheLoadControlAttribute,
 			referer_dependent
 				? QNetworkRequest::AlwaysNetwork
-				: offline_->load()
+					: cache_only
 					? QNetworkRequest::AlwaysCache
-					: QNetworkRequest::PreferNetwork);
+					: entry->request.payload_kind
+					    == NetworkPayloadKind::JsonDocument
+						? QNetworkRequest::AlwaysNetwork
+						: QNetworkRequest::PreferNetwork);
 		request.setAttribute(
 			QNetworkRequest::CacheSaveControlAttribute,
-			!referer_dependent);
+			!referer_dependent
+			&& entry->request.payload_kind
+			     == NetworkPayloadKind::TileImage);
 		request.setMaximumRedirectsAllowed(config_.max_redirects);
 		request.setTransferTimeout(config_.transfer_timeout);
-		request.setDecompressedSafetyCheckThreshold(config_.max_response_bytes);
+		auto const response_limit = responseLimit(*entry);
+		request.setDecompressedSafetyCheckThreshold(response_limit);
 
 		auto* reply = network_->get(request);
 		entry->reply = reply;
@@ -696,17 +1412,20 @@ private:
 			entry->received_metadata = true;
 			auto const length = entry->reply->header(
 				QNetworkRequest::ContentLengthHeader).toLongLong();
-			if (length > config_.max_response_bytes)
+			auto const response_limit = responseLimit(*entry);
+			if (length > response_limit)
 			{
 				entry->too_large = true;
 				entry->reply->abort();
 			}
 		});
 		connect(reply, &QIODevice::readyRead, this, [this, entry] {
-			if (!entry->reply || entry->too_large)
+			if (!entry->reply || entry->too_large || entry->cancelled
+			    || entry->offline_abort || entry->permission_revoked)
 				return;
 			auto chunk = entry->reply->readAll();
-			if (chunk.size() > config_.max_response_bytes - entry->body.size())
+			auto const response_limit = responseLimit(*entry);
+			if (chunk.size() > response_limit - entry->body.size())
 			{
 				entry->too_large = true;
 				entry->body.clear();
@@ -762,10 +1481,13 @@ private:
 		if (!entry->reply)
 			return;
 		auto* reply = entry->reply.data();
-		if (!entry->too_large)
+		if (!entry->too_large && !entry->cancelled
+		    && !entry->offline_abort && !entry->permission_revoked
+		    && reply->isReadable())
 		{
 			auto tail = reply->readAll();
-			if (tail.size() > config_.max_response_bytes - entry->body.size())
+			auto const response_limit = responseLimit(*entry);
+			if (tail.size() > response_limit - entry->body.size())
 			{
 				entry->too_large = true;
 				entry->body.clear();
@@ -787,12 +1509,76 @@ private:
 		auto const from_cache = reply->attribute(
 			QNetworkRequest::SourceIsFromCacheAttribute).toBool();
 		auto const retry_after = reply->rawHeader(QByteArrayLiteral("Retry-After"));
+		auto const etag = reply->rawHeader(QByteArrayLiteral("ETag"));
+		auto const last_modified =
+			reply->rawHeader(QByteArrayLiteral("Last-Modified"));
+		auto const final_url = reply->url();
 		releaseActive(entry);
+
+		auto const add_response_metadata =
+			[&](TileNetworkResult& result) {
+				result.final_url = final_url;
+				result.etag = etag;
+				result.last_modified = last_modified;
+			};
 
 		if (entry->cancelled)
 		{
 			TileNetworkResult result;
 			result.outcome = TileNetworkResult::Outcome::Cancelled;
+			add_response_metadata(result);
+			finish(entry, std::move(result));
+			dispatch();
+			return;
+		}
+		if (entry->permission_revoked)
+		{
+			TileNetworkResult result;
+			result.outcome = TileNetworkResult::Outcome::Rejected;
+			result.private_network_rejected = true;
+			result.private_network_rejected_url =
+				entry->permission_revoked_url;
+			result.private_network_permission_revoked = true;
+			result.error_string = TileNetworkManager::tr(
+				"Permission for the private imagery origin was revoked.");
+			add_response_metadata(result);
+			finish(entry, std::move(result));
+			dispatch();
+			return;
+		}
+		if (privatePermissionChanged(*entry))
+		{
+			TileNetworkResult result;
+			result.outcome = TileNetworkResult::Outcome::Rejected;
+			result.private_network_rejected = true;
+			result.private_network_rejected_url =
+				entry->private_permission_url;
+			result.private_network_permission_revoked = true;
+			result.error_string = TileNetworkManager::tr(
+				"Permission for the private imagery origin changed while the request was active.");
+			add_response_metadata(result);
+			finish(entry, std::move(result));
+			dispatch();
+			return;
+		}
+		if (networkModeChanged(*entry))
+		{
+			TileNetworkResult result;
+			result.outcome = TileNetworkResult::Outcome::OfflineMiss;
+			result.error_string = TileNetworkManager::tr(
+				"The imagery request was stopped because offline mode was enabled.");
+			add_response_metadata(result);
+			finish(entry, std::move(result));
+			dispatch();
+			return;
+		}
+		if (entry->offline_abort)
+		{
+			TileNetworkResult result;
+			result.outcome = TileNetworkResult::Outcome::OfflineMiss;
+			result.error_string = TileNetworkManager::tr(
+				"The imagery request was stopped because offline mode was enabled.");
+			add_response_metadata(result);
 			finish(entry, std::move(result));
 			dispatch();
 			return;
@@ -803,7 +1589,11 @@ private:
 			result.outcome = TileNetworkResult::Outcome::PermanentError;
 			result.error_string = TileNetworkManager::tr(
 				"The imagery response exceeded the %1 MB safety limit.")
-				.arg(config_.max_response_bytes / (1024 * 1024));
+				.arg((entry->request.max_response_bytes > 0
+				      ? entry->request.max_response_bytes
+				      : config_.max_response_bytes)
+				     / (1024 * 1024));
+			add_response_metadata(result);
 			finish(entry, std::move(result));
 			dispatch();
 			return;
@@ -814,6 +1604,7 @@ private:
 			result.outcome = TileNetworkResult::Outcome::PermanentError;
 			result.error_string = TileNetworkManager::tr(
 				"Imagery sources requiring HTTP authentication are not supported.");
+			add_response_metadata(result);
 			finish(entry, std::move(result));
 			dispatch();
 			return;
@@ -823,7 +1614,9 @@ private:
 		{
 			auto const next = entry->current_url.resolved(redirect)
 			                 .adjusted(QUrl::RemoveFragment);
-			auto error = validateHttpUrl(next, config_);
+			QUrl private_network_rejected_url;
+			auto error = validateHttpUrl(
+				next, config_, &private_network_rejected_url);
 			if (error.isEmpty()
 			    && entry->current_url.scheme() == QLatin1String("https")
 			    && next.scheme() == QLatin1String("http")
@@ -840,9 +1633,16 @@ private:
 			if (!error.isEmpty())
 			{
 				TileNetworkResult result;
-				result.outcome = TileNetworkResult::Outcome::PermanentError;
+				result.outcome = private_network_rejected_url.isEmpty()
+					? TileNetworkResult::Outcome::PermanentError
+					: TileNetworkResult::Outcome::Rejected;
+				result.private_network_rejected =
+					!private_network_rejected_url.isEmpty();
+				result.private_network_rejected_url =
+					private_network_rejected_url;
 				result.http_status = status;
 				result.error_string = error;
+				add_response_metadata(result);
 				finish(entry, std::move(result));
 				dispatch();
 				return;
@@ -850,20 +1650,41 @@ private:
 			++entry->redirects;
 			entry->current_url = next;
 			entry->not_before = now();
+			entry->body.clear();
+			releaseResultCapacity(entry);
 			queueAfterDestinationCheck(entry);
+			dispatch();
+			return;
+		}
+
+		if (entry->request.payload_kind
+		      == NetworkPayloadKind::JsonDocument
+		    && status == 304)
+		{
+			TileNetworkResult result;
+			result.outcome = TileNetworkResult::Outcome::NotModified;
+			result.http_status = status;
+			result.content_type = content_type;
+			result.from_cache = from_cache;
+			add_response_metadata(result);
+			finish(entry, std::move(result));
+			dispatch();
 			return;
 		}
 
 		if (entry->request.empty_http_status_codes.contains(status))
 		{
 			negative_cache_.insert(
-				entry->request.url.adjusted(QUrl::RemoveFragment),
-				now() + config_.negative_cache_ttl_ms);
+				negativeCacheKey(entry->request),
+				{ now() + config_.negative_cache_ttl_ms,
+				  nextStateAccess() });
+			pruneNegativeCache();
 			TileNetworkResult result;
 			result.outcome = TileNetworkResult::Outcome::EmptyTile;
 			result.http_status = status;
 			result.content_type = content_type;
 			result.from_cache = from_cache;
+			add_response_metadata(result);
 			finish(entry, std::move(result));
 			dispatch();
 			return;
@@ -877,6 +1698,7 @@ private:
 			result.http_status = status;
 			result.content_type = content_type;
 			result.from_cache = from_cache;
+			add_response_metadata(result);
 			finish(entry, std::move(result));
 			dispatch();
 			return;
@@ -891,6 +1713,7 @@ private:
 			result.http_status = status;
 			result.error_string = TileNetworkManager::tr(
 				"The imagery tile is not available in the offline cache.");
+			add_response_metadata(result);
 			finish(entry, std::move(result));
 			dispatch();
 			return;
@@ -907,10 +1730,14 @@ private:
 				auto const host = hostKey(entry->current_url);
 				host_not_before_[host] = std::max(
 					host_not_before_.value(host), now() + delay);
+				pruneHostBackoff();
 			}
 			++entry->retries;
 			entry->not_before = now() + delay;
-			enqueue(entry);
+			entry->body.clear();
+			releaseResultCapacity(entry);
+			queueAfterDestinationCheck(entry);
+			dispatch();
 			return;
 		}
 
@@ -921,6 +1748,7 @@ private:
 		result.http_status = status;
 		result.content_type = content_type;
 		result.from_cache = from_cache;
+		add_response_metadata(result);
 		result.error_string = entry->absolute_timeout
 		                    ? TileNetworkManager::tr("The imagery request timed out.")
 		                    : network_error_string;
@@ -974,10 +1802,36 @@ private:
 	{
 		eraseQueued(entry);
 		entries_.remove(entry->token);
-		deliver(entry->token, entry->request, std::move(result));
+		pruneDestinationWaiters();
+		auto client_count = client_entry_counts_.find(
+			entry->request.client_id);
+		if (client_count != client_entry_counts_.end()
+		    && --(*client_count) <= 0)
+		{
+			client_entry_counts_.erase(client_count);
+			client_last_service_.remove(entry->request.client_id);
+		}
+		auto const reserved = entry->result_slot_reserved;
+		auto const reserved_response_bytes = entry->reserved_response_bytes;
+		auto const guard = deliveryGuard(*entry);
+		entry->result_slot_reserved = false;
+		entry->reserved_response_bytes = 0;
+		deliver(
+			entry->token,
+			entry->request,
+			std::move(result),
+			reserved,
+			reserved_response_bytes,
+			guard);
 	}
 
-	void deliver(Token token, const TileNetworkRequest& request, TileNetworkResult result)
+	void deliver(
+		Token token,
+		const TileNetworkRequest& request,
+		TileNetworkResult result,
+		bool reserved,
+		qint64 reserved_response_bytes,
+		DeliveryGuard guard)
 	{
 		if (shutting_down_)
 			return;
@@ -986,12 +1840,66 @@ private:
 		result.user_data = request.user_data;
 		auto facade = facade_;
 		if (!facade)
+		{
+			if (reserved)
+				acknowledgeResult(reserved_response_bytes);
 			return;
+		}
+		QPointer<Worker> worker(this);
 		QMetaObject::invokeMethod(
 			facade,
-			[facade, token, result = std::move(result)] {
+			[facade, worker, token, result = std::move(result),
+			 reserved, reserved_response_bytes,
+			 guard = std::move(guard)]() mutable {
 				if (facade)
+				{
+					if (result.outcome
+					      != TileNetworkResult::Outcome::Cancelled
+					    && result.outcome
+					      != TileNetworkResult::Outcome::Rejected)
+					{
+						auto const private_permission_changed =
+							guard.private_permission_generation != 0
+							&& facade->privateOriginGeneration(
+								guard.private_permission_origin)
+							     != guard.private_permission_generation;
+						if (private_permission_changed)
+						{
+							result.body.clear();
+							result.outcome =
+								TileNetworkResult::Outcome::Rejected;
+							result.private_network_rejected = true;
+							result.private_network_rejected_url =
+								guard.private_permission_url;
+							result.private_network_permission_revoked = true;
+							result.error_string = TileNetworkManager::tr(
+								"Permission for the private imagery origin changed before the response was delivered.");
+						}
+						else if (!guard.cache_only_request
+						         && guard.network_mode_generation != 0
+						         && facade->networkModeSnapshot().generation
+						              != guard.network_mode_generation)
+						{
+							result.body.clear();
+							result.outcome =
+								TileNetworkResult::Outcome::OfflineMiss;
+							result.error_string = TileNetworkManager::tr(
+								"The imagery request was stopped because offline mode was enabled.");
+						}
+					}
 					emit facade->finished(token, result);
+				}
+				if (reserved && worker)
+				{
+					QMetaObject::invokeMethod(
+						worker,
+						[worker, reserved_response_bytes] {
+							if (worker)
+								worker->acknowledgeResult(
+									reserved_response_bytes);
+						},
+						Qt::QueuedConnection);
+				}
 			},
 			Qt::QueuedConnection);
 	}
@@ -999,6 +1907,7 @@ private:
 	Config config_;
 	QPointer<TileNetworkManager> facade_;
 	std::atomic_bool* offline_ = nullptr;
+	std::atomic<quint64>* network_mode_generation_ = nullptr;
 	QElapsedTimer clock_;
 	QNetworkAccessManager* network_ = nullptr;
 	QTimer* wake_timer_ = nullptr;
@@ -1006,17 +1915,21 @@ private:
 	quint64 next_sequence_ = 1;
 	quint64 next_service_ = 1;
 	int active_total_ = 0;
+	int outstanding_results_ = 0;
+	qint64 outstanding_response_bytes_ = 0;
 	QHash<Token, std::shared_ptr<Entry>> entries_;
 	QVector<std::shared_ptr<Entry>> queue_;
 	QHash<QNetworkReply*, std::shared_ptr<Entry>> active_replies_;
 	QHash<QString, int> active_hosts_;
 	QHash<quint64, int> active_clients_;
+	QHash<quint64, int> client_entry_counts_;
 	QHash<quint64, quint64> client_last_service_;
 	QHash<QString, qint64> host_not_before_;
-	QHash<QUrl, qint64> negative_cache_;
+	QHash<QByteArray, NegativeCacheEntry> negative_cache_;
 	QHash<QString, DestinationDecision> destination_cache_;
 	QHash<QString, int> destination_lookups_;
 	QHash<QString, QVector<std::shared_ptr<Entry>>> destination_waiters_;
+	quint64 next_state_access_ = 1;
 };
 
 TileNetworkManager::TileNetworkManager(QObject* parent)
@@ -1040,15 +1953,39 @@ TileNetworkManager::TileNetworkManager(Config config, QObject* parent)
 	config_.max_active_per_client = std::max(1, config_.max_active_per_client);
 	config_.max_pending_total = std::max(1, config_.max_pending_total);
 	config_.max_pending_per_client = std::max(1, config_.max_pending_per_client);
+	config_.max_negative_cache_entries =
+		std::max(0, config_.max_negative_cache_entries);
+	config_.max_client_history_entries =
+		std::max(0, config_.max_client_history_entries);
+	config_.max_host_backoff_entries =
+		std::max(0, config_.max_host_backoff_entries);
+	config_.max_destination_cache_entries =
+		std::max(0, config_.max_destination_cache_entries);
 	config_.max_redirects = std::max(0, config_.max_redirects);
 	config_.max_retries = std::max(0, config_.max_retries);
+	config_.negative_cache_ttl_ms =
+		std::max(0, config_.negative_cache_ttl_ms);
 	config_.max_response_bytes = std::max<qint64>(1, config_.max_response_bytes);
+	config_.max_outstanding_results =
+		std::max(1, config_.max_outstanding_results);
+	config_.max_outstanding_response_bytes = std::max(
+		config_.max_response_bytes,
+		config_.max_outstanding_response_bytes);
 	config_.disk_cache_bytes = std::max<qint64>(0, config_.disk_cache_bytes);
+	approved_private_origins_ = config_.approved_private_origins;
+	for (auto const& origin : std::as_const(approved_private_origins_))
+	{
+		auto const generation = next_private_origin_generation_++;
+		if (generation == 0)
+			qFatal("Imagery private-origin generation space exhausted");
+		private_origin_generations_.insert(origin, generation);
+	}
 
 	qRegisterMetaType<TileNetworkResult>();
 	network_thread_ = new QThread(this);
 	network_thread_->setObjectName(QStringLiteral("Mapper imagery network"));
-	worker_ = new Worker(config_, this, &offline_);
+	worker_ = new Worker(
+		config_, this, &offline_, &network_mode_generation_);
 	worker_->moveToThread(network_thread_);
 	network_thread_->start();
 	QMetaObject::invokeMethod(
@@ -1093,6 +2030,12 @@ QString TileNetworkManager::canonicalOrigin(const QUrl& url)
 	return hostKey(url);
 }
 
+bool TileNetworkManager::isPublicDestinationAddress(
+	const QHostAddress& address)
+{
+	return isPublicDestination(address);
+}
+
 TileNetworkManager::Token TileNetworkManager::submit(TileNetworkRequest request)
 {
 	auto const token = next_token_.fetch_add(1);
@@ -1128,12 +2071,150 @@ void TileNetworkManager::cancelClient(
 
 void TileNetworkManager::setOfflineMode(bool offline)
 {
-	offline_.store(offline);
+	{
+		QMutexLocker lock(&network_mode_mutex_);
+		if (offline_.load() == offline)
+			return;
+		auto const advance_generation = [this] {
+			if (network_mode_generation_.fetch_add(1)
+			    == std::numeric_limits<quint64>::max())
+			{
+				qFatal("Imagery network-mode generation space exhausted");
+			}
+		};
+		// A worker which observes the transition without taking this mutex must
+		// see either the old online mode or a cache-only state. The generation
+		// makes every already-active online request stale.
+		if (offline)
+		{
+			offline_.store(true);
+			advance_generation();
+		}
+		else
+		{
+			advance_generation();
+			offline_.store(false);
+		}
+		// Queue under the same mutex so concurrent callers cannot reorder the
+		// worker's transition callbacks after publishing facade state.
+		QMetaObject::invokeMethod(
+			worker_,
+			[worker = worker_, offline] {
+				worker->setOfflineMode(offline);
+			},
+			Qt::QueuedConnection);
+	}
+	if (QThread::currentThread() == thread())
+	{
+		emit offlineModeChanged(offline);
+	}
+	else
+	{
+		QPointer<TileNetworkManager> self(this);
+		QMetaObject::invokeMethod(
+			this,
+			[self, offline] {
+				if (self)
+					emit self->offlineModeChanged(offline);
+			},
+			Qt::QueuedConnection);
+	}
 }
 
 bool TileNetworkManager::offlineMode() const noexcept
 {
 	return offline_.load();
+}
+
+TileNetworkManager::NetworkModeSnapshot
+TileNetworkManager::networkModeSnapshot() const
+{
+	QMutexLocker lock(&network_mode_mutex_);
+	return {
+		offline_.load(),
+		network_mode_generation_.load(),
+	};
+}
+
+bool TileNetworkManager::approvePrivateOrigin(
+	const QUrl& url)
+{
+	auto const scheme = url.scheme().toLower();
+	if (!url.isValid() || url.isRelative() || url.host().isEmpty()
+	    || !url.userInfo().isEmpty()
+	    || (scheme != QLatin1String("http")
+	        && scheme != QLatin1String("https")))
+		return false;
+	auto const origin = canonicalOrigin(url);
+	{
+		QMutexLocker lock(&permissions_mutex_);
+		if (approved_private_origins_.contains(origin))
+			return true;
+		approved_private_origins_.insert(origin);
+		auto const generation = next_private_origin_generation_++;
+		if (generation == 0)
+			qFatal("Imagery private-origin generation space exhausted");
+		private_origin_generations_.insert(origin, generation);
+		// Preserve mutation order when approvals are changed concurrently.
+		QMetaObject::invokeMethod(
+			worker_,
+			[worker = worker_, origin] {
+				worker->setPrivateOriginApproved(origin, true);
+			},
+			Qt::QueuedConnection);
+	}
+	QPointer<TileNetworkManager> self(this);
+	QMetaObject::invokeMethod(
+		this,
+		[self, origin] {
+			if (self)
+				emit self->privateOriginApprovalChanged(origin, true);
+		},
+		Qt::QueuedConnection);
+	return true;
+}
+
+bool TileNetworkManager::revokePrivateOrigin(
+	const QUrl& url)
+{
+	auto const origin = canonicalOrigin(url);
+	{
+		QMutexLocker lock(&permissions_mutex_);
+		if (!approved_private_origins_.remove(origin))
+			return false;
+		private_origin_generations_.remove(origin);
+		// Preserve mutation order when approvals are changed concurrently.
+		QMetaObject::invokeMethod(
+			worker_,
+			[worker = worker_, origin] {
+				worker->setPrivateOriginApproved(origin, false);
+			},
+			Qt::QueuedConnection);
+	}
+	QPointer<TileNetworkManager> self(this);
+	QMetaObject::invokeMethod(
+		this,
+		[self, origin] {
+			if (self)
+				emit self->privateOriginApprovalChanged(origin, false);
+		},
+		Qt::QueuedConnection);
+	return true;
+}
+
+bool TileNetworkManager::isPrivateOriginApproved(
+	const QUrl& url) const
+{
+	QMutexLocker lock(&permissions_mutex_);
+	return approved_private_origins_.contains(
+		canonicalOrigin(url));
+}
+
+quint64 TileNetworkManager::privateOriginGeneration(
+	const QString& origin) const
+{
+	QMutexLocker lock(&permissions_mutex_);
+	return private_origin_generations_.value(origin);
 }
 
 }  // namespace OpenOrienteering::imagery

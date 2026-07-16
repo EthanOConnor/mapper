@@ -250,7 +250,8 @@ void RenderIrTest::referenceRendererInterpretsIr()
 	auto pixels = std::make_shared<const std::vector<std::uint8_t>>(
 		std::vector<std::uint8_t> { 0, 255, 0, 255 }
 	);
-	auto image = std::make_shared<const render::ImageData>(render::ImageData { 1, 1, 4, pixels });
+	auto image = std::make_shared<const render::ImageData>(
+		render::ImageData { 1, 1, 4, pixels, {} });
 	builder.drawImage(image, { 96, 8, 16, 16 });
 	builder.drawLinePattern(rectangle(88, 40, 120, 72), render::fromQColor(Qt::magenta),
 	                        0, 4, 0, 1);

@@ -43,6 +43,24 @@ bool normalizedEpsg(const QString& crs)
 	return pattern.match(crs).hasMatch();
 }
 
+bool hasFiniteExtent(const TileMatrix& matrix)
+{
+	auto const tile_width =
+		matrix.cell_size * double(matrix.tile_size.width());
+	auto const tile_height =
+		matrix.cell_size * double(matrix.tile_size.height());
+	auto const full_width = tile_width * double(matrix.matrix_width);
+	auto const full_height = tile_height * double(matrix.matrix_height);
+	auto const east = matrix.point_of_origin.x() + full_width;
+	auto const south = matrix.point_of_origin.y() - full_height;
+	return finite(tile_width) && tile_width > 0
+	       && finite(tile_height) && tile_height > 0
+	       && finite(full_width) && full_width > 0
+	       && finite(full_height) && full_height > 0
+	       && finite(east) && east > matrix.point_of_origin.x()
+	       && finite(south) && south < matrix.point_of_origin.y();
+}
+
 }  // namespace
 
 bool CrsBounds::isValid() const noexcept
@@ -132,6 +150,16 @@ bool TileMatrixSet::validateDyadicTopLeft(QString* error) const
 		}
 		if (matrix.matrix_width <= 0 || matrix.matrix_height <= 0)
 			return fail(error, QStringLiteral("Tile matrix dimensions must be positive"));
+		if (!hasFiniteExtent(matrix))
+		{
+			return fail(
+				error,
+				QStringLiteral(
+					"Tile matrix spans and full extent must be finite "
+					"and representable"
+				)
+			);
+		}
 		if (index == 0)
 			continue;
 

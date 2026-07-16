@@ -18,6 +18,7 @@ private slots:
 	void expandsXyzAndTmsRows();
 	void rejectsUnsafeUrlTemplates();
 	void validatesTileLimits();
+	void rejectsTilesBeyondRuntimeProfile();
 	void requestPolicyHasExplicitDefaults();
 	void snapshotRoundTripsDeterministically();
 	void snapshotRejectsUnsupportedRegistrations();

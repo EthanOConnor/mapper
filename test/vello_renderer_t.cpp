@@ -70,7 +70,8 @@ render::FramePacketPtr completeOperationFrame(render::FrameId id)
 	auto pixels = std::make_shared<const std::vector<std::uint8_t>>(
 		std::vector<std::uint8_t> { 0, 255, 0, 255 }
 	);
-	auto image = std::make_shared<const render::ImageData>(render::ImageData { 1, 1, 4, pixels });
+	auto image = std::make_shared<const render::ImageData>(
+		render::ImageData { 1, 1, 4, pixels, {} });
 	builder.drawImage(image, { 96, 8, 16, 16 });
 	builder.drawLinePattern(rectangle(88, 40, 120, 72), render::fromQColor(Qt::magenta),
 	                        0, 4, 0, 1);
@@ -322,7 +323,7 @@ void VelloRendererTest::affineImageSourceCropMatchesReference()
 		}
 	}
 	auto image = std::make_shared<const render::ImageData>(render::ImageData {
-		width, height, width * 4, std::move(pixels)
+		width, height, width * 4, std::move(pixels), {}
 	});
 
 	render::RenderIRBuilder builder(44, { 0, 0, 64, 64 });

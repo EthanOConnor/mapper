@@ -64,6 +64,7 @@ struct RasterResourceManager::Owner::SharedState
 		std::vector<std::shared_ptr<Job>> pending;
 		std::uint64_t last_owner = 0;
 		int active = 0;
+		std::size_t outstanding = 0;
 	};
 
 	SharedState(RasterResourceManager* context, Limits limits)
@@ -75,6 +76,9 @@ struct RasterResourceManager::Owner::SharedState
 	 ))
 	 , max_pending_per_lane(std::max<std::size_t>(
 		max_pending_per_owner, limits.max_pending_per_lane
+	 ))
+	 , max_outstanding_per_lane(std::max<std::size_t>(
+		1, limits.max_outstanding_per_lane
 	 ))
 	{}
 
@@ -157,7 +161,8 @@ struct RasterResourceManager::Owner::SharedState
 	{
 		auto& lane = laneState(lane_id);
 		while (!shutting_down
-		       && lane.active < lane.pool.maxThreadCount())
+		       && lane.active < lane.pool.maxThreadCount()
+		       && lane.outstanding < max_outstanding_per_lane)
 		{
 			auto selected = chooseNextLocked(lane_id, lane);
 			if (selected == lane.pending.end())
@@ -166,6 +171,7 @@ struct RasterResourceManager::Owner::SharedState
 			auto job = std::move(*selected);
 			lane.pending.erase(selected);
 			++lane.active;
+			++lane.outstanding;
 			++job->owner->active[laneIndex(lane_id)];
 			auto self = shared_from_this();
 			lane.pool.start([self = std::move(self), job = std::move(job)] {
@@ -198,6 +204,8 @@ struct RasterResourceManager::Owner::SharedState
 			--lane.active;
 			--job->owner->active[laneIndex(job->lane)];
 			deliver = !shutting_down && completion && jobIsCurrent(*job);
+			if (!deliver)
+				--lane.outstanding;
 			dispatchLocked(Lane::BlockingIo);
 			dispatchLocked(Lane::Decode);
 		}
@@ -210,15 +218,20 @@ struct RasterResourceManager::Owner::SharedState
 			context,
 			[self = std::move(self), job = std::move(job),
 			 completion = std::move(completion)]() mutable {
+				bool run_completion = false;
 				{
 					std::lock_guard lock(self->mutex);
-					if (self->shutting_down || !self->jobIsCurrent(*job)
-					    || !job->receiver)
-					{
-						return;
-					}
+					auto& lane = self->laneState(job->lane);
+					Q_ASSERT(lane.outstanding > 0);
+					--lane.outstanding;
+					run_completion =
+						!self->shutting_down
+						&& self->jobIsCurrent(*job)
+						&& job->receiver;
+					self->dispatchLocked(job->lane);
 				}
-				completion();
+				if (run_completion)
+					completion();
 			},
 			Qt::QueuedConnection
 		);
@@ -272,6 +285,7 @@ struct RasterResourceManager::Owner::SharedState
 	std::uint64_t next_sequence = 1;
 	std::size_t max_pending_per_owner = 128;
 	std::size_t max_pending_per_lane = 2048;
+	std::size_t max_outstanding_per_lane = 128;
 	bool shutting_down = false;
 };
 

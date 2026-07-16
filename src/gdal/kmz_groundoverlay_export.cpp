@@ -32,16 +32,23 @@
 #include <QtGlobal>
 #include <QApplication>
 #include <QBuffer>
+#include <QCryptographicHash>
+#include <QDir>
 #include <QEventLoop>
+#include <QFile>
 #include <QFileInfo>
 #include <QImage>
 #include <QIODevice>
 #include <QLatin1String>
 #include <QLineF>
+#include <QLockFile>
 #include <QPainter>
 #include <QPoint>
 #include <QPointF>
 #include <QProgressDialog>
+#include <QSaveFile>
+#include <QTemporaryDir>
+#include <QTemporaryFile>
 #include <QTransform>
 
 #include "mapper_config.h"
@@ -130,7 +137,32 @@ QRectF boundingBoxMap(const Georeferencing& georef, const QRectF& extent_lonlat)
 	);
 }
 
-	
+QByteArray directAssetPrefix(
+	const QByteArray& output_filepath)
+{
+	return QByteArray(".mapper-kml-")
+	       + QCryptographicHash::hash(
+		         output_filepath,
+		         QCryptographicHash::Sha256)
+		         .toHex()
+		         .left(16)
+	       + QByteArray("-assets-");
+}
+
+QByteArray stagingFilePrefix(
+	const QByteArray& output_filepath,
+	bool kmz)
+{
+	return QByteArray(".mapper-")
+	       + (kmz ? QByteArray("kmz-") : QByteArray("kml-"))
+	       + QCryptographicHash::hash(
+		         output_filepath,
+		         QCryptographicHash::Sha256)
+		         .toHex()
+	       + QByteArray("-stage-");
+}
+
+
 }  // namespace
 
 
@@ -160,16 +192,9 @@ KmzGroundOverlayExport::KmzGroundOverlayExport(const QString& path, const Map& m
 , is_kmz(path.endsWith(QLatin1String(".kmz"), Qt::CaseInsensitive))
 {
 	auto const fileinfo = QFileInfo(path);
-	if (is_kmz)
-	{
-		basepath_utf8 = "/vsizip/" + fileinfo.absoluteFilePath().toUtf8();
-		doc_filepath_utf8 = basepath_utf8 + "/doc.kml";
-	}
-	else
-	{
+	output_filepath_utf8 = fileinfo.absoluteFilePath().toUtf8();
+	if (!is_kmz)
 		basepath_utf8 = fileinfo.absolutePath().toUtf8();
-		doc_filepath_utf8 = fileinfo.absoluteFilePath().toUtf8();
-	}
 }
 
 
@@ -183,11 +208,31 @@ QString KmzGroundOverlayExport::errorString() const
 	return error_message;
 }
 
+bool KmzGroundOverlayExport::wasCanceled() const
+{
+	return cancelled
+	       || (progress_observer && progress_observer->wasCanceled());
+}
 
-bool KmzGroundOverlayExport::doExport(const MapPrinter& map_printer, int tile_width_px)
+
+bool KmzGroundOverlayExport::doExport(MapPrinter& map_printer, int tile_width_px)
 {
 	error_message.clear();
-	
+	cancelled = false;
+	staging_filepath_utf8.clear();
+	direct_assets_relative_utf8.clear();
+	tile_progress_maximum = 1;
+	QLockFile output_lock(
+		QString::fromUtf8(output_filepath_utf8)
+		+ QStringLiteral(".mapper-export.lock"));
+	if (!output_lock.tryLock())
+	{
+		error_message = tr(
+			"Another process is already exporting to this destination.");
+		return false;
+	}
+	pruneStagedOutputFiles();
+
 #ifdef QT_PRINTSUPPORT_LIB
 	auto const& georef = map.getGeoreferencing();
 	if (georef.getState() != Georeferencing::Geospatial)
@@ -207,20 +252,34 @@ bool KmzGroundOverlayExport::doExport(const MapPrinter& map_printer, int tile_wi
 	auto const bounding_box_lonlat = boundingBoxLonLat(georef, map_printer.getPrintArea());
 	auto const bounding_box_map = boundingBoxMap(georef, bounding_box_lonlat);
 	auto const metrics = makeMetrics(bounding_box_map.size(), resolution, tile_width_px);
-	auto const tiles = makeTiles(map_printer.getPrintArea(), metrics);
-	
-	if (!is_kmz)
+	auto tiles = makeTiles(map_printer.getPrintArea(), metrics);
+
+	auto const exact_output_extent =
+		renderExtent(tiles).intersected(
+			map_printer.getPrintArea());
+	if (!map_printer.prepareOutput(
+	    exact_output_extent.isEmpty()
+	        ? map_printer.getPrintArea()
+	        : exact_output_extent))
 	{
-		// When not creating a KMZ container file, do not overwrite existing image files.
-		for (auto const& tile : tiles)
-		{
-			auto const filepath_utf8 = QByteArray(basepath_utf8 + '/' + tile.filepath);
-			if (GdalFile::exists(filepath_utf8))
-			{
-				error_message = tr("%1 already exists.").arg(QString::fromUtf8(filepath_utf8));
-				return false;
-			}
-		}
+		cancelled =
+			map_printer.outputWasCanceled() || wasCanceled();
+		error_message = cancelled
+		              ? tr("Canceled")
+		              : map_printer.outputError();
+		return false;
+	}
+	if (wasCanceled())
+	{
+		cancelled = true;
+		error_message = tr("Canceled");
+		map_printer.finishOutput(true);
+		return false;
+	}
+	if (!beginStagedOutput(tiles))
+	{
+		map_printer.finishOutput(true);
+		return false;
 	}
 	
 	VSIErrorReset();
@@ -230,24 +289,48 @@ bool KmzGroundOverlayExport::doExport(const MapPrinter& map_printer, int tile_wi
 	if (is_kmz && !kmz_file)
 	{
 		error_message = QString::fromUtf8(VSIGetLastErrorMsg());
+		map_printer.finishOutput(true);
+		cleanupPartialOutput(tiles);
 		return false;
 	}
 	
 	// Create KML document and image files.
 	setMaximumProgress(int(tiles.size()));
-	auto const result = doExport(map_printer, metrics, tiles);
+	auto result = doExport(map_printer, metrics, tiles);
+	cancelled =
+		wasCanceled() || map_printer.outputWasCanceled();
+	map_printer.finishOutput(!result || cancelled);
 	if (is_kmz)
 	{
-		VSIFCloseL(kmz_file);
-		if (wasCanceled())
-			VSIUnlink(basepath_utf8);
+		if (VSIFCloseL(kmz_file) != 0)
+		{
+			if (result && !cancelled)
+			{
+				error_message = tr(
+					"Failed to finish the KMZ archive.");
+			}
+			result = false;
+		}
 	}
-	else if (wasCanceled())
+
+	if (result && !cancelled)
 	{
-		VSIUnlink(doc_filepath_utf8);
+		result = commitStagedOutput();
 	}
-	setProgress(maximumProgress());
-	return result;
+	if (!result || cancelled)
+	{
+		cleanupPartialOutput(tiles);
+		if (cancelled)
+		{
+			error_message = tr("Canceled");
+		}
+	}
+	else
+	{
+		if (progress_observer)
+			progress_observer->setValue(100);
+	}
+	return result && !cancelled;
 #else
 	Q_UNUSED(map_printer)
 	Q_UNUSED(tile_width_px)
@@ -255,10 +338,16 @@ bool KmzGroundOverlayExport::doExport(const MapPrinter& map_printer, int tile_wi
 #endif // QT_PRINTSUPPORT_LIB
 }
 
-bool KmzGroundOverlayExport::doExport(const MapPrinter& map_printer, const Metrics& metrics, const std::vector<Tile>& tiles)
+bool KmzGroundOverlayExport::doExport(MapPrinter& map_printer, const Metrics& metrics, const std::vector<Tile>& tiles)
 try
 {
 #ifdef QT_PRINTSUPPORT_LIB
+	if (wasCanceled())
+	{
+		error_message = tr("Canceled");
+		return false;
+	}
+
 	// Reusing the same QByteArray allocation for KML document and for tiles.
 	QByteArray byte_array;
 	byte_array.reserve(100000);
@@ -272,20 +361,42 @@ try
 	
 	QImage image(metrics.tile_size_px, QImage::Format_ARGB32_Premultiplied);
 	QImage buffer(metrics.tile_size_px, QImage::Format_RGB32);
+	if (image.isNull() || buffer.isNull())
+	{
+		error_message = tr("Failed to allocate a raster export tile.");
+		return false;
+	}
 	auto progress = 0;
 	for (auto const& tile : tiles)
 	{
+		if (wasCanceled())
+		{
+			error_message = tr("Canceled");
+			return false;
+		}
 		image.fill(Qt::white);
 		buffer.fill(Qt::white);
 		QPainter painter(&image);
 		const auto tile_transform = makeTileTransform(tile.rect_map, metrics, map.getGeoreferencing().getDeclination());
-		map_printer.drawPage(&painter, tile.rect_map.adjusted(-5, -5, 5, 5), tile_transform, &buffer);
+		map_printer.drawPage(
+			&painter, renderClip(tile), tile_transform, &buffer);
+		if (!painter.isActive())
+		{
+			error_message = map_printer.outputError().isEmpty()
+			              ? tr("Failed to render exact template imagery.")
+			              : map_printer.outputError();
+			return false;
+		}
+		painter.end();
 		saveToBuffer(image, byte_array);
 		writeToVSI(basepath_utf8 + '/' + tile.filepath, byte_array);
 		
 		setProgress(++progress);
 		if (wasCanceled())
-			break;
+		{
+			error_message = tr("Canceled");
+			return false;
+		}
 	}
 	return true;
 #else
@@ -352,6 +463,25 @@ std::vector<KmzGroundOverlayExport::Tile> KmzGroundOverlayExport::makeTiles(cons
 }
 
 
+QRectF KmzGroundOverlayExport::renderClip(const Tile& tile) noexcept
+{
+	// Include nearby objects and template pixels which can contribute through
+	// antialiasing at the edge of the geographic tile.
+	return tile.rect_map.adjusted(-5, -5, 5, 5);
+}
+
+QRectF KmzGroundOverlayExport::renderExtent(
+	const std::vector<Tile>& tiles) noexcept
+{
+	if (tiles.empty())
+		return {};
+	auto extent = renderClip(tiles.front());
+	for (auto tile = std::next(tiles.cbegin()); tile != tiles.cend(); ++tile)
+		extent = extent.united(renderClip(*tile));
+	return extent;
+}
+
+
 void KmzGroundOverlayExport::writeKml(QByteArray& buffer, const std::vector<KmzGroundOverlayExport::Tile>& tiles) const
 {
 	buffer.append(
@@ -400,9 +530,13 @@ QTransform KmzGroundOverlayExport::makeTileTransform(const QRectF& tile_map, con
 void KmzGroundOverlayExport::saveToBuffer(const QImage& image, QByteArray& data)
 {
 	QBuffer buffer(&data);
-	buffer.open(QIODevice::WriteOnly | QIODevice::Truncate);
-	image.save(&buffer, format, quality);
-	buffer.close();
+	if (!buffer.open(QIODevice::WriteOnly | QIODevice::Truncate)
+	    || !image.save(&buffer, format, quality))
+	{
+		throw FileFormatException(
+			KmzGroundOverlayExport::tr(
+				"Failed to encode a raster export tile."));
+	}
 }
 
 // static
@@ -411,8 +545,31 @@ void KmzGroundOverlayExport::writeToVSI(const QByteArray& filepath_utf8, const Q
 	auto* file = VSIFOpenL(filepath_utf8, "wb");
 	if (!file)
 		throw FileFormatException(QString::fromUtf8(VSIGetLastErrorMsg()));
-	VSIFWriteL(data, 1, data.size(), file);
-	VSIFCloseL(file);
+	qsizetype offset = 0;
+	bool write_failed = false;
+	while (offset < data.size())
+	{
+		auto const written = VSIFWriteL(
+			data.constData() + offset,
+			1,
+			std::size_t(data.size() - offset),
+			file);
+		if (written == 0)
+		{
+			write_failed = true;
+			break;
+		}
+		offset += qsizetype(written);
+	}
+	auto const close_failed = VSIFCloseL(file) != 0;
+	if (write_failed || close_failed)
+	{
+		auto error = QString::fromUtf8(VSIGetLastErrorMsg());
+		if (error.isEmpty())
+			error = KmzGroundOverlayExport::tr(
+				"Failed to write an export file.");
+		throw FileFormatException(error);
+	}
 }
 
 void KmzGroundOverlayExport::mkdir(const QByteArray& path_utf8) const
@@ -426,31 +583,306 @@ void KmzGroundOverlayExport::mkdir(const QByteArray& path_utf8) const
 }
 
 
-void KmzGroundOverlayExport::setMaximumProgress(int value) const
+void KmzGroundOverlayExport::setMaximumProgress(int value)
 {
+	tile_progress_maximum = std::max(1, value);
 	if (progress_observer)
-	{
-		progress_observer->setMaximum(value);
-	}
-}
-
-int KmzGroundOverlayExport::maximumProgress() const
-{
-	return progress_observer ? progress_observer->maximum() : 100;
+		progress_observer->setRange(0, 100);
 }
 
 void KmzGroundOverlayExport::setProgress(int value) const
 {
 	if (progress_observer)
 	{
-		progress_observer->setValue(value);
-		QApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 100 /* ms */); // Drawing and Cancel events
+		auto const percent =
+			15
+			+ (84 * std::clamp(
+			     value, 0, tile_progress_maximum))
+			  / tile_progress_maximum;
+		progress_observer->setValue(percent);
+		QApplication::processEvents(
+			QEventLoop::AllEvents, 100 /* ms */);
 	}
 }
 
-bool KmzGroundOverlayExport::wasCanceled() const
+bool KmzGroundOverlayExport::beginStagedOutput(
+	std::vector<Tile>& tiles)
 {
-	return progress_observer && progress_observer->wasCanceled();
+	auto const output_path =
+		QString::fromUtf8(output_filepath_utf8);
+	auto const fileinfo = QFileInfo(output_path);
+	auto const staging_prefix = QString::fromLatin1(
+		stagingFilePrefix(output_filepath_utf8, is_kmz));
+	QTemporaryFile staging(
+		fileinfo.absolutePath()
+		+ QLatin1Char('/')
+		+ staging_prefix
+		+ QStringLiteral("XXXXXX")
+		// /vsizip/ treats the first .zip/.kmz component as the archive
+		// boundary, so only the final suffix may contain .kmz.
+		+ (is_kmz
+		       ? QStringLiteral(".kmz")
+		       : QStringLiteral(".part")));
+	staging.setAutoRemove(true);
+	if (!staging.open())
+	{
+		error_message = tr("Could not create a temporary export file: %1")
+			.arg(staging.errorString());
+		return false;
+	}
+	staging_filepath_utf8 =
+		staging.fileName().toUtf8();
+	staging.close();
+
+	if (is_kmz)
+	{
+		if (!QFile::remove(
+			    QString::fromUtf8(staging_filepath_utf8)))
+		{
+			error_message = tr(
+				"Could not initialize the temporary KMZ archive.");
+			return false;
+		}
+		basepath_utf8 =
+			"/vsizip/" + staging_filepath_utf8;
+		doc_filepath_utf8 =
+			basepath_utf8 + "/doc.kml";
+		files_directory_existed = false;
+	}
+	else
+	{
+		basepath_utf8 = fileinfo.absolutePath().toUtf8();
+		doc_filepath_utf8 = staging_filepath_utf8;
+		files_directory_existed =
+			GdalFile::isDir(basepath_utf8 + "/files");
+		auto const files_path =
+			fileinfo.absolutePath()
+			+ QStringLiteral("/files");
+		if (!QDir().mkpath(files_path))
+		{
+			error_message = tr(
+				"Could not create the KML image directory.");
+			staging_filepath_utf8.clear();
+			return false;
+		}
+
+		// Direct KML is a multi-file format. Keep every new sidecar in an
+		// exporter-owned transaction directory and publish the KML document
+		// last. On the next run, the currently published KML identifies the
+		// one live transaction directory; any other such directories are
+		// crash leftovers and can be removed safely.
+		pruneDirectAssetDirectories();
+		auto const asset_prefix =
+			directAssetPrefix(output_filepath_utf8);
+		QTemporaryDir assets(
+			files_path
+			+ QLatin1Char('/')
+			+ QString::fromLatin1(asset_prefix)
+			+ QStringLiteral("XXXXXX"));
+		assets.setAutoRemove(true);
+		if (!assets.isValid())
+		{
+			error_message = tr(
+				"Could not create a temporary KML image directory.");
+			staging_filepath_utf8.clear();
+			return false;
+		}
+		auto const assets_name =
+			QFileInfo(assets.path()).fileName();
+		direct_assets_relative_utf8 =
+			QByteArray("files/")
+			+ assets_name.toUtf8();
+		for (auto& tile : tiles)
+			tile.filepath =
+				direct_assets_relative_utf8
+				+ '/' + tile.name;
+		assets.setAutoRemove(false);
+		staging.setAutoRemove(false);
+	}
+	return true;
+}
+
+bool KmzGroundOverlayExport::commitStagedOutput()
+{
+	QFile source(QString::fromUtf8(staging_filepath_utf8));
+	if (!source.open(QIODevice::ReadOnly))
+	{
+		error_message = tr("Could not read the completed temporary export: %1")
+			.arg(source.errorString());
+		return false;
+	}
+	QSaveFile destination(
+		QString::fromUtf8(output_filepath_utf8));
+	if (!destination.open(QIODevice::WriteOnly))
+	{
+		error_message = tr("Could not open the export destination: %1")
+			.arg(destination.errorString());
+		return false;
+	}
+
+	QByteArray buffer(256 * 1024, Qt::Uninitialized);
+	while (true)
+	{
+		auto const count =
+			source.read(buffer.data(), buffer.size());
+		if (count == 0)
+			break;
+		if (count < 0)
+		{
+			error_message = tr("Could not read the completed temporary export: %1")
+				.arg(source.errorString());
+			destination.cancelWriting();
+			return false;
+		}
+		if (destination.write(buffer.constData(), count)
+		    != count)
+		{
+			error_message = tr("Could not write the export destination: %1")
+				.arg(destination.errorString());
+			destination.cancelWriting();
+			return false;
+		}
+		QApplication::processEvents(
+			QEventLoop::AllEvents, 25);
+		if (wasCanceled())
+		{
+			cancelled = true;
+			error_message = tr("Canceled");
+			destination.cancelWriting();
+			return false;
+		}
+	}
+	if (!destination.commit())
+	{
+		error_message = tr("Could not finish the export destination: %1")
+			.arg(destination.errorString());
+		return false;
+	}
+	source.close();
+	QFile::remove(
+		QString::fromUtf8(staging_filepath_utf8));
+	staging_filepath_utf8.clear();
+	if (!is_kmz)
+	{
+		pruneDirectAssetDirectories(
+			direct_assets_relative_utf8);
+		direct_assets_relative_utf8.clear();
+	}
+	return true;
+}
+
+void KmzGroundOverlayExport::cleanupPartialOutput(
+	const std::vector<Tile>& tiles)
+{
+	if (!staging_filepath_utf8.isEmpty())
+	{
+		QFile::remove(
+			QString::fromUtf8(staging_filepath_utf8));
+		staging_filepath_utf8.clear();
+	}
+	if (is_kmz)
+		return;
+	Q_UNUSED(tiles)
+	if (!direct_assets_relative_utf8.isEmpty())
+	{
+		QDir(
+			QString::fromUtf8(
+				basepath_utf8 + '/'
+				+ direct_assets_relative_utf8))
+			.removeRecursively();
+		direct_assets_relative_utf8.clear();
+	}
+	if (!files_directory_existed)
+	{
+		auto const files_path = QByteArray(basepath_utf8 + "/files");
+		VSIRmdir(files_path.constData());
+	}
+}
+
+void KmzGroundOverlayExport::pruneStagedOutputFiles()
+{
+	auto const output_path =
+		QString::fromUtf8(output_filepath_utf8);
+	auto const fileinfo = QFileInfo(output_path);
+	QDir directory(fileinfo.absolutePath());
+	if (!directory.exists())
+		return;
+
+	auto const prefix = QString::fromLatin1(
+		stagingFilePrefix(output_filepath_utf8, is_kmz));
+	auto const suffix = is_kmz
+	                  ? QStringLiteral(".kmz")
+	                  : QStringLiteral(".part");
+	auto const entries = directory.entryInfoList(
+		{ prefix + QLatin1Char('*') + suffix },
+		QDir::Files | QDir::Hidden | QDir::NoSymLinks);
+	for (auto const& entry : entries)
+	{
+		// Never follow or unlink a caller-provided symlink or special file.
+		if (entry.isFile() && !entry.isSymLink())
+			QFile::remove(entry.absoluteFilePath());
+	}
+}
+
+void KmzGroundOverlayExport::pruneDirectAssetDirectories(
+	const QByteArray& keep_relative_path)
+{
+	if (is_kmz)
+		return;
+	auto const files_path =
+		QString::fromUtf8(basepath_utf8 + "/files");
+	QDir files(files_path);
+	if (!files.exists())
+		return;
+
+	QByteArray published_kml;
+	auto can_identify_published_assets =
+		!keep_relative_path.isEmpty();
+	if (!can_identify_published_assets)
+	{
+		QFile current(
+			QString::fromUtf8(output_filepath_utf8));
+		constexpr qint64 maximum_kml_recovery_bytes =
+			qint64(16) * 1024 * 1024;
+		if (!current.exists())
+		{
+			can_identify_published_assets = true;
+		}
+		else if (current.size()
+		             <= maximum_kml_recovery_bytes
+		         && current.open(QIODevice::ReadOnly))
+		{
+			published_kml =
+				current.read(
+					maximum_kml_recovery_bytes + 1);
+			can_identify_published_assets =
+				published_kml.size()
+				<= maximum_kml_recovery_bytes;
+		}
+	}
+	if (!can_identify_published_assets)
+		return;
+
+	auto const entries = files.entryInfoList(
+		{ QString::fromLatin1(
+			directAssetPrefix(output_filepath_utf8))
+		  + QLatin1Char('*') },
+		QDir::Dirs | QDir::Hidden
+			| QDir::NoDotAndDotDot
+			| QDir::NoSymLinks);
+	for (auto const& entry : entries)
+	{
+		QByteArray const relative =
+			QByteArray("files/")
+			+ entry.fileName().toUtf8();
+		auto const keep =
+			!keep_relative_path.isEmpty()
+				? relative == keep_relative_path
+				: published_kml.contains(relative);
+		if (!keep)
+			QDir(entry.absoluteFilePath())
+				.removeRecursively();
+	}
 }
 
 

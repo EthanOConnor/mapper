@@ -356,6 +356,14 @@ public slots:
 	void showTemplateWindow(bool show);
 	/** Shows a file selector to open a template. */
 	void openTemplateClicked();
+	/** Shows the online imagery source browser. */
+	void addOnlineImageryClicked();
+	/** Shows installed imagery catalogs. */
+	void manageImageryCatalogsClicked();
+	/** Reviews installation-local private-network imagery grants. */
+	void manageImageryNetworkPermissionsClicked();
+	/** Enables or disables application-wide offline imagery mode. */
+	void setOfflineImagery(bool offline);
 	/** Shows the ReopenTemplateDialog. */
 	void reopenTemplateClicked();
 	/** Adjusts action availability based on the presence of templates */
@@ -769,6 +777,10 @@ private:
 	QPointer<QWidget> template_dock_widget;
 	TemplateListWidget* template_list_widget;
 	QAction* open_template_act = {};
+	QAction* online_imagery_act = {};
+	QAction* manage_imagery_catalogs_act = {};
+	QAction* manage_imagery_network_permissions_act = {};
+	QAction* offline_imagery_act = {};
 	QAction* reopen_template_act = {};
 	
 	QAction* tags_window_act = {};

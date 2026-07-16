@@ -169,6 +169,25 @@ void ImageryCoreTest::validatesTileLimits()
 	QVERIFY(error.contains(QStringLiteral("halve")));
 }
 
+void ImageryCoreTest::rejectsTilesBeyondRuntimeProfile()
+{
+	auto source = sourceFixture();
+	auto const height =
+		int(imagery::maximum_runtime_tile_pixels
+		    / imagery::maximum_runtime_tile_dimension)
+		+ 1;
+	for (auto& matrix : source.tile_matrix_set.matrices)
+	{
+		matrix.tile_size = {
+			imagery::maximum_runtime_tile_dimension,
+			height,
+		};
+	}
+	QString error;
+	QVERIFY(!source.validate(&error));
+	QVERIFY(error.contains(QStringLiteral("decode profile")));
+}
+
 void ImageryCoreTest::requestPolicyHasExplicitDefaults()
 {
 	imagery::ImageryRequestPolicy policy;

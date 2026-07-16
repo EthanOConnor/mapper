@@ -18,7 +18,10 @@ private slots:
 	void preservesLayerOrderAndRetainedScenes();
 	void recordsVectorMapAndTrackTemplates();
 	void boundsImageAdmissionAndPreservesVelloIdentity();
+	void retainsRasterMemoryLeaseWithImmutableScene();
+	void leasesTransparentMosaicPeakAndRetainedMemory();
 	void marksFallbackLayersIncomplete();
+	void drawsProvisionalDirectTilesBeforeExactTiles();
 	void respectsExplicitImageToMapTransform();
 	void preservesOpaqueGuttersWithoutTileSeams();
 	void preservesTransparentGuttersWithoutTileSeams();

@@ -21,6 +21,8 @@ OpenOrienteering Mapper supports the following file formats to be loaded as temp
  - Geospatial vector data (cf. [geospatial data support with GDAL](gdal.md))
  - [GPX tracks](#track-templates) (gpx)
  - [Map files](#map-templates) (omap, xmap, ocd)
+ - [Online imagery](online-imagery.md) (OIC catalog sources, XYZ/TMS tiles and
+   cached ArcGIS services)
 
 
 Additionally, templates can be classified into **georeferenced** and **non-georeferenced** templates. For georeferenced templates, information about the exact positioning of the template in a known world coordinate system is available - see [georeferencing](georeferencing.md). This way, they can be positioned on the map automatically provided that the map is georeferenced too. For non-georeferenced templates, this information is not available, so they have to be [positioned manually](#positioning).

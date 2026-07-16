@@ -291,6 +291,17 @@ bool ResolvedImagerySource::validate(QString* error) const
 	{
 		return fail(error, QStringLiteral("Imagery source zoom range is invalid"));
 	}
+	for (auto const& matrix : tile_matrix_set.matrices)
+	{
+		if (matrix.zoom >= min_zoom && matrix.zoom <= max_zoom
+		    && !runtimeSupportsTileSize(matrix.tile_size))
+		{
+			return fail(
+				error,
+				QStringLiteral(
+					"Imagery tile dimensions exceed the runtime decode profile"));
+		}
+	}
 	if (!validateTileMatrixLimits(tile_limits, tile_matrix_set, error))
 		return false;
 	for (auto const& limit : tile_limits)
