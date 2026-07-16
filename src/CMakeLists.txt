@@ -399,6 +399,12 @@ endif()
 
 qt_add_executable(Mapper WIN32 MACOSX_BUNDLE ${Mapper_SRCS})
 
+if(WIN32 AND Qt6_VERSION VERSION_GREATER_EQUAL 6.11)
+	set_target_properties(Mapper PROPERTIES
+		QT_WINDOWS_APP_PROJECT_IDENTIFIER "org.openorienteering.mapper"
+	)
+endif()
+
 if(NOT ANDROID)
 	target_compile_definitions(Mapper PRIVATE MAPPER_USE_KDSINGLEAPPLICATION)
 	target_link_libraries(Mapper PRIVATE KDAB::kdsingleapplication)
