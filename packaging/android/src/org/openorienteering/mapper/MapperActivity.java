@@ -50,6 +50,8 @@ public class MapperActivity extends QtActivity
 	private static boolean optimizationRequestDone;
 	private static final WeakHashMap<TextureView, WeakReference<Surface>> textureViewSurfaces =
 		new WeakHashMap<>();
+	private static final WeakHashMap<ViewGroup, WeakReference<SurfaceView>> nativeSurfaceViews =
+		new WeakHashMap<>();
 
 	private String yesString;
 	private String noString;
@@ -197,12 +199,33 @@ public class MapperActivity extends QtActivity
 		return display == null ? 0 : display.getRotation();
 	}
 
-	/** Return the public Android Surface already owned by a Qt child QWindow. */
+	/**
+	 * Return a public Android Surface for a Qt child QWindow.
+	 * Qt does not create a SurfaceView for a bare Vulkan QWindow, so install one
+	 * in Mapper's render-only child window when no Qt surface already exists.
+	 */
 	public static Surface nativeSurfaceForQtWindow(Object qtWindow)
 	{
 		if (!(qtWindow instanceof View))
 			return null;
-		return findSurface((View)qtWindow);
+		View view = (View)qtWindow;
+		Surface surface = findSurface(view);
+		if (surface != null || !(view instanceof ViewGroup))
+			return surface;
+
+		ViewGroup group = (ViewGroup)view;
+		WeakReference<SurfaceView> reference = nativeSurfaceViews.get(group);
+		SurfaceView surfaceView = reference == null ? null : reference.get();
+		if (surfaceView == null)
+		{
+			surfaceView = new SurfaceView(group.getContext());
+			nativeSurfaceViews.put(group, new WeakReference<>(surfaceView));
+			group.addView(surfaceView, 0, new ViewGroup.LayoutParams(
+				ViewGroup.LayoutParams.MATCH_PARENT,
+				ViewGroup.LayoutParams.MATCH_PARENT));
+		}
+		surface = surfaceView.getHolder().getSurface();
+		return surface != null && surface.isValid() ? surface : null;
 	}
 
 	private static Surface findSurface(View view)
