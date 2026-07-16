@@ -249,6 +249,7 @@ set(Mapper_Common_SRCS
   
   templates/paint_on_template_feature.cpp
   templates/paint_on_template_tool.cpp
+  templates/raster_resource_manager.cpp
   templates/template.cpp
   templates/template_adjust.cpp
   templates/template_dialog_reopen.cpp

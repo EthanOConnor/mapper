@@ -154,7 +154,7 @@ private slots:
 		QCOMPARE(GdalTemplate::chooseTileSubsampling(0.25, { 64, 64 }), 4);
 	}
 
-	void threadSafeDatasetDecodesOnQtPool()
+	void threadSafeDatasetDecodesOnSharedScheduler()
 	{
 		QTemporaryDir dir;
 		QVERIFY(dir.isValid());
@@ -168,8 +168,17 @@ private slots:
 		QVERIFY(source.loadTemplateFileImpl());
 		QVERIFY(source.isTiledSource());
 		QVERIFY(source.tiled_dataset->IsThreadSafe(GDAL_OF_RASTER));
-		QVERIFY(source.tile_pool.maxThreadCount() >= 1);
-		QVERIFY(source.tile_pool.maxThreadCount() <= 4);
+		QVERIFY(source.raster_owner.concurrencyLimit(
+			RasterResourceManager::Lane::BlockingIo
+		) >= 1);
+		QVERIFY(source.raster_owner.concurrencyLimit(
+			RasterResourceManager::Lane::BlockingIo
+		) <= 4);
+		QVERIFY(
+			RasterResourceManager::instance().threadLimit(
+				RasterResourceManager::Lane::BlockingIo
+			) <= 4
+		);
 
 		GdalTemplate::TileWindow window { 0, 0, 1, 1, 1 };
 		source.queueWantedTiles(window, true);
@@ -198,7 +207,9 @@ private slots:
 		Map map;
 		GdalTemplate source(path, &map);
 		QVERIFY(source.loadTemplateFileImpl());
-		source.tile_pool.setMaxThreadCount(1);
+		source.raster_owner.setConcurrencyLimit(
+			RasterResourceManager::Lane::BlockingIo, 1
+		);
 		source.queueWantedTiles({ 0, 0, 15, 15, 1 }, true);
 		QVERIFY(source.queued_tiles.size() <= 64);
 		QTRY_VERIFY_WITH_TIMEOUT(
