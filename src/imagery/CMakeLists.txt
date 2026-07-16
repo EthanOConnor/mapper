@@ -30,3 +30,20 @@ set_target_properties(mapper-imagery-core PROPERTIES
 )
 
 mapper_translations_sources(${MAPPER_IMAGERY_CORE_SOURCES})
+
+add_library(mapper-imagery-network STATIC
+  tile_network_manager.cpp
+  tile_network_manager.h
+)
+add_library(Mapper::ImageryNetwork ALIAS mapper-imagery-network)
+mapper_target_defaults(mapper-imagery-network)
+target_include_directories(mapper-imagery-network PUBLIC "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(mapper-imagery-network PUBLIC Qt6::Core Qt6::Network)
+target_compile_definitions(mapper-imagery-network PRIVATE
+  QT_NO_CAST_FROM_ASCII
+  QT_NO_CAST_TO_ASCII
+  QT_USE_QSTRINGBUILDER
+)
+set_target_properties(mapper-imagery-network PROPERTIES PREFIX "")
+
+mapper_translations_sources(tile_network_manager.cpp tile_network_manager.h)

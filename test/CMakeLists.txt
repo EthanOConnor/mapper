@@ -190,6 +190,8 @@ add_unit_test(util_t ../src/util/util
 # Low-level imagery contracts stay independent of the full Mapper runtime.
 add_test_helper(imagery_core_t)
 target_link_libraries(imagery_core_t PRIVATE Mapper::ImageryCore)
+add_test_helper(tile_network_manager_t)
+target_link_libraries(tile_network_manager_t PRIVATE Mapper::ImageryNetwork Qt6::Network)
 
 # Benchmarks
 add_system_test(coord_xml_t MANUAL)
