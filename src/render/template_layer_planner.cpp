@@ -215,18 +215,6 @@ RasterMosaic transparentMosaic(const std::vector<SourceTile>& tiles)
 	};
 }
 
-Rect fullImageTarget(const TileKey& tile)
-{
-	auto const scale_x = tile.target.width / tile.source.width;
-	auto const scale_y = tile.target.height / tile.source.height;
-	return {
-		tile.target.x - tile.source.x * scale_x,
-		tile.target.y - tile.source.y * scale_y,
-		tile.image.width * scale_x,
-		tile.image.height * scale_y,
-	};
-}
-
 }  // namespace
 
 class TemplateLayerPlanner::Impl
@@ -502,7 +490,7 @@ private:
 		RenderIRBuilder builder(next_revision_++);
 		builder.pushTransform(key.template_to_map);
 		for (auto const& [tile, image] : tiles)
-			builder.drawImage(image, fullImageTarget(tile));
+			builder.drawImage(image, tile.source, tile.target);
 		builder.popTransform();
 		auto scene = builder.finish();
 		layers_[&source] = { std::move(key), scene };

@@ -458,8 +458,8 @@ void FramePipelineTest::overlayPatternsAndImagesStayRetained()
 		if (auto const* image = std::get_if<render::DrawImage>(&command))
 		{
 			first_image = image->image;
-			QCOMPARE(image->target.width, 12.0);
-			QCOMPARE(image->target.height, 8.0);
+			QCOMPARE(image->source.width * image->image_to_scene.m11, 12.0);
+			QCOMPARE(image->source.height * image->image_to_scene.m22, 8.0);
 		}
 	}
 	QCOMPARE(pattern_count, 2);

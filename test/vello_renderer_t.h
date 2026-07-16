@@ -18,6 +18,7 @@ private slots:
 	void typedEncoderRetainsImmutableScenes();
 	void missingNativeTargetIsRetriable();
 	void offscreenGpuMatchesReference();
+	void affineImageSourceCropMatchesReference();
 	void miterLimitOneMatchesReference();
 	void selectionHandleGlyphsSurviveHighDpi();
 	void mapCorpusMatchesReference();

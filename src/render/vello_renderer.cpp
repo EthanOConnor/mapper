@@ -287,7 +287,8 @@ public:
 						throw std::logic_error("Vello received invalid immutable image data");
 					auto const image = retainImage(op.image);
 					auto const accepted = ffi::scene_draw_image(
-						*builder, *image->image, ffiRect(op.target), op.opacity
+						*builder, *image->image, ffiRect(op.source),
+						ffiTransform(op.image_to_scene), op.opacity
 					);
 					if (!accepted)
 						throw std::logic_error("Vello rejected immutable image data");

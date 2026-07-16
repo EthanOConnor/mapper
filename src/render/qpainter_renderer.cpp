@@ -261,10 +261,16 @@ void QPainterRenderer::render(QPainter& painter, const RenderIR& ir,
 				}
 				QImage image(bytes.data(), int(op.image->width), int(op.image->height),
 				             qsizetype(op.image->bytes_per_row), QImage::Format_RGBA8888);
+				auto const source = toQRectF(op.source).intersected(
+					QRectF(0, 0, image.width(), image.height())
+				);
+				if (!source.isValid() || source.isEmpty())
+					return;
 				painter.save();
 				painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
 				painter.setOpacity(painter.opacity() * op.opacity);
-				painter.drawImage(toQRectF(op.target), image);
+				painter.setWorldTransform(toQTransform(op.image_to_scene), true);
+				painter.drawImage(source, image, source);
 				painter.restore();
 			}
 			else if constexpr (std::is_same_v<T, DrawLinePattern>)

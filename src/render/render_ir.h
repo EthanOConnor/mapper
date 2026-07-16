@@ -225,7 +225,8 @@ struct StrokeEllipse
 struct DrawImage
 {
 	std::shared_ptr<const ImageData> image;
-	Rect target;
+	Rect source;
+	Transform image_to_scene;
 	double opacity = 1;
 };
 
@@ -284,6 +285,10 @@ public:
 	                   QualityHint quality = QualityHint::Default);
 	void drawImage(std::shared_ptr<const ImageData> image, Rect target,
 	               double opacity = 1);
+	void drawImage(std::shared_ptr<const ImageData> image, Rect source,
+	               Rect target, double opacity = 1);
+	void drawImage(std::shared_ptr<const ImageData> image, Rect source,
+	               Transform image_to_scene, double opacity = 1);
 	void drawLinePattern(PathPtr outline, Color color, double angle,
 	                     double spacing, double offset, double line_width);
 	void append(const RenderIR& scene);

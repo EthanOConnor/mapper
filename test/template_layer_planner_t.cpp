@@ -138,10 +138,14 @@ std::size_t imageCommandCount(const render::VectorPass& pass)
 	});
 }
 
-QImage renderReference(const render::FramePacket& frame)
+QImage renderReference(const render::FramePacket& frame,
+                       QColor background = Qt::white)
 {
-	QImage image(16, 16, QImage::Format_ARGB32_Premultiplied);
-	image.fill(Qt::white);
+	auto const width = qCeil(frame.view.width * frame.view.device_pixel_ratio);
+	auto const height = qCeil(frame.view.height * frame.view.device_pixel_ratio);
+	QImage image(width, height, QImage::Format_ARGB32_Premultiplied);
+	image.setDevicePixelRatio(frame.view.device_pixel_ratio);
+	image.fill(background);
 	QPainter painter(&image);
 	auto const completion = render::QPainterFrameRenderer().render(painter, frame);
 	Q_ASSERT(completion.status == render::FrameStatus::Presented);
@@ -157,10 +161,12 @@ QColor velloPixel(const render::VelloImage& image, QPoint point)
 	return view.pixelColor(point);
 }
 
-QImage renderVello(const render::FramePacketPtr& frame)
+QImage renderVello(
+	const render::FramePacketPtr& frame,
+	render::Color background = { 65535, 65535, 65535, 65535 })
 {
 	render::VelloRenderer renderer;
-	auto const rendered = renderer.renderOffscreen(frame);
+	auto const rendered = renderer.renderOffscreen(frame, background);
 	Q_ASSERT_X(rendered, Q_FUNC_INFO, renderer.lastError().c_str());
 	QImage view(
 		rendered->rgba8.data(), int(rendered->width), int(rendered->height),
@@ -388,6 +394,9 @@ void TemplateLayerPlannerTest::preservesTransparentGuttersWithoutTileSeams()
 	auto whole_plan = whole_planner.plan(whole_map, whole_view, { -10, -7, 20, 14 }, 3.2);
 	QVERIFY(tiled_plan.complete);
 	QVERIFY(whole_plan.complete);
+	QCOMPARE(tiled_plan.newly_resident_images, std::size_t(1));
+	QCOMPARE(tiled_plan.below_map.size(), std::size_t(1));
+	QCOMPARE(imageCommandCount(tiled_plan.below_map.front()), std::size_t(1));
 
 	auto const tiled_snapshot = tiled_map.publishRenderSnapshot();
 	auto const whole_snapshot = whole_map.publishRenderSnapshot();
@@ -395,12 +404,17 @@ void TemplateLayerPlannerTest::preservesTransparentGuttersWithoutTileSeams()
 	QVERIFY(whole_snapshot);
 	render::FramePlanner tiled_frame_planner;
 	render::FramePlanner whole_frame_planner;
-	auto const tiled = renderVello(scaledFrameFor(
+	auto const tiled_frame = scaledFrameFor(
 		*tiled_snapshot, tiled_frame_planner, std::move(tiled_plan)
-	));
-	auto const whole = renderVello(scaledFrameFor(
+	);
+	auto const whole_frame = scaledFrameFor(
 		*whole_snapshot, whole_frame_planner, std::move(whole_plan)
-	));
+	);
+	auto const transparent = render::Color { 0, 0, 0, 0 };
+	auto const tiled = renderVello(tiled_frame, transparent);
+	auto const whole = renderVello(whole_frame, transparent);
+	auto const tiled_reference = renderReference(*tiled_frame, Qt::transparent);
+	auto const whole_reference = renderReference(*whole_frame, Qt::transparent);
 
 	// The source boundary projects to x=32.25. Compare a narrow band across
 	// it against one monolithic image, including fractional transform coverage.
@@ -410,13 +424,25 @@ void TemplateLayerPlannerTest::preservesTransparentGuttersWithoutTileSeams()
 		{
 			auto const actual = tiled.pixelColor(x, y);
 			auto const expected = whole.pixelColor(x, y);
+			auto const reference_actual = tiled_reference.pixelColor(x, y);
+			auto const reference_expected = whole_reference.pixelColor(x, y);
 			QVERIFY2(
 				std::abs(actual.red() - expected.red()) <= 2
 				&& std::abs(actual.green() - expected.green()) <= 2
-				&& std::abs(actual.blue() - expected.blue()) <= 2,
+				&& std::abs(actual.blue() - expected.blue()) <= 2
+				&& std::abs(actual.alpha() - expected.alpha()) <= 2,
 				qPrintable(QStringLiteral("tile seam at %1,%2: %3 vs %4")
 				           .arg(x).arg(y).arg(actual.name(QColor::HexArgb),
 				                              expected.name(QColor::HexArgb)))
+			);
+			QVERIFY2(
+				std::abs(reference_actual.red() - reference_expected.red()) <= 2
+				&& std::abs(reference_actual.green() - reference_expected.green()) <= 2
+				&& std::abs(reference_actual.blue() - reference_expected.blue()) <= 2
+				&& std::abs(reference_actual.alpha() - reference_expected.alpha()) <= 2,
+				qPrintable(QStringLiteral("reference tile seam at %1,%2: %3 vs %4")
+				           .arg(x).arg(y).arg(reference_actual.name(QColor::HexArgb),
+				                              reference_expected.name(QColor::HexArgb)))
 			);
 		}
 	}

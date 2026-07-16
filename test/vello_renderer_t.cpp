@@ -125,13 +125,14 @@ render::FramePacketPtr mapFrame(Map& map, QSize viewport,
 	});
 }
 
-QImage referenceImage(const render::FramePacket& frame)
+QImage referenceImage(const render::FramePacket& frame,
+                      QColor background = Qt::white)
 {
 	auto const width = qCeil(frame.view.width * frame.view.device_pixel_ratio);
 	auto const height = qCeil(frame.view.height * frame.view.device_pixel_ratio);
 	QImage image(width, height, QImage::Format_ARGB32_Premultiplied);
 	image.setDevicePixelRatio(frame.view.device_pixel_ratio);
-	image.fill(Qt::white);
+	image.fill(background);
 	QPainter painter(&image);
 	painter.setRenderHint(QPainter::Antialiasing, true);
 	auto const completion = render::QPainterFrameRenderer().render(painter, frame);
@@ -293,6 +294,68 @@ void VelloRendererTest::offscreenGpuMatchesReference()
 	        << "high-delta pixels" << difference.high_delta_pixels;
 	QVERIFY(difference.mean_channel_delta < 3);
 	QVERIFY(difference.high_delta_pixels < actual.width() * actual.height() / 50);
+}
+
+void VelloRendererTest::affineImageSourceCropMatchesReference()
+{
+	constexpr auto width = std::uint32_t(6);
+	constexpr auto height = std::uint32_t(6);
+	auto pixels = std::make_shared<std::vector<std::uint8_t>>(
+		std::size_t(width * height * 4), std::uint8_t(0)
+	);
+	for (auto y = std::uint32_t(0); y < height; ++y)
+	{
+		for (auto x = std::uint32_t(0); x < width; ++x)
+		{
+			auto const offset = std::size_t((y * width + x) * 4);
+			(*pixels)[offset + 0] = 255;
+			(*pixels)[offset + 1] = 0;
+			(*pixels)[offset + 2] = 255;
+			(*pixels)[offset + 3] = 255;
+			if (x >= 1 && x < 5 && y >= 1 && y < 5)
+			{
+				(*pixels)[offset + 0] = std::uint8_t(20 + x * 15);
+				(*pixels)[offset + 1] = std::uint8_t(160 + y * 12);
+				(*pixels)[offset + 2] = 35;
+				(*pixels)[offset + 3] = std::uint8_t(80 + x * 20);
+			}
+		}
+	}
+	auto image = std::make_shared<const render::ImageData>(render::ImageData {
+		width, height, width * 4, std::move(pixels)
+	});
+
+	render::RenderIRBuilder builder(44, { 0, 0, 64, 64 });
+	builder.drawImage(
+		std::move(image),
+		{ 1, 1, 4, 4 },
+		{ 4, 1, -1, 4, 20, 10 }
+	);
+	auto frame = std::make_shared<render::FramePacket>();
+	frame->id = 9;
+	frame->revision = 44;
+	frame->view = { 64, 64, 1, {} };
+	frame->vector_passes.push_back({ builder.finish() });
+
+	render::VelloRenderer renderer;
+	auto const transparent = render::Color { 0, 0, 0, 0 };
+	auto const rendered = renderer.renderOffscreen(frame, transparent);
+	QVERIFY2(rendered, renderer.lastError().c_str());
+	auto const actual = imageFromVello(*rendered);
+	auto const expected = referenceImage(*frame, Qt::transparent);
+
+	QCOMPARE(actual.pixelColor(8, 8), QColor(Qt::transparent));
+	QCOMPARE(expected.pixelColor(8, 8), QColor(Qt::transparent));
+	QVERIFY(actual.pixelColor(29, 25).green() > 100);
+	QVERIFY(actual.pixelColor(29, 25).alpha() > 50);
+
+	auto const difference = compareImages(actual, expected);
+	qInfo() << "Affine cropped image Vello/QPainter mean channel delta"
+	        << difference.mean_channel_delta
+	        << "high-delta pixels" << difference.high_delta_pixels;
+	QVERIFY(difference.mean_channel_delta < 3.2);
+	QVERIFY(difference.high_delta_pixels
+	        < 2 * (actual.width() + actual.height()));
 }
 
 void VelloRendererTest::miterLimitOneMatchesReference()
