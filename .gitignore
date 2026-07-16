@@ -8,7 +8,6 @@ CMakeLists.txt.user*
 build*/
 vcpkg_installed/
 aqtinstall.log
-/test/acceptance/corpus.local.toml
 help/*.qhc
 3rd-party/*/download
 !3rd-party/*/download/README.txt

@@ -1,8 +1,8 @@
 # Mapper modernization campaign
 
-The campaign ran on `modern-core` and was promoted without rewriting history to
-the public product branch `main`. It starts at upstream commit
-`064e6c943ee963277f1e930bda595723acd3e8c6` (2026-06-20). Upstream is the
+The campaign began on an internal implementation line and was promoted without
+rewriting history to the public product branch `main`. It starts at upstream
+commit `064e6c943ee963277f1e930bda595723acd3e8c6` (2026-06-20). Upstream is the
 ancestry and behavioral baseline. `full-speed-ahead` is evidence about what was
 tried, what looked good, what failed, and what was measured. It is not a code
 base to merge or mechanically replay.
@@ -58,10 +58,11 @@ The architecture is judged against these existing uses:
 7. Build, package, start, suspend, resume, resize, and recover the application on
    its supported platforms.
 
-## Recovery checkpoints
+## Architectural recovery layers
 
-These are recovery points inside one sustained campaign, not product phases.
-Feature work stayed frozen until all were complete.
+These seven items describe the architecture recovered by one sustained
+campaign. They are layers, not product phases or a count of checkpoint tags.
+Feature work stays frozen until the foundation closeout is complete.
 
 1. Modern CMake/dependency model and Qt 6 application stand-up.
 2. Immutable render snapshot/IR and QPainter reference renderer.
@@ -73,14 +74,12 @@ Feature work stayed frozen until all were complete.
 7. Delete transitional paths and enforce the intended dependency direction by
    the structure of the build targets and focused tests.
 
-Each checkpoint must build and have focused verification. Its final state is a
-dedicated commit with an annotated `modernization-checkpoint-N` tag recording
-the toolchain, verification commands, test totals, corpus ids, measurements,
-and genuine remaining failures. Preparatory commits may exist between tags,
-but work on checkpoint N+1 does not begin until checkpoint N is clean, buildable,
-tested, committed, and tagged. This creates useful recovery points without
-turning the campaign into incremental product delivery or a permanent migration
-architecture.
+Numbered annotated checkpoint tags record multiple buildable, tested public
+recovery points across these layers. Dated commands, test discovery counts,
+measurements, artifacts, and genuine remaining failures belong in the
+acceptance record for the exact tagged revision. The tags create useful
+recovery points without turning the campaign into incremental product delivery
+or a permanent migration architecture.
 
 ## Target architecture
 
@@ -111,32 +110,41 @@ the whole map or hold a global map lock while workers render.
 The small IR expresses transforms, clips, fills, strokes, opacity,
 blend/overprint semantics, images, line patterns, and world bounds. Paths have
 explicit shared ownership. Map text, overlay labels, and track labels are
-shaped with Qt before publication and frozen into the same immutable fill and
-stroke paths as other geometry. The backend therefore needs no font registry
-or font-byte ownership contract.
+shaped with Qt while their IR is built and frozen into the same immutable fill
+and stroke paths as other geometry before that IR enters a `FramePacket`. The
+backend therefore needs no font registry or font-byte ownership contract.
 
 QPainter consumes this IR as the deterministic reference, headless, print, and
 PDF path. Once the cutover is complete there is no second direct
-model-to-QPainter map-output path. Vello screen rendering has one fixed Area-AA
-policy. QPainter inherits its caller's render hint unless a direct caller
-explicitly disallows antialiasing.
+model-to-QPainter map-output path. Vello screen and offscreen rendering use a
+fixed Area-AA policy. QPainter begins with its caller's render hint;
+`ForceAntialiasing` commands may enable antialiasing only when the caller allows
+it, and an explicit `DisableAntialiasing` request dominates.
 
 ### Retained vector rendering
 
-Camera movement is a frame transform, not a reason to rebuild geometry. The
-spatial index selects retained scene pages affecting the viewport. Each
-drawable paints once per frame: clipped duplicate geometry is forbidden because
-translucent copies double-blend at page boundaries. Ordering-sensitive content
-retains stable map color/z order across pages.
+Camera movement is a frame transform, not a reason to rebuild geometry. When a
+map IR is rebuilt, the immutable snapshot preserves color/object order and
+filters object and renderable extents against the requested bounds. The
+resulting map pass and encoded scene remain retained while the snapshot and
+render request are unchanged. Each drawable paints once per frame: clipped
+duplicate geometry is forbidden because translucent copies double-blend at page
+boundaries. Ordering-sensitive content retains stable map color/z order.
 
-An edit keeps the last complete revision visible until replacement data is
-ready. A frame packet owns references to everything it uses, so background
-completion or eviction cannot destroy a scene mid-frame.
+A frame packet owns references to everything it uses, so background completion
+or eviction cannot destroy a scene mid-frame. Snapshots structurally share
+unchanged object and path data across edits; the frame planner reuses map passes
+only while the snapshot and relevant render request remain unchanged. Raster
+convergence may install bounded intermediate packets as ready images are
+admitted; `TemplateLayerPlan` reports coverage and admission progress so the
+product coordinator either continues or waits for the existing source-ready
+notification.
 
 ### Vello and presentation
 
 Rust owns the wgpu instance, adapter, surface, device, queue, Vello renderer,
-GPU scene handles, raster residency, composition, present, and render thread.
+GPU scene handles, GPU image/atlas residency, composition, present, and render
+thread.
 It renders directly to the wgpu surface hosted by a Qt `QWindow`. QRhi is not a
 wgpu bridge; removing the cross-API texture handoff deletes a large class of
 platform-specific synchronization and lifetime code.
@@ -196,17 +204,18 @@ Android main thread through `QAndroidApplication`; no Qt-private reflection,
 second rendering view, or QPA header is involved.
 
 The renderer first draws to an RGBA8 storage texture, then uses wgpu's maintained
-`TextureBlitter` for the swapchain format. The same path supports deterministic
-GPU readback for conformance tests without creating a second encoder. The
-complete-operation fixture and five map/DPR/rotation/overprint scenarios require
+`TextureBlitter` for the swapchain format. The same render-description path
+supports deterministic GPU readback for conformance tests; the offscreen path
+owns its readback command encoder. The complete-operation fixture and five
+map/DPR/rotation/overprint scenarios require
 mean channel delta below 3 and fewer than 2 percent high-delta pixels against
 the QPainter reference. The initial complete-map benchmark records 10,736
 commands once and includes GPU synchronization plus a 3 MiB CPU readback on
 every measured frame; that deliberately stricter offscreen measurement is not
 substituted for later native-presentation latency measurement. In the checkpoint
-4 Release build, 300 samples at 1024 x 768 on an Apple M3 Max measured 6.67 ms
-p50, 9.08 ms p95, and 10.91 ms maximum for that render-and-readback path while
-encoding the retained scene exactly once.
+4 Release build, one unmeasured warmup preceded 300 samples at 1024 x 768 on an
+Apple M3 Max; they measured 6.67 ms p50, 9.08 ms p95, and 10.91 ms maximum for
+that render-and-readback path while encoding the retained scene exactly once.
 
 ### Raster
 
@@ -214,7 +223,7 @@ Checkpoint 5 uses the GDAL 3.13 fine-grained C++ API directly:
 `GDALDatasetUniquePtr`, `GDALDataset::Open`, `GDALDataset::RasterIO`, and
 `GDALDataset::IsThreadSafe`. Raster datasets are opened with the thread-safe
 read-only contract and decoded on a private Qt `QThreadPool` of at most four
-workers. No compatibility C-handle layer or application-owned worker fleet was
+workers. No compatibility C-handle layer or custom worker-thread framework was
 introduced.
 
 Useful native blocks are retained. A large strip or monolithic source instead
@@ -249,10 +258,11 @@ continues through coalesced product requests; one waiting for source pixels
 sleeps until the existing source-ready notification.
 
 On the Apple M3 Max checkpoint machine, the Release heavy-raster gate used the
-831 MiB Fishtrap source at 2068 x 1906 physical pixels for 300 synchronized
-Vello render-and-readback samples. Exact visible coverage arrived in 3.24 s;
-the retained frame held 25 images and 27 raster-scene commands. Samples measured
-5.14 ms p50, 5.27 ms p95, and 7.40 ms maximum. Against the QPainter reference,
+831 MiB Fishtrap source at 2068 x 1906 physical pixels. One unmeasured warmup
+preceded 300 synchronized Vello render-and-readback samples. Exact visible
+coverage arrived in 3.24 s; the retained frame held 25 images and 27
+raster-scene commands. Samples measured 5.14 ms p50, 5.27 ms p95, and 7.40 ms
+maximum. Against the QPainter reference,
 the two maintained bilinear samplers differed by 3.05 mean RGBA-channel levels,
 with exact alpha and five high-delta pixels among 3.94 million. Peak RSS was
 468 MiB and macOS peak footprint was 1.08 GiB. Checkpoint 6's
@@ -271,9 +281,10 @@ not require a GPU readback or a model-to-QPainter screen escape hatch.
 `OverlaySceneBuilder` translates the small retained Qt drawing vocabulary into
 backend-neutral IR, including dashed strokes, standard hatch patterns, text,
 and stable-DPR images. Unsupported brush kinds fail at the boundary instead of
-silently changing appearance. The frame planner reuses unchanged map passes,
-assigns monotonic ids even to empty frames, and preserves the last complete
-frame while replacement work is pending.
+silently changing appearance. The frame planner retains a map pass while its
+snapshot and render request remain unchanged, assigns monotonic ids even to
+empty frames, and installs bounded intermediate raster packets while ready
+images converge.
 
 Printing, preview, PDF, raster output, map separations, grids, and templates now
 consume immutable render snapshots and IR through the QPainter output backend.
@@ -285,15 +296,8 @@ presentation states; actual renderer failures remain fatal and visible.
 Desktop tests exercise direct native-surface creation, lifecycle ordering,
 overlay fidelity, retained template composition, and shared print semantics.
 The Android arm64 package is cross-built from the same CMake preset and public
-native bridge; a physical-device surface smoke remains mandatory before the
-campaign can claim Android runtime acceptance.
-
-Checkpoint 6 closes with 35 of 35 tests passing in both Debug and Release, the
-six render/frame/raster/print tests passing under AddressSanitizer and
-UndefinedBehaviorSanitizer, and Rust test, clippy, formatting, and Android
-target checks clean. Qt's sequential package targets produced both an unsigned
-arm64 release APK and release AAB with Java compilation and Android lint in the
-gate. No physical Android device was attached for the final surface smoke.
+native bridge. Exact test discovery counts and package evidence are kept in the
+dated acceptance record rather than this evergreen architecture summary.
 
 ### Final dependency cut
 
@@ -325,21 +329,22 @@ by the Android cross-link. This is intentionally the whole enforcement
 mechanism: target structure, normal compiler/linker failures, and focused tests,
 not a custom architecture checker.
 
-The final Debug and Release gates each pass 35 of 35 tests. Seven focused
-render/frame/raster/print/presentation tests pass under AddressSanitizer and
-UndefinedBehaviorSanitizer. Rust's test, clippy with warnings denied, and
-formatting checks are clean. The Android arm64 build compiles C++, Rust, and
-Java, runs Android lint, and produces both the unsigned release APK and release
-AAB. A physical-device surface smoke remains the only platform acceptance item
-that cannot be performed without hardware.
+The maintained gates cover the discovered desktop suite, focused
+render/frame/raster/print/presentation behavior, Rust tests, clippy with
+warnings denied, formatting, and Android arm64 packaging. Exact results and
+artifacts are recorded against their public commits. Physical Android
+surface/document verification and Windows printer output remain
+release-candidate device gates, not foundation-closeout blockers.
 
-The final Release retained-vector benchmark encodes the 10,736-command scene
-once and measures 300 synchronized 1024 x 768 render/readback samples at
-6.70 ms p50, 9.10 ms p95, and 10.06 ms maximum. The final Fishtrap raster gate
-reaches exact coverage in 3.33 s and measures 300 synchronized 2068 x 1906
+The checkpoint-7 Release retained-vector benchmark encodes the 10,736-command
+scene once, performs one unmeasured warmup, and measures 300 synchronized
+1024 x 768 render/readback samples at 6.70 ms p50, 9.10 ms p95, and 10.06 ms
+maximum. The checkpoint-7 Fishtrap raster gate reaches exact coverage in
+3.33 s and, after one unmeasured warmup, measures 300 synchronized 2068 x 1906
 samples at 4.08 ms p50, 4.28 ms p95, and 6.22 ms maximum, with 25 retained
 images, 3.05 mean RGBA-channel delta, exact alpha, and five high-delta pixels.
-These agree with the checkpoint-4/5 baselines and show no final-cut regression.
+These agree with the checkpoint-4/5 baselines and show no dependency-cut
+regression.
 
 ## Lessons from the exploratory renderer
 
@@ -379,12 +384,21 @@ Do not add a package for a tiny readable standard-library helper or pull in a
 second application framework. Prefer imported/package targets over copied
 source. A local patch needs a removal condition and a test.
 
-The development baseline is CMake 4.4.0, Ninja 1.13.0, C++23, Qt 6.10.3,
-PROJ 9.8.1, GDAL 3.13.1, ICU 78.3, and Rust stable with committed `Cargo.lock`.
-Distributable builds use the pinned vcpkg manifest; fast local builds may use
-system packages that satisfy the same minimums. Build properties are
-target-scoped; there are no global include directories, global definitions, or
-string-appended compiler flags.
+The development baseline is CMake 4.4.0, Ninja 1.13.0, C++23, Qt 6.11.1,
+PROJ 9.8.1, GDAL 3.13.1, ICU 78.3, and Rust stable. Qt 6.11.1 is the newest
+stable release with published packages for the complete supported target
+matrix; the available Qt 6.12.0 packages are still Beta 2 pre-releases. Ninja
+1.13.0 is retained because 1.13.2 was unavailable from the selected simple
+PyPI install channel; a custom download path would add maintenance without
+changing product behavior.
+
+`src/render/vello/Cargo.toml` declares the Rust dependency intent and its
+committed `Cargo.lock` is the exact graph authority. That graph currently uses
+Vello 0.9.0 and wgpu 29.0.4. Corrosion 0.6.1 is hash-pinned by CMake as the
+ordinary Cargo integration. Distributable builds use the pinned vcpkg
+manifest; fast local builds may use system packages that satisfy the same
+minimums. Build properties are target-scoped; there are no global include
+directories, global definitions, or string-appended compiler flags.
 
 ## Corpus
 
@@ -392,74 +406,47 @@ The public corpus includes the example maps, overprinting map, text fixtures,
 rotated patterns, symbol edge cases, raster/world-file/GeoTIFF templates,
 legacy maps, large-coordinate cases, hidden/helper symbols, and undo fixtures.
 
-`test/acceptance/corpus.example.toml` defines a tiny manifest for local real
-assets. `corpus.local.toml` is ignored by Git. The current machine's manifest
-contains Fishtrap Lake OMAP/OCD/PDF and its 831 MB raster, dense Kelsey
-Creek/Wilburton contours, a legacy Kelsey OCD map, and a Wilburton raster/object
-fixture. Final acceptance expands this to at least 50 real maps across ISOM,
-ISSprOM, ISSkiOM, MTBO, urban/sprint, dense contours, imported OCD, and raster
-templates. Reports publish ids, tags, hashes, and aggregate results, never
-private files.
+No external corpus manifest is consumed by the build or test graph. Real-map
+evidence is recorded directly in the dated acceptance and manual-parity
+records; private local asset paths are not a public project contract.
 
 The repeatable interaction trace and the 2026-07-14 side-by-side evidence
 against `full-speed-ahead` are recorded in
 `test/manual/render-parity.md`.
 
-The six gates for accepting this rewrite as the practical foundation, including
-the two remaining physical/human verdicts, are tracked in
+The current gates for accepting this rewrite as the practical foundation are
+tracked with exact dated evidence in
 `test/manual/rewrite-foundation-acceptance.md`.
 
-## Acceptance thresholds
+## Maintained foundation gates
 
-### Correctness
+- The complete discovered CTest suite and the Rust format, clippy, and test
+  gates pass at the exact candidate revision without weakened assertions.
+- The complete-operation fixture and five maintained map/DPR/rotation/overprint
+  scenarios compare Vello with QPainter at a mean channel delta below 3 and
+  fewer than 2 percent high-delta pixels.
+- Raster tests enforce ordered composition, bounded four-image admission,
+  missing-source wakeup without polling, stable retained-image identity, and
+  fractional-transform gutter coverage. The heavy-raster executable retains
+  its pass/fail image comparison; dated runs record exact coverage time,
+  latency, memory, and image-delta results.
+- CMake presets build, test, and package the desktop targets and cross-build the
+  Android arm64 APK/AAB in the GitHub-hosted matrix. Package and dependency
+  notice evidence, exact run links, and artifact identities are recorded in the
+  acceptance report. Build provenance remains a least-privilege, version-tag
+  release path and is not claimed for ordinary candidate runs.
+- The same three representative maps and interaction traces are compared live
+  on the candidate and `full-speed-ahead`. A human verdict covers graphic
+  quality, fluidity, blanking and seams, cursors, selection and drawing,
+  pan/zoom/rotation, and overlays.
+- Dated renderer benchmarks name their hardware, viewport, DPR, fixture,
+  warmup, build type, and samples. They are regression evidence, not an
+  invented universal frame budget or soak gate.
+- Physical Android surface/document behavior and Windows printer output remain
+  release-candidate gates. They do not weaken the automated foundation gate or
+  become silently skipped results.
 
-- Existing upstream tests pass without weakened assertions.
-- OMAP/XMAP/OCD open, save/reload, and undo/redo preserve behavior.
-- Every IR operation has QPainter and Vello conformance coverage.
-- Fixed reference goldens are stable. Cross-backend comparisons use edge-aware
-  metrics: SSIM at least 0.995, at least 99.5% of non-edge pixels with
-  CIEDE2000 at most 2, and no unexplained error region wider than two physical
-  pixels.
-- Clips, fill rules, transparency, overprint, patterns, path text, raster
-  gutters, and page seams pass at DPR 1 and 2, rotations, and fractional zooms.
-- Pan/zoom/style/edit transitions never show a blank frame, wrong revision,
-  destroyed resource, or translucent seam.
-- Print/PDF preserves page geometry, color intent, fonts, and raster placement.
-
-### Performance
-
-Measurements name hardware, viewport, DPR, corpus id, warmup, and build type.
-On the reference Apple-silicon Mac at about 2068 x 1906 physical pixels:
-
-- warm dense-vector and heavy-raster render-thread CPU p95 is at most 8.33 ms
-  and p99 at most 12 ms;
-- Qt frame preparation p95 is at most 1.5 ms;
-- no input/lifecycle handler blocks for 8 ms or more;
-- no post-warm stall exceeds 50 ms in a 10-minute stress run;
-- style activation posts in under 10 ms and shows the right revision within
-  100 ms on the heavy fixture;
-- a single-object edit publishes its snapshot in under 5 ms p95 on a dense map
-  with work proportional to affected immutable blocks.
-
-Every supported platform must stay under a 16.67 ms p95 CPU frame budget for
-the 60 Hz reference workload with zero blank frames. A four-hour scripted soak
-must have bounded caches and less than 10% resident-memory growth after the
-first 30 minutes; desktop high-tier process memory stays below 1.5 GB.
-
-Open, save, print, and export may not regress more than 10% from the recorded
-upstream baseline without a reviewed correctness/quality reason.
-
-### Platform and delivery
-
-- Clean preset builds on macOS, Windows, and Linux.
-- Android arm64 cross-build and real-device surface smoke.
-- Qt 6 only: no Qt 5, Core5Compat, qmake, or old superbuild/Azure path.
-- Dependency/license inventory is available to packaging.
-- Existing navigation, editing, overlays, print/export, and lifecycle scenarios
-  pass on the new paths.
-- Old backing store, old screen-QPainter path, duplicate raster paths,
-  QRhi/wgpu interop, temporary backend flags, and migration adapters are deleted.
-
-For each checkpoint, the commit, commands, test totals, corpus ids, benchmark
-samples, visual artifacts, and genuine remaining failures are recorded. A
-failure is not converted into a skip merely to close a checkpoint.
+Each checkpoint record names its exact commit, commands, discovered tests,
+artifacts, genuine remaining failures, and the applicable benchmark or visual
+evidence for that phase. A failure is not converted into a skip merely to close
+a checkpoint.
