@@ -82,11 +82,11 @@ for native presentation latency:
   showed the same map geometry, text, line patterns, colors, and ordering. The
   rewrite was at least as crisp at physical resolution; no graphic-quality
   regression was found.
-- The native 120-frame measurements remain below 8.33 ms, the historical
-  120 Hz diagnostic threshold used in this comparison. This is headroom
-  evidence, not a maintained universal frame budget. The lower p95 values and
-  absence of duplicate submissions support smoother input response in the
-  rewrite. During this run, the trace exposed and removed an unnecessary
+- The reported native averages and p95 values remain below 8.33 ms, the
+  historical 120 Hz diagnostic threshold used in this comparison. This is
+  headroom evidence, not a maintained universal frame budget. The lower p95
+  values and absence of duplicate submissions support smoother input response
+  in the rewrite. During this run, the trace exposed and removed an unnecessary
   old-frame submission caused by assigning an unchanged canvas background
   before every new frame.
 - `QWidget::grab()` cannot capture the historical native Metal child surface;
