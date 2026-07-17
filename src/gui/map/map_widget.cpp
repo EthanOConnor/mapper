@@ -1184,7 +1184,7 @@ void MapWidget::renderFrame()
 	// Preserve native-resolution resting frames while reducing the fill cost that
 	// dominates latency on mobile GPUs during direct manipulation.
 	if (current_pressed_buttons != 0 || pinching)
-		device_pixel_ratio = std::max(1.0, device_pixel_ratio * 0.75);
+		device_pixel_ratio = std::max(0.25, device_pixel_ratio * 0.25);
 #endif
 	render::FrameRequest frame_request {
 		{
