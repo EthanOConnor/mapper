@@ -1223,13 +1223,29 @@ bool OnlineRasterTemplate::workingSetFits(const TileWindow& window) const noexce
 bool OnlineRasterTemplate::keyNeededForWindow(const OnlineRasterTileKey& key,
 											  const TileWindow& window) const noexcept
 {
-	if (window.isEmpty() || key.zoom < source_->min_zoom || key.zoom > window.zoom)
+	if (!source_ || window.isEmpty() || key.zoom < source_->min_zoom
+		|| key.zoom > source_->max_zoom
+		|| key.zoom > window.zoom + max_retained_zoom_delta)
 	{
 		return false;
 	}
-	auto const shift = window.zoom - key.zoom;
-	return key.column >= (window.min_column >> shift) && key.column <= (window.max_column >> shift)
-		   && key.row >= (window.min_row >> shift) && key.row <= (window.max_row >> shift);
+	if (key.zoom <= window.zoom)
+	{
+		auto const shift = window.zoom - key.zoom;
+		return key.column >= (window.min_column >> shift)
+			   && key.column <= (window.max_column >> shift)
+			   && key.row >= (window.min_row >> shift)
+			   && key.row <= (window.max_row >> shift);
+	}
+
+	// Nearby descendants can fill the wanted tile while its exact/coarser
+	// coverage is still arriving. Retain only descendants whose ancestor lies
+	// in the current overscanned window; unrelated work is still cancelled.
+	auto const shift = key.zoom - window.zoom;
+	auto const ancestor_column = key.column >> shift;
+	auto const ancestor_row = key.row >> shift;
+	return ancestor_column >= window.min_column && ancestor_column <= window.max_column
+		   && ancestor_row >= window.min_row && ancestor_row <= window.max_row;
 }
 
 void OnlineRasterTemplate::cancelUnwantedWork(const TileWindow& window)

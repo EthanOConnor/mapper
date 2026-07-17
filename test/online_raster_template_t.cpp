@@ -1576,6 +1576,9 @@ class OnlineRasterTemplateTest : public QObject
 		auto const generation = online.generation_;
 		QVERIFY(online.keyNeededForWindow({ 1, 0, 0 }, { 2, 0, 1, 0, 1 }));
 		QVERIFY(!online.keyNeededForWindow({ 2, 3, 3 }, { 2, 0, 1, 0, 1 }));
+		QVERIFY(online.keyNeededForWindow({ 2, 3, 3 }, { 0, 0, 0, 0, 0 }));
+		QVERIFY(!online.keyNeededForWindow({ 2, 4, 0 }, { 0, 0, 0, 0, 0 }));
+		QVERIFY(online.keyNeededForWindow({ 2, 3, 3 }, { 1, 1, 1, 1, 1 }));
 		online.queueWindow({}, true);
 		QCOMPARE(online.generation_, generation);
 		QVERIFY(online.decode_owner_.isValid());

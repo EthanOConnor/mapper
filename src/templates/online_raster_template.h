@@ -482,6 +482,10 @@ class OnlineRasterTemplate final : public TemplateImage
 	static constexpr qint64 max_atlas_pixels = qint64(16) * 1024 * 1024;
 	static constexpr qint64 max_atlas_peak_bytes = qint64(128) * 1024 * 1024;
 #endif
+	// Let nearby work finish so a quick reversal in zoom direction can reuse it
+	// as provisional coverage. The admitted fetch/decode queues remain globally
+	// bounded, and spatial filtering prevents unrelated finer tiles lingering.
+	static constexpr int max_retained_zoom_delta = 2;
 	static constexpr qint64 max_tile_pixels =
 		imagery::maximum_runtime_tile_pixels;
 	static constexpr int max_tile_dimension =
