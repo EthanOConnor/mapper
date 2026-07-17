@@ -481,22 +481,41 @@ void TemplateLayerPlannerTest::retainsCompleteRasterSceneAcrossZoomHandoff()
 		QRectF(-2, -2, 4, 4));
 	auto* raster_ptr = raster.get();
 	map.addTemplate(0, std::move(raster));
-	map.setFirstFrontTemplate(1);
+	map.setFirstFrontTemplate(0);
 	view.setTemplateVisibility(map.getTemplate(0), { 1, true });
 
 	render::TemplateLayerPlanner planner;
 	auto first = planner.plan(map, view, { -8, -8, 16, 16 }, 1);
 	QVERIFY(first.complete);
-	QCOMPARE(first.below_map.size(), std::size_t(1));
-	auto const complete_scene = first.below_map.front().scene;
+	QCOMPARE(first.above_map.size(), std::size_t(1));
+	auto const complete_scene = first.above_map.front().scene;
 
 	raster_ptr->setTiles({ RasterTemplateTile {
 		{}, { -4, -4, 8, 8 }, {}, 0, true, false
 	} });
 	auto loading = planner.plan(map, view, { -8, -8, 16, 16 }, 2);
 	QVERIFY(!loading.complete);
-	QCOMPARE(loading.below_map.size(), std::size_t(1));
-	QCOMPARE(loading.below_map.front().scene, complete_scene);
+	QCOMPARE(loading.above_map.size(), std::size_t(1));
+	QCOMPARE(loading.above_map.front().scene, complete_scene);
+
+	auto provisional = tile(
+		solidImage({ 8, 4 }, Qt::blue), { -4, -2, 8, 4 }
+	);
+	provisional.provisional = true;
+	raster_ptr->setTiles({ std::move(provisional) });
+	loading = planner.plan(map, view, { -8, -8, 16, 16 }, 2);
+	QVERIFY(!loading.complete);
+	QCOMPARE(loading.above_map.size(), std::size_t(1));
+	QCOMPARE(imageCommandCount(loading.above_map.front()), std::size_t(2));
+	auto const snapshot = map.publishRenderSnapshot();
+	QVERIFY(snapshot);
+	render::FramePlanner frame_planner;
+	auto const transition_frame = frameFor(
+		*snapshot, frame_planner, std::move(loading)
+	);
+	auto const transition = renderReference(*transition_frame);
+	QCOMPARE(transition.pixelColor(6, 8), QColor(Qt::red));
+	QCOMPARE(transition.pixelColor(10, 8), QColor(Qt::blue));
 
 	QVector<RasterTemplateTile> next_zoom;
 	for (int index = 0; index < 6; ++index)
@@ -510,12 +529,13 @@ void TemplateLayerPlannerTest::retainsCompleteRasterSceneAcrossZoomHandoff()
 	loading = planner.plan(map, view, { -8, -8, 16, 16 }, 2);
 	QVERIFY(!loading.complete);
 	QCOMPARE(loading.newly_resident_images, std::size_t(4));
-	QCOMPARE(loading.below_map.front().scene, complete_scene);
+	QCOMPARE(loading.above_map.size(), std::size_t(1));
+	QVERIFY(loading.above_map.front().scene != complete_scene);
 	auto ready = planner.plan(map, view, { -8, -8, 16, 16 }, 2);
 	QVERIFY(ready.complete);
 	QCOMPARE(ready.newly_resident_images, std::size_t(2));
-	QCOMPARE(ready.below_map.size(), std::size_t(1));
-	QVERIFY(ready.below_map.front().scene != complete_scene);
+	QCOMPARE(ready.above_map.size(), std::size_t(1));
+	QVERIFY(ready.above_map.front().scene != complete_scene);
 }
 
 void TemplateLayerPlannerTest::drawsProvisionalDirectTilesBeforeExactTiles()

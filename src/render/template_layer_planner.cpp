@@ -555,6 +555,24 @@ private:
 		}
 	}
 
+	std::shared_ptr<const RenderIR> transitionScene(
+		const std::shared_ptr<const RenderIR>& current,
+		const std::shared_ptr<const RenderIR>& retained)
+	{
+		if (!current)
+			return retained;
+		if (!retained)
+			return current;
+		if (next_revision_ == std::numeric_limits<Revision>::max())
+			qFatal("Raster layer revision space exhausted");
+		RenderIRBuilder builder(next_revision_++);
+		// Current coverage fills newly exposed areas. The retained complete
+		// scene stays above it where the two view generations overlap.
+		builder.append(*current);
+		builder.append(*retained);
+		return builder.finish();
+	}
+
 	std::shared_ptr<const RenderIR> layerFor(const TemplateImage& source,
 	                                        const QVector<RasterTemplateTile>& source_tiles,
 	                                        TemplateLayerPlan& result,
@@ -645,12 +663,6 @@ private:
 			staging_layers_.erase(&source);
 			return {};
 		}
-		if (!source_complete)
-		{
-			if (auto retained = retain_zoom_scene())
-				return retained;
-		}
-
 		auto const has_direct_tiles = std::ranges::any_of(
 			source_images,
 			[](auto const& tile) { return tile.key.direct_to_map; }
@@ -693,6 +705,19 @@ private:
 				builder.popClip();
 			auto scene = builder.finish();
 			++result.newly_resident_images;
+			if (!source_complete)
+			{
+				if (auto retained = retain_zoom_scene())
+				{
+					// Alpha imagery cannot safely overlap the retained scene:
+					// drawing both would double its opacity. Prefer the current
+					// provisional atlas, which covers the requested window.
+					staging_layers_[&source] = {
+						std::move(full_key), scene, view_scale
+					};
+					return scene;
+				}
+			}
 			layers_[&source] = { std::move(full_key), scene, view_scale };
 			staging_layers_.erase(&source);
 			return scene;
@@ -769,7 +794,7 @@ private:
 			if (auto retained = retain_zoom_scene())
 			{
 				staging_layers_[&source] = { std::move(key), scene, view_scale };
-				return retained;
+				return transitionScene(scene, retained);
 			}
 		}
 		layers_[&source] = { std::move(key), scene, view_scale };
