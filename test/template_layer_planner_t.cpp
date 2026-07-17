@@ -495,7 +495,44 @@ void TemplateLayerPlannerTest::rebuildsRasterSceneForCurrentZoomGeometry()
 	} });
 	auto loading = planner.plan(map, view, { -8, -8, 16, 16 }, 2);
 	QVERIFY(!loading.complete);
-	QVERIFY(loading.above_map.empty());
+	QCOMPARE(loading.above_map.size(), std::size_t(1));
+	QCOMPARE(loading.above_map.front().scene, complete_scene);
+
+	// A translucent partial replacement cannot be layered over retained pixels
+	// without changing opacity, so it remains an all-or-nothing transition.
+	auto translucent = tile(
+		solidImage({ 4, 4 }, QColor(0, 0, 255, 128)), { -2, -2, 2, 4 }
+	);
+	raster_ptr->setTiles({
+		std::move(translucent),
+		RasterTemplateTile { {}, { 0, -2, 2, 4 }, {}, 0, true, false },
+	});
+	loading = planner.plan(map, view, { -8, -8, 16, 16 }, 2);
+	QVERIFY(!loading.complete);
+	QCOMPARE(loading.above_map.size(), std::size_t(1));
+	QCOMPARE(loading.above_map.front().scene, complete_scene);
+
+	// A partial opaque replacement refines over retained coverage. The current
+	// half must win, while the missing half remains covered by the old scene.
+	auto partial = tile(
+		solidImage({ 4, 4 }, Qt::blue), { -2, -2, 2, 4 }
+	);
+	raster_ptr->setTiles({
+		std::move(partial),
+		RasterTemplateTile { {}, { 0, -2, 2, 4 }, {}, 0, true, false },
+	});
+	loading = planner.plan(map, view, { -8, -8, 16, 16 }, 2);
+	QVERIFY(!loading.complete);
+	QCOMPARE(loading.above_map.size(), std::size_t(1));
+	auto const snapshot = map.publishRenderSnapshot();
+	QVERIFY(snapshot);
+	render::FramePlanner frame_planner;
+	auto transition_frame = frameFor(
+		*snapshot, frame_planner, std::move(loading)
+	);
+	auto transition = renderReference(*transition_frame);
+	QCOMPARE(transition.pixelColor(7, 8), QColor(Qt::blue));
+	QCOMPARE(transition.pixelColor(9, 8), QColor(Qt::red));
 
 	auto provisional = tile(
 		solidImage({ 8, 4 }, Qt::blue), { -4, -2, 8, 4 }
@@ -507,13 +544,10 @@ void TemplateLayerPlannerTest::rebuildsRasterSceneForCurrentZoomGeometry()
 	QCOMPARE(loading.above_map.size(), std::size_t(1));
 	QCOMPARE(imageCommandCount(loading.above_map.front()), std::size_t(1));
 	QVERIFY(loading.above_map.front().scene != complete_scene);
-	auto const snapshot = map.publishRenderSnapshot();
-	QVERIFY(snapshot);
-	render::FramePlanner frame_planner;
-	auto const transition_frame = frameFor(
+	transition_frame = frameFor(
 		*snapshot, frame_planner, std::move(loading)
 	);
-	auto const transition = renderReference(*transition_frame);
+	transition = renderReference(*transition_frame);
 	QCOMPARE(transition.pixelColor(6, 8), QColor(Qt::blue));
 	QCOMPARE(transition.pixelColor(10, 8), QColor(Qt::blue));
 

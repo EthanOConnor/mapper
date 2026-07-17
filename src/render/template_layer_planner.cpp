@@ -553,6 +553,7 @@ private:
 		LayerKey full_key;
 		full_key.template_to_map = templateToMapTransform(source);
 		full_key.render_clip = fromQRectF(source.getRasterRenderClip(on_screen));
+		auto coverage_complete = true;
 		std::vector<SourceTile> source_images;
 		source_images.reserve(std::size_t(source_tiles.size()));
 		for (auto const& tile : source_tiles)
@@ -562,11 +563,16 @@ private:
 			if (tile.missing)
 			{
 				result.complete = false;
+				coverage_complete = false;
 				continue;
 			}
 			if (tile.image.isNull() || !tile.template_rect.isValid()
 			    || !tile.source_rect.isValid() || tile.source_rect.isEmpty())
+			{
+				result.complete = false;
+				coverage_complete = false;
 				continue;
+			}
 
 			ImageKey image_key {
 				tile.cache_key ? tile.cache_key : quint64(tile.image.cacheKey()),
@@ -606,6 +612,8 @@ private:
 		}
 		if (source_images.empty())
 		{
+			if (on_screen && found != layers_.end())
+				return found->second.scene;
 			layers_.erase(&source);
 			return {};
 		}
@@ -613,25 +621,36 @@ private:
 			source_images,
 			[](auto const& tile) { return tile.key.direct_to_map; }
 		);
-		auto const has_transparency =
-			!has_direct_tiles
-			&& std::ranges::any_of(
-				source_images,
-				[this](auto const& tile) {
-					return !isOpaque(tile.key.image, tile.image);
-				}
-			);
+		auto const has_transparency = std::ranges::any_of(
+			source_images,
+			[this](auto const& tile) {
+				return !isOpaque(tile.key.image, tile.image);
+			}
+		);
+		// A partially available translucent replacement cannot be layered over
+		// retained translucent pixels without changing opacity. Keep the last
+		// atomic coverage scene until the source supplies a visually complete
+		// atlas. Opaque patches can safely refine over retained coverage below.
+		if (on_screen && !coverage_complete && has_transparency
+		    && found != layers_.end())
+		{
+			return found->second.scene;
+		}
 		if (has_transparency && !has_direct_tiles)
 		{
 			if (on_screen && result.newly_resident_images >= max_new_images_per_frame)
 			{
 				result.complete = false;
+				if (found != layers_.end())
+					return found->second.scene;
 				return {};
 			}
 			auto mosaic = transparentMosaic(source_images);
 			if (!mosaic.image)
 			{
 				result.complete = false;
+				if (on_screen && found != layers_.end())
+					return found->second.scene;
 				return {};
 			}
 
@@ -647,7 +666,8 @@ private:
 				builder.popClip();
 			auto scene = builder.finish();
 			++result.newly_resident_images;
-			layers_[&source] = { std::move(full_key), scene };
+			if (coverage_complete || !on_screen || found == layers_.end())
+				layers_[&source] = { std::move(full_key), scene };
 			return scene;
 		}
 
@@ -667,6 +687,7 @@ private:
 			if (!image)
 			{
 				result.complete = false;
+				coverage_complete = false;
 				continue;
 			}
 			key.tiles.push_back(tile.key);
@@ -676,6 +697,8 @@ private:
 			return found->second.scene;
 		if (tiles.empty())
 		{
+			if (on_screen && found != layers_.end())
+				return found->second.scene;
 			layers_.erase(&source);
 			return {};
 		}
@@ -706,6 +729,17 @@ private:
 		if (key.render_clip.isValid())
 			builder.popClip();
 		auto scene = builder.finish();
+		if (on_screen && !coverage_complete && found != layers_.end())
+		{
+			if (next_revision_ == std::numeric_limits<Revision>::max())
+				qFatal("Raster layer revision space exhausted");
+			RenderIRBuilder transition(next_revision_++);
+			// Retained coverage is the floor; current-scale patches refine it.
+			// This ordering prevents stale pixels from obscuring newly exact tiles.
+			transition.append(*found->second.scene);
+			transition.append(*scene);
+			return transition.finish();
+		}
 		layers_[&source] = { std::move(key), scene };
 		return scene;
 	}

@@ -221,6 +221,7 @@ class OnlineRasterTemplate final : public TemplateImage
 		QRectF map_bounds;
 		double pixels_per_map_unit = 0;
 		bool provisional = false;
+		bool coverage_complete = false;
 		bool output_owned = false;
 		std::shared_ptr<MemoryReservation> memory;
 		std::shared_ptr<MemoryReservation> render_memory;
@@ -268,6 +269,7 @@ class OnlineRasterTemplate final : public TemplateImage
 		QRectF map_bounds;
 		double pixels_per_map_unit = 0;
 		bool provisional = false;
+		bool coverage_complete = false;
 		bool has_left_neighbor = false;
 		bool has_right_neighbor = false;
 		bool has_top_neighbor = false;
@@ -284,6 +286,7 @@ class OnlineRasterTemplate final : public TemplateImage
 		QRectF map_bounds;
 		double pixels_per_map_unit = 0;
 		bool provisional = false;
+		bool coverage_complete = false;
 		std::shared_ptr<MemoryReservation> working_memory;
 	};
 
@@ -456,6 +459,8 @@ class OnlineRasterTemplate final : public TemplateImage
 	mutable bool atlas_pending_for_output_ = false;
 	mutable QVector<quint64> atlas_failed_signature_;
 	mutable double atlas_failed_scale_ = 0;
+	mutable QVector<quint64> atlas_deferred_signature_;
+	mutable double atlas_deferred_scale_ = 0;
 	mutable bool atlas_queue_busy_ = false;
 	mutable QTimer atlas_retry_timer_;
 	mutable QRectF last_render_bounds_;
@@ -482,10 +487,6 @@ class OnlineRasterTemplate final : public TemplateImage
 	static constexpr qint64 max_atlas_pixels = qint64(16) * 1024 * 1024;
 	static constexpr qint64 max_atlas_peak_bytes = qint64(128) * 1024 * 1024;
 #endif
-	// Let nearby work finish so a quick reversal in zoom direction can reuse it
-	// as provisional coverage. The admitted fetch/decode queues remain globally
-	// bounded, and spatial filtering prevents unrelated finer tiles lingering.
-	static constexpr int max_retained_zoom_delta = 2;
 	static constexpr qint64 max_tile_pixels =
 		imagery::maximum_runtime_tile_pixels;
 	static constexpr int max_tile_dimension =

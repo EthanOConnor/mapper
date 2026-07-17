@@ -297,6 +297,46 @@ void VelloRendererTest::offscreenGpuMatchesReference()
 	QVERIFY(difference.high_delta_pixels < actual.width() * actual.height() / 50);
 }
 
+void VelloRendererTest::cubicBezierRemainsCurvedOnGpu()
+{
+	// Map geometry is retained in millimetres and enlarged by the view transform.
+	// Exercise that split explicitly; flattening before the pass transform would
+	// turn a small-world-coordinate cubic into a visibly faceted polyline.
+	constexpr auto world_scale = 0.001;
+	render::RenderIRBuilder builder(45, { 0, 0, 64 * world_scale, 64 * world_scale });
+	render::PathBuilder curve;
+	curve.moveTo({ 8 * world_scale, 56 * world_scale });
+	curve.cubicTo(
+		{ 8 * world_scale, 8 * world_scale },
+		{ 56 * world_scale, 8 * world_scale },
+		{ 56 * world_scale, 56 * world_scale }
+	);
+	builder.strokePath(
+		curve.finish(), render::fromQColor(Qt::black),
+		{ .width = 2 * world_scale, .cap = render::LineCap::Flat,
+		  .join = render::LineJoin::Round, .miter_limit = 4 }
+	);
+
+	auto frame = std::make_shared<render::FramePacket>();
+	frame->id = 10;
+	frame->revision = 45;
+	frame->view = { 64, 64, 1, { 1 / world_scale, 0, 0, 1 / world_scale, 0, 0 } };
+	frame->vector_passes.push_back({ builder.finish() });
+
+	render::VelloRenderer renderer;
+	auto const rendered = renderer.renderOffscreen(frame);
+	QVERIFY2(rendered, renderer.lastError().c_str());
+	auto const actual = imageFromVello(*rendered);
+	auto const expected = referenceImage(*frame);
+
+	// A cubic reaches the center around y=20. Treating its control points as
+	// polyline vertices instead would draw a horizontal segment around y=8.
+	QVERIFY(actual.pixelColor(32, 20).lightness() < 80);
+	QVERIFY(actual.pixelColor(32, 8).lightness() > 220);
+	auto const difference = compareImages(actual, expected);
+	QVERIFY(difference.mean_channel_delta < 1.5);
+}
+
 void VelloRendererTest::affineImageSourceCropMatchesReference()
 {
 	constexpr auto width = std::uint32_t(6);

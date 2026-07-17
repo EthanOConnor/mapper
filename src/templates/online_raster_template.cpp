@@ -251,6 +251,7 @@ void OnlineRasterTemplate::AtlasCache::clear()
 	map_bounds = {};
 	pixels_per_map_unit = 0;
 	provisional = false;
+	coverage_complete = false;
 	output_owned = false;
 	memory.reset();
 	render_memory.reset();
@@ -1224,28 +1225,13 @@ bool OnlineRasterTemplate::keyNeededForWindow(const OnlineRasterTileKey& key,
 											  const TileWindow& window) const noexcept
 {
 	if (!source_ || window.isEmpty() || key.zoom < source_->min_zoom
-		|| key.zoom > source_->max_zoom
-		|| key.zoom > window.zoom + max_retained_zoom_delta)
+	    || key.zoom > source_->max_zoom || key.zoom > window.zoom)
 	{
 		return false;
 	}
-	if (key.zoom <= window.zoom)
-	{
-		auto const shift = window.zoom - key.zoom;
-		return key.column >= (window.min_column >> shift)
-			   && key.column <= (window.max_column >> shift)
-			   && key.row >= (window.min_row >> shift)
-			   && key.row <= (window.max_row >> shift);
-	}
-
-	// Nearby descendants can fill the wanted tile while its exact/coarser
-	// coverage is still arriving. Retain only descendants whose ancestor lies
-	// in the current overscanned window; unrelated work is still cancelled.
-	auto const shift = key.zoom - window.zoom;
-	auto const ancestor_column = key.column >> shift;
-	auto const ancestor_row = key.row >> shift;
-	return ancestor_column >= window.min_column && ancestor_column <= window.max_column
-		   && ancestor_row >= window.min_row && ancestor_row <= window.max_row;
+	auto const shift = window.zoom - key.zoom;
+	return key.column >= (window.min_column >> shift) && key.column <= (window.max_column >> shift)
+		   && key.row >= (window.min_row >> shift) && key.row <= (window.max_row >> shift);
 }
 
 void OnlineRasterTemplate::cancelUnwantedWork(const TileWindow& window)
@@ -2566,11 +2552,11 @@ void OnlineRasterTemplate::insertTile(const OnlineRasterTileKey& key, CachedTile
 		if (auto const* cached = tile_cache_.object(key))
 			output_tiles_.insert(key, *cached);
 	}
-	if (!(output_preparation_active_ && (atlas_.output_owned || atlas_pending_for_output_)))
-	{
-		cancelAtlasBuild();
-		atlas_.clear();
-	}
+	// A completed atlas is the screen's atomic coverage fallback. Keep it
+	// visible while newly arriving tiles are incorporated by the current or
+	// next atlas build; clearing it here produces a whole-layer blank frame.
+	// An in-flight build owns immutable tile images, so it can finish safely
+	// even when this newer tile changes the next signature.
 	markTileDirty(key);
 	queueWindow(wanted_window_, false);
 }
@@ -3132,6 +3118,7 @@ std::optional<OnlineRasterTemplate::AtlasBuildRequest> OnlineRasterTemplate::mak
 	request.signature = signature;
 	request.core_size = { int(width), int(height) };
 	request.pixels_per_map_unit = pixels_per_map_unit;
+	request.coverage_complete = !has_missing;
 	bool provisional = has_missing;
 	for (auto const& visual : visuals)
 	{
@@ -3577,6 +3564,7 @@ OnlineRasterTemplate::buildAtlas(AtlasBuildRequest request,
 		request.map_bounds,
 		request.pixels_per_map_unit,
 		request.provisional,
+		request.coverage_complete,
 		std::move(request.working_memory),
 	};
 }
@@ -3596,6 +3584,8 @@ void OnlineRasterTemplate::cancelAtlasBuild(bool clear_failure) const
 	{
 		atlas_failed_signature_.clear();
 		atlas_failed_scale_ = 0;
+		atlas_deferred_signature_.clear();
+		atlas_deferred_scale_ = 0;
 	}
 }
 
@@ -3609,17 +3599,44 @@ bool OnlineRasterTemplate::queueAtlasBuild(const TileWindow& window,
 		auto const scale = std::max({ 1.0, std::abs(first), std::abs(second) });
 		return std::abs(first - second) <= scale * 1.0e-9;
 	};
-	if (atlas_cancelled_ && atlas_pending_signature_ == signature
-		&& scale_matches(atlas_pending_scale_, pixels_per_map_unit))
+	if (atlas_cancelled_)
 	{
-		atlas_queue_busy_ = false;
-		atlas_pending_for_output_ |= for_output;
-		return true;
+		auto const same_request = atlas_pending_signature_ == signature
+			&& scale_matches(atlas_pending_scale_, pixels_per_map_unit);
+		if (same_request)
+		{
+			atlas_queue_busy_ = false;
+			atlas_pending_for_output_ |= for_output;
+			return true;
+		}
+		if (for_output)
+		{
+			// Exact output cannot consume a stale screen request. Output is an
+			// explicit, bounded operation and may supersede it.
+			cancelAtlasBuild(false);
+		}
+		else
+		{
+			atlas_queue_busy_ = false;
+			// Serialize atlas construction. Replacing an in-flight request on every
+			// tile or wheel event can prevent any atlas from completing. Its
+			// completion dirties the bounded template extent, which schedules the
+			// newest signature immediately afterward.
+			return true;
+		}
 	}
 	if (atlas_failed_signature_ == signature
 		&& scale_matches(atlas_failed_scale_, pixels_per_map_unit))
 	{
 		return false;
+	}
+	if (atlas_deferred_signature_ == signature
+		&& scale_matches(atlas_deferred_scale_, pixels_per_map_unit))
+	{
+		// This incomplete screen atlas was already built and deliberately kept
+		// behind a complete fallback. Wait for a tile/signature change rather
+		// than rebuilding the same unusable transition on every redraw.
+		return true;
 	}
 
 	cancelAtlasBuild(false);
@@ -3716,6 +3733,7 @@ void OnlineRasterTemplate::finishAtlasBuild(std::optional<AtlasBuildResult> resu
 	completed.pixels_per_map_unit =
 		result->pixels_per_map_unit;
 	completed.provisional = result->provisional;
+	completed.coverage_complete = result->coverage_complete;
 	completed.output_owned = pending_for_output;
 	completed.memory = std::move(memory);
 	auto const dirty_bounds = completed.map_bounds;
@@ -3731,15 +3749,37 @@ void OnlineRasterTemplate::finishAtlasBuild(std::optional<AtlasBuildResult> resu
 	}
 	else
 	{
-		atlas_ = std::move(completed);
+		if (!completed.coverage_complete && atlas_.coverage_complete)
+		{
+			// A translucent atlas is one compositing unit: layering a partial
+			// replacement over retained pixels would alter opacity, while replacing
+			// the retained atlas would expose holes. Keep the complete atlas until
+			// this request's signature gains full visual coverage.
+			atlas_deferred_signature_ = completed.signature;
+			atlas_deferred_scale_ = completed.pixels_per_map_unit;
+		}
+		else
+		{
+			atlas_ = std::move(completed);
+			atlas_deferred_signature_.clear();
+			atlas_deferred_scale_ = 0;
+		}
 	}
 	retained_access_ = nextRetainedAccess();
 	atlas_failed_signature_.clear();
 	atlas_failed_scale_ = 0;
-	if (dirty_bounds.isValid())
-		map->setTemplateAreaDirty(
-			this, dirty_bounds,
-			getTemplateBoundingBoxPixelBorder());
+	if (!pending_for_output)
+	{
+		// The completed request may belong to the immediately preceding view.
+		// Dirty the bounded screen authority as well as its own footprint so the
+		// current view promptly queues the next serialized refinement.
+		auto redraw_bounds = dirty_bounds;
+		rectIncludeSafe(redraw_bounds, onScreenMapBounds());
+		if (redraw_bounds.isValid())
+			map->setTemplateAreaDirty(
+				this, redraw_bounds,
+				getTemplateBoundingBoxPixelBorder());
+	}
 	updateResourceStatus();
 }
 
@@ -3765,7 +3805,33 @@ bool OnlineRasterTemplate::appendTransparentAtlas(const TileWindow& window,
 		}
 		queueAtlasBuild(window, visuals, has_missing, pixels_per_map_unit, signature,
 						!on_screen && output_preparation_active_);
-		return false;
+		if (!on_screen || atlas_.image.isNull())
+			return false;
+
+		// Keep the most recently completed, map-georeferenced atlas on screen
+		// until its replacement is complete. The view transform can pan/zoom this
+		// immutable map-space image without a white intermediate presentation.
+		auto const source_rect = QRectF(
+			1, 1,
+			std::max(0, atlas_.image.width() - 2),
+			std::max(0, atlas_.image.height() - 2));
+		out.push_back({
+			atlas_.image,
+			atlas_.image_to_map.mapRect(source_rect),
+			source_rect,
+			quint64(atlas_.image.cacheKey()),
+			false,
+			true,
+			atlas_.image_to_map,
+			true,
+			atlas_.memory,
+			[this](qint64 bytes)
+				-> std::shared_ptr<RasterMemoryLease> {
+				return reserveRetainedMemory(bytes);
+			},
+		});
+		retained_access_ = nextRetainedAccess();
+		return true;
 	}
 	auto const source_rect = QRectF(
 		1, 1,

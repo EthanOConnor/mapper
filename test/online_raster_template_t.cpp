@@ -1364,6 +1364,90 @@ class OnlineRasterTemplateTest : public QObject
 		{
 			QVERIFY(atlas.pixelColor(x, y).alpha() >= 120);
 		}
+
+		auto const completed_key = atlas.cacheKey();
+		tiles.clear();
+		online.collectRasterTiles(map_rect, 3.0e-7, true, tiles);
+		QCOMPARE(tiles.size(), 1);
+		QVERIFY(!tiles.front().missing);
+		QVERIFY(tiles.front().provisional);
+		QCOMPARE(tiles.front().image.cacheKey(), completed_key);
+		QVERIFY(online.atlas_cancelled_);
+		auto const pending = online.atlas_cancelled_;
+
+		// A newer view and a newly arrived tile must not cancel the atlas that
+		// is already making forward progress, nor clear the completed fallback.
+		tiles.clear();
+		online.collectRasterTiles(map_rect, 4.0e-7, true, tiles);
+		QCOMPARE(online.atlas_cancelled_, pending);
+		QCOMPARE(tiles.size(), 1);
+		QCOMPARE(tiles.front().image.cacheKey(), completed_key);
+		online.insertTile(
+			{ 1, 0, 0 },
+			{ paddedImage({ 4, 4 }, QColor(255, 255, 0, 128)), false });
+		QCOMPARE(online.atlas_cancelled_, pending);
+		QCOMPARE(online.atlas_.image.cacheKey(), completed_key);
+		QTRY_VERIFY_WITH_TIMEOUT(!online.atlas_cancelled_, 5000);
+	}
+
+	void incompleteTransparentAtlasCannotReplaceCompleteCoverage()
+	{
+		Map map;
+		georeferenceMap(map);
+		OnlineRasterTemplate online(snapshotFixture(), &map);
+		online.setTemplateState(Template::Unloaded);
+		QVERIFY2(online.loadTemplateFile(), qPrintable(online.errorString()));
+
+		online.insertTile(
+			{ 1, 0, 0 },
+			{ paddedImage({ 4, 4 }, QColor(255, 0, 0, 128)), false });
+		online.insertTile(
+			{ 1, 1, 0 },
+			{ paddedImage({ 4, 4 }, QColor(0, 0, 255, 128)), false });
+		online.wanted_window_ = { 1, 0, 1, 0, 0 };
+		auto map_rect = mapRectForWindow(online, online.wanted_window_);
+		QVector<RasterTemplateTile> tiles;
+		online.collectRasterTiles(map_rect, 2.0e-7, true, tiles);
+		QTRY_VERIFY_WITH_TIMEOUT(
+			online.atlas_.coverage_complete, 5000);
+		auto const complete_key = online.atlas_.image.cacheKey();
+
+		// Expanding into a row with no pixels may build a useful candidate, but
+		// it must not atomically replace the complete atlas with transparent holes.
+		online.wanted_window_ = { 1, 0, 1, 0, 1 };
+		map_rect = mapRectForWindow(online, online.wanted_window_);
+		tiles.clear();
+		online.collectRasterTiles(map_rect, 2.0e-7, true, tiles);
+		QCOMPARE(tiles.size(), 1);
+		QCOMPARE(tiles.front().image.cacheKey(), complete_key);
+		QVERIFY(online.atlas_cancelled_);
+		QTRY_VERIFY_WITH_TIMEOUT(!online.atlas_cancelled_, 5000);
+		QVERIFY(!online.atlas_deferred_signature_.isEmpty());
+		QVERIFY(online.atlas_.coverage_complete);
+		QCOMPARE(online.atlas_.image.cacheKey(), complete_key);
+
+		// The deferred signature is not rebuilt on every redraw.
+		tiles.clear();
+		online.collectRasterTiles(map_rect, 2.0e-7, true, tiles);
+		QVERIFY(!online.atlas_cancelled_);
+		QCOMPARE(tiles.size(), 1);
+		QCOMPARE(tiles.front().image.cacheKey(), complete_key);
+
+		online.insertTile(
+			{ 1, 0, 1 },
+			{ paddedImage({ 4, 4 }, QColor(0, 255, 0, 128)), false });
+		online.insertTile(
+			{ 1, 1, 1 },
+			{ paddedImage({ 4, 4 }, QColor(255, 255, 0, 128)), false });
+		tiles.clear();
+		online.collectRasterTiles(map_rect, 2.0e-7, true, tiles);
+		QVERIFY(online.atlas_cancelled_);
+		QTRY_VERIFY_WITH_TIMEOUT(
+			online.atlas_.window == online.wanted_window_
+				&& online.atlas_.coverage_complete,
+			5000);
+		QVERIFY(online.atlas_deferred_signature_.isEmpty());
+		QVERIFY(online.atlas_.image.cacheKey() != complete_key);
 	}
 
 			void transparentCrossCrsWindowUsesCpuPrewarp()
@@ -1576,9 +1660,6 @@ class OnlineRasterTemplateTest : public QObject
 		auto const generation = online.generation_;
 		QVERIFY(online.keyNeededForWindow({ 1, 0, 0 }, { 2, 0, 1, 0, 1 }));
 		QVERIFY(!online.keyNeededForWindow({ 2, 3, 3 }, { 2, 0, 1, 0, 1 }));
-		QVERIFY(online.keyNeededForWindow({ 2, 3, 3 }, { 0, 0, 0, 0, 0 }));
-		QVERIFY(!online.keyNeededForWindow({ 2, 4, 0 }, { 0, 0, 0, 0, 0 }));
-		QVERIFY(online.keyNeededForWindow({ 2, 3, 3 }, { 1, 1, 1, 1, 1 }));
 		online.queueWindow({}, true);
 		QCOMPARE(online.generation_, generation);
 		QVERIFY(online.decode_owner_.isValid());
