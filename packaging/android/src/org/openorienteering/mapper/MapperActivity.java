@@ -50,7 +50,7 @@ public class MapperActivity extends QtActivity
 	private static boolean optimizationRequestDone;
 	private static final WeakHashMap<TextureView, WeakReference<Surface>> textureViewSurfaces =
 		new WeakHashMap<>();
-	private static final WeakHashMap<ViewGroup, WeakReference<TextureView>> nativeSurfaceViews =
+	private static final WeakHashMap<ViewGroup, WeakReference<SurfaceView>> nativeSurfaceViews =
 		new WeakHashMap<>();
 
 	private String yesString;
@@ -202,7 +202,7 @@ public class MapperActivity extends QtActivity
 	/**
 	 * Return a public Android Surface for a Qt child QWindow.
 	 * Qt does not create a native surface for a bare Vulkan QWindow, so install
-	 * a composited TextureView in Mapper's render-only child window when needed.
+	 * a SurfaceView in Mapper's render-only child window when needed.
 	 */
 	public static Surface nativeSurfaceForQtWindow(Object qtWindow)
 	{
@@ -214,19 +214,20 @@ public class MapperActivity extends QtActivity
 			return surface;
 
 		ViewGroup group = (ViewGroup)view;
-		WeakReference<TextureView> reference = nativeSurfaceViews.get(group);
-		TextureView textureView = reference == null ? null : reference.get();
-		if (textureView == null)
+		WeakReference<SurfaceView> reference = nativeSurfaceViews.get(group);
+		SurfaceView surfaceView = reference == null ? null : reference.get();
+		if (surfaceView == null)
 		{
-			textureView = new TextureView(group.getContext());
-			textureView.setClickable(false);
-			textureView.setFocusable(false);
-			nativeSurfaceViews.put(group, new WeakReference<>(textureView));
-			group.addView(textureView, 0, new ViewGroup.LayoutParams(
+			surfaceView = new SurfaceView(group.getContext());
+			surfaceView.setClickable(false);
+			surfaceView.setFocusable(false);
+			nativeSurfaceViews.put(group, new WeakReference<>(surfaceView));
+			group.addView(surfaceView, 0, new ViewGroup.LayoutParams(
 				ViewGroup.LayoutParams.MATCH_PARENT,
 				ViewGroup.LayoutParams.MATCH_PARENT));
 		}
-		return findSurface(textureView);
+		surface = surfaceView.getHolder().getSurface();
+		return surface != null && surface.isValid() ? surface : null;
 	}
 
 	private static Surface findSurface(View view)
