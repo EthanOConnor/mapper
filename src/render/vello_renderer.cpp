@@ -380,10 +380,13 @@ bool VelloRenderer::setSurface(const presentation::NativeSurfaceState& state)
 }
 
 bool VelloRenderer::submit(const FramePacketPtr& frame,
-	                       const presentation::NativeSurfaceState& surface,
-	                       Color background)
+                           const presentation::NativeSurfaceState& surface,
+                           Color background)
 {
 	if (!frame || frame->id == 0 || frame->revision == 0
+	    || frame->view.width == 0 || frame->view.height == 0
+	    || !std::isfinite(frame->view.device_pixel_ratio)
+	    || frame->view.device_pixel_ratio <= 0
 	    || !std::isfinite(surface.device_pixel_ratio)
 	    || surface.device_pixel_ratio <= 0
 	    || surface.phase != presentation::SurfacePhase::Exposed
@@ -392,9 +395,20 @@ bool VelloRenderer::submit(const FramePacketPtr& frame,
 	{
 		return false;
 	}
+	auto const render_pixel_ratio = std::min(
+		frame->view.device_pixel_ratio, surface.device_pixel_ratio
+	);
+	auto const render_width = std::min(
+		double(surface.physical_width),
+		std::ceil(double(frame->view.width) * render_pixel_ratio)
+	);
+	auto const render_height = std::min(
+		double(surface.physical_height),
+		std::ceil(double(frame->view.height) * render_pixel_ratio)
+	);
 	auto request = impl_->buildFrame(
-		*frame, surface.physical_width, surface.physical_height,
-		surface.device_pixel_ratio, surface.sequence, background
+		*frame, std::uint32_t(render_width), std::uint32_t(render_height),
+		render_pixel_ratio, surface.sequence, background
 	);
 	return ffi::renderer_submit(*impl_->renderer, std::move(request));
 }

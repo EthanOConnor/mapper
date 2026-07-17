@@ -891,7 +891,13 @@ fn create_surface_target(
         .ok_or("wgpu surface has no supported default configuration")?;
     config.usage = wgpu::TextureUsages::RENDER_ATTACHMENT;
     config.format = format;
-    if capabilities
+    if cfg!(target_os = "android")
+        && capabilities
+            .present_modes
+            .contains(&wgpu::PresentMode::Mailbox)
+    {
+        config.present_mode = wgpu::PresentMode::Mailbox;
+    } else if capabilities
         .present_modes
         .contains(&wgpu::PresentMode::Fifo)
     {
@@ -903,7 +909,7 @@ fn create_surface_target(
         .copied()
         .find(|mode| *mode == wgpu::CompositeAlphaMode::Opaque)
         .unwrap_or(wgpu::CompositeAlphaMode::Auto);
-    config.desired_maximum_frame_latency = 2;
+    config.desired_maximum_frame_latency = if cfg!(target_os = "android") { 1 } else { 2 };
     surface.configure(&device, &config);
     let renderer = VelloRenderer::new(
         &device,
@@ -1093,7 +1099,6 @@ fn acquire_surface_texture(target: &mut SurfaceTarget) -> Result<wgpu::SurfaceTe
 fn render_frame(target: &mut SurfaceTarget, frame: &FrameBuilder) -> Result<(), u8> {
     let width = frame.header.width.max(1);
     let height = frame.header.height.max(1);
-    target.resize(width, height);
     let output = acquire_surface_texture(target)?;
     let output_view = output
         .texture

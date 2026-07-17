@@ -936,7 +936,6 @@ bool MapWidget::event(QEvent* event)
 	case QEvent::TouchEnd:
 	case QEvent::TouchCancel:
 	{
-		auto const* touch = static_cast<QTouchEvent*>(event);
 		if (static_cast<QTouchEvent*>(event)->points().count() >= 2)
 		{
 			single_touch_mouse_active = false;
@@ -944,6 +943,7 @@ bool MapWidget::event(QEvent* event)
 		}
 
 #if defined(Q_OS_ANDROID)
+		auto const* touch = static_cast<QTouchEvent*>(event);
 		if (event->type() == QEvent::TouchCancel)
 		{
 			if (!single_touch_mouse_active)
@@ -1179,11 +1179,18 @@ void MapWidget::renderFrame()
 		touch_cursor->paint(&overlay_scene_builder);
 	auto overlay = overlay_scene_builder.finish();
 
+	auto device_pixel_ratio = std::max(1.0, double(devicePixelRatioF()));
+#if defined(Q_OS_ANDROID)
+	// Preserve native-resolution resting frames while reducing the fill cost that
+	// dominates latency on mobile GPUs during direct manipulation.
+	if (current_pressed_buttons != 0 || pinching)
+		device_pixel_ratio = std::max(1.0, device_pixel_ratio * 0.75);
+#endif
 	render::FrameRequest frame_request {
 		{
 			std::uint32_t(std::max(0, width())),
 			std::uint32_t(std::max(0, height())),
-			std::max(1.0, double(devicePixelRatioF())),
+			device_pixel_ratio,
 			world_to_viewport,
 		},
 		render_request,
