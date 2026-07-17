@@ -1508,10 +1508,10 @@ void MapEditorController::createMobileGUI()
 	
 	show_top_bar_button = new QToolButton(window);
 	show_top_bar_button->setDefaultAction(show_top_bar_action);
-	show_top_bar_button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+	show_top_bar_button->setFixedSize(button_size_px, button_size_px);
 	show_top_bar_button->setAutoRaise(true);
 	show_top_bar_button->setIconSize(icon_size);
-	show_top_bar_button->setGeometry(0, 0, button_size_px, button_size_px);
+	show_top_bar_button->hide();
 	
 	
 	// Create bottom action bar
@@ -1641,12 +1641,12 @@ void MapEditorController::createMobileGUI()
 	
 	bottom_action_bar->setToUseOverflowActionFrom(top_action_bar);
 	
-	top_action_bar->setParent(map_widget);
-	
 	auto* container_widget = new QWidget();
 	auto* layout = new QVBoxLayout();
 	layout->setContentsMargins(0, 0, 0, 0);
 	layout->setSpacing(0);
+	layout->addWidget(top_action_bar);
+	layout->addWidget(show_top_bar_button, 0, Qt::AlignLeft);
 	layout->addWidget(map_widget, 1);
 	layout->addWidget(bottom_action_bar);
 	container_widget->setLayout(layout);
@@ -3706,7 +3706,7 @@ void MapEditorController::enableCompassDisplay(bool enable)
 		if (top_action_bar->isVisible())
 			compass_display->setGeometry(0, top_action_bar->size().height(), size.width(), size.height());
 		else
-			compass_display->setGeometry(show_top_bar_button->size().width(), 0, size.width(), size.height());
+			compass_display->setGeometry(0, show_top_bar_button->size().height(), size.width(), size.height());
 		connect(&Compass::getInstance(), &Compass::azimuthChanged, compass_display, &CompassDisplay::setAzimuth);
 		compass_display->show();
 	}
@@ -3760,7 +3760,7 @@ void MapEditorController::hideTopActionBar()
 	show_top_bar_button->show();
 	show_top_bar_button->raise();
 	
-	compass_display->move(show_top_bar_button->size().width(), 0);
+	compass_display->move(0, show_top_bar_button->size().height());
 }
 
 void MapEditorController::showTopActionBar()
