@@ -1274,6 +1274,12 @@ void OnlineRasterTemplate::updateRenderContext(const ViewRenderContext& context)
 		auto const replace_pending = !wanted_window_.isEmpty();
 		wanted_window_ = {};
 		queueWindow(wanted_window_, replace_pending);
+		if (replace_pending)
+		{
+			map->setTemplateAreaDirty(
+				this, context.visible_map_rect,
+				getTemplateBoundingBoxPixelBorder());
+		}
 		return;
 	}
 	auto const pixels_per_map_unit = Util::mmToPixelPhysical(context.view_zoom);
@@ -1282,6 +1288,15 @@ void OnlineRasterTemplate::updateRenderContext(const ViewRenderContext& context)
 	auto const replace_pending = wanted_window_ != window;
 	wanted_window_ = window;
 	queueWindow(window, replace_pending);
+	if (replace_pending)
+	{
+		// View-context updates run after the first frame for a pan, zoom, or
+		// visibility change. Cached tiles produce no asynchronous completion,
+		// so the window change itself must request the follow-up frame.
+		map->setTemplateAreaDirty(
+			this, context.visible_map_rect,
+			getTemplateBoundingBoxPixelBorder());
+	}
 }
 
 OutputRenderPreparation OnlineRasterTemplate::prepareForOutput(const QRectF& map_rect,

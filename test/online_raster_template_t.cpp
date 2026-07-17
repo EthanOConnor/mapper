@@ -603,6 +603,33 @@ class OnlineRasterTemplateTest : public QObject
 		));
 	}
 
+	void screenWindowChangeInvalidatesEvenWithoutNetworkCompletion()
+	{
+		Map map;
+		georeferenceMap(map);
+		OnlineRasterTemplate online(snapshotFixture(), &map);
+		online.setTemplateState(Template::Unloaded);
+		QVERIFY2(online.loadTemplateFile(), qPrintable(online.errorString()));
+		auto const visible = mapRectForWindow(online, { 1, 0, 0, 0, 0 });
+		int invalidations = 0;
+		QRectF invalidated_area;
+		connect(
+			&map, &Map::templateAreaDirty, this,
+			[&](Template* source, const QRectF& area, int) {
+				if (source == &online)
+				{
+					++invalidations;
+					invalidated_area = area;
+				}
+			});
+
+		online.updateRenderContext({ visible, 1 });
+		QCOMPARE(invalidations, 1);
+		QCOMPARE(invalidated_area, visible);
+		online.updateRenderContext({ visible, 1 });
+		QCOMPARE(invalidations, 1);
+	}
+
 		void workingSetBudgetPreventsCacheChurn()
 		{
 		Map map;
