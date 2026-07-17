@@ -18,7 +18,7 @@
 #include "core/map.h"
 #include "core/renderables/renderable.h"
 #include "render/qpainter_renderer.h"
-#include "render/qt_render_bridge.h"
+#include "render/render_snapshot.h"
 
 using namespace OpenOrienteering;
 
@@ -60,9 +60,7 @@ int main(int argc, char** argv)
 	painter.setClipRect(extent);
 	auto const snapshot = map.publishRenderSnapshot();
 	render::QPainterRenderer().draw(painter, *snapshot, {
-		render::fromQRectF(
-			extent.adjusted(-render_padding, -render_padding, render_padding, render_padding)
-		),
+		extent.adjusted(-render_padding, -render_padding, render_padding, render_padding),
 		pixels_per_mm,
 		RenderConfig::HelperSymbols,
 		1,

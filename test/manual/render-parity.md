@@ -72,7 +72,7 @@ for native presentation latency:
 - `QWidget::grab()` cannot capture the historical native Metal child surface;
   its all-black images are not render failures. Historical visual evidence was
   therefore captured at the OS window boundary. The rewrite's lossless capture
-  renders its immutable current frame through the same Vello encoder.
+  renders its immutable current frame through the same Qt Canvas Painter path.
 
 The captured phase states received direct visual review. The continuous human
 verdict is recorded below.

@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <memory>
 #include <variant>
+#include <vector>
 
 #include <QtTest>
 #include <QDir>
@@ -20,12 +21,9 @@
 #include "test_config.h"
 #include "core/map.h"
 #include "core/map_view.h"
-#include "presentation/native_surface.h"
 #include "render/frame_pipeline.h"
 #include "render/qpainter_frame_renderer.h"
-#include "render/qt_render_bridge.h"
 #include "render/template_layer_planner.h"
-#include "render/vello_renderer.h"
 #include "templates/template_image.h"
 #include "templates/template_map.h"
 #include "templates/template_track.h"
@@ -148,25 +146,25 @@ QImage renderReference(const render::FramePacket& frame)
 	return image;
 }
 
-QColor velloPixel(const render::VelloImage& image, QPoint point)
+std::vector<render::ImagePtr> images(const render::VectorPass& pass)
 {
-	QImage view(
-		image.rgba8.data(), int(image.width), int(image.height), int(image.width * 4),
-		QImage::Format_RGBA8888
-	);
-	return view.pixelColor(point);
+	std::vector<render::ImagePtr> result;
+	for (auto const& command : pass.scene->commands)
+		if (auto const* image = std::get_if<render::DrawImage>(&command))
+			result.push_back(image->image);
+	return result;
 }
 
-QImage renderVello(const render::FramePacketPtr& frame)
+QImage renderFrame(const render::FramePacketPtr& frame)
 {
-	render::VelloRenderer renderer;
-	auto const rendered = renderer.renderOffscreen(frame);
-	Q_ASSERT_X(rendered, Q_FUNC_INFO, renderer.lastError().c_str());
-	QImage view(
-		rendered->rgba8.data(), int(rendered->width), int(rendered->height),
-		int(rendered->width * 4), QImage::Format_RGBA8888
-	);
-	return view.copy();
+	QImage image(int(frame->view.width), int(frame->view.height),
+	             QImage::Format_ARGB32_Premultiplied);
+	image.fill(Qt::white);
+	QPainter painter(&image);
+	auto const completion = render::QPainterFrameRenderer().render(painter, *frame);
+	Q_ASSERT(completion.status == render::FrameStatus::Presented);
+	painter.end();
+	return image;
 }
 
 }  // namespace
@@ -214,14 +212,7 @@ void TemplateLayerPlannerTest::preservesLayerOrderAndRetainedScenes()
 	QCOMPARE(frame->vector_passes.back().scene, above_scene);
 
 	auto const reference = renderReference(*frame);
-	render::VelloRenderer renderer;
-	auto const rendered = renderer.renderOffscreen(frame);
-	QVERIFY2(rendered, renderer.lastError().c_str());
-	auto const expected = reference.pixelColor(8, 8);
-	auto const actual = velloPixel(*rendered, { 8, 8 });
-	QVERIFY(std::abs(actual.red() - expected.red()) <= 2);
-	QVERIFY(std::abs(actual.green() - expected.green()) <= 2);
-	QVERIFY(std::abs(actual.blue() - expected.blue()) <= 2);
+	QVERIFY(!reference.isNull());
 }
 
 void TemplateLayerPlannerTest::recordsVectorMapAndTrackTemplates()
@@ -249,7 +240,7 @@ void TemplateLayerPlannerTest::recordsVectorMapAndTrackTemplates()
 	             .united(map.getTemplate(1)->calculateTemplateBoundingBox());
 	QVERIFY(visible.isValid());
 	render::TemplateLayerPlanner planner;
-	auto plan = planner.plan(map, view, render::fromQRectF(visible), 4);
+	auto plan = planner.plan(map, view, visible, 4);
 	QVERIFY(plan.complete);
 	QCOMPARE(plan.newly_resident_images, std::size_t(0));
 	QCOMPARE(plan.below_map.size(), std::size_t(1));
@@ -264,7 +255,7 @@ void TemplateLayerPlannerTest::recordsVectorMapAndTrackTemplates()
 	));
 }
 
-void TemplateLayerPlannerTest::boundsImageAdmissionAndPreservesVelloIdentity()
+void TemplateLayerPlannerTest::boundsImageAdmissionAndPreservesQtImageIdentity()
 {
 	Map map;
 	MapView view { &map };
@@ -284,14 +275,7 @@ void TemplateLayerPlannerTest::boundsImageAdmissionAndPreservesVelloIdentity()
 
 	render::TemplateLayerPlanner template_planner;
 	render::FramePlanner frame_planner;
-	render::VelloRenderer renderer;
-	presentation::NativeSurfaceState surface;
-	surface.sequence = 1;
-	surface.phase = presentation::SurfacePhase::Exposed;
-	surface.native.window = 1;
-	surface.physical_width = 16;
-	surface.physical_height = 16;
-	QVERIFY(renderer.setSurface(surface));
+	std::vector<render::ImagePtr> first_images;
 
 	{
 		auto first = template_planner.plan(map, view, { -8, -8, 16, 16 }, 1);
@@ -299,9 +283,8 @@ void TemplateLayerPlannerTest::boundsImageAdmissionAndPreservesVelloIdentity()
 		QCOMPARE(first.newly_resident_images, std::size_t(4));
 		QCOMPARE(first.below_map.size(), std::size_t(1));
 		QCOMPARE(imageCommandCount(first.below_map.front()), std::size_t(4));
-		auto const frame = frameFor(*snapshot, frame_planner, std::move(first));
-		QVERIFY(renderer.submit(frame, surface));
-		QCOMPARE(renderer.cachedImageCount(), std::size_t(4));
+		first_images = images(first.below_map.front());
+		QCOMPARE(first_images.size(), std::size_t(4));
 	}
 
 	auto second = template_planner.plan(map, view, { -8, -8, 16, 16 }, 1);
@@ -309,12 +292,12 @@ void TemplateLayerPlannerTest::boundsImageAdmissionAndPreservesVelloIdentity()
 	QCOMPARE(second.newly_resident_images, std::size_t(2));
 	QCOMPARE(second.below_map.size(), std::size_t(1));
 	QCOMPARE(imageCommandCount(second.below_map.front()), std::size_t(6));
+	auto const complete_images = images(second.below_map.front());
+	QCOMPARE(complete_images.size(), std::size_t(6));
+	for (auto index = std::size_t(0); index < first_images.size(); ++index)
+		QCOMPARE(complete_images[index], first_images[index]);
 	auto const complete_scene = second.below_map.front().scene;
-	{
-		auto const frame = frameFor(*snapshot, frame_planner, std::move(second));
-		QVERIFY(renderer.submit(frame, surface));
-		QCOMPARE(renderer.cachedImageCount(), std::size_t(6));
-	}
+	QVERIFY(frameFor(*snapshot, frame_planner, std::move(second)));
 
 	auto third = template_planner.plan(map, view, { -8, -8, 16, 16 }, 1);
 	QVERIFY(third.complete);
@@ -395,10 +378,10 @@ void TemplateLayerPlannerTest::preservesTransparentGuttersWithoutTileSeams()
 	QVERIFY(whole_snapshot);
 	render::FramePlanner tiled_frame_planner;
 	render::FramePlanner whole_frame_planner;
-	auto const tiled = renderVello(scaledFrameFor(
+	auto const tiled = renderFrame(scaledFrameFor(
 		*tiled_snapshot, tiled_frame_planner, std::move(tiled_plan)
 	));
-	auto const whole = renderVello(scaledFrameFor(
+	auto const whole = renderFrame(scaledFrameFor(
 		*whole_snapshot, whole_frame_planner, std::move(whole_plan)
 	));
 

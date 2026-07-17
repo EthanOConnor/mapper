@@ -25,12 +25,12 @@
 
 #include <QtMath>
 #include <QColor>
+#include <QPen>
 #include <QXmlStreamReader>
 
 #include "core/georeferencing.h"
 #include "core/map.h"
 #include "core/map_coord.h"
-#include "render/qt_render_bridge.h"
 #include "util/util.h"
 #include "util/xml_stream_util.h"
 
@@ -93,7 +93,7 @@ const MapGrid& MapGrid::load(QXmlStreamReader& xml)
 	return *this;
 }
 
-std::shared_ptr<const render::RenderIR> MapGrid::buildRenderIR(
+std::shared_ptr<const render::QtRenderScene> MapGrid::buildQtRenderScene(
 	const QRectF& bounding_box,
 	Map* map,
 	double view_scale,
@@ -106,10 +106,10 @@ std::shared_ptr<const render::RenderIR> MapGrid::buildRenderIR(
 	                         final_horz_offset, final_vert_offset,
 	                         final_rotation, map);
 
-	render::PathBuilder path;
+	render::QtRenderPathBuilder path;
 	std::function<void (const QPointF&, const QPointF&)> draw_line = [&path](const QPointF& start, const QPointF& end) {
-		path.moveTo({ start.x(), start.y() });
-		path.lineTo({ end.x(), end.y() });
+		path.moveTo(start);
+		path.lineTo(end);
 	};
 	if (display == AllLines)
 	{
@@ -128,12 +128,11 @@ std::shared_ptr<const render::RenderIR> MapGrid::buildRenderIR(
 		                       final_rotation, draw_line);
 	}
 
-	render::RenderIRBuilder builder(revision, render::fromQRectF(bounding_box));
-	auto stroke = render::StrokeStyle{};
-	stroke.width = 1.0 / std::max(view_scale, 1.0e-9);
+	render::QtRenderSceneBuilder builder(revision, bounding_box);
+	QPen stroke(QColor::fromRgba(color));
+	stroke.setWidthF(1.0 / std::max(view_scale, 1.0e-9));
 	builder.strokePath(
 		path.finish(),
-		render::fromQColor(QColor::fromRgba(color)),
 		std::move(stroke),
 		render::QualityHint::ForceAntialiasing
 	);

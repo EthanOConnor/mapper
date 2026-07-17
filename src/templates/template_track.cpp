@@ -33,6 +33,7 @@
 #include <QLatin1String>
 #include <QMessageBox>
 #include <QPainterPath>
+#include <QPen>
 #include <QRect>
 #include <QRgb>
 #include <QSize>
@@ -53,7 +54,6 @@
 #include "gui/task_dialog.h"
 #include "undo/object_undo.h"
 #include "util/util.h"
-#include "render/qt_render_bridge.h"
 
 class QAbstractButton;
 
@@ -343,12 +343,12 @@ void TemplateTrack::unloadTemplateFileImpl()
 	track.clear();
 }
 
-std::shared_ptr<const render::RenderIR> TemplateTrack::buildRenderIR(
+std::shared_ptr<const render::QtRenderScene> TemplateTrack::buildQtRenderScene(
 	bool on_screen,
 	double view_scale,
 	render::Revision revision) const
 {
-	render::RenderIRBuilder builder(revision);
+	render::QtRenderSceneBuilder builder(revision);
 	if (!is_georeferenced)
 	{
 		auto const origin = templateToMap(QPointF(0, 0));
@@ -364,19 +364,17 @@ std::shared_ptr<const render::RenderIR> TemplateTrack::buildRenderIR(
 	auto const track_width = on_screen ? 1.0 / std::max(view_scale, 1.0e-9) : 0.1;
 	for (int segment = 0; segment < track.getNumSegments(); ++segment)
 	{
-		render::PathBuilder path;
+		render::QtRenderPathBuilder path;
 		for (int point_index = 0; point_index < track.getSegmentPointCount(segment); ++point_index)
 		{
 			auto const& point = track.getSegmentPoint(segment, point_index);
 			if (point_index == 0)
-				path.moveTo({ point.map_coord.x(), point.map_coord.y() });
+				path.moveTo(point.map_coord);
 			else
-				path.lineTo({ point.map_coord.x(), point.map_coord.y() });
+				path.lineTo(point.map_coord);
 		}
-		auto stroke = render::StrokeStyle{};
-		stroke.width = track_width;
-		builder.strokePath(path.finish(), render::fromQColor(QColor(212, 0, 244)),
-		                   std::move(stroke),
+		QPen stroke(QColor(212, 0, 244), track_width);
+		builder.strokePath(path.finish(), std::move(stroke),
 		                   render::QualityHint::ForceAntialiasing);
 	}
 
@@ -387,7 +385,7 @@ std::shared_ptr<const render::RenderIR> TemplateTrack::buildRenderIR(
 		auto const& point = track.getWaypoint(waypoint);
 		builder.fillEllipse(
 			{ point.map_coord.x() - 0.25, point.map_coord.y() - 0.25, 0.5, 0.5 },
-			render::fromQColor(QColor(Qt::red)),
+			QColor(Qt::red),
 			render::QualityHint::ForceAntialiasing
 		);
 		auto const& name = track.getWaypointName(waypoint);
@@ -398,8 +396,7 @@ std::shared_ptr<const render::RenderIR> TemplateTrack::buildRenderIR(
 			auto const bounds = text.boundingRect();
 			text.translate(point.map_coord.x() - bounds.center().x(),
 			               point.map_coord.y() - bounds.bottom());
-			builder.fillPath(render::fromQPainterPath(text),
-			                 render::fromQColor(QColor(Qt::red)));
+			builder.fillPath(render::sharePainterPath(std::move(text)), QColor(Qt::red));
 		}
 	}
 

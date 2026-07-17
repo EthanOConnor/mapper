@@ -52,7 +52,6 @@
 #include "core/objects/text_object.h"
 #include "core/renderables/renderable.h"
 #include "render/qpainter_renderer.h"
-#include "render/qt_render_bridge.h"
 #include "core/renderables/renderable_implementation.h"
 #include "core/symbols/area_symbol.h"
 #include "core/symbols/combined_symbol.h"
@@ -780,7 +779,7 @@ QImage Symbol::createIcon(const Map& map, int side_length, bool antialiasing, qr
 	
 	auto const snapshot = icon_map.publishRenderSnapshot();
 	render::QPainterRenderer().draw(painter, *snapshot, {
-		render::fromQRectF(QRectF(-10000, -10000, 20000, 20000)),
+		QRectF(-10000, -10000, 20000, 20000),
 		final_zoom,
 		RenderConfig::HelperSymbols,
 		1,

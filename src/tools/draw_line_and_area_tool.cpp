@@ -186,7 +186,7 @@ void DrawLineAndAreaTool::drawPreviewObjects(render::OverlaySceneBuilder* painte
 		painter->setWorldTransform(map_view->worldTransform(), true);
 		
 		RenderConfig config = { *map(), map_view->calculateViewedRect(widget->viewportToView(widget->rect())), map_view->calculateFinalZoomFactor(), RenderConfig::Tool, 0.5 };
-		painter->append(*renderables->buildIR(config));
+		painter->append(*renderables->buildScene(config));
 		
 		painter->restore();
 	}

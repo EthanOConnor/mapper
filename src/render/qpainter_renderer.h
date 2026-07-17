@@ -13,11 +13,12 @@ class QPainter;
 
 namespace OpenOrienteering::render {
 
-/** Deterministic reference, print, PDF, and headless interpreter for RenderIR. */
+/** Deterministic reference, print, PDF, and headless interpreter for QtRenderScene. */
 class QPainterRenderer
 {
 public:
-	void render(QPainter& painter, const RenderIR& ir, bool antialiasing_allowed) const;
+	void render(QPainter& painter, const QtRenderScene& scene,
+	            bool antialiasing_allowed) const;
 	void draw(QPainter& painter, const MapRenderSnapshot& snapshot,
 	          const RenderRequest& request) const;
 	void drawColorSeparation(QPainter& painter, const MapRenderSnapshot& snapshot,

@@ -17,9 +17,7 @@
 #include <QImage>
 #include <QPainter>
 #include <QPen>
-#include <QPlatformSurfaceEvent>
 #include <QPixmap>
-#include <QResizeEvent>
 #include <QTransform>
 #include <QVector>
 
@@ -30,13 +28,11 @@
 #include "core/map_view.h"
 #include "core/objects/object.h"
 #include "gui/map/map_widget.h"
-#include "presentation/native_surface.h"
-#include "presentation/vello_canvas.h"
+#include "presentation/qt_canvas.h"
 #include "render/frame_pipeline.h"
 #include "render/overlay_scene.h"
 #include "render/qpainter_frame_renderer.h"
 #include "render/qpainter_renderer.h"
-#include "render/qt_render_bridge.h"
 #include "templates/template_image.h"
 
 using namespace OpenOrienteering;
@@ -143,7 +139,7 @@ std::unique_ptr<Fixture> makeFixture(const QString& file_name)
 	fixture->transform.scale(fixture->scale, fixture->scale);
 	fixture->transform.translate(-fixture->extent.left(), -fixture->extent.top());
 	fixture->render_request = {
-		render::fromQRectF(fixture->extent),
+		fixture->extent,
 		fixture->scale,
 		RenderConfig::Screen | RenderConfig::HelperSymbols,
 		1,
@@ -152,7 +148,7 @@ std::unique_ptr<Fixture> makeFixture(const QString& file_name)
 		std::uint32_t(fixture->pixel_size.width()),
 		std::uint32_t(fixture->pixel_size.height()),
 		1,
-		render::fromQTransform(fixture->transform),
+		fixture->transform,
 	};
 	return fixture;
 }
@@ -267,7 +263,7 @@ void FramePipelineTest::packetIsCompleteAndMonotonic()
 	QCOMPARE(normal->vector_passes.size(), std::size_t(1));
 	QVERIFY(overprint->vector_passes.size() > 1);
 	QVERIFY(std::ranges::any_of(overprint->vector_passes, [](auto const& pass) {
-		return pass.blend == render::BlendMode::Multiply;
+		return pass.composition == QPainter::CompositionMode_Multiply;
 	}));
 	for (auto const& pass : overprint->vector_passes)
 	{
@@ -307,7 +303,7 @@ void FramePipelineTest::overprintingUsesIsolatedPasses()
 	render::FramePlanner planner;
 	auto const frame = planner.plan(*snapshot, { fixture->view, fixture->render_request, true });
 	QVERIFY(std::ranges::all_of(frame->vector_passes, [](auto const& pass) {
-		return pass.blend != render::BlendMode::Multiply || pass.isolated;
+		return pass.composition != QPainter::CompositionMode_Multiply || pass.isolated;
 	}));
 
 	auto const actual = renderFrame(*fixture, *frame);
@@ -359,11 +355,11 @@ void FramePipelineTest::viewportOverlayUsesTheSharedFrameContract()
 		width,
 		height,
 		1,
-		render::fromQTransform(QTransform::fromTranslate(80, 0)),
+		QTransform::fromTranslate(80, 0),
 	};
 	request.above_map.push_back({
 		scene,
-		render::BlendMode::SourceOver,
+		QPainter::CompositionMode_SourceOver,
 		1,
 		false,
 		render::VectorPass::Space::Viewport,
@@ -450,7 +446,7 @@ void FramePipelineTest::overlayPatternsAndImagesStayRetained()
 	auto const first = record();
 	auto const second = record();
 	auto pattern_count = 0;
-	std::shared_ptr<const render::ImageData> first_image;
+	std::shared_ptr<const QImage> first_image;
 	for (auto const& command : first->commands)
 	{
 		if (std::holds_alternative<render::DrawLinePattern>(command))
@@ -458,14 +454,14 @@ void FramePipelineTest::overlayPatternsAndImagesStayRetained()
 		if (auto const* image = std::get_if<render::DrawImage>(&command))
 		{
 			first_image = image->image;
-			QCOMPARE(image->target.width, 12.0);
-			QCOMPARE(image->target.height, 8.0);
+			QCOMPARE(image->target.width(), 12.0);
+			QCOMPARE(image->target.height(), 8.0);
 		}
 	}
 	QCOMPARE(pattern_count, 2);
 	QVERIFY(first_image);
 
-	std::shared_ptr<const render::ImageData> second_image;
+	std::shared_ptr<const QImage> second_image;
 	for (auto const& command : second->commands)
 		if (auto const* image = std::get_if<render::DrawImage>(&command))
 			second_image = image->image;
@@ -478,96 +474,22 @@ void FramePipelineTest::mapWidgetUsesTheFrameContract()
 	QVERIFY(fixture);
 	MapView view(nullptr, &fixture->map);
 	MapWidget widget(false);
-	widget.setWindowFlag(Qt::WindowStaysOnTopHint);
 	widget.resize(800, 600);
 	widget.setMapView(&view);
 	widget.adjustViewToRect(fixture->extent, MapWidget::ContinuousZoom);
-	auto* canvas_widget = widget.findChild<QWidget*>(QStringLiteral("mapVelloCanvas"));
-	QVERIFY(canvas_widget);
-	auto* canvas = dynamic_cast<presentation::VelloCanvas*>(canvas_widget);
+	auto* canvas = widget.findChild<presentation::QtCanvas*>(QStringLiteral("mapQtCanvas"));
 	QVERIFY(canvas);
 	QTRY_VERIFY_WITH_TIMEOUT(canvas->currentFrame(), 5000);
 	widget.show();
 	QVERIFY(QTest::qWaitForWindowExposed(&widget));
-	widget.raise();
-	widget.activateWindow();
-	widget.setCursor(Qt::CrossCursor);
-	QCOMPARE(canvas->presentationCursor().shape(), Qt::CrossCursor);
-	QPixmap custom_cursor(16, 16);
-	custom_cursor.fill(QColor(40, 90, 180));
-	widget.setCursor(QCursor(custom_cursor, 3, 5));
-	QCOMPARE(canvas->presentationCursor().shape(), Qt::BitmapCursor);
-	QCOMPARE(canvas->presentationCursor().hotSpot(), QPoint(3, 5));
-	QCOMPARE(canvas->presentationCursor().pixmap().toImage(), custom_cursor.toImage());
-	presentation::NativeSurfaceWindow* native_surface = nullptr;
-	for (auto* window : QGuiApplication::allWindows())
-	{
-		auto* candidate = dynamic_cast<presentation::NativeSurfaceWindow*>(window);
-		if (candidate
-		    && candidate->surfaceState().native.window == canvas->surfaceState().native.window)
-		{
-			native_surface = candidate;
-			break;
-		}
-	}
-	QVERIFY(native_surface);
-	auto const drag_start = QPointF(300, 240);
-	auto const drag_end = QPointF(365, 275);
-	auto const global_start = QPointF(native_surface->mapToGlobal(drag_start.toPoint()));
-	auto const global_end = QPointF(native_surface->mapToGlobal(drag_end.toPoint()));
-	auto const center_before_drag = view.center();
-	QMouseEvent press(
-		QEvent::MouseButtonPress, drag_start, drag_start, global_start,
-		Qt::MiddleButton, Qt::MiddleButton, Qt::NoModifier
-	);
-	QCoreApplication::sendEvent(native_surface, &press);
-	QCOMPARE(canvas->presentationCursor().shape(), Qt::ClosedHandCursor);
-	QMouseEvent move(
-		QEvent::MouseMove, drag_end, drag_end, global_end,
-		Qt::NoButton, Qt::MiddleButton, Qt::NoModifier
-	);
-	QCoreApplication::sendEvent(native_surface, &move);
-	QCOMPARE(view.panOffset(), (drag_end - drag_start).toPoint());
-	QMouseEvent release(
-		QEvent::MouseButtonRelease, drag_end, drag_end, global_end,
-		Qt::MiddleButton, Qt::NoButton, Qt::NoModifier
-	);
-	QCoreApplication::sendEvent(native_surface, &release);
-	QCOMPARE(view.panOffset(), QPoint());
-	QVERIFY(view.center() != center_before_drag);
-	QCOMPARE(canvas->presentationCursor().shape(), Qt::BitmapCursor);
 	auto const frame_is_current = [canvas] {
-		return canvas->currentFrame() && canvas->lastResult()
-		       && canvas->lastResult()->completion.frame_id == canvas->currentFrame()->id
-		       && canvas->lastResult()->surface_sequence == canvas->surfaceState().sequence
-		       && canvas->lastResult()->completion.status == render::FrameStatus::Presented;
+		return canvas->currentFrame() && canvas->lastCompletion()
+		       && canvas->lastCompletion()->frame_id == canvas->currentFrame()->id
+		       && canvas->lastCompletion()->status == render::FrameStatus::Presented;
 	};
-	auto const state_description = [canvas] {
-		auto const frame_id = canvas->currentFrame() ? canvas->currentFrame()->id : 0;
-		auto const result_id = canvas->lastResult()
-		                     ? canvas->lastResult()->completion.frame_id : 0;
-		auto const result_status = canvas->lastResult()
-		                         ? int(canvas->lastResult()->completion.status) : -1;
-		auto const result_surface = canvas->lastResult()
-		                          ? canvas->lastResult()->surface_sequence : 0;
-		return QStringLiteral(
-			"frame %1, result %2 status %3, result surface %4, current surface %5 phase %6, error: %7"
-		).arg(frame_id)
-		 .arg(result_id)
-		 .arg(result_status)
-		 .arg(result_surface)
-		 .arg(canvas->surfaceState().sequence)
-		 .arg(int(canvas->surfaceState().phase))
-		 .arg(QString::fromStdString(canvas->lastError()));
-	};
-	QTRY_VERIFY2_WITH_TIMEOUT(
-		frame_is_current(),
-		qPrintable(state_description()),
-		30000
-	);
+	QTRY_VERIFY_WITH_TIMEOUT(frame_is_current(), 30000);
 	auto const first_frame = canvas->currentFrame();
 	QVERIFY(!first_frame->vector_passes.empty());
-	QVERIFY2(canvas->lastError().empty(), canvas->lastError().c_str());
 
 	auto* object = fixture->map.getPart(0)->getObject(0);
 	QVERIFY(object);
@@ -575,11 +497,7 @@ void FramePipelineTest::mapWidgetUsesTheFrameContract()
 	widget.updateEverything();
 	QTRY_VERIFY(canvas->currentFrame()->id > first_frame->id);
 	QVERIFY(canvas->currentFrame()->revision >= first_frame->revision);
-	QTRY_VERIFY2_WITH_TIMEOUT(
-		frame_is_current(),
-		qPrintable(state_description()),
-		30000
-	);
+	QTRY_VERIFY_WITH_TIMEOUT(frame_is_current(), 30000);
 }
 
 void FramePipelineTest::mapWidgetConvergesRasterBatches()
@@ -602,9 +520,7 @@ void FramePipelineTest::mapWidgetConvergesRasterBatches()
 
 	MapWidget widget(false);
 	widget.setMapView(&view);
-	auto* canvas_widget = widget.findChild<QWidget*>(QStringLiteral("mapVelloCanvas"));
-	QVERIFY(canvas_widget);
-	auto* canvas = dynamic_cast<presentation::VelloCanvas*>(canvas_widget);
+	auto* canvas = widget.findChild<presentation::QtCanvas*>(QStringLiteral("mapQtCanvas"));
 	QVERIFY(canvas);
 	QTRY_VERIFY_WITH_TIMEOUT(
 		canvas->currentFrame() && frameImageCount(*canvas->currentFrame()) == 10,
@@ -628,9 +544,7 @@ void FramePipelineTest::mapWidgetWaitsForMissingRasterSource()
 
 	MapWidget widget(false);
 	widget.setMapView(&view);
-	auto* canvas_widget = widget.findChild<QWidget*>(QStringLiteral("mapVelloCanvas"));
-	QVERIFY(canvas_widget);
-	auto* canvas = dynamic_cast<presentation::VelloCanvas*>(canvas_widget);
+	auto* canvas = widget.findChild<presentation::QtCanvas*>(QStringLiteral("mapQtCanvas"));
 	QVERIFY(canvas);
 	QTRY_VERIFY_WITH_TIMEOUT(canvas->currentFrame(), 5000);
 	QCOMPARE(source_ptr->collectionCount(), 1);
@@ -651,84 +565,14 @@ void FramePipelineTest::mapWidgetWaitsForMissingRasterSource()
 	QCOMPARE(source_ptr->collectionCount(), 2);
 }
 
-void FramePipelineTest::nativeSurfacePublishesOrderedLifecycle()
+void FramePipelineTest::qtCanvasIsAnOrdinaryQtChild()
 {
-	using namespace presentation;
-	NativeSurfaceWindow window;
-	QVERIFY(window.flags().testFlag(Qt::WindowDoesNotAcceptFocus));
-	QVERIFY(!window.flags().testFlag(Qt::WindowTransparentForInput));
-	auto input_events = 0;
-	window.setInputHandler([&input_events](QEvent* event) {
-		if (event->type() != QEvent::MouseMove)
-			return false;
-		++input_events;
-		return true;
-	});
-	QMouseEvent mouse_move(
-		QEvent::MouseMove, QPointF(20, 30), QPointF(20, 30),
-		Qt::NoButton, Qt::NoButton, Qt::NoModifier
-	);
-	QCoreApplication::sendEvent(&window, &mouse_move);
-	QCOMPARE(input_events, 1);
-	std::vector<NativeSurfaceState> states;
-	window.setStateHandler([&states](auto const& state) { states.push_back(state); });
-
-	QPlatformSurfaceEvent created(QPlatformSurfaceEvent::SurfaceCreated);
-	QCoreApplication::sendEvent(&window, &created);
-	QVERIFY(states.size() >= 2);
-	QVERIFY(states.back().phase == SurfacePhase::Hidden
-	        || states.back().phase == SurfacePhase::Exposed);
-	QVERIFY(states.back().native.window != 0);
-#if defined(Q_OS_MACOS)
-	QCOMPARE(states.back().native.platform, NativePlatform::AppKit);
-#elif defined(Q_OS_WIN)
-	QCOMPARE(states.back().native.platform, NativePlatform::Win32);
-#elif defined(Q_OS_LINUX)
-	auto const platform_name = QGuiApplication::platformName().toLower();
-	if (platform_name == QLatin1String("xcb"))
-		QCOMPARE(states.back().native.platform, NativePlatform::Xcb);
-	else if (platform_name.contains(QLatin1String("wayland")))
-		QCOMPARE(states.back().native.platform, NativePlatform::Wayland);
-	else
-		QFAIL(qPrintable(QStringLiteral("Unsupported native test platform: %1")
-		                 .arg(platform_name)));
-#else
-	QCOMPARE(states.back().native.platform, NativePlatform::Unknown);
-#endif
-	auto const created_sequence = states.back().sequence;
-
-	window.resize(320, 200);
-	QResizeEvent resized(QSize(320, 200), QSize());
-	QCoreApplication::sendEvent(&window, &resized);
-	QVERIFY(states.back().sequence > created_sequence);
-	QVERIFY(states.back().physical_width >= std::uint32_t(320));
-	QVERIFY(states.back().physical_height >= std::uint32_t(200));
-	auto const resized_state_count = states.size();
-	QResizeEvent duplicate_resize(QSize(320, 200), QSize(320, 200));
-	QCoreApplication::sendEvent(&window, &duplicate_resize);
-	QCOMPARE(states.size(), resized_state_count);
-	window.refreshState();
-	QCOMPARE(states.size(), resized_state_count + 1);
-	QVERIFY(states.back().sequence > created_sequence);
-
-	QPlatformSurfaceEvent destroying(QPlatformSurfaceEvent::SurfaceAboutToBeDestroyed);
-	QCoreApplication::sendEvent(&window, &destroying);
-	QCOMPARE(states.back().phase, SurfacePhase::Unavailable);
-	QCOMPARE(states.back().native.window, std::uintptr_t(0));
-	for (std::size_t i = 1; i < states.size(); ++i)
-		QVERIFY(states[i].sequence > states[i - 1].sequence);
-
-	std::vector<NativeSurfaceState> destruction_states;
-	{
-		auto retiring_window = std::make_unique<NativeSurfaceWindow>();
-		retiring_window->setStateHandler([&destruction_states](auto const& state) {
-			destruction_states.push_back(state);
-		});
-		QCoreApplication::sendEvent(retiring_window.get(), &created);
-		QVERIFY(destruction_states.back().phase != SurfacePhase::Unavailable);
-	}
-	QCOMPARE(destruction_states.back().phase, SurfacePhase::Unavailable);
-	QCOMPARE(destruction_states.back().native.window, std::uintptr_t(0));
+	QWidget host;
+	presentation::QtCanvas canvas(&host);
+	QCOMPARE(canvas.parentWidget(), &host);
+	QVERIFY(canvas.testAttribute(Qt::WA_TransparentForMouseEvents));
+	QCOMPARE(canvas.focusPolicy(), Qt::NoFocus);
+	QVERIFY(!canvas.isWindow());
 }
 
 QTEST_MAIN(FramePipelineTest)

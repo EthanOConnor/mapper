@@ -31,7 +31,7 @@
 #include <QString>
 
 #include "core/track.h"
-#include "render/render_ir.h"
+#include "render/qt_render_scene.h"
 #include "templates/template.h"
 
 class QByteArray;
@@ -85,7 +85,7 @@ public:
 	
 	bool hasAlpha() const override;
 	
-	std::shared_ptr<const render::RenderIR> buildRenderIR(bool on_screen,
+	std::shared_ptr<const render::QtRenderScene> buildQtRenderScene(bool on_screen,
 	                                                     double view_scale,
 	                                                     render::Revision revision) const;
 	

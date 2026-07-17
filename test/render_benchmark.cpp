@@ -18,7 +18,6 @@
 #include "core/map_part.h"
 #include "core/objects/object.h"
 #include "render/frame_pipeline.h"
-#include "render/qt_render_bridge.h"
 #include "render/render_snapshot.h"
 
 using namespace OpenOrienteering;
@@ -72,12 +71,12 @@ int main(int argc, char** argv)
 		return 4;
 
 	auto const request = render::RenderRequest {
-		render::fromQRectF(map.calculateExtent(true)),
+		map.calculateExtent(true),
 		10,
 		RenderConfig::HelperSymbols,
 		1,
 	};
-	map.publishRenderSnapshot()->buildIR(request);
+	map.publishRenderSnapshot()->buildScene(request);
 	render::FramePlanner frame_planner;
 	auto const frame_request = render::FrameRequest {
 		{ 2068, 1906, 1, {} },
@@ -88,11 +87,11 @@ int main(int argc, char** argv)
 
 	std::vector<double> edit_and_publish;
 	std::vector<double> publish;
-	std::vector<double> record_ir;
+	std::vector<double> record_scene;
 	std::vector<double> frame_plan;
 	edit_and_publish.reserve(iterations);
 	publish.reserve(iterations);
-	record_ir.reserve(iterations);
+	record_scene.reserve(iterations);
 	frame_plan.reserve(iterations);
 	std::size_t object_count = 0;
 	std::size_t command_count = 0;
@@ -104,14 +103,14 @@ int main(int argc, char** argv)
 		auto const edited = Clock::now();
 		auto snapshot = map.publishRenderSnapshot();
 		auto const published = Clock::now();
-		auto ir = snapshot->buildIR(request);
+		auto ir = snapshot->buildScene(request);
 		auto const recorded = Clock::now();
 		auto frame = frame_planner.plan(*snapshot, frame_request);
 		auto const planned = Clock::now();
 
 		edit_and_publish.push_back(milliseconds(published - started));
 		publish.push_back(milliseconds(published - edited));
-		record_ir.push_back(milliseconds(recorded - published));
+		record_scene.push_back(milliseconds(recorded - published));
 		frame_plan.push_back(milliseconds(planned - recorded));
 		object_count = snapshot->objectCount();
 		command_count = ir->commands.size();
@@ -130,7 +129,7 @@ int main(int argc, char** argv)
 	std::cout << ",\n";
 	printSeries("publish_only", publish);
 	std::cout << ",\n";
-	printSeries("record_ir", record_ir);
+	printSeries("record_scene", record_scene);
 	std::cout << ",\n";
 	printSeries("frame_plan", frame_plan);
 	std::cout << "\n}\n";

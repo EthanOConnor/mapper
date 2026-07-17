@@ -4,7 +4,7 @@
  *    This file is part of OpenOrienteering.
  */
 
-#include "render_ir_t.h"
+#include "qt_render_scene_t.h"
 
 #include <algorithm>
 #include <cmath>
@@ -14,6 +14,7 @@
 
 #include <QtTest>
 #include <QColor>
+#include <QCanvasPath>
 #include <QDir>
 #include <QImage>
 #include <QPainter>
@@ -26,8 +27,7 @@
 #include "core/objects/object.h"
 #include "core/symbols/line_symbol.h"
 #include "render/qpainter_renderer.h"
-#include "render/qt_render_bridge.h"
-#include "render/render_ir.h"
+#include "render/qt_render_scene.h"
 #include "render/render_snapshot.h"
 
 using namespace OpenOrienteering;
@@ -36,12 +36,8 @@ namespace {
 
 render::PathPtr rectangle(double left, double top, double right, double bottom)
 {
-	render::PathBuilder path(render::FillRule::Winding);
-	path.moveTo({ left, top });
-	path.lineTo({ right, top });
-	path.lineTo({ right, bottom });
-	path.lineTo({ left, bottom });
-	path.close();
+	render::QtRenderPathBuilder path;
+	path.addRect(QRectF(QPointF(left, top), QPointF(right, bottom)));
 	return path.finish();
 }
 
@@ -58,7 +54,7 @@ const RenderableVector* firstGeometry(const render::SnapshotObject& object)
 
 }  // namespace
 
-void RenderIrTest::initTestCase()
+void QtRenderSceneTest::initTestCase()
 {
 	Q_INIT_RESOURCE(resources);
 	doStaticInitializations();
@@ -68,7 +64,28 @@ void RenderIrTest::initTestCase()
 	);
 }
 
-void RenderIrTest::immutableSnapshotSurvivesEdit()
+void QtRenderSceneTest::directPathBuilderProducesBothQtPaths()
+{
+	render::QtRenderPathBuilder first(Qt::WindingFill);
+	first.moveTo({ 0, 0 });
+	first.lineTo({ 4, 0 });
+	first.cubicTo({ 5, 0 }, { 5, 4 }, { 4, 4 });
+	first.closeSubpath();
+
+	render::QtRenderPathBuilder second(Qt::WindingFill);
+	second.moveTo({ 8, 8 });
+	second.lineTo({ 12, 8 });
+	second.connectPath(first);
+	auto const retained = second.finish();
+
+	QVERIFY(retained);
+	QCOMPARE(retained->painterPath().fillRule(), Qt::WindingFill);
+	QCOMPARE(retained->painterPath().currentPosition(), QPointF(0, 0));
+	QVERIFY(retained->painterPath().elementCount() >= 6);
+	QVERIFY(retained->canvasPath().commandsSize() >= 6);
+}
+
+void QtRenderSceneTest::immutableSnapshotSurvivesEdit()
 {
 	Map map;
 	QVERIFY(map.loadFrom(QStringLiteral("testdata:symbols/line-symbol-border-variants.omap")));
@@ -89,12 +106,12 @@ void RenderIrTest::immutableSnapshotSurvivesEdit()
 	QCOMPARE(first_geometry.size(), first->objectCount());
 
 	render::RenderRequest request {
-		render::fromQRectF(map.calculateExtent(true)),
+		map.calculateExtent(true),
 		10,
 		RenderConfig::HelperSymbols,
 		1,
 	};
-	auto const old_ir = first->buildIR(request);
+	auto const old_ir = first->buildScene(request);
 	QVERIFY(old_ir);
 	auto const old_command_count = old_ir->commands.size();
 
@@ -131,22 +148,22 @@ void RenderIrTest::immutableSnapshotSurvivesEdit()
 	QCOMPARE(shared_objects + changed_objects, first->objectCount());
 
 	// The old revision remains complete and readable after the live object changed.
-	auto const old_ir_again = first->buildIR(request);
+	auto const old_ir_again = first->buildScene(request);
 	QCOMPARE(old_ir_again->revision, first->revision());
 	QCOMPARE(old_ir_again->commands.size(), old_command_count);
 
 	// Removal updates persistent object blocks and color-order buckets without
 	// invalidating either earlier revision.
-	auto const second_command_count = second->buildIR(request)->commands.size();
+	auto const second_command_count = second->buildScene(request)->commands.size();
 	map.getPart(0)->deleteObject(0);
 	auto const third = map.publishRenderSnapshot();
 	QCOMPARE(third->objectCount() + 1, second->objectCount());
 	QVERIFY(third->revision() > second->revision());
-	QVERIFY(third->buildIR(request)->commands.size() < second_command_count);
-	QCOMPARE(first->buildIR(request)->commands.size(), old_command_count);
+	QVERIFY(third->buildScene(request)->commands.size() < second_command_count);
+	QCOMPARE(first->buildScene(request)->commands.size(), old_command_count);
 }
 
-void RenderIrTest::curvedLineKeepsBothBorders()
+void QtRenderSceneTest::curvedLineKeepsBothBorders()
 {
 	Map map;
 	auto* fill = new MapColor;
@@ -177,8 +194,8 @@ void RenderIrTest::curvedLineKeepsBothBorders()
 	map.addObject(object);
 
 	auto const snapshot = map.publishRenderSnapshot();
-	auto const ir = snapshot->buildIR({
-		render::fromQRectF(map.calculateExtent(true).adjusted(-1, -1, 1, 1)),
+	auto const ir = snapshot->buildScene({
+		map.calculateExtent(true).adjusted(-1, -1, 1, 1),
 		20,
 		RenderConfig::NoOptions,
 		1,
@@ -188,14 +205,16 @@ void RenderIrTest::curvedLineKeepsBothBorders()
 	for (auto const& command : ir->commands)
 	{
 		auto const* stroke = std::get_if<render::StrokePath>(&command);
-		if (!stroke || std::abs(stroke->style.width - 0.07) > 1.0e-9 || !stroke->path)
+		if (!stroke || std::abs(stroke->pen.widthF() - 0.07) > 1.0e-9 || !stroke->path)
 		{
 			continue;
 		}
-		QVERIFY(std::ranges::any_of(stroke->path->elements(), [](const auto& element) {
-			return element.verb == render::PathVerb::CubicTo;
-		}));
-		border_paths.push_back(render::toQPainterPath(*stroke->path));
+		auto const& path = stroke->path->painterPath();
+		auto has_curve = false;
+		for (auto index = 0; index < path.elementCount(); ++index)
+			has_curve |= path.elementAt(index).type == QPainterPath::CurveToElement;
+		QVERIFY(has_curve);
+		border_paths.push_back(path);
 	}
 	QCOMPARE(border_paths.size(), std::size_t(2));
 
@@ -224,35 +243,31 @@ void RenderIrTest::curvedLineKeepsBothBorders()
 	QVERIFY(middle_sides[0] * middle_sides[1] < 0);
 }
 
-void RenderIrTest::referenceRendererInterpretsIr()
+void QtRenderSceneTest::referenceRendererInterpretsScene()
 {
-	render::RenderIRBuilder builder(42, { 0, 0, 128, 128 });
+	render::QtRenderSceneBuilder builder(42, { 0, 0, 128, 128 });
 	auto const full = rectangle(0, 0, 128, 128);
 	auto const clip = rectangle(16, 16, 80, 80);
 	auto const line = rectangle(4, 4, 124, 124);
 
-	builder.fillPath(full, render::fromQColor(Qt::white));
+	builder.fillPath(full, Qt::white);
 	builder.pushTransform({ 1, 0, 0, 1, 4, 4 });
-	builder.fillEllipse({ 4, 4, 12, 12 }, render::fromQColor(Qt::red));
+	builder.fillEllipse({ 4, 4, 12, 12 }, Qt::red);
 	builder.popTransform();
 	builder.pushClip(clip);
 	builder.pushLayer(0.5);
-	builder.fillPath(full, render::fromQColor(Qt::blue));
-	builder.strokePath(line, render::fromQColor(Qt::black),
-	                   { .width = 2, .cap = render::LineCap::Round,
-	                     .join = render::LineJoin::Round, .miter_limit = 4 });
-	builder.strokeEllipse({ 30, 30, 20, 20 }, render::fromQColor(Qt::yellow),
-	                      { .width = 2, .cap = render::LineCap::Flat,
-	                        .join = render::LineJoin::Miter, .miter_limit = 4 });
+	builder.fillPath(full, Qt::blue);
+	builder.strokePath(line, QPen(Qt::black, 2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+	builder.strokeEllipse({ 30, 30, 20, 20 },
+	                      QPen(Qt::yellow, 2, Qt::SolidLine, Qt::FlatCap, Qt::MiterJoin));
 	builder.popLayer();
 	builder.popClip();
 
-	auto pixels = std::make_shared<const std::vector<std::uint8_t>>(
-		std::vector<std::uint8_t> { 0, 255, 0, 255 }
-	);
-	auto image = std::make_shared<const render::ImageData>(render::ImageData { 1, 1, 4, pixels });
+	QImage source(1, 1, QImage::Format_RGBA8888);
+	source.fill(Qt::green);
+	auto image = std::make_shared<const QImage>(std::move(source));
 	builder.drawImage(image, { 96, 8, 16, 16 });
-	builder.drawLinePattern(rectangle(88, 40, 120, 72), render::fromQColor(Qt::magenta),
+	builder.drawLinePattern(rectangle(88, 40, 120, 72), Qt::magenta,
 	                        0, 4, 0, 1);
 
 	auto const ir = builder.finish();
@@ -272,16 +287,16 @@ void RenderIrTest::referenceRendererInterpretsIr()
 	QVERIFY(output.pixelColor(100, 48) != QColor(Qt::white));
 }
 
-void RenderIrTest::antialiasPolicyPreservesCallerIntent()
+void QtRenderSceneTest::antialiasPolicyPreservesCallerIntent()
 {
 	auto render_triangle = [](render::QualityHint quality, bool antialiasing_allowed) {
-		render::PathBuilder path(render::FillRule::Winding);
-		path.moveTo({ 1.25, 1.25 });
-		path.lineTo({ 14.75, 1.25 });
-		path.lineTo({ 1.25, 14.75 });
-		path.close();
-		render::RenderIRBuilder builder(1, { 0, 0, 16, 16 });
-		builder.fillPath(path.finish(), render::fromQColor(Qt::black), quality);
+		QPainterPath path;
+		path.moveTo(1.25, 1.25);
+		path.lineTo(14.75, 1.25);
+		path.lineTo(1.25, 14.75);
+		path.closeSubpath();
+		render::QtRenderSceneBuilder builder(1, { 0, 0, 16, 16 });
+		builder.fillPath(render::sharePainterPath(std::move(path)), Qt::black, quality);
 
 		QImage image(16, 16, QImage::Format_ARGB32_Premultiplied);
 		image.fill(Qt::transparent);
@@ -317,4 +332,4 @@ namespace {
 }
 #endif
 
-QTEST_MAIN(RenderIrTest)
+QTEST_MAIN(QtRenderSceneTest)

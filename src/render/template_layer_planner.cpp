@@ -23,7 +23,6 @@
 
 #include "core/map.h"
 #include "core/map_view.h"
-#include "render/qt_render_bridge.h"
 #include "templates/template.h"
 #include "templates/template_image.h"
 #include "templates/template_map.h"
@@ -48,37 +47,27 @@ struct ImageKey
 struct TileKey
 {
 	ImageKey image;
-	Rect target;
-	Rect source;
+	QRectF target;
+	QRectF source;
 
 	bool operator==(const TileKey& other) const
 	{
-		return image == other.image
-		       && target.x == other.target.x && target.y == other.target.y
-		       && target.width == other.target.width && target.height == other.target.height
-		       && source.x == other.source.x && source.y == other.source.y
-		       && source.width == other.source.width && source.height == other.source.height;
+		return image == other.image && target == other.target && source == other.source;
 	}
 };
 
 struct LayerKey
 {
-	Transform template_to_map;
+	QTransform template_to_map;
 	std::vector<TileKey> tiles;
 
 	bool operator==(const LayerKey& other) const
 	{
-		return template_to_map.m11 == other.template_to_map.m11
-		       && template_to_map.m12 == other.template_to_map.m12
-		       && template_to_map.m21 == other.template_to_map.m21
-		       && template_to_map.m22 == other.template_to_map.m22
-		       && template_to_map.dx == other.template_to_map.dx
-		       && template_to_map.dy == other.template_to_map.dy
-		       && tiles == other.tiles;
+		return template_to_map == other.template_to_map && tiles == other.tiles;
 	}
 };
 
-Transform templateToMapTransform(const Template& source)
+QTransform templateToMapTransform(const Template& source)
 {
 	auto const origin = source.templateToMap(QPointF(0, 0));
 	auto const x = source.templateToMap(QPointF(1, 0));
@@ -111,26 +100,11 @@ bool imageIsOpaque(const QImage& source)
 	return true;
 }
 
-std::shared_ptr<const ImageData> snapshotImage(const QImage& source)
+std::shared_ptr<const QImage> snapshotImage(const QImage& source)
 {
-	auto const image = source.convertToFormat(QImage::Format_RGBA8888);
-	if (image.isNull())
+	if (source.isNull())
 		return {};
-
-	auto bytes = std::make_shared<std::vector<std::uint8_t>>();
-	auto const row_bytes = std::size_t(image.width()) * 4;
-	bytes->reserve(row_bytes * std::size_t(image.height()));
-	for (int y = 0; y < image.height(); ++y)
-	{
-		auto const* row = image.constScanLine(y);
-		bytes->insert(bytes->end(), row, row + row_bytes);
-	}
-	return std::make_shared<const ImageData>(ImageData {
-		std::uint32_t(image.width()),
-		std::uint32_t(image.height()),
-		std::uint32_t(row_bytes),
-		std::move(bytes),
-	});
+	return std::make_shared<const QImage>(source);
 }
 
 struct SourceTile
@@ -141,8 +115,8 @@ struct SourceTile
 
 struct RasterMosaic
 {
-	std::shared_ptr<const ImageData> image;
-	Rect target;
+	std::shared_ptr<const QImage> image;
+	QRectF target;
 };
 
 RasterMosaic transparentMosaic(const std::vector<SourceTile>& tiles)
@@ -158,12 +132,12 @@ RasterMosaic transparentMosaic(const std::vector<SourceTile>& tiles)
 	auto density_y = 0.0;
 	for (auto const& tile : tiles)
 	{
-		left = std::min(left, tile.key.target.x);
-		top = std::min(top, tile.key.target.y);
-		right = std::max(right, tile.key.target.x + tile.key.target.width);
-		bottom = std::max(bottom, tile.key.target.y + tile.key.target.height);
-		density_x = std::max(density_x, tile.key.source.width / tile.key.target.width);
-		density_y = std::max(density_y, tile.key.source.height / tile.key.target.height);
+		left = std::min(left, tile.key.target.left());
+		top = std::min(top, tile.key.target.top());
+		right = std::max(right, tile.key.target.right());
+		bottom = std::max(bottom, tile.key.target.bottom());
+		density_x = std::max(density_x, tile.key.source.width() / tile.key.target.width());
+		density_y = std::max(density_y, tile.key.source.height() / tile.key.target.height());
 	}
 	auto const target_width = right - left;
 	auto const target_height = bottom - top;
@@ -200,12 +174,12 @@ RasterMosaic transparentMosaic(const std::vector<SourceTile>& tiles)
 	for (auto const& tile : tiles)
 	{
 		auto const target = QRectF(
-			(tile.key.target.x - left) * scale_x,
-			(tile.key.target.y - top) * scale_y,
-			tile.key.target.width * scale_x,
-			tile.key.target.height * scale_y
+			(tile.key.target.x() - left) * scale_x,
+			(tile.key.target.y() - top) * scale_y,
+			tile.key.target.width() * scale_x,
+			tile.key.target.height() * scale_y
 		);
-		painter.drawImage(target, tile.image, toQRectF(tile.key.source));
+		painter.drawImage(target, tile.image, tile.key.source);
 	}
 	painter.end();
 
@@ -215,13 +189,13 @@ RasterMosaic transparentMosaic(const std::vector<SourceTile>& tiles)
 	};
 }
 
-Rect fullImageTarget(const TileKey& tile)
+QRectF fullImageTarget(const TileKey& tile)
 {
-	auto const scale_x = tile.target.width / tile.source.width;
-	auto const scale_y = tile.target.height / tile.source.height;
+	auto const scale_x = tile.target.width() / tile.source.width();
+	auto const scale_y = tile.target.height() / tile.source.height();
 	return {
-		tile.target.x - tile.source.x * scale_x,
-		tile.target.y - tile.source.y * scale_y,
+		tile.target.x() - tile.source.x() * scale_x,
+		tile.target.y() - tile.source.y() * scale_y,
 		tile.image.width * scale_x,
 		tile.image.height * scale_y,
 	};
@@ -235,12 +209,12 @@ public:
 	struct CachedLayer
 	{
 		LayerKey key;
-		std::shared_ptr<const RenderIR> scene;
+		std::shared_ptr<const QtRenderScene> scene;
 	};
 
 	TemplateLayerPlan plan(const Map& map,
 	                     const MapView* view,
-	                     Rect visible_map_rect,
+	                     QRectF visible_map_rect,
 	                     double view_scale,
 	                     bool on_screen)
 	{
@@ -262,19 +236,19 @@ public:
 				std::abs(source->getTemplateScaleX()),
 				std::abs(source->getTemplateScaleY())
 			));
-			std::shared_ptr<const RenderIR> layer;
+			std::shared_ptr<const QtRenderScene> layer;
 			if (auto const* image = dynamic_cast<const TemplateImage*>(source))
 			{
 				live_layers.insert(image);
 				QVector<RasterTemplateTile> source_tiles;
 				image->collectRasterTiles(
-					toQRectF(visible_map_rect), template_scale, on_screen, source_tiles
+					visible_map_rect, template_scale, on_screen, source_tiles
 				);
 				layer = layerFor(*image, source_tiles, result, on_screen);
 			}
 			else if (auto const* map_template = dynamic_cast<const TemplateMap*>(source))
 			{
-				layer = map_template->buildRenderIR(
+				layer = map_template->buildQtRenderScene(
 					visible_map_rect, template_scale, on_screen
 				);
 				if (map_template->includesChildTemplates() && map_template->templateMap())
@@ -307,7 +281,7 @@ public:
 			{
 				if (next_revision_ == std::numeric_limits<Revision>::max())
 					qFatal("Template layer revision space exhausted");
-				layer = track_template->buildRenderIR(
+				layer = track_template->buildQtRenderScene(
 					on_screen, template_scale, next_revision_++
 				);
 			}
@@ -343,35 +317,35 @@ public:
 	}
 
 private:
-	static VectorPass passFor(std::shared_ptr<const RenderIR> scene, double opacity)
+	static VectorPass passFor(std::shared_ptr<const QtRenderScene> scene, double opacity)
 	{
 		auto const clamped = std::clamp(opacity, 0.0, 1.0);
-		return { std::move(scene), BlendMode::SourceOver, clamped, clamped < 1 };
+		return { std::move(scene), QPainter::CompositionMode_SourceOver, clamped, clamped < 1 };
 	}
 
-	static Rect templateClip(const TemplateMap& source, Rect map_clip)
+	static QRectF templateClip(const TemplateMap& source, QRectF map_clip)
 	{
 		if (source.isTemplateGeoreferenced())
 			return map_clip;
 		QRectF result;
-		auto const clip = toQRectF(map_clip);
+		auto const& clip = map_clip;
 		rectIncludeSafe(result, source.mapToTemplate(MapCoordF(clip.topLeft())));
 		rectIncludeSafe(result, source.mapToTemplate(MapCoordF(clip.topRight())));
 		rectIncludeSafe(result, source.mapToTemplate(MapCoordF(clip.bottomLeft())));
 		rectIncludeSafe(result, source.mapToTemplate(MapCoordF(clip.bottomRight())));
-		return fromQRectF(result);
+		return result;
 	}
 
-	std::shared_ptr<const RenderIR> nestedToHost(const TemplateMap& source,
-	                                             std::shared_ptr<const RenderIR> scene,
-	                                             Rect host_clip)
+	std::shared_ptr<const QtRenderScene> nestedToHost(const TemplateMap& source,
+	                                             std::shared_ptr<const QtRenderScene> scene,
+	                                             QRectF host_clip)
 	{
 		if (!scene || source.isTemplateGeoreferenced())
 			return scene;
 		auto const origin = source.templateToMap(QPointF(0, 0));
 		auto const x_axis = source.templateToMap(QPointF(1, 0));
 		auto const y_axis = source.templateToMap(QPointF(0, 1));
-		RenderIRBuilder builder(scene->revision, host_clip);
+		QtRenderSceneBuilder builder(scene->revision, host_clip);
 		builder.pushTransform({
 			x_axis.x() - origin.x(), x_axis.y() - origin.y(),
 			y_axis.x() - origin.x(), y_axis.y() - origin.y(),
@@ -385,7 +359,7 @@ private:
 	void appendNested(std::vector<VectorPass>& destination,
 	                  std::vector<VectorPass> passes,
 	                  const TemplateMap& source,
-	                  Rect host_clip,
+	                  QRectF host_clip,
 	                  double outer_opacity)
 	{
 		for (auto& pass : passes)
@@ -397,7 +371,7 @@ private:
 		}
 	}
 
-	std::shared_ptr<const RenderIR> layerFor(const TemplateImage& source,
+	std::shared_ptr<const QtRenderScene> layerFor(const TemplateImage& source,
 	                                        const QVector<RasterTemplateTile>& source_tiles,
 	                                        TemplateLayerPlan& result,
 	                                        bool on_screen)
@@ -426,8 +400,8 @@ private:
 			};
 			TileKey tile_key {
 				image_key,
-				fromQRectF(tile.template_rect),
-				fromQRectF(tile.source_rect),
+				tile.template_rect,
+				tile.source_rect,
 			};
 			full_key.tiles.push_back(tile_key);
 			source_images.push_back({ std::move(tile_key), tile.image });
@@ -464,7 +438,7 @@ private:
 
 			if (next_revision_ == std::numeric_limits<Revision>::max())
 				qFatal("Raster layer revision space exhausted");
-			RenderIRBuilder builder(next_revision_++);
+			QtRenderSceneBuilder builder(next_revision_++);
 			builder.pushTransform(full_key.template_to_map);
 			builder.drawImage(mosaic.image, mosaic.target);
 			builder.popTransform();
@@ -476,7 +450,7 @@ private:
 
 		LayerKey key;
 		key.template_to_map = full_key.template_to_map;
-		std::vector<std::pair<TileKey, std::shared_ptr<const ImageData>>> tiles;
+		std::vector<std::pair<TileKey, std::shared_ptr<const QImage>>> tiles;
 		tiles.reserve(source_images.size());
 		for (auto const& tile : source_images)
 		{
@@ -499,7 +473,7 @@ private:
 
 		if (next_revision_ == std::numeric_limits<Revision>::max())
 			qFatal("Raster layer revision space exhausted");
-		RenderIRBuilder builder(next_revision_++);
+		QtRenderSceneBuilder builder(next_revision_++);
 		builder.pushTransform(key.template_to_map);
 		for (auto const& [tile, image] : tiles)
 			builder.drawImage(image, fullImageTarget(tile));
@@ -518,7 +492,7 @@ private:
 		return opacity_.emplace(key, imageIsOpaque(image)).first->second;
 	}
 
-	std::shared_ptr<const ImageData> imageFor(const ImageKey& key,
+	std::shared_ptr<const QImage> imageFor(const ImageKey& key,
 	                                          const QImage& image,
 	                                          TemplateLayerPlan& result,
 	                                          bool on_screen)
@@ -542,7 +516,7 @@ private:
 
 	Revision next_revision_ = 1;
 	std::unordered_map<const TemplateImage*, CachedLayer> layers_;
-	std::map<ImageKey, std::weak_ptr<const ImageData>> images_;
+	std::map<ImageKey, std::weak_ptr<const QImage>> images_;
 	std::map<ImageKey, bool> opacity_;
 	std::unordered_map<const TemplateMap*, std::unique_ptr<TemplateLayerPlanner>> child_planners_;
 };
@@ -555,7 +529,7 @@ TemplateLayerPlanner::~TemplateLayerPlanner() = default;
 
 TemplateLayerPlan TemplateLayerPlanner::plan(const Map& map,
 	                                     const MapView& view,
-	                                     Rect visible_map_rect,
+	                                     QRectF visible_map_rect,
 	                                     double view_scale,
 	                                     bool on_screen)
 {
@@ -564,7 +538,7 @@ TemplateLayerPlan TemplateLayerPlanner::plan(const Map& map,
 
 TemplateLayerPlan TemplateLayerPlanner::plan(const Map& map,
 	                                     const MapView* view,
-	                                     Rect visible_map_rect,
+	                                     QRectF visible_map_rect,
 	                                     double view_scale,
 	                                     bool on_screen)
 {

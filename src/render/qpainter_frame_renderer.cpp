@@ -12,21 +12,9 @@
 #include <QPainter>
 
 #include "render/qpainter_renderer.h"
-#include "render/qt_render_bridge.h"
-
 namespace OpenOrienteering::render {
 
 namespace {
-
-QPainter::CompositionMode compositionMode(BlendMode blend)
-{
-	switch (blend)
-	{
-	case BlendMode::SourceOver: return QPainter::CompositionMode_SourceOver;
-	case BlendMode::Multiply: return QPainter::CompositionMode_Multiply;
-	}
-	Q_UNREACHABLE_RETURN(QPainter::CompositionMode_SourceOver);
-}
 
 void applyOpacity(QImage& image, double opacity)
 {
@@ -67,7 +55,7 @@ FrameCompletion QPainterFrameRenderer::render(QPainter& painter, const FramePack
 		if (!pass.scene)
 			continue;
 		auto const pass_transform = pass.space == VectorPass::Space::World
-		                          ? toQTransform(frame.view.world_to_viewport)
+		                          ? frame.view.world_to_viewport
 		                          : QTransform{};
 		if (pass.isolated)
 		{
@@ -83,14 +71,14 @@ FrameCompletion QPainterFrameRenderer::render(QPainter& painter, const FramePack
 
 			painter.save();
 			painter.resetTransform();
-			painter.setCompositionMode(compositionMode(pass.blend));
+			painter.setCompositionMode(pass.composition);
 			painter.drawImage(QPointF(0, 0), layer);
 			painter.restore();
 			continue;
 		}
 		painter.save();
 		painter.setWorldTransform(pass_transform, false);
-		painter.setCompositionMode(compositionMode(pass.blend));
+		painter.setCompositionMode(pass.composition);
 		painter.setOpacity(painter.opacity() * pass.opacity);
 		renderer.render(painter, *pass.scene, true);
 		painter.restore();

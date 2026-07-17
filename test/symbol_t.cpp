@@ -50,7 +50,7 @@
 #include "core/symbols/point_symbol.h"
 #include "core/symbols/symbol.h"
 #include "render/qpainter_renderer.h"
-#include "render/qt_render_bridge.h"
+#include "render/render_snapshot.h"
 
 using namespace OpenOrienteering;
 
@@ -282,7 +282,7 @@ private slots:
 		painter.setClipRect(extent);
 		auto const snapshot = map.publishRenderSnapshot();
 		render::QPainterRenderer().draw(painter, *snapshot, {
-			render::fromQRectF(extent),
+			extent,
 			pixel_per_mm,
 			RenderConfig::DisableAntialiasing,
 			1,

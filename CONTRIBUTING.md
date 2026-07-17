@@ -33,7 +33,7 @@ not a second canonical source tree.
 ## Verification
 
 Changes to `main` must keep the supported desktop matrix and Android package
-build green. Rendering changes require reference-output and Vello conformance
+build green. Rendering changes require reference-output and Qt Canvas conformance
 coverage. Platform-specific behavior must be tested on the affected platform;
 do not convert a failure into a skip merely to close a change.
 

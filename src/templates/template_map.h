@@ -30,7 +30,7 @@
 #include <QString>
 
 #include "templates/template.h"
-#include "render/render_ir.h"
+#include "render/qt_render_scene.h"
 
 class QByteArray;
 class QRectF;
@@ -92,7 +92,7 @@ public:
 	
 	const Map* templateMap() const;
 	virtual bool includesChildTemplates() const noexcept;
-	std::shared_ptr<const render::RenderIR> buildRenderIR(render::Rect map_clip_rect,
+	std::shared_ptr<const render::QtRenderScene> buildQtRenderScene(QRectF map_clip_rect,
 	                                                     double view_scale,
 	                                                     bool on_screen) const;
 	

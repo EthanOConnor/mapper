@@ -24,7 +24,7 @@
 
 #include <QRgb>
 
-#include "render/render_ir.h"
+#include "render/qt_render_scene.h"
 
 class QRectF;
 class QXmlStreamReader;
@@ -81,8 +81,8 @@ public:
 	/** Loads the grid in xml format from the given stream. */
 	const MapGrid& load(QXmlStreamReader& xml);
 	
-	/** Builds immutable render IR for the visible grid lines. */
-	std::shared_ptr<const render::RenderIR> buildRenderIR(const QRectF& bounding_box,
+	/** Builds an immutable Qt scene for the visible grid lines. */
+	std::shared_ptr<const render::QtRenderScene> buildQtRenderScene(const QRectF& bounding_box,
 	                                                     Map* map,
 	                                                     double view_scale,
 	                                                     render::Revision revision) const;

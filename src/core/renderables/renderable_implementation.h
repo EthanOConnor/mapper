@@ -12,7 +12,7 @@
 #include <QRectF>
 
 #include "core/renderables/renderable.h"
-#include "render/render_ir.h"
+#include "render/qt_render_scene.h"
 
 class QPointF;
 
@@ -32,7 +32,7 @@ class DotRenderable : public Renderable
 {
 public:
 	DotRenderable(const PointSymbol* symbol, MapCoordF coord);
-	void appendTo(render::RenderIRBuilder& builder,
+	void appendTo(render::QtRenderSceneBuilder& builder,
 	              const RenderPrimitiveConfig& config) const override;
 };
 
@@ -40,7 +40,7 @@ class CircleRenderable : public Renderable
 {
 public:
 	CircleRenderable(const PointSymbol* symbol, MapCoordF coord);
-	void appendTo(render::RenderIRBuilder& builder,
+	void appendTo(render::QtRenderSceneBuilder& builder,
 	              const RenderPrimitiveConfig& config) const override;
 
 private:
@@ -53,7 +53,7 @@ class LineRenderable : public Renderable
 public:
 	LineRenderable(const LineSymbol* symbol, const VirtualPath& virtual_path, bool closed);
 	LineRenderable(const LineSymbol* symbol, QPointF first, QPointF second);
-	void appendTo(render::RenderIRBuilder& builder,
+	void appendTo(render::QtRenderSceneBuilder& builder,
 	              const RenderPrimitiveConfig& config) const override;
 
 private:
@@ -64,8 +64,8 @@ private:
 
 	qreal line_width;
 	render::PathPtr path;
-	render::LineCap cap_style = render::LineCap::Flat;
-	render::LineJoin join_style = render::LineJoin::Miter;
+	Qt::PenCapStyle cap_style = Qt::FlatCap;
+	Qt::PenJoinStyle join_style = Qt::MiterJoin;
 };
 
 class AreaRenderable : public Renderable
@@ -73,13 +73,14 @@ class AreaRenderable : public Renderable
 public:
 	AreaRenderable(const AreaSymbol* symbol, const PathPartVector& path_parts);
 	AreaRenderable(const AreaSymbol* symbol, const VirtualPath& path);
-	void appendTo(render::RenderIRBuilder& builder,
+	void appendTo(render::QtRenderSceneBuilder& builder,
 	              const RenderPrimitiveConfig& config) const override;
 
 	const render::PathPtr& renderPath() const noexcept;
 
 private:
-	void addSubpath(const VirtualPath& virtual_path, render::PathBuilder& builder);
+	void addSubpath(const VirtualPath& virtual_path,
+	                render::QtRenderPathBuilder& path);
 
 	render::PathPtr path;
 };
@@ -89,12 +90,12 @@ class TextRenderable : public Renderable
 public:
 	TextRenderable(const TextSymbol* symbol, const TextObject* text_object,
 	               const MapColor* color, double anchor_x, double anchor_y);
-	void appendTo(render::RenderIRBuilder& builder,
+	void appendTo(render::QtRenderSceneBuilder& builder,
 	              const RenderPrimitiveConfig& config) const override;
 
 protected:
 	render::PathPtr path;
-	render::Transform transform;
+	QTransform transform;
 	double scale_factor = 1;
 };
 
@@ -103,7 +104,7 @@ class TextFramingRenderable : public TextRenderable
 public:
 	TextFramingRenderable(const TextSymbol* symbol, const TextObject* text_object,
 	                      const MapColor* color, double anchor_x, double anchor_y);
-	void appendTo(render::RenderIRBuilder& builder,
+	void appendTo(render::QtRenderSceneBuilder& builder,
 	              const RenderPrimitiveConfig& config) const override;
 
 private:

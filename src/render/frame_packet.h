@@ -11,7 +11,7 @@
 #include <memory>
 #include <vector>
 
-#include "render/render_ir.h"
+#include "render/qt_render_scene.h"
 
 namespace OpenOrienteering::render {
 
@@ -23,7 +23,7 @@ struct FrameView
 	std::uint32_t width = 0;
 	std::uint32_t height = 0;
 	double device_pixel_ratio = 1;
-	Transform world_to_viewport;
+	QTransform world_to_viewport;
 };
 
 /** One ordered vector contribution to a frame. */
@@ -35,8 +35,8 @@ struct VectorPass
 		Viewport,
 	};
 
-	std::shared_ptr<const RenderIR> scene;
-	BlendMode blend = BlendMode::SourceOver;
+	std::shared_ptr<const QtRenderScene> scene;
+	QPainter::CompositionMode composition = QPainter::CompositionMode_SourceOver;
 	double opacity = 1;
 	/** Render to transparent intermediate storage before compositing. */
 	bool isolated = false;

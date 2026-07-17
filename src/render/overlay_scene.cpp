@@ -21,31 +21,9 @@
 #include <QRectF>
 #include <QString>
 
-#include "render/qt_render_bridge.h"
-
 namespace OpenOrienteering::render {
 
 namespace {
-
-LineCap lineCap(Qt::PenCapStyle cap)
-{
-	switch (cap)
-	{
-	case Qt::RoundCap: return LineCap::Round;
-	case Qt::SquareCap: return LineCap::Square;
-	default: return LineCap::Flat;
-	}
-}
-
-LineJoin lineJoin(Qt::PenJoinStyle join)
-{
-	switch (join)
-	{
-	case Qt::BevelJoin: return LineJoin::Bevel;
-	case Qt::RoundJoin: return LineJoin::Round;
-	default: return LineJoin::Miter;
-	}
-}
 
 std::uint64_t imageKey(std::uint64_t source_key, const QRect& source,
 	                   std::uint64_t source_kind)
@@ -68,14 +46,14 @@ OverlaySceneBuilder::OverlaySceneBuilder()
 	states_.push_back({});
 }
 
-void OverlaySceneBuilder::begin(Revision revision, Rect viewport_bounds)
+void OverlaySceneBuilder::begin(Revision revision, QRectF viewport_bounds)
 {
-	builder_ = RenderIRBuilder(revision, viewport_bounds);
+	builder_ = QtRenderSceneBuilder(revision, viewport_bounds);
 	states_.clear();
 	states_.push_back({});
 }
 
-std::shared_ptr<const RenderIR> OverlaySceneBuilder::finish()
+std::shared_ptr<const QtRenderScene> OverlaySceneBuilder::finish()
 {
 	if (states_.size() != 1)
 		qFatal("Unbalanced transient overlay state");
@@ -127,9 +105,10 @@ void OverlaySceneBuilder::setWorldTransform(const QTransform& transform, bool co
 
 void OverlaySceneBuilder::drawLine(const QPointF& start, const QPointF& end)
 {
-	QPainterPath path(start);
+	QtRenderPathBuilder path;
+	path.moveTo(start);
 	path.lineTo(end);
-	drawShape(path);
+	drawShape(path.finish());
 }
 
 void OverlaySceneBuilder::drawLine(const QLineF& line) { drawLine(line.p1(), line.p2()); }
@@ -138,10 +117,11 @@ void OverlaySceneBuilder::drawPolyline(const QPointF* points, qsizetype count)
 {
 	if (!points || count < 2)
 		return;
-	QPainterPath path(points[0]);
+	QtRenderPathBuilder path;
+	path.moveTo(points[0]);
 	for (qsizetype i = 1; i < count; ++i)
 		path.lineTo(points[i]);
-	drawShape(path);
+	drawShape(path.finish());
 }
 
 void OverlaySceneBuilder::drawPolyline(const QPolygonF& points)
@@ -153,11 +133,12 @@ void OverlaySceneBuilder::drawPolygon(const QPointF* points, qsizetype count)
 {
 	if (!points || count < 2)
 		return;
-	QPainterPath path(points[0]);
+	QtRenderPathBuilder path;
+	path.moveTo(points[0]);
 	for (qsizetype i = 1; i < count; ++i)
 		path.lineTo(points[i]);
 	path.closeSubpath();
-	drawShape(path);
+	drawShape(path.finish());
 }
 
 void OverlaySceneBuilder::drawPolygon(const QPolygonF& points)
@@ -167,9 +148,9 @@ void OverlaySceneBuilder::drawPolygon(const QPolygonF& points)
 
 void OverlaySceneBuilder::drawRect(const QRectF& rect)
 {
-	QPainterPath path;
+	QtRenderPathBuilder path;
 	path.addRect(rect);
-	drawShape(path);
+	drawShape(path.finish());
 }
 
 void OverlaySceneBuilder::drawRect(const QRect& rect) { drawRect(QRectF(rect)); }
@@ -181,9 +162,9 @@ void OverlaySceneBuilder::drawRect(int x, int y, int width, int height)
 
 void OverlaySceneBuilder::drawEllipse(const QRectF& rect)
 {
-	QPainterPath path;
+	QtRenderPathBuilder path;
 	path.addEllipse(rect);
-	drawShape(path);
+	drawShape(path.finish());
 }
 
 void OverlaySceneBuilder::drawEllipse(const QPointF& center, double radius_x, double radius_y)
@@ -196,10 +177,10 @@ void OverlaySceneBuilder::drawPath(const QPainterPath& path) { drawShape(path); 
 
 void OverlaySceneBuilder::fillRect(const QRectF& rect, const QColor& source)
 {
-	QPainterPath path;
+	QtRenderPathBuilder path;
 	path.addRect(rect);
 	pushStateTransform();
-	builder_.fillPath(fromQPainterPath(path), color(source), QualityHint::ForceAntialiasing);
+	builder_.fillPath(path.finish(), color(source), QualityHint::ForceAntialiasing);
 	popStateTransform();
 }
 
@@ -225,7 +206,7 @@ void OverlaySceneBuilder::drawText(const QRect& rect, int flags, const QString& 
 	if (states_.back().pen.style() == Qt::NoPen)
 		return;
 	pushStateTransform();
-	builder_.fillPath(fromQPainterPath(path), color(states_.back().pen.color()));
+	builder_.fillPath(sharePainterPath(std::move(path)), color(states_.back().pen.color()));
 	popStateTransform();
 }
 
@@ -266,7 +247,7 @@ void OverlaySceneBuilder::drawPixmap(const QPointF& top_left, const QPixmap& pix
 	popStateTransform();
 }
 
-void OverlaySceneBuilder::append(const RenderIR& scene)
+void OverlaySceneBuilder::append(const QtRenderScene& scene)
 {
 	pushStateTransform();
 	if (states_.back().opacity < 1)
@@ -281,7 +262,13 @@ void OverlaySceneBuilder::drawShape(const QPainterPath& path)
 {
 	if (path.isEmpty())
 		return;
-	auto immutable_path = fromQPainterPath(path);
+	drawShape(sharePainterPath(path));
+}
+
+void OverlaySceneBuilder::drawShape(PathPtr immutable_path)
+{
+	if (!immutable_path || immutable_path->painterPath().isEmpty())
+		return;
 	pushStateTransform();
 	auto const& state = states_.back();
 	auto const brush_color = color(state.brush.color());
@@ -335,74 +322,49 @@ void OverlaySceneBuilder::drawShape(const QPainterPath& path)
 		qFatal("Unsupported transient overlay brush style %d", int(state.brush.style()));
 	}
 	if (state.pen.style() != Qt::NoPen)
-		builder_.strokePath(std::move(immutable_path), color(state.pen.color()), stroke(),
+		builder_.strokePath(std::move(immutable_path), stroke(),
 		                    QualityHint::ForceAntialiasing);
 	popStateTransform();
 }
 
 void OverlaySceneBuilder::pushStateTransform()
 {
-	builder_.pushTransform(fromQTransform(states_.back().transform));
+	builder_.pushTransform(states_.back().transform);
 }
 
 void OverlaySceneBuilder::popStateTransform() { builder_.popTransform(); }
 
-Color OverlaySceneBuilder::color(const QColor& source) const
+QColor OverlaySceneBuilder::color(const QColor& source) const
 {
 	auto adjusted = source;
 	adjusted.setAlphaF(adjusted.alphaF() * states_.back().opacity);
-	return fromQColor(adjusted);
+	return adjusted;
 }
 
-StrokeStyle OverlaySceneBuilder::stroke() const
+QPen OverlaySceneBuilder::stroke() const
 {
-	auto const& pen = states_.back().pen;
+	auto pen = states_.back().pen;
 	auto width = pen.widthF();
 	if (width <= 0)
 		width = 1;
-	StrokeStyle style {
-		.width = width,
-		.cap = lineCap(pen.capStyle()),
-		.join = lineJoin(pen.joinStyle()),
-		.miter_limit = pen.miterLimit(),
-		.dash_pattern = {},
-		.dash_offset = 0,
-	};
-	if (pen.style() != Qt::SolidLine && pen.style() != Qt::NoPen)
-	{
-		for (auto value : pen.dashPattern())
-			style.dash_pattern.push_back(value * width);
-		style.dash_offset = pen.dashOffset() * width;
-	}
-	return style;
+	pen.setWidthF(width);
+	pen.setColor(color(pen.color()));
+	return pen;
 }
 
-std::shared_ptr<const ImageData> OverlaySceneBuilder::image(const QImage& source,
-	                                                        const QRect& source_rect,
-	                                                        std::uint64_t stable_key)
+ImagePtr OverlaySceneBuilder::image(const QImage& source,
+	                                const QRect& source_rect,
+	                                std::uint64_t stable_key)
 {
 	if (source.isNull() || !source.rect().contains(source_rect) || source_rect.isEmpty())
 		return {};
 	if (auto found = images_.find(stable_key); found != images_.end())
 		return found->second;
 
-	auto converted = source.copy(source_rect).convertToFormat(QImage::Format_RGBA8888);
-	if (converted.isNull())
+	auto image = source.copy(source_rect);
+	if (image.isNull())
 		return {};
-	auto bytes = std::make_shared<std::vector<std::uint8_t>>();
-	auto const row_bytes = std::size_t(converted.width()) * 4;
-	bytes->reserve(row_bytes * std::size_t(converted.height()));
-	for (int row = 0; row < converted.height(); ++row)
-	{
-		auto const* begin = converted.constScanLine(row);
-		bytes->insert(bytes->end(), begin, begin + row_bytes);
-	}
-	auto data = std::make_shared<const ImageData>(ImageData {
-		std::uint32_t(converted.width()),
-		std::uint32_t(converted.height()),
-		std::uint32_t(row_bytes),
-		std::move(bytes),
-	});
+	auto data = std::make_shared<const QImage>(std::move(image));
 	if (images_.size() >= 128)
 		images_.clear();
 	images_.emplace(stable_key, data);

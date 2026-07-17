@@ -25,7 +25,7 @@
 #include <QRectF>
 
 #include "core/map_color.h"
-#include "render/render_ir.h"
+#include "render/qt_render_scene.h"
 
 class QColor;
 
@@ -43,7 +43,7 @@ struct SnapshotObjectBlock;
 struct SnapshotObject;
 }
 
-/** View-dependent policy used while producing ordered render IR. */
+/** View-dependent policy used while producing an ordered Qt-native scene. */
 class RenderConfig
 {
 public:
@@ -73,11 +73,11 @@ struct RenderPrimitiveConfig
 {
 	qreal scaling = 1;
 	RenderConfig::Options options;
-	render::Color color;
+	QColor color;
 };
 
 /**
- * Immutable backend-neutral geometry produced by a map symbol.
+ * Immutable Qt path geometry produced by a map symbol.
  *
  * Instances are explicitly shared by the live document, immutable snapshots,
  * and in-flight render work. They never contain QPainter or native resources.
@@ -99,7 +99,7 @@ public:
 	bool intersects(const QRectF& rect) const;
 	int colorPriority() const noexcept;
 
-	virtual void appendTo(render::RenderIRBuilder& builder,
+	virtual void appendTo(render::QtRenderSceneBuilder& builder,
 	                      const RenderPrimitiveConfig& config) const = 0;
 
 protected:
@@ -131,8 +131,8 @@ public:
 	void insertRenderable(Renderable* renderable);
 	void clear();
 	void detach();
-	std::shared_ptr<const render::RenderIR> buildIR(
-		int map_color, render::Color color, const render::RenderRequest& request
+	std::shared_ptr<const render::QtRenderScene> buildScene(
+		int map_color, QColor color, const render::RenderRequest& request
 	) const;
 
 	void setClipPath(render::PathPtr path);
@@ -165,7 +165,7 @@ public:
 
 	explicit MapRenderables(Map* map);
 
-	std::shared_ptr<const render::RenderIR> buildIR(const RenderConfig& config) const;
+	std::shared_ptr<const render::QtRenderScene> buildScene(const RenderConfig& config) const;
 
 	void insertRenderablesOfObject(const Object* object);
 	void removeRenderablesOfObject(const Object* object, bool mark_area_as_dirty);

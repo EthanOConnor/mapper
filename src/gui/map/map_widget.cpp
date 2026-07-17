@@ -59,9 +59,8 @@
 #include "core/map.h"
 #include "core/renderables/renderable.h"
 #include "core/symbols/symbol.h"  // IWYU pragma: keep
-#include "render/qt_render_bridge.h"
 #include "render/template_layer_planner.h"
-#include "presentation/vello_canvas.h"
+#include "presentation/qt_canvas.h"
 #include "gui/touch_cursor.h"
 #include "gui/map/map_editor_activity.h"
 #include "gui/widgets/action_grid_bar.h"
@@ -128,7 +127,7 @@ MapWidget::MapWidget(bool show_help, QWidget* parent)
  , pinching(false)
  , pinching_factor(1.0)
  , render_context_update_scheduled(false)
- , vello_canvas(new presentation::VelloCanvas(this))
+ , qt_canvas(new presentation::QtCanvas(this))
  , drawing_dirty_rect_border(0)
  , activity_dirty_rect_border(0)
  , last_mouse_release_time(QTime::currentTime())
@@ -147,8 +146,8 @@ MapWidget::MapWidget(bool show_help, QWidget* parent)
 	setMouseTracking(true);
 	setFocusPolicy(Qt::ClickFocus);
 	setSizePolicy(QSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding));
-	vello_canvas->setGeometry(rect());
-	vello_canvas->setPresentationCursor(cursor());
+	qt_canvas->setGeometry(rect());
+	qt_canvas->setCursor(cursor());
 }
 
 MapWidget::~MapWidget()
@@ -325,8 +324,8 @@ void MapWidget::drawSelection(render::OverlaySceneBuilder* painter,
 		selection_opacity,
 	};
 	painter->append(*(replacement_renderables
-		? replacement_renderables->buildIR(config)
-		: map.buildSelectionIR(config)));
+		? replacement_renderables->buildScene(config)
+		: map.buildSelectionScene(config)));
 	painter->restore();
 }
 
@@ -947,7 +946,7 @@ bool MapWidget::event(QEvent* event)
 		break;
 
 	case QEvent::CursorChange:
-		vello_canvas->setPresentationCursor(cursor());
+		qt_canvas->setCursor(cursor());
 		break;
 		
 	default:
@@ -1016,7 +1015,7 @@ void MapWidget::renderFrame()
 	if (overlay_revision == std::numeric_limits<render::Revision>::max())
 		qFatal("Map viewport revision space exhausted");
 
-	auto const viewport_bounds = render::Rect {
+	auto const viewport_bounds = QRectF {
 		0, 0, double(std::max(0, width())), double(std::max(0, height()))
 	};
 	if (!view)
@@ -1031,13 +1030,11 @@ void MapWidget::renderFrame()
 		};
 		request.above_map.push_back({
 			overlay_scene_builder.finish(),
-			render::BlendMode::SourceOver, 1, false,
+			QPainter::CompositionMode_SourceOver, 1, false,
 			render::VectorPass::Space::Viewport,
 		});
 		auto frame = frame_planner.plan(request);
-		vello_canvas->setFrame(
-			std::move(frame), render::fromQColor(QColor(Qt::gray))
-		);
+		qt_canvas->setFrame(std::move(frame), QColor(Qt::gray));
 		return;
 	}
 
@@ -1059,7 +1056,7 @@ void MapWidget::renderFrame()
 	auto const origin = viewport_point({ 0, 0 });
 	auto const x_axis = viewport_point({ 1, 0 });
 	auto const y_axis = viewport_point({ 0, 1 });
-	auto const world_to_viewport = render::Transform {
+	auto const world_to_viewport = QTransform {
 		x_axis.x() - origin.x(), x_axis.y() - origin.y(),
 		y_axis.x() - origin.x(), y_axis.y() - origin.y(),
 		origin.x(), origin.y(),
@@ -1069,7 +1066,7 @@ void MapWidget::renderFrame()
 	RenderConfig::Options options(RenderConfig::Screen | RenderConfig::HelperSymbols);
 	auto const map_visibility = view->effectiveMapVisibility();
 	auto const render_request = render::RenderRequest {
-		render::fromQRectF(map_view_rect),
+		map_view_rect,
 		view->calculateFinalZoomFactor() * (pinching ? pinching_factor : 1),
 		options,
 		map_visibility.visible ? double(map_visibility.opacity) : 0,
@@ -1079,11 +1076,10 @@ void MapWidget::renderFrame()
 	if (!view->areAllTemplatesHidden())
 	{
 		template_layers = template_layer_planner.plan(
-			*map, *view, render::fromQRectF(map_view_rect),
+			*map, *view, map_view_rect,
 			render_request.scaling, true
 		);
 	}
-
 	overlay_scene_builder.begin(overlay_revision++, viewport_bounds);
 	if (show_help && no_contents)
 	{
@@ -1123,7 +1119,7 @@ void MapWidget::renderFrame()
 	if (view->isGridVisible())
 	{
 		frame_request.above_map.push_back({
-			map->getGrid().buildRenderIR(map_view_rect, map, render_request.scaling,
+			map->getGrid().buildQtRenderScene(map_view_rect, map, render_request.scaling,
 			                             overlay_revision++),
 		});
 	}
@@ -1134,16 +1130,14 @@ void MapWidget::renderFrame()
 	);
 	frame_request.above_map.push_back({
 		std::move(overlay),
-		render::BlendMode::SourceOver, 1, false,
+		QPainter::CompositionMode_SourceOver, 1, false,
 		render::VectorPass::Space::Viewport,
 	});
 	auto const snapshot = map->publishRenderSnapshot();
 	auto frame = frame_planner.plan(*snapshot, frame_request);
-	vello_canvas->setFrame(
+	qt_canvas->setFrame(
 		std::move(frame),
-		render::fromQColor(
-			show_help && no_contents ? QColor(Qt::gray) : QColor(Qt::white)
-		)
+		show_help && no_contents ? QColor(Qt::gray) : QColor(Qt::white)
 	);
 	if (!template_layers.complete && template_layers.newly_resident_images > 0)
 		scheduleFrameUpdate();
@@ -1151,7 +1145,7 @@ void MapWidget::renderFrame()
 
 void MapWidget::resizeEvent(QResizeEvent* event)
 {
-	vello_canvas->setGeometry(QRect(QPoint(), event->size()));
+	qt_canvas->setGeometry(QRect(QPoint(), event->size()));
 	scheduleFrameUpdate();
 	
 	for (QObject* const child : children())

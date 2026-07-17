@@ -17,17 +17,6 @@
 #    You should have received a copy of the GNU General Public License
 #    along with OpenOrienteering.  If not, see <http://www.gnu.org/licenses/>.
 
-corrosion_import_crate(
-  MANIFEST_PATH "${CMAKE_CURRENT_SOURCE_DIR}/render/vello/Cargo.toml"
-  CRATES mapper-vello
-  LOCKED
-)
-corrosion_add_cxxbridge(mapper-vello-cxx CRATE mapper_vello FILES lib.rs)
-target_compile_features(mapper-vello-cxx PRIVATE cxx_std_23)
-set_target_properties(mapper-vello-cxx PROPERTIES AUTOMOC OFF AUTOUIC OFF)
-add_feature_info(Vello ON "0.9.0 with wgpu 29.0.4")
-
-
 # Build configuration
 
 get_filename_component(ABSOLUTE_ABOUT_DESTINATION "${MAPPER_ABOUT_DESTINATION}" ABSOLUTE
@@ -43,56 +32,6 @@ execute_process(
 )
 add_library(mapper-config INTERFACE)
 target_include_directories(mapper-config  INTERFACE "${CMAKE_CURRENT_BINARY_DIR}")
-
-# Lowest-level C++ rendering contract. Keeping the IR in its own target makes
-# the intended dependency direction ordinary CMake structure: document and
-# presentation code may produce or consume IR; the IR never depends on Qt or a
-# graphics backend.
-add_library(mapper-render-ir STATIC
-  render/render_ir.cpp
-)
-add_library(Mapper::RenderIR ALIAS mapper-render-ir)
-mapper_target_defaults(mapper-render-ir)
-target_include_directories(mapper-render-ir PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
-set_target_properties(mapper-render-ir PROPERTIES AUTOMOC OFF AUTOUIC OFF)
-
-# The production screen backend is a replaceable consumer of immutable frame
-# packets. Keep it out of the application library so a future backend can
-# reuse the same planner/IR contract without introducing a runtime plugin
-# system or teaching document code about GPU implementation details.
-add_library(mapper-vello-backend STATIC
-  render/vello_renderer.cpp
-)
-add_library(Mapper::VelloBackend ALIAS mapper-vello-backend)
-mapper_target_defaults(mapper-vello-backend)
-target_include_directories(mapper-vello-backend PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
-set_target_properties(mapper-vello-backend PROPERTIES AUTOMOC OFF AUTOUIC OFF)
-target_link_libraries(mapper-vello-backend
-  PUBLIC
-  Mapper::RenderIR
-  PRIVATE
-  mapper-vello-cxx
-)
-
-# Qt owns window lifecycle and input; this target only adapts an immutable
-# frame packet to the production native-surface backend.
-add_library(mapper-vello-presentation STATIC
-  presentation/native_surface.cpp
-  presentation/vello_canvas.cpp
-)
-add_library(Mapper::VelloPresentation ALIAS mapper-vello-presentation)
-mapper_target_defaults(mapper-vello-presentation)
-target_include_directories(mapper-vello-presentation PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
-set_target_properties(mapper-vello-presentation PROPERTIES AUTOMOC OFF AUTOUIC OFF)
-target_link_libraries(mapper-vello-presentation
-  PUBLIC
-  Mapper::VelloBackend
-  Qt6::Widgets
-)
-if(ANDROID)
-  target_link_libraries(mapper-vello-presentation PRIVATE android)
-endif()
-
 
 # Resources (from project root)
 
@@ -141,13 +80,15 @@ set(Mapper_Common_SRCS
   core/renderables/renderable.cpp
   core/renderables/renderable_implementation.cpp
 
-  # Immutable backend-neutral render description and QPainter reference path.
+  # Immutable Qt-native scene, GPU Canvas Painter, and QPainter export path.
+  presentation/qt_canvas.cpp
   render/frame_pipeline.cpp
   render/overlay_scene.cpp
-  render/render_snapshot.cpp
-  render/qt_render_bridge.cpp
   render/qpainter_frame_renderer.cpp
   render/qpainter_renderer.cpp
+  render/qt_canvas_renderer.cpp
+  render/qt_render_scene.cpp
+  render/render_snapshot.cpp
   render/template_layer_planner.cpp
   core/symbols/area_symbol.cpp
   core/symbols/combined_symbol.cpp
@@ -349,14 +290,14 @@ qt_add_resources(Mapper_Common "mapper-translations"
 target_link_libraries(Mapper_Common
   PUBLIC
   Clipper2::Clipper2
-  Mapper::RenderIR
   ${PROJ_LIBRARIES}
   Qt6::Widgets
   Qt6::Svg
+  Qt6::CanvasPainter
   PRIVATE
-  Mapper::VelloPresentation
   ICU::data
   ICU::uc
+  Qt6::GuiPrivate
 )
 foreach(lib
   cove

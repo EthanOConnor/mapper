@@ -46,12 +46,12 @@ public:
 
 	TemplateLayerPlan plan(const Map& map,
 	                     const MapView& view,
-	                     Rect visible_map_rect,
+	                     QRectF visible_map_rect,
 	                     double view_scale,
 	                     bool on_screen = true);
 	TemplateLayerPlan plan(const Map& map,
 	                     const MapView* view,
-	                     Rect visible_map_rect,
+	                     QRectF visible_map_rect,
 	                     double view_scale,
 	                     bool on_screen = true);
 

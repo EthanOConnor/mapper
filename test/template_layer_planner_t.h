@@ -17,7 +17,7 @@ private slots:
 	void initTestCase();
 	void preservesLayerOrderAndRetainedScenes();
 	void recordsVectorMapAndTrackTemplates();
-	void boundsImageAdmissionAndPreservesVelloIdentity();
+	void boundsImageAdmissionAndPreservesQtImageIdentity();
 	void marksFallbackLayersIncomplete();
 	void preservesTransparentGuttersWithoutTileSeams();
 };

@@ -73,7 +73,7 @@ class UndoStep;
 
 namespace render {
 class MapRenderSnapshot;
-class RenderIR;
+class QtRenderScene;
 }
 
 
@@ -1071,8 +1071,8 @@ public:
 	 */
 	void includeSelectionRect(QRectF& rect) const;
 	
-	/** Builds immutable render IR for the current object selection. */
-	std::shared_ptr<const render::RenderIR> buildSelectionIR(const RenderConfig& config) const;
+	/** Builds an immutable Qt-native scene for the current object selection. */
+	std::shared_ptr<const render::QtRenderScene> buildSelectionScene(const RenderConfig& config) const;
 	
 	/**
 	 * Adds the given object to the selection.

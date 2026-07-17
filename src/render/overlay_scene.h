@@ -18,7 +18,7 @@
 #include <QPen>
 #include <QTransform>
 
-#include "render/render_ir.h"
+#include "render/qt_render_scene.h"
 
 class QLineF;
 class QPainterPath;
@@ -32,7 +32,7 @@ class QString;
 namespace OpenOrienteering::render {
 
 /**
- * Records transient editor graphics directly into backend-neutral RenderIR.
+ * Records transient editor graphics directly into a Qt-native retained scene.
  *
  * Qt value types remain the natural GUI-side geometry vocabulary, but no
  * paint device or QPainter operation crosses this boundary. The builder is
@@ -43,8 +43,8 @@ class OverlaySceneBuilder
 public:
 	OverlaySceneBuilder();
 
-	void begin(Revision revision, Rect viewport_bounds);
-	std::shared_ptr<const RenderIR> finish();
+	void begin(Revision revision, QRectF viewport_bounds);
+	std::shared_ptr<const QtRenderScene> finish();
 
 	void save();
 	void restore();
@@ -86,7 +86,7 @@ public:
 	               int source_x, int source_y, int source_width, int source_height);
 	void drawPixmap(const QPointF& top_left, const QPixmap& pixmap);
 
-	void append(const RenderIR& scene);
+	void append(const QtRenderScene& scene);
 
 private:
 	struct State
@@ -99,16 +99,17 @@ private:
 	};
 
 	void drawShape(const QPainterPath& path);
+	void drawShape(PathPtr path);
 	void pushStateTransform();
 	void popStateTransform();
-	Color color(const QColor& source) const;
-	StrokeStyle stroke() const;
-	std::shared_ptr<const ImageData> image(const QImage& source, const QRect& source_rect,
-	                                       std::uint64_t stable_key);
+	QColor color(const QColor& source) const;
+	QPen stroke() const;
+	ImagePtr image(const QImage& source, const QRect& source_rect,
+	               std::uint64_t stable_key);
 
-	RenderIRBuilder builder_;
+	QtRenderSceneBuilder builder_;
 	std::vector<State> states_;
-	std::unordered_map<std::uint64_t, std::shared_ptr<const ImageData>> images_;
+	std::unordered_map<std::uint64_t, ImagePtr> images_;
 };
 
 }  // namespace OpenOrienteering::render

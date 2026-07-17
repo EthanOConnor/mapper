@@ -902,10 +902,10 @@ void Map::includeSelectionRect(QRectF& rect) const
 		rectIncludeSafe(rect, object->getExtent());
 }
 
-std::shared_ptr<const render::RenderIR> Map::buildSelectionIR(
+std::shared_ptr<const render::QtRenderScene> Map::buildSelectionScene(
 	const RenderConfig& config) const
 {
-	return selection_renderables->buildIR(config);
+	return selection_renderables->buildScene(config);
 }
 
 void Map::addObjectToSelection(Object* object, bool emit_selection_changed)

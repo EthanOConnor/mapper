@@ -42,7 +42,6 @@
 #include "core/symbols/point_symbol.h"
 #include "core/symbols/symbol.h"
 #include "core/virtual_coord_vector.h"
-#include "render/qt_render_bridge.h"
 #include "util/xml_stream_util.h"
 
 class QXmlStreamWriter;
@@ -435,7 +434,7 @@ void AreaSymbol::FillPattern::createRenderables(const AreaRenderable& outline, q
 	if (rotation < 0)
 		rotation = M_PI + rotation;
 	Q_ASSERT(rotation >= 0 && rotation <= M_PI);
-	auto const clipping_outline = render::toQPainterPath(*outline.renderPath());
+	auto const& clipping_outline = outline.renderPath()->painterPath();
 	
 	// Handle clipping
 	const auto old_clip_path = output.getClipPath();

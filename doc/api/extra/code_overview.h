@@ -85,12 +85,13 @@ The process to display map objects works like this:
   The constraint is that every renderable uses just one map color.
 - The ObjectRenderables are inserted into the MapRenderables of the map,
   where they are sorted by their color priority.
-- MapRenderables publishes an immutable MapRenderSnapshot. buildIR() converts
-  the requested view of that snapshot into backend-neutral RenderIR while
-  preserving the renderables' color-priority order.
-- Presentation code composes document, template, grid, and transient IR into a
-  FramePacket. The Vello screen backend or QPainter output/reference backend
-  consumes that packet without calling back into the document model.
+- MapRenderables publishes an immutable MapRenderSnapshot. buildScene() records
+  the requested view into QtRenderScene while preserving color-priority order.
+  Its paths carry direct QCanvasPath and QPainterPath representations.
+- Presentation code composes document, template, grid, and transient scenes into
+  a FramePacket. Qt Canvas Painter consumes it on screen; QPainter consumes the
+  same packet for print, PDF, software composition, and deterministic reference
+  output. Neither path calls back into the document model.
 
 
 \section gui GUI

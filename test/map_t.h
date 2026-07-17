@@ -41,7 +41,7 @@ private slots:
 	/** Tests basic print configuration properties. */
 	void printerConfigTest();
 
-	/** Tests backend-neutral presentation invalidation requests. */
+	/** Tests presentation invalidation requests. */
 	void presentationRequestsTest();
 	
 	/** Tests if special colors are correctly handled. */

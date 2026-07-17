@@ -200,7 +200,6 @@ add_system_test(coord_xml_t MANUAL)
 add_system_test(file_format_t)
 add_system_test(duplicate_equals_t)
 add_system_test(frame_pipeline_t)
-target_link_libraries(frame_pipeline_t PRIVATE Mapper::VelloPresentation)
 if(Mapper_USE_GDAL)
 	add_system_test(gdal_tiled_t)
 	target_link_libraries(gdal_tiled_t PRIVATE mapper-gdal GDAL::GDAL)
@@ -211,10 +210,8 @@ add_system_test(object_t)
 add_system_test(object_query_t)
 add_system_test(path_object_t)
 add_system_test(template_layer_planner_t)
-target_link_libraries(template_layer_planner_t PRIVATE Mapper::VelloBackend)
-add_system_test(render_ir_t)
-add_system_test(vello_renderer_t)
-target_link_libraries(vello_renderer_t PRIVATE Mapper::VelloPresentation)
+add_system_test(qt_render_scene_t)
+add_system_test(qt_canvas_renderer_t)
 add_system_test(style_t)
 add_system_test(symbol_set_t)
 add_system_test(symbol_t)
@@ -229,7 +226,7 @@ add_system_test(undo_manager_t)
 set_tests_properties(
 	frame_pipeline_t
 	template_layer_planner_t
-	vello_renderer_t
+	qt_canvas_renderer_t
 	PROPERTIES RESOURCE_LOCK mapper_gpu
 )
 # This test presents and activates a real native child window. Competing GUI
@@ -246,19 +243,11 @@ add_executable(render_benchmark EXCLUDE_FROM_ALL render_benchmark.cpp)
 mapper_target_defaults(render_benchmark)
 target_link_libraries(render_benchmark PRIVATE Mapper_Common Qt6::Widgets)
 
-add_executable(vello_benchmark EXCLUDE_FROM_ALL vello_benchmark.cpp)
-mapper_target_defaults(vello_benchmark)
-target_link_libraries(vello_benchmark PRIVATE
-	Mapper_Common Mapper::VelloBackend Qt6::Widgets
+add_executable(qt_canvas_benchmark EXCLUDE_FROM_ALL qt_canvas_benchmark.cpp)
+mapper_target_defaults(qt_canvas_benchmark)
+target_link_libraries(qt_canvas_benchmark PRIVATE
+	Mapper_Common Qt6::Widgets
 )
-
-if(Mapper_USE_GDAL)
-	add_executable(raster_benchmark EXCLUDE_FROM_ALL raster_benchmark.cpp)
-	mapper_target_defaults(raster_benchmark)
-	target_link_libraries(raster_benchmark PRIVATE
-		Mapper_Common Mapper::VelloBackend mapper-gdal GDAL::GDAL Qt6::Widgets
-	)
-endif()
 
 if(TARGET mapper-sensors)
 	add_system_test(sensors_t)

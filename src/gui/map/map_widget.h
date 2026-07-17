@@ -58,7 +58,7 @@ class QWheelEvent;
 
 namespace OpenOrienteering {
 
-namespace presentation { class VelloCanvas; }
+namespace presentation { class QtCanvas; }
 
 class GPSDisplay;
 class GPSTemporaryMarkers;
@@ -449,7 +449,7 @@ private:
 	render::FramePlanner frame_planner;
 	render::TemplateLayerPlanner template_layer_planner;
 	render::OverlaySceneBuilder overlay_scene_builder;
-	presentation::VelloCanvas* vello_canvas;
+	presentation::QtCanvas* qt_canvas;
 	render::Revision overlay_revision = 1;
 	
 	// Dirty regions for drawings (tools) and activities

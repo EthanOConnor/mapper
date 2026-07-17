@@ -110,15 +110,6 @@ endif()
 mapper_define_build_options()
 
 include(FetchContent)
-FetchContent_Declare(corrosion
-	URL https://github.com/corrosion-rs/corrosion/archive/refs/tags/v0.6.1.tar.gz
-	URL_HASH SHA256=e9e95b1ee2bad52681f347993fb1a5af5cce458c5ce8a2636c9e476e4babf8e3
-	DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-	EXCLUDE_FROM_ALL
-)
-FetchContent_MakeAvailable(corrosion)
-add_feature_info(Corrosion ON "0.6.1")
-
 set(CLIPPER2_UTILS OFF CACHE BOOL "" FORCE)
 set(CLIPPER2_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(CLIPPER2_TESTS OFF CACHE BOOL "" FORCE)
@@ -167,8 +158,10 @@ if(Mapper_USE_GDAL)
 endif()
 
 set(mapper_qt_components
+	CanvasPainter
 	Core
 	Gui
+	GuiPrivate
 	LinguistTools
 	Network
 	Positioning
@@ -186,8 +179,8 @@ endif()
 if(NOT ANDROID)
 	list(APPEND mapper_qt_components PrintSupport)
 endif()
-find_package(Qt6 6.10.3 REQUIRED COMPONENTS ${mapper_qt_components})
-qt_standard_project_setup(REQUIRES 6.10.3)
+find_package(Qt6 6.12 REQUIRED COMPONENTS ${mapper_qt_components})
+qt_standard_project_setup(REQUIRES 6.12)
 
 if(NOT ANDROID)
 	set(KDSingleApplication_QT6 ON CACHE BOOL "" FORCE)

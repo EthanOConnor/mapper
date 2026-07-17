@@ -14,7 +14,7 @@
 #include <vector>
 
 #include "core/renderables/renderable.h"
-#include "render/render_ir.h"
+#include "render/qt_render_scene.h"
 
 namespace OpenOrienteering::render {
 
@@ -34,7 +34,7 @@ struct SpotComponent
 struct SnapshotColor
 {
 	int priority = MapColor::Reserved;
-	Color color;
+	QColor color;
 	double opacity = 1;
 	SpotMethod spot_method = SpotMethod::Undefined;
 	bool knockout = false;
@@ -44,7 +44,7 @@ struct SnapshotColor
 struct SnapshotObject
 {
 	ObjectId id = 0;
-	Rect extent;
+	QRectF extent;
 	bool helper_symbol = false;
 	bool hidden_symbol = false;
 	std::map<int, SharedRenderables> colors;
@@ -62,13 +62,13 @@ using SnapshotObjectIds = std::shared_ptr<const std::vector<ObjectId>>;
 
 struct RenderRequest
 {
-	Rect bounding_box;
+	QRectF bounding_box;
 	double scaling = 1;
 	RenderConfig::Options options;
 	double opacity = 1;
 };
 
-/** Immutable document revision from which every backend records IR. */
+/** Immutable structurally shared document revision used to build Qt scenes. */
 class MapRenderSnapshot
 {
 public:
@@ -85,8 +85,8 @@ public:
 	ObjectId maxObjectId() const noexcept;
 	const SnapshotObject* object(ObjectId id) const noexcept;
 
-	std::shared_ptr<const RenderIR> buildIR(const RenderRequest& request) const;
-	std::shared_ptr<const RenderIR> buildColorSeparationIR(
+	std::shared_ptr<const QtRenderScene> buildScene(const RenderRequest& request) const;
+	std::shared_ptr<const QtRenderScene> buildColorSeparationScene(
 		const RenderRequest& request,
 		int separation_priority,
 		bool use_color
@@ -94,10 +94,10 @@ public:
 
 private:
 	const SnapshotColor* color(int priority) const;
-	bool appendObjectColor(RenderIRBuilder& builder,
+	bool appendObjectColor(QtRenderSceneBuilder& builder,
 	                       const SnapshotObject& object,
 	                       int color_priority,
-	                       Color color,
+	                       QColor color,
 	                       const RenderRequest& request) const;
 
 	Revision revision_;

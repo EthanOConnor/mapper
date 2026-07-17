@@ -58,7 +58,6 @@
 #include "core/map_view.h"
 #include "core/renderables/renderable.h"
 #include "render/qpainter_frame_renderer.h"
-#include "render/qt_render_bridge.h"
 #include "render/render_snapshot.h"
 #include "templates/template.h"
 #include "util/xml_stream_util.h"
@@ -99,7 +98,7 @@ bool renderFramePasses(QPainter* painter,
 		std::uint32_t(std::max(0, painter->device()->width())),
 		std::uint32_t(std::max(0, painter->device()->height())),
 		device_pixel_ratio,
-		render::fromQTransform(camera),
+		camera,
 	};
 	frame.vector_passes = passes;
 	painter->save();
@@ -1004,7 +1003,7 @@ void MapPrinter::drawPage(QPainter* device_painter, const QRectF& page_extent, c
 	const auto page_region_used = page_extent.intersected(print_area);
 	const auto output_scaling = units_per_mm * scale_adjustment;
 	const auto output_request = render::RenderRequest {
-		render::fromQRectF(page_region_used),
+		page_region_used,
 		output_scaling,
 		RenderConfig::NoOptions,
 		1,
@@ -1014,7 +1013,7 @@ void MapPrinter::drawPage(QPainter* device_painter, const QRectF& page_extent, c
 	if (options.show_templates)
 	{
 		template_layers = template_layer_planner.plan(
-			map, view, render::fromQRectF(page_region_used), output_scaling, false
+			map, view, page_region_used, output_scaling, false
 		);
 		if (!template_layers.complete)
 		{
@@ -1181,7 +1180,7 @@ void MapPrinter::drawPage(QPainter* device_painter, const QRectF& page_extent, c
 				std::uint32_t(std::max(0, map_painter->device()->width())),
 				std::uint32_t(std::max(0, map_painter->device()->height())),
 				1,
-				render::fromQTransform(camera),
+				camera,
 			},
 			map_request,
 			rasterModeSelected() && options.simulate_overprinting,
@@ -1217,7 +1216,7 @@ void MapPrinter::drawPage(QPainter* device_painter, const QRectF& page_extent, c
 		page_painter->save();
 		
 		page_painter->setRenderHints(render_hints);
-		auto grid_scene = map.getGrid().buildRenderIR(
+		auto grid_scene = map.getGrid().buildQtRenderScene(
 			page_region_used, &map, output_scaling, snapshot->revision()
 		);
 		if (!renderFramePasses(page_painter, { { std::move(grid_scene) } },
@@ -1321,12 +1320,12 @@ void MapPrinter::drawSeparationPages(QPagedPaintDevice* device, QPainter* device
 			Qt::ReplaceClip
 		);
 		auto const request = render::RenderRequest {
-			render::fromQRectF(page_extent),
+			page_extent,
 			scale,
 			RenderConfig::NoOptions,
 			1,
 		};
-		auto scene = snapshot->buildColorSeparationIR(
+		auto scene = snapshot->buildColorSeparationScene(
 			request, color->getPriority(), false
 		);
 		auto const rendered = renderFramePasses(

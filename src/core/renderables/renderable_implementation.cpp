@@ -23,6 +23,7 @@
 #include <cstddef>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include <QtMath>
@@ -43,13 +44,27 @@
 #include "core/symbols/line_symbol.h"
 #include "core/symbols/point_symbol.h"
 #include "core/symbols/text_symbol.h"
-#include "render/qt_render_bridge.h"
 #include "util/util.h"
 
 // IWYU pragma: no_forward_declare QFontMetricsF
 
 
 namespace OpenOrienteering {
+
+namespace {
+
+QPen renderPen(QColor color, qreal width,
+	            Qt::PenCapStyle cap = Qt::FlatCap,
+	            Qt::PenJoinStyle join = Qt::MiterJoin,
+	            qreal miter_limit = 4)
+{
+	QPen pen(std::move(color), width, Qt::SolidLine, cap, join);
+	if (join == Qt::MiterJoin)
+		pen.setMiterLimit(miter_limit);
+	return pen;
+}
+
+}  // namespace
 
 // ### DotRenderable ###
 
@@ -62,7 +77,7 @@ DotRenderable::DotRenderable(const PointSymbol* symbol, MapCoordF coord)
 	extent = QRectF(x - radius, y - radius, 2 * radius, 2 * radius);
 }
 
-void DotRenderable::appendTo(render::RenderIRBuilder& builder,
+void DotRenderable::appendTo(render::QtRenderSceneBuilder& builder,
 	                         const RenderPrimitiveConfig& config) const
 {
 	if (config.options.testFlag(RenderConfig::ForceMinSize) && extent.width() * config.scaling < 1.5)
@@ -75,7 +90,7 @@ void DotRenderable::appendTo(render::RenderIRBuilder& builder,
 		);
 	}
 	else
-		builder.fillEllipse(render::fromQRectF(extent), config.color);
+		builder.fillEllipse(extent, config.color);
 }
 
 
@@ -93,7 +108,7 @@ CircleRenderable::CircleRenderable(const PointSymbol* symbol, MapCoordF coord)
 	extent = QRectF(rect.x() - 0.5*line_width, rect.y() - 0.5*line_width, rect.width() + line_width, rect.height() + line_width);
 }
 
-void CircleRenderable::appendTo(render::RenderIRBuilder& builder,
+void CircleRenderable::appendTo(render::QtRenderSceneBuilder& builder,
 	                            const RenderPrimitiveConfig& config) const
 {
 	auto width = line_width;
@@ -105,15 +120,14 @@ void CircleRenderable::appendTo(render::RenderIRBuilder& builder,
 	if (config.options.testFlag(RenderConfig::Screen) && line_width * config.scaling < 0.125)
 		return;
 
-	auto bounds = render::fromQRectF(rect);
+	auto bounds = rect;
 	if (config.options.testFlag(RenderConfig::ForceMinSize) && rect.width() * config.scaling < 1.5)
 	{
 		auto const center = rect.center();
 		auto const radius = 0.5 / config.scaling;
 		bounds = { center.x() - radius, center.y() - radius, 2 * radius, 2 * radius };
 	}
-	builder.strokeEllipse(bounds, config.color,
-	                      { .width = width, .dash_pattern = {}, .dash_offset = 0 },
+	builder.strokeEllipse(bounds, renderPen(config.color, width),
 	                      color_priority < 0 ? render::QualityHint::ForceAntialiasing
 	                                         : render::QualityHint::Default);
 }
@@ -127,22 +141,22 @@ LineRenderable::LineRenderable(const LineSymbol* symbol, const VirtualPath& virt
  , line_width(0.001 * symbol->getLineWidth())
 {
 	Q_ASSERT(virtual_path.size() >= 2);
-	QPainterPath path;
+	render::QtRenderPathBuilder path;
 	
 	qreal half_line_width = (color_priority < 0) ? 0 : line_width/2;
 	
 	switch (symbol->getCapStyle())
 	{
-		case LineSymbol::FlatCap:		cap_style = render::LineCap::Flat;	break;
-		case LineSymbol::RoundCap:		cap_style = render::LineCap::Round;	break;
-		case LineSymbol::SquareCap:		cap_style = render::LineCap::Square;	break;
-		case LineSymbol::PointedCap:	cap_style = render::LineCap::Flat;	break;
+		case LineSymbol::FlatCap:		cap_style = Qt::FlatCap;	break;
+		case LineSymbol::RoundCap:		cap_style = Qt::RoundCap;	break;
+		case LineSymbol::SquareCap:		cap_style = Qt::SquareCap;	break;
+		case LineSymbol::PointedCap:	cap_style = Qt::FlatCap;	break;
 	}
 	switch (symbol->getJoinStyle())
 	{
-		case LineSymbol::BevelJoin:		join_style = render::LineJoin::Bevel;	break;
-		case LineSymbol::MiterJoin:		join_style = render::LineJoin::Miter;	break;
-		case LineSymbol::RoundJoin:		join_style = render::LineJoin::Round;	break;
+		case LineSymbol::BevelJoin:		join_style = Qt::BevelJoin;	break;
+		case LineSymbol::MiterJoin:		join_style = Qt::MiterJoin;	break;
+		case LineSymbol::RoundJoin:		join_style = Qt::RoundJoin;	break;
 	}
 	
 	auto& flags  = virtual_path.coords.flags;
@@ -150,7 +164,7 @@ LineRenderable::LineRenderable(const LineSymbol* symbol, const VirtualPath& virt
 	
 	bool has_curve = false;
 	bool hole = false;
-	QPainterPath first_subpath;
+	std::optional<render::QtRenderPathBuilder> first_subpath;
 	
 	auto i = virtual_path.first_index;
 	bool gap = flags[i].isGapPoint();  // Line may start with a gap
@@ -170,10 +184,10 @@ LineRenderable::LineRenderable(const LineSymbol* symbol, const VirtualPath& virt
 			else if (flags[i].isGapPoint())
 			{
 				gap = false;
-				if (first_subpath.isEmpty() && closed)
+				if (!first_subpath && closed)
 				{
-					first_subpath = path;
-					path = QPainterPath();
+					first_subpath.emplace(std::move(path));
+					path = render::QtRenderPathBuilder();
 				}
 				path.moveTo(coords[i]);
 				extentIncludeCap(i, half_line_width, false, symbol, virtual_path);
@@ -184,10 +198,10 @@ LineRenderable::LineRenderable(const LineSymbol* symbol, const VirtualPath& virt
 		if (hole)
 		{
 			Q_ASSERT(!flags[i].isHolePoint() && "Two hole points in a row!");
-			if (first_subpath.isEmpty() && closed)
+			if (!first_subpath && closed)
 			{
-				first_subpath = path;
-				path = QPainterPath();
+				first_subpath.emplace(std::move(path));
+				path = render::QtRenderPathBuilder();
 			}
 			path.moveTo(coords[i]);
 			extentIncludeCap(i, half_line_width, false, symbol, virtual_path);
@@ -218,10 +232,10 @@ LineRenderable::LineRenderable(const LineSymbol* symbol, const VirtualPath& virt
 	
 	if (closed)
 	{
-		if (first_subpath.isEmpty())
+		if (!first_subpath)
 			path.closeSubpath();
 		else
-			path.connectPath(first_subpath);
+			path.connectPath(*first_subpath);
 	}
 	
 	// If we do not have the path coords, but there was a curve, calculate path coords.
@@ -248,15 +262,15 @@ LineRenderable::LineRenderable(const LineSymbol* symbol, const VirtualPath& virt
 			}
 		}
 	}
-	this->path = render::fromQPainterPath(path);
+	this->path = path.finish();
 	Q_ASSERT(extent.right() < 60000000);	// assert if bogus values are returned
 }
 
 LineRenderable::LineRenderable(const LineSymbol* symbol, QPointF first, QPointF second)
  : Renderable(symbol->getColor())
  , line_width(0.001 * symbol->getLineWidth())
- , cap_style(render::LineCap::Flat)
- , join_style(render::LineJoin::Miter)
+	, cap_style(Qt::FlatCap)
+	, join_style(Qt::MiterJoin)
 {
 	qreal half_line_width = (color_priority < 0) ? 0 : line_width/2;
 	
@@ -268,10 +282,10 @@ LineRenderable::LineRenderable(const LineSymbol* symbol, QPointF first, QPointF 
 	             .normalized()
 	             .adjusted(-margin.x(), -margin.y(), margin.x(), margin.y());
 	
-	render::PathBuilder builder;
-	builder.moveTo({ first.x(), first.y() });
-	builder.lineTo({ second.x(), second.y() });
-	path = builder.finish();
+	render::QtRenderPathBuilder path_builder;
+	path_builder.moveTo(first);
+	path_builder.lineTo(second);
+	path = path_builder.finish();
 }
 
 void LineRenderable::extentIncludeCap(quint32 i, qreal half_line_width, bool end_cap, const LineSymbol* symbol, const VirtualPath& path)
@@ -422,7 +436,7 @@ void LineRenderable::extentIncludeJoin(quint32 i, qreal half_line_width, const L
 	}
 }
 
-void LineRenderable::appendTo(render::RenderIRBuilder& builder,
+void LineRenderable::appendTo(render::QtRenderSceneBuilder& builder,
 	                          const RenderPrimitiveConfig& config) const
 {
 	auto width = line_width;
@@ -436,15 +450,7 @@ void LineRenderable::appendTo(render::RenderIRBuilder& builder,
 
 	builder.strokePath(
 		path,
-		config.color,
-		{
-			.width = width,
-			.cap = cap_style,
-			.join = join_style,
-			.miter_limit = LineSymbol::miterLimit(),
-			.dash_pattern = {},
-			.dash_offset = 0,
-		},
+		renderPen(config.color, width, cap_style, join_style, LineSymbol::miterLimit()),
 		color_priority < 0 ? render::QualityHint::ForceAntialiasing
 		                   : render::QualityHint::Default
 	);
@@ -455,24 +461,24 @@ void LineRenderable::appendTo(render::RenderIRBuilder& builder,
 AreaRenderable::AreaRenderable(const AreaSymbol* symbol, const PathPartVector& path_parts)
  : Renderable(symbol->getColor())
 {
-	render::PathBuilder builder;
+	render::QtRenderPathBuilder path_builder;
 	if (!path_parts.empty())
 	{
 		auto part = begin(path_parts);
 		if (part->size() > 2)
 		{
 			extent = part->path_coords.calculateExtent();
-			addSubpath(*part, builder);
+			addSubpath(*part, path_builder);
 			
 			auto last = end(path_parts);
 			for (++part; part != last; ++part)
 			{
 				rectInclude(extent, part->path_coords.calculateExtent());
-				addSubpath(*part, builder);
+				addSubpath(*part, path_builder);
 			}
 		}
 	}
-	path = builder.finish();
+	path = path_builder.finish();
 	Q_ASSERT(extent.right() < 60000000);	// assert if bogus values are returned
 }
 
@@ -480,40 +486,37 @@ AreaRenderable::AreaRenderable(const AreaSymbol* symbol, const VirtualPath& path
  : Renderable(symbol->getColor())
 {
 	extent = path.path_coords.calculateExtent();
-	render::PathBuilder builder;
-	addSubpath(path, builder);
-	this->path = builder.finish();
+	render::QtRenderPathBuilder path_builder;
+	addSubpath(path, path_builder);
+	this->path = path_builder.finish();
 }
 
-void AreaRenderable::addSubpath(const VirtualPath& virtual_path, render::PathBuilder& builder)
+void AreaRenderable::addSubpath(const VirtualPath& virtual_path,
+	                            render::QtRenderPathBuilder& path)
 {
 	auto& flags  = virtual_path.coords.flags;
 	auto& coords = virtual_path.coords;
 	Q_ASSERT(!flags.data().empty());
 	
 	auto i = virtual_path.first_index;
-	builder.moveTo({ coords[i].x(), coords[i].y() });
+	path.moveTo(coords[i]);
 	for (++i; i <= virtual_path.last_index; ++i)
 	{
 		if (flags[i-1].isCurveStart())
 		{
 			Q_ASSERT(i+2 < coords.size());
-			builder.cubicTo(
-				{ coords[i].x(), coords[i].y() },
-				{ coords[i+1].x(), coords[i+1].y() },
-				{ coords[i+2].x(), coords[i+2].y() }
-			);
+			path.cubicTo(coords[i], coords[i+1], coords[i+2]);
 			i += 2;
 		}
 		else
 		{
-			builder.lineTo({ coords[i].x(), coords[i].y() });
+			path.lineTo(coords[i]);
 		}
 	}
-	builder.close();
+	path.closeSubpath();
 }
 
-void AreaRenderable::appendTo(render::RenderIRBuilder& builder,
+void AreaRenderable::appendTo(render::QtRenderSceneBuilder& builder,
 	                          const RenderPrimitiveConfig& config) const
 {
 	builder.fillPath(path, config.color);
@@ -576,11 +579,11 @@ TextRenderable::TextRenderable(const TextSymbol* symbol, const TextObject* text_
 	}
 	
 	extent = t.mapRect(painter_path.controlPointRect());
-	path = render::fromQPainterPath(painter_path);
-	transform = render::fromQTransform(t);
+	path = render::sharePainterPath(std::move(painter_path));
+	transform = t;
 }
 
-void TextRenderable::appendTo(render::RenderIRBuilder& builder,
+void TextRenderable::appendTo(render::QtRenderSceneBuilder& builder,
 	                          const RenderPrimitiveConfig& config) const
 {
 	builder.pushTransform(transform);
@@ -600,7 +603,7 @@ TextFramingRenderable::TextFramingRenderable(const TextSymbol* symbol, const Tex
 	extent.adjust(-adjustment, -adjustment, +adjustment, +adjustment);
 }
 
-void TextFramingRenderable::appendTo(render::RenderIRBuilder& builder,
+void TextFramingRenderable::appendTo(render::QtRenderSceneBuilder& builder,
 	                                 const RenderPrimitiveConfig& config) const
 {
 	auto width = framing_line_width;
@@ -613,15 +616,7 @@ void TextFramingRenderable::appendTo(render::RenderIRBuilder& builder,
 	builder.pushTransform(transform);
 	builder.strokePath(
 		path,
-		config.color,
-		{
-			.width = width,
-			.cap = render::LineCap::Flat,
-			.join = render::LineJoin::Miter,
-			.miter_limit = 0.5,
-			.dash_pattern = {},
-			.dash_offset = 0,
-		}
+		renderPen(config.color, width, Qt::FlatCap, Qt::MiterJoin, 0.5)
 	);
 	builder.popTransform();
 }

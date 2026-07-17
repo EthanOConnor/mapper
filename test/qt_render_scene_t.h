@@ -4,20 +4,21 @@
  *    This file is part of OpenOrienteering.
  */
 
-#ifndef OPENORIENTEERING_RENDER_IR_T_H
-#define OPENORIENTEERING_RENDER_IR_T_H
+#ifndef OPENORIENTEERING_QT_RENDER_SCENE_T_H
+#define OPENORIENTEERING_QT_RENDER_SCENE_T_H
 
 #include <QObject>
 
-class RenderIrTest : public QObject
+class QtRenderSceneTest : public QObject
 {
 Q_OBJECT
 
 private slots:
 	void initTestCase();
+	void directPathBuilderProducesBothQtPaths();
 	void immutableSnapshotSurvivesEdit();
 	void curvedLineKeepsBothBorders();
-	void referenceRendererInterpretsIr();
+	void referenceRendererInterpretsScene();
 	void antialiasPolicyPreservesCallerIntent();
 };
 

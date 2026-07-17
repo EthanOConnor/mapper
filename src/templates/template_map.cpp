@@ -34,7 +34,6 @@
 #include <QTransform>
 #include <QVariant>
 
-#include "render/qt_render_bridge.h"
 #include "render/render_snapshot.h"
 #include "core/georeferencing.h"
 #include "core/map.h"
@@ -237,15 +236,15 @@ void TemplateMap::unloadTemplateFileImpl()
 	template_map.reset();
 }
 
-std::shared_ptr<const render::RenderIR> TemplateMap::buildRenderIR(
-	render::Rect map_clip_rect,
+std::shared_ptr<const render::QtRenderScene> TemplateMap::buildQtRenderScene(
+	QRectF map_clip_rect,
 	double view_scale,
 	bool on_screen) const
 {
 	if (!template_map)
 		return {};
 
-	auto const map_clip = render::toQRectF(map_clip_rect);
+	auto const& map_clip = map_clip_rect;
 	QRectF template_clip;
 	if (!is_georeferenced)
 	{
@@ -262,8 +261,8 @@ std::shared_ptr<const render::RenderIR> TemplateMap::buildRenderIR(
 	auto options = on_screen ? RenderConfig::Options(RenderConfig::Screen)
 	                         : RenderConfig::Options(RenderConfig::NoOptions);
 	auto const snapshot = template_map->publishRenderSnapshot();
-	auto scene = snapshot->buildIR({
-		render::fromQRectF(template_clip),
+	auto scene = snapshot->buildScene({
+		template_clip,
 		view_scale,
 		options,
 		1,
@@ -274,7 +273,7 @@ std::shared_ptr<const render::RenderIR> TemplateMap::buildRenderIR(
 	auto const origin = templateToMap(QPointF(0, 0));
 	auto const x_axis = templateToMap(QPointF(1, 0));
 	auto const y_axis = templateToMap(QPointF(0, 1));
-	render::RenderIRBuilder builder(snapshot->revision(), map_clip_rect);
+	render::QtRenderSceneBuilder builder(snapshot->revision(), map_clip_rect);
 	builder.pushTransform({
 		x_axis.x() - origin.x(), x_axis.y() - origin.y(),
 		y_axis.x() - origin.x(), y_axis.y() - origin.y(),

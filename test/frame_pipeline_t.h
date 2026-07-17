@@ -23,7 +23,7 @@ private slots:
 	void mapWidgetUsesTheFrameContract();
 	void mapWidgetConvergesRasterBatches();
 	void mapWidgetWaitsForMissingRasterSource();
-	void nativeSurfacePublishesOrderedLifecycle();
+	void qtCanvasIsAnOrdinaryQtChild();
 };
 
 #endif

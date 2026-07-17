@@ -23,7 +23,7 @@ void appendNormalFrame(std::vector<VectorPass>& passes,
                        const MapRenderSnapshot& snapshot,
                        const RenderRequest& request)
 {
-	passes.push_back({ snapshot.buildIR(request) });
+	passes.push_back({ snapshot.buildScene(request) });
 }
 
 constexpr double overprintingCorrectionOpacity()
@@ -41,7 +41,7 @@ bool sameRequest(const RenderRequest& left, const RenderRequest& right)
 {
 	auto const& a = left.bounding_box;
 	auto const& b = right.bounding_box;
-	return a.x == b.x && a.y == b.y && a.width == b.width && a.height == b.height
+	return a == b
 	       && left.scaling == right.scaling
 	       && left.options == right.options
 	       && left.opacity == right.opacity;
@@ -56,8 +56,8 @@ void appendOverprintingFrame(std::vector<VectorPass>& passes,
 		if (color->second.spot_method != SpotMethod::Spot)
 			continue;
 		passes.push_back({
-			snapshot.buildColorSeparationIR(request, color->first, true),
-			BlendMode::Multiply,
+			snapshot.buildColorSeparationScene(request, color->first, true),
+			QPainter::CompositionMode_Multiply,
 			1,
 			true,
 		});
@@ -67,8 +67,8 @@ void appendOverprintingFrame(std::vector<VectorPass>& passes,
 	auto spot_request = request;
 	spot_request.options |= RenderConfig::RequireSpotColor;
 	passes.push_back({
-		snapshot.buildIR(spot_request),
-		BlendMode::SourceOver,
+		snapshot.buildScene(spot_request),
+		QPainter::CompositionMode_SourceOver,
 		overprintingCorrectionOpacity(),
 		true,
 	});
@@ -77,7 +77,7 @@ void appendOverprintingFrame(std::vector<VectorPass>& passes,
 	if (request.options.testFlag(RenderConfig::Screen))
 	{
 		passes.push_back({
-			snapshot.buildColorSeparationIR(
+			snapshot.buildColorSeparationScene(
 				request, MapColor::Reserved, true
 			),
 		});
@@ -98,12 +98,12 @@ FramePacketPtr FramePlanner::plan(const MapRenderSnapshot& snapshot, const Frame
 	    || !std::isfinite(request.render.opacity)
 	    || request.render.opacity < 0
 	    || request.render.opacity > 1
-	    || !std::isfinite(transform.m11)
-	    || !std::isfinite(transform.m12)
-	    || !std::isfinite(transform.m21)
-	    || !std::isfinite(transform.m22)
-	    || !std::isfinite(transform.dx)
-	    || !std::isfinite(transform.dy))
+	    || !std::isfinite(transform.m11())
+	    || !std::isfinite(transform.m12())
+	    || !std::isfinite(transform.m21())
+	    || !std::isfinite(transform.m22())
+	    || !std::isfinite(transform.dx())
+	    || !std::isfinite(transform.dy()))
 	{
 		qFatal("Invalid renderer frame request");
 	}
@@ -151,12 +151,12 @@ FramePacketPtr FramePlanner::plan(const FrameRequest& request)
 	    || !std::isfinite(request.render.opacity)
 	    || request.render.opacity < 0
 	    || request.render.opacity > 1
-	    || !std::isfinite(transform.m11)
-	    || !std::isfinite(transform.m12)
-	    || !std::isfinite(transform.m21)
-	    || !std::isfinite(transform.m22)
-	    || !std::isfinite(transform.dx)
-	    || !std::isfinite(transform.dy))
+	    || !std::isfinite(transform.m11())
+	    || !std::isfinite(transform.m12())
+	    || !std::isfinite(transform.m21())
+	    || !std::isfinite(transform.m22())
+	    || !std::isfinite(transform.dx())
+	    || !std::isfinite(transform.dy()))
 	{
 		qFatal("Invalid renderer frame request");
 	}

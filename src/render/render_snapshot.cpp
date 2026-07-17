@@ -13,8 +13,6 @@
 
 #include <QColor>
 
-#include "render/qt_render_bridge.h"
-
 namespace OpenOrienteering::render {
 
 namespace {
@@ -28,9 +26,8 @@ std::uint64_t nextSnapshotIdentity()
 	return identity;
 }
 
-Color highlighted(Color original)
+QColor highlighted(QColor color)
 {
-	auto color = toQColor(original);
 	if (color.value() > 127)
 	{
 		constexpr qreal factor = 0.35;
@@ -46,7 +43,7 @@ Color highlighted(Color original)
 			255
 		);
 	}
-	return fromQColor(color);
+	return color;
 }
 
 }  // namespace
@@ -108,10 +105,10 @@ const SnapshotColor* MapRenderSnapshot::color(int priority) const
 	return found == colors_.end() ? nullptr : &found->second;
 }
 
-bool MapRenderSnapshot::appendObjectColor(RenderIRBuilder& builder,
+bool MapRenderSnapshot::appendObjectColor(QtRenderSceneBuilder& builder,
 	                                      const SnapshotObject& object,
 	                                      int color_priority,
-	                                      Color draw_color,
+	                                      QColor draw_color,
 	                                      const RenderRequest& request) const
 {
 	auto const found = object.colors.find(color_priority);
@@ -120,7 +117,7 @@ bool MapRenderSnapshot::appendObjectColor(RenderIRBuilder& builder,
 
 	auto emitted = false;
 	PathPtr active_clip;
-	auto const request_rect = toQRectF(request.bounding_box);
+	auto const& request_rect = request.bounding_box;
 	for (auto const& item : *found->second)
 	{
 		if (!item.renderable)
@@ -156,9 +153,10 @@ bool MapRenderSnapshot::appendObjectColor(RenderIRBuilder& builder,
 	return emitted;
 }
 
-std::shared_ptr<const RenderIR> MapRenderSnapshot::buildIR(const RenderRequest& request) const
+std::shared_ptr<const QtRenderScene> MapRenderSnapshot::buildScene(const RenderRequest& request) const
 {
-	RenderIRBuilder builder(revision_, request.bounding_box);
+	QtRenderSceneBuilder builder(revision_, request.bounding_box);
+	builder.reserve(object_count_ * 3, object_count_ / 4);
 	if (request.opacity != 1)
 		builder.pushLayer(request.opacity);
 
@@ -176,7 +174,7 @@ std::shared_ptr<const RenderIR> MapRenderSnapshot::buildIR(const RenderRequest& 
 
 		auto draw_color = map_color->color;
 		if (priority >= 0 && map_color->opacity < 1)
-			draw_color = draw_color.withAlpha(map_color->opacity);
+			draw_color.setAlphaF(draw_color.alphaF() * map_color->opacity);
 		if (request.options.testFlag(RenderConfig::Highlighted))
 			draw_color = highlighted(draw_color);
 
@@ -201,12 +199,13 @@ std::shared_ptr<const RenderIR> MapRenderSnapshot::buildIR(const RenderRequest& 
 	return builder.finish();
 }
 
-std::shared_ptr<const RenderIR> MapRenderSnapshot::buildColorSeparationIR(
+std::shared_ptr<const QtRenderScene> MapRenderSnapshot::buildColorSeparationScene(
 	const RenderRequest& request,
 	int separation_priority,
 	bool use_color) const
 {
-	RenderIRBuilder builder(revision_, request.bounding_box);
+	QtRenderSceneBuilder builder(revision_, request.bounding_box);
+	builder.reserve(object_count_ * 3, object_count_ / 4);
 	auto drawing_started = false;
 	auto const* separation = color(separation_priority);
 	if (!separation)
@@ -293,7 +292,7 @@ std::shared_ptr<const RenderIR> MapRenderSnapshot::buildColorSeparationIR(
 		}
 		else if (use_color)
 		{
-			output_color = toQColor(spot->color);
+			output_color = spot->color;
 			float c, m, y, k;
 			output_color.getCmykF(&c, &m, &y, &k);
 			output_color.setCmykF(c * factor, m * factor, y * factor, k * factor, 1);
@@ -316,7 +315,7 @@ std::shared_ptr<const RenderIR> MapRenderSnapshot::buildColorSeparationIR(
 			if (object.hidden_symbol || !object.extent.intersects(request.bounding_box))
 				continue;
 			auto const emitted = appendObjectColor(
-				builder, object, priority, fromQColor(output_color), request
+				builder, object, priority, output_color, request
 			);
 			drawing_started |= drawing && emitted;
 		}

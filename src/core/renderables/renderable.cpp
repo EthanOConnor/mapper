@@ -22,7 +22,6 @@
 #include "core/map.h"
 #include "core/objects/object.h"
 #include "core/symbols/symbol.h"
-#include "render/qt_render_bridge.h"
 #include "render/render_snapshot.h"
 #include "util/util.h"
 
@@ -44,7 +43,7 @@ render::SnapshotColor snapshotColor(const MapColor& color)
 {
 	render::SnapshotColor snapshot;
 	snapshot.priority = color.getPriority();
-	snapshot.color = render::fromQColor(static_cast<const QColor&>(color));
+	snapshot.color = color;
 	snapshot.opacity = color.getOpacity();
 	snapshot.spot_method = spotMethod(color.getSpotColorMethod());
 	snapshot.knockout = color.getKnockout();
@@ -107,11 +106,11 @@ void ObjectRenderables::detach()
 	}
 }
 
-std::shared_ptr<const render::RenderIR> ObjectRenderables::buildIR(
-	int map_color, render::Color color, const render::RenderRequest& request) const
+std::shared_ptr<const render::QtRenderScene> ObjectRenderables::buildScene(
+	int map_color, QColor color, const render::RenderRequest& request) const
 {
-	render::RenderIRBuilder builder(0, request.bounding_box);
-	auto const bounding_box = render::toQRectF(request.bounding_box);
+	render::QtRenderSceneBuilder builder(0, request.bounding_box);
+	auto const& bounding_box = request.bounding_box;
 	if (!extent.intersects(bounding_box))
 		return builder.finish();
 	auto const found = find(map_color);
@@ -379,7 +378,7 @@ std::shared_ptr<const render::MapRenderSnapshot> MapRenderables::snapshot() cons
 				found->second.snapshot = std::make_shared<const render::SnapshotObject>(
 					render::SnapshotObject {
 						id,
-						render::fromQRectF(object->getExtent()),
+						object->getExtent(),
 						symbol && symbol->isHelperSymbol(),
 						symbol && symbol->isHidden(),
 						found->second.colors,
@@ -417,11 +416,11 @@ std::shared_ptr<const render::MapRenderSnapshot> MapRenderables::snapshot() cons
 	return published_snapshot;
 }
 
-std::shared_ptr<const render::RenderIR> MapRenderables::buildIR(
+std::shared_ptr<const render::QtRenderScene> MapRenderables::buildScene(
 	const RenderConfig& config) const
 {
-	return snapshot()->buildIR({
-		render::fromQRectF(config.bounding_box),
+	return snapshot()->buildScene({
+		config.bounding_box,
 		config.scaling,
 		config.options,
 		config.opacity,
