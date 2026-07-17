@@ -3736,7 +3736,9 @@ void OnlineRasterTemplate::collectRasterTiles(const QRectF& map_clip_rect, doubl
 		out.push_back({ {}, map_clip_rect, {}, 0, true, false });
 		return;
 	}
-	auto const window = tileWindowForMapRect(clipped_map_rect, zoom, !on_screen);
+	auto const window = on_screen && !wanted_window_.isEmpty()
+					? wanted_window_
+					: tileWindowForMapRect(clipped_map_rect, zoom, !on_screen);
 	if (window.isEmpty())
 		return;
 	if (!on_screen

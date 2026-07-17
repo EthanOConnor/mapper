@@ -579,6 +579,30 @@ class OnlineRasterTemplateTest : public QObject
 		QVERIFY(std::ranges::all_of(tiles, [](auto const& tile) { return tile.has_image_to_map; }));
 	}
 
+	void screenSceneIncludesAlreadyRequestedOverscan()
+	{
+		Map map;
+		georeferenceMap(map);
+		OnlineRasterTemplate online(snapshotFixture(), &map);
+		online.setTemplateState(Template::Unloaded);
+		QVERIFY2(online.loadTemplateFile(), qPrintable(online.errorString()));
+		online.insertTile(
+			{ 1, 0, 0 }, { paddedImage({ 4, 4 }, Qt::red), true, false }
+		);
+		online.insertTile(
+			{ 1, 1, 0 }, { paddedImage({ 4, 4 }, Qt::blue), true, false }
+		);
+		online.wanted_window_ = { 1, 0, 1, 0, 0 };
+		auto const visible = mapRectForWindow(online, { 1, 0, 0, 0, 0 });
+
+		QVector<RasterTemplateTile> tiles;
+		online.collectRasterTiles(visible, 1.0e-5, true, tiles);
+		QCOMPARE(tiles.size(), 2);
+		QVERIFY(std::ranges::all_of(
+			tiles, [](auto const& tile) { return !tile.missing; }
+		));
+	}
+
 		void workingSetBudgetPreventsCacheChurn()
 		{
 		Map map;
