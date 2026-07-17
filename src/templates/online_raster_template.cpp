@@ -334,6 +334,12 @@ OnlineRasterTemplate::~OnlineRasterTemplate()
 void OnlineRasterTemplate::initializeConnections()
 {
 	auto& georeferencing = map->getGeoreferencing();
+	connect(map, &Map::objectAreaDirty, this, [this](const QRectF&) {
+		screen_map_bounds_dirty_ = true;
+	});
+	connect(map, &Map::redrawRequested, this, [this] {
+		screen_map_bounds_dirty_ = true;
+	});
 	disconnect(&georeferencing, &Georeferencing::projectionChanged, this,
 			   &TemplateImage::updateGeoreferencing);
 	disconnect(&georeferencing, &Georeferencing::transformationChanged, this,
@@ -486,6 +492,7 @@ imagery::CrsBounds OnlineRasterTemplate::tileBounds(const OnlineRasterTileKey& k
 
 void OnlineRasterTemplate::setSnapshot(imagery::ImagerySourceSnapshot snapshot)
 {
+	screen_map_bounds_dirty_ = true;
 	stored_snapshot_json_ = snapshot.canonical_json;
 	stored_snapshot_sha256_ = snapshot.sha256;
 	stored_snapshot_version_ = QString::number(imagery::ImagerySourceSnapshotCodec::version);
@@ -735,6 +742,7 @@ void OnlineRasterTemplate::unloadTemplateFileImpl()
 
 void OnlineRasterTemplate::resetRuntime(bool clear_cache)
 {
+	screen_map_bounds_dirty_ = true;
 	auto const previous_generation = generation_;
 	if (generation_ == std::numeric_limits<quint64>::max())
 		qFatal("Online imagery generation space exhausted");
@@ -1274,12 +1282,6 @@ void OnlineRasterTemplate::updateRenderContext(const ViewRenderContext& context)
 		auto const replace_pending = !wanted_window_.isEmpty();
 		wanted_window_ = {};
 		queueWindow(wanted_window_, replace_pending);
-		if (replace_pending)
-		{
-			map->setTemplateAreaDirty(
-				this, context.visible_map_rect,
-				getTemplateBoundingBoxPixelBorder());
-		}
 		return;
 	}
 	auto const pixels_per_map_unit = Util::mmToPixelPhysical(context.view_zoom);
@@ -1288,15 +1290,6 @@ void OnlineRasterTemplate::updateRenderContext(const ViewRenderContext& context)
 	auto const replace_pending = wanted_window_ != window;
 	wanted_window_ = window;
 	queueWindow(window, replace_pending);
-	if (replace_pending)
-	{
-		// View-context updates run after the first frame for a pan, zoom, or
-		// visibility change. Cached tiles produce no asynchronous completion,
-		// so the window change itself must request the follow-up frame.
-		map->setTemplateAreaDirty(
-			this, context.visible_map_rect,
-			getTemplateBoundingBoxPixelBorder());
-	}
 }
 
 OutputRenderPreparation OnlineRasterTemplate::prepareForOutput(const QRectF& map_rect,
@@ -3899,19 +3892,34 @@ QRectF OnlineRasterTemplate::sourceMapBounds() const
 
 QRectF OnlineRasterTemplate::onScreenMapBounds() const
 {
+	if (!screen_map_bounds_dirty_)
+		return screen_map_bounds_cache_;
 	auto const source_bounds = sourceMapBounds();
 	if (!map)
-		return source_bounds;
+	{
+		screen_map_bounds_cache_ = source_bounds;
+		screen_map_bounds_dirty_ = false;
+		return screen_map_bounds_cache_;
+	}
 	auto const content_bounds = map->calculateExtent(false, false).normalized();
 	if (!content_bounds.isValid() || content_bounds.isEmpty())
-		return source_bounds;
-	auto const padded = content_bounds.adjusted(
-		-content_bounds.width() * 0.2,
-		-content_bounds.height() * 0.2,
-		content_bounds.width() * 0.2,
-		content_bounds.height() * 0.2
-	);
-	return source_bounds.isValid() ? source_bounds.intersected(padded) : padded;
+	{
+		screen_map_bounds_cache_ = source_bounds;
+	}
+	else
+	{
+		auto const padded = content_bounds.adjusted(
+			-content_bounds.width() * 0.2,
+			-content_bounds.height() * 0.2,
+			content_bounds.width() * 0.2,
+			content_bounds.height() * 0.2
+		);
+		screen_map_bounds_cache_ = source_bounds.isValid()
+			? source_bounds.intersected(padded)
+			: padded;
+	}
+	screen_map_bounds_dirty_ = false;
+	return screen_map_bounds_cache_;
 }
 
 QRectF OnlineRasterTemplate::calculateTemplateBoundingBox() const
@@ -3940,6 +3948,7 @@ void OnlineRasterTemplate::onMapGeoreferencingChanged()
 {
 	if (template_state != Loaded)
 		return;
+	screen_map_bounds_dirty_ = true;
 	auto const old_bounds = last_render_bounds_;
 	cancelAtlasBuild();
 	atlas_.clear();

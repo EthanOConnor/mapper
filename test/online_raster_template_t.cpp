@@ -472,6 +472,11 @@ class OnlineRasterTemplateTest : public QObject
 			content_bounds.width() * 0.2,
 			content_bounds.height() * 0.2));
 		QCOMPARE(online.calculateTemplateBoundingBox(), expected);
+		QVERIFY(!online.screen_map_bounds_dirty_);
+		map.setObjectAreaDirty(content_bounds);
+		QVERIFY(online.screen_map_bounds_dirty_);
+		QCOMPARE(online.calculateTemplateBoundingBox(), expected);
+		QVERIFY(!online.screen_map_bounds_dirty_);
 		QVERIFY(expected.width() < source_bounds.width() * 0.2);
 		QVERIFY(expected.height() < source_bounds.height() * 0.2);
 
@@ -603,7 +608,7 @@ class OnlineRasterTemplateTest : public QObject
 		));
 	}
 
-	void screenWindowChangeInvalidatesEvenWithoutNetworkCompletion()
+	void screenWindowChangeDoesNotMutatePresentationState()
 	{
 		Map map;
 		georeferenceMap(map);
@@ -612,22 +617,18 @@ class OnlineRasterTemplateTest : public QObject
 		QVERIFY2(online.loadTemplateFile(), qPrintable(online.errorString()));
 		auto const visible = mapRectForWindow(online, { 1, 0, 0, 0, 0 });
 		int invalidations = 0;
-		QRectF invalidated_area;
 		connect(
 			&map, &Map::templateAreaDirty, this,
-			[&](Template* source, const QRectF& area, int) {
+			[&](Template* source, const QRectF&, int) {
 				if (source == &online)
-				{
 					++invalidations;
-					invalidated_area = area;
-				}
 			});
 
 		online.updateRenderContext({ visible, 1 });
-		QCOMPARE(invalidations, 1);
-		QCOMPARE(invalidated_area, visible);
+		QCOMPARE(invalidations, 0);
+		QVERIFY(!online.wanted_window_.isEmpty());
 		online.updateRenderContext({ visible, 1 });
-		QCOMPARE(invalidations, 1);
+		QCOMPARE(invalidations, 0);
 	}
 
 		void workingSetBudgetPreventsCacheChurn()

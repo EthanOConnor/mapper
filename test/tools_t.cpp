@@ -22,6 +22,9 @@
 
 #include "tools_t.h"
 
+#include <cmath>
+#include <memory>
+
 #include <Qt>
 #include <QtGlobal>
 #include <QtTest>
@@ -45,10 +48,64 @@
 #include "gui/map/map_find_feature.h"
 #include "gui/map/map_widget.h"
 #include "templates/paint_on_template_feature.h"
+#include "templates/template_image.h"
 #include "tools/edit_point_tool.h"
 #include "tools/edit_tool.h"
 
 using namespace OpenOrienteering;
+
+namespace {
+
+class FrameContextRasterTemplate final : public TemplateImage
+{
+public:
+	explicit FrameContextRasterTemplate(Map* map)
+	 : TemplateImage(QString(), map)
+	{
+		image = QImage(4, 4, QImage::Format_RGBA8888);
+		image.fill(Qt::blue);
+		setTemplateState(Loaded);
+	}
+
+	void arm()
+	{
+		armed = true;
+		context_seen = false;
+		collected = false;
+		collected_without_context = false;
+	}
+
+	void updateRenderContext(const ViewRenderContext&) override
+	{
+		if (armed)
+			context_seen = true;
+	}
+
+	void collectRasterTiles(const QRectF&, double, bool,
+	                        QVector<RasterTemplateTile>& out) const override
+	{
+		if (armed)
+		{
+			collected = true;
+			collected_without_context = !context_seen;
+			armed = false;
+		}
+		out.push_back({
+			image,
+			QRectF(-2, -2, 4, 4),
+			QRectF(0, 0, 4, 4),
+			quint64(image.cacheKey()),
+			false,
+		});
+	}
+
+	mutable bool armed = false;
+	mutable bool context_seen = false;
+	mutable bool collected = false;
+	mutable bool collected_without_context = false;
+};
+
+} // namespace
 
 
 /// Creates a test map and provides pointers to specific map elements.
@@ -179,6 +236,24 @@ void ToolsTest::newMapStartsWithoutFormat()
 	auto* map = new Map;
 	TestMapEditor editor(map);  // taking ownership
 	QCOMPARE(editor.window->currentFormat(), nullptr);
+}
+
+void ToolsTest::framePublishesTemplateContextBeforeRasterCollection()
+{
+	auto* map = new Map;
+	auto raster = std::make_unique<FrameContextRasterTemplate>(map);
+	auto* raster_ptr = raster.get();
+	map->addTemplate(0, std::move(raster));
+	TestMapEditor editor(map); // taking ownership
+	editor.map_widget->resize(320, 240);
+	auto* view = editor.map_widget->getMapView();
+	view->setTemplateVisibility(raster_ptr, { 1, true });
+	QTest::qWait(20);
+
+	raster_ptr->arm();
+	view->setZoom(view->getZoom() * std::sqrt(2.0));
+	QTRY_VERIFY_WITH_TIMEOUT(raster_ptr->collected, 1000);
+	QVERIFY(!raster_ptr->collected_without_context);
 }
 
 

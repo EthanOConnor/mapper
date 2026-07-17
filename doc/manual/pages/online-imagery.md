@@ -98,10 +98,12 @@ This keeps a broad service coverage area from changing **Zoom entire map** or
 using cache space far beyond the working map. A map with no drawn objects falls
 back to the source's published tile extent.
 
-During zooming, Mapper keeps the last complete imagery scene visible while the
-replacement level is downloaded, decoded and admitted to the renderer. The new
-level replaces it as one scene, avoiding a white intermediate frame or a
-partially updated tile grid.
+Before each screen frame, Mapper publishes the current view and zoom to every
+visible imagery source. Cached parent tiles may fill the new view while sharper
+tiles load, and the already-requested one-tile safety ring is retained around
+the viewport. Raster geometry is always rebuilt for the current zoom; Mapper
+does not stretch an older reprojected scene whose approximation was calculated
+for a different scale.
 
 ## Offline use
 

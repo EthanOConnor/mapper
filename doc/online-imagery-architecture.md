@@ -127,9 +127,13 @@ Screen planning intersects the visible view with the drawn map-object extent
 padded by 20 percent per side. That intersection bounds tile scheduling and is
 also emitted as a backend-neutral raster-layer clip, so a coarse edge tile
 cannot visually expand the working extent. Exact output remains governed by
-the requested output rectangle. Across a zoom-level transition, the planner
-retains the last complete raster scene while a separate staging scene admits
-the replacement images in bounded batches, then swaps the scene atomically.
+the requested output rectangle. Before frame planning, the viewport consumes
+any pending template render-context update, so tile selection and scene
+construction use the same view generation. Reprojected patch geometry is
+scale-dependent and is therefore rebuilt for the current scale; no raster
+RenderIR is carried across a zoom transition. Cached parent tiles and the
+already-requested overscan ring provide provisional coverage without violating
+that geometry invariant.
 
 File output is committed transactionally. PDF and standalone image writers
 target `QSaveFile`. An image plus world-file export stages both files under a

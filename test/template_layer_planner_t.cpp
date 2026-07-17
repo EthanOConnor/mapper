@@ -469,7 +469,7 @@ void TemplateLayerPlannerTest::marksFallbackLayersIncomplete()
 	QCOMPARE(imageCommandCount(plan.below_map.front()), std::size_t(1));
 }
 
-void TemplateLayerPlannerTest::retainsCompleteRasterSceneAcrossZoomHandoff()
+void TemplateLayerPlannerTest::rebuildsRasterSceneForCurrentZoomGeometry()
 {
 	Map map;
 	MapView view { &map };
@@ -495,8 +495,7 @@ void TemplateLayerPlannerTest::retainsCompleteRasterSceneAcrossZoomHandoff()
 	} });
 	auto loading = planner.plan(map, view, { -8, -8, 16, 16 }, 2);
 	QVERIFY(!loading.complete);
-	QCOMPARE(loading.above_map.size(), std::size_t(1));
-	QCOMPARE(loading.above_map.front().scene, complete_scene);
+	QVERIFY(loading.above_map.empty());
 
 	auto provisional = tile(
 		solidImage({ 8, 4 }, Qt::blue), { -4, -2, 8, 4 }
@@ -506,7 +505,8 @@ void TemplateLayerPlannerTest::retainsCompleteRasterSceneAcrossZoomHandoff()
 	loading = planner.plan(map, view, { -8, -8, 16, 16 }, 2);
 	QVERIFY(!loading.complete);
 	QCOMPARE(loading.above_map.size(), std::size_t(1));
-	QCOMPARE(imageCommandCount(loading.above_map.front()), std::size_t(2));
+	QCOMPARE(imageCommandCount(loading.above_map.front()), std::size_t(1));
+	QVERIFY(loading.above_map.front().scene != complete_scene);
 	auto const snapshot = map.publishRenderSnapshot();
 	QVERIFY(snapshot);
 	render::FramePlanner frame_planner;
@@ -514,7 +514,7 @@ void TemplateLayerPlannerTest::retainsCompleteRasterSceneAcrossZoomHandoff()
 		*snapshot, frame_planner, std::move(loading)
 	);
 	auto const transition = renderReference(*transition_frame);
-	QCOMPARE(transition.pixelColor(6, 8), QColor(Qt::red));
+	QCOMPARE(transition.pixelColor(6, 8), QColor(Qt::blue));
 	QCOMPARE(transition.pixelColor(10, 8), QColor(Qt::blue));
 
 	QVector<RasterTemplateTile> next_zoom;

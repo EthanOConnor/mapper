@@ -33,6 +33,7 @@ Q_OBJECT
 private slots:
 	void initTestCase();
 	void newMapStartsWithoutFormat();
+	void framePublishesTemplateContextBeforeRasterCollection();
 	
 	void editTool();
 	

@@ -1013,6 +1013,11 @@ void MapWidget::scheduleFrameUpdate()
 void MapWidget::renderFrame()
 {
 	frame_update_scheduled = false;
+	// A frame and its template resources must use the same view generation.
+	// View changes coalesce both updates through zero-delay timers, so consume
+	// any pending template context before collecting raster layers.
+	if (render_context_update_scheduled)
+		publishRenderContext();
 	if (overlay_revision == std::numeric_limits<render::Revision>::max())
 		qFatal("Map viewport revision space exhausted");
 

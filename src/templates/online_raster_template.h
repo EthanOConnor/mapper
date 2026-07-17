@@ -455,6 +455,8 @@ class OnlineRasterTemplate final : public TemplateImage
 	mutable bool atlas_queue_busy_ = false;
 	mutable QTimer atlas_retry_timer_;
 	mutable QRectF last_render_bounds_;
+	mutable QRectF screen_map_bounds_cache_;
+	mutable bool screen_map_bounds_dirty_ = true;
 	mutable bool exact_projection_failed_ = false;
 	mutable quint64 retained_access_ = 0;
 
