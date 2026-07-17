@@ -240,7 +240,9 @@ QString canonical(QStringView path)
 
 	const QFileInfo info{path.toString()};
 	const auto canonical_path = info.canonicalFilePath();
-	return canonical_path.isEmpty() ? info.absoluteFilePath() : canonical_path;
+	if (!canonical_path.isEmpty())
+		return canonical_path;
+	return info.isAbsolute() ? info.absoluteFilePath() : path.toString();
 }
 
 QString displayName(QStringView path)

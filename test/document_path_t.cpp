@@ -31,6 +31,9 @@ void DocumentPathTest::localPathRoundTrip()
 	QCOMPARE(DocumentPath::canonical(path), QFileInfo{path}.absoluteFilePath());
 	QCOMPARE(DocumentPath::displayName(path), QLatin1String("map.omap"));
 	QCOMPARE(DocumentPath::suffix(path), QLatin1String("omap"));
+
+	const auto unresolved_relative = QStringLiteral("missing/templates/map.omap");
+	QCOMPARE(DocumentPath::canonical(unresolved_relative), unresolved_relative);
 }
 
 void DocumentPathTest::contentUriRoundTrip()
