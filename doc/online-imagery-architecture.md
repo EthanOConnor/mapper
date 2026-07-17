@@ -7,7 +7,7 @@ GDAL remains the right abstraction for local geospatial files, broad raster
 format support and export. Current GDAL releases also offer thread-safe raster
 dataset wrappers for read-only access. Those capabilities do not provide the
 application contracts needed here: view-driven request cancellation, source
-fairness, provisional parent tiles, alpha-seam prevention, renderer resource
+fairness, provisional adjacent-level tiles, alpha-seam prevention, renderer resource
 admission, exact-output preflight, catalog identity or installation-local
 network permissions.
 
@@ -131,9 +131,11 @@ the requested output rectangle. Before frame planning, the viewport consumes
 any pending template render-context update, so tile selection and scene
 construction use the same view generation. Reprojected patch geometry is
 scale-dependent and is therefore rebuilt for the current scale; no raster
-RenderIR is carried across a zoom transition. Cached parent tiles and the
-already-requested overscan ring provide provisional coverage without violating
-that geometry invariant.
+RenderIR is carried across a zoom transition. Cached parents provide zoom-in
+coverage; cached descendants provide zoom-out coverage. Descendants retain
+their already-resident immutable pixels but receive fresh current-scale patch
+geometry. Together with the already-requested overscan ring, this makes the
+handoff continuous without violating the geometry invariant.
 
 File output is committed transactionally. PDF and standalone image writers
 target `QSaveFile`. An image plus world-file export stages both files under a

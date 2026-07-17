@@ -22,6 +22,7 @@ private slots:
 	void leasesTransparentMosaicPeakAndRetainedMemory();
 	void marksFallbackLayersIncomplete();
 	void rebuildsRasterSceneForCurrentZoomGeometry();
+	void reusesResidentPixelsWhileRebuildingProvisionalGeometry();
 	void drawsProvisionalDirectTilesBeforeExactTiles();
 	void respectsExplicitImageToMapTransform();
 	void preservesOpaqueGuttersWithoutTileSeams();

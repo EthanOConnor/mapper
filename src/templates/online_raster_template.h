@@ -206,6 +206,10 @@ class OnlineRasterTemplate final : public TemplateImage
 		QRectF source_rect;
 		bool provisional = false;
 		bool complete_empty = false;
+		// Position in the logical tile grid of the requested window. Exact
+		// tiles and cached ancestors occupy one full requested tile; cached
+		// descendants occupy their dyadic fraction of it.
+		QRectF target_rect;
 	};
 
 	struct AtlasCache

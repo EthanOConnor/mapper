@@ -99,11 +99,12 @@ using cache space far beyond the working map. A map with no drawn objects falls
 back to the source's published tile extent.
 
 Before each screen frame, Mapper publishes the current view and zoom to every
-visible imagery source. Cached parent tiles may fill the new view while sharper
-tiles load, and the already-requested one-tile safety ring is retained around
-the viewport. Raster geometry is always rebuilt for the current zoom; Mapper
-does not stretch an older reprojected scene whose approximation was calculated
-for a different scale.
+visible imagery source. Cached parent tiles fill zoom-in transitions; cached
+child tiles fill zoom-out transitions while the new level loads. The
+already-requested one-tile safety ring is retained around the viewport. Both
+fallback directions reuse source pixels but rebuild raster geometry for the
+current zoom, so Mapper does not stretch an older reprojected scene whose
+approximation was calculated for a different scale.
 
 ## Offline use
 
@@ -116,8 +117,9 @@ serving it later without the original request context can be incorrect.
 
 ## Printing and export
 
-Screen display may temporarily use a coarser cached parent tile while a sharper
-tile loads. Print, PDF, image and KML/KMZ output do not use provisional parents.
+Screen display may temporarily use cached tiles from an adjacent level while
+the requested level loads. Print, PDF, image and KML/KMZ output do not use
+provisional level fallback.
 Mapper prepares the exact requested source level before opening the output
 paint engine. A missing or permanently failed tile stops exact output with an
 error instead of silently producing an incomplete map.

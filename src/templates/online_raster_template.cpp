@@ -2648,6 +2648,91 @@ OnlineRasterTemplate::visualTiles(const TileWindow& window, bool allow_provision
 		return result;
 	result.reserve(int(*count));
 	auto touched_pixels = false;
+	auto descendant_probe_budget = qsizetype(16 * max_window_tiles);
+	auto descendant_visual_budget = qsizetype(max_window_tiles);
+	QSet<OnlineRasterTileKey> cached_descendant_branches;
+	auto descendant_index_ready = false;
+	auto ensureDescendantIndex = [&] {
+		if (descendant_index_ready)
+			return;
+		descendant_index_ready = true;
+		for (auto key : tile_cache_.keys())
+		{
+			while (key.zoom >= source_->min_zoom)
+			{
+				cached_descendant_branches.insert(key);
+				if (key.zoom == source_->min_zoom)
+					break;
+				key = { key.zoom - 1, key.column >> 1, key.row >> 1 };
+			}
+		}
+	};
+	auto appendVisual = [&](VisualTile visual) {
+		if (visual.tile && !visual.complete_empty)
+		{
+			if (has_pixels)
+				*has_pixels = true;
+			touched_pixels = true;
+			if (has_transparency && !visual.tile->opaque)
+				*has_transparency = true;
+		}
+		result.push_back(std::move(visual));
+	};
+	auto descendantTarget = [](const OnlineRasterTileKey& key, int requested_zoom) {
+		auto const shift = key.zoom - requested_zoom;
+		auto const divisor = double(qint64(1) << shift);
+		return QRectF(
+			double(key.column) / divisor,
+			double(key.row) / divisor,
+			1.0 / divisor,
+			1.0 / divisor);
+	};
+	std::function<bool(const OnlineRasterTileKey&, const OnlineRasterTileKey&, int)>
+		appendDescendantCoverage;
+	appendDescendantCoverage = [&](const OnlineRasterTileKey& key,
+	                                 const OnlineRasterTileKey& requested,
+	                                 int maximum_zoom) {
+		if (descendant_probe_budget <= 0 || descendant_visual_budget <= 0)
+			return false;
+		--descendant_probe_budget;
+		if (!tileAllowed(key))
+			return true;
+		if (!cached_descendant_branches.contains(key))
+			return false;
+		if (auto const* tile = tile_cache_.object(key))
+		{
+			--descendant_visual_budget;
+			auto const* tile_matrix = matrix(key.zoom);
+			appendVisual({
+				requested,
+				key,
+				tile,
+				tile->empty || !tile_matrix
+					? QRectF {}
+					: QRectF(1, 1, tile_matrix->tile_size.width(),
+					         tile_matrix->tile_size.height()),
+				true,
+				tile->empty,
+				descendantTarget(key, requested.zoom),
+			});
+			return true;
+		}
+		if (key.zoom >= maximum_zoom)
+			return false;
+
+		auto complete = true;
+		for (qint64 row = 0; row < 2; ++row)
+		{
+			for (qint64 column = 0; column < 2; ++column)
+			{
+				complete &= appendDescendantCoverage(
+					{ key.zoom + 1, 2 * key.column + column,
+					  2 * key.row + row },
+					requested, maximum_zoom);
+			}
+		}
+		return complete;
+	};
 	for (qint64 row = window.min_row; row <= window.max_row; ++row)
 	{
 		for (qint64 column = window.min_column; column <= window.max_column; ++column)
@@ -2666,7 +2751,10 @@ OnlineRasterTemplate::visualTiles(const TileWindow& window, bool allow_provision
 				cached = requested;
 				if (tile->empty)
 				{
-					result.push_back({ requested, cached, tile, {}, false, true });
+					appendVisual({
+						requested, cached, tile, {}, false, true,
+						QRectF(column, row, 1, 1),
+					});
 					continue;
 				}
 				auto const* requested_matrix = matrix(requested.zoom);
@@ -2679,18 +2767,36 @@ OnlineRasterTemplate::visualTiles(const TileWindow& window, bool allow_provision
 			}
 			if (!tile)
 			{
-				if (has_missing)
-					*has_missing = true;
-				result.push_back({ requested, {}, nullptr, {}, false, false });
+				auto complete = false;
+				if (allow_provisional && requested.zoom < source_->max_zoom)
+				{
+					// A zoom-out transition already has finer source pixels on
+					// screen. Reuse those cached descendants as pixels, but build
+					// fresh map geometry for this frame's scale. This is the
+					// inverse of parent fallback and never retains a stale scene.
+					// The ancestor index prunes empty branches, so even a large
+					// coalesced zoom jump remains bounded by cached resources and
+					// the explicit probe and visual limits above.
+					ensureDescendantIndex();
+					complete = appendDescendantCoverage(
+						requested, requested, source_->max_zoom);
+				}
+				if (!complete)
+				{
+					if (has_missing)
+						*has_missing = true;
+					appendVisual({
+						requested, {}, nullptr, {}, false, false,
+						QRectF(column, row, 1, 1),
+					});
+				}
 				continue;
 			}
-			if (has_pixels)
-				*has_pixels = true;
-			touched_pixels = true;
-			if (has_transparency && !tile->opaque)
-				*has_transparency = true;
-			result.push_back(
-				{ requested, cached, tile, source_rect, cached.zoom != requested.zoom, false });
+			appendVisual({
+				requested, cached, tile, source_rect,
+				cached.zoom != requested.zoom, false,
+				QRectF(column, row, 1, 1),
+			});
 		}
 	}
 	if (touched_pixels)
@@ -3013,22 +3119,27 @@ std::optional<OnlineRasterTemplate::AtlasBuildRequest> OnlineRasterTemplate::mak
 	bool provisional = has_missing;
 	for (auto const& visual : visuals)
 	{
+		auto const target = visual.target_rect.isValid()
+			? visual.target_rect
+			: QRectF(visual.requested.column, visual.requested.row, 1, 1);
 		request.has_left_neighbor |=
-			visual.requested.column < window.min_column;
+			target.left() < window.min_column;
 		request.has_right_neighbor |=
-			visual.requested.column > window.max_column;
+			target.right() > window.max_column + 1;
 		request.has_top_neighbor |=
-			visual.requested.row < window.min_row;
+			target.top() < window.min_row;
 		request.has_bottom_neighbor |=
-			visual.requested.row > window.max_row;
+			target.bottom() > window.max_row + 1;
 		if (!visual.tile || visual.complete_empty)
 			continue;
 		request.visuals.push_back({
-			QRectF(1 + (visual.requested.column - window.min_column)
-				         * tile_matrix->tile_size.width(),
-				   1 + (visual.requested.row - window.min_row)
-				         * tile_matrix->tile_size.height(),
-				   tile_matrix->tile_size.width(), tile_matrix->tile_size.height()),
+			QRectF(
+				1 + (target.x() - window.min_column)
+					* tile_matrix->tile_size.width(),
+				1 + (target.y() - window.min_row)
+					* tile_matrix->tile_size.height(),
+				target.width() * tile_matrix->tile_size.width(),
+				target.height() * tile_matrix->tile_size.height()),
 				visual.tile->image,
 				visual.source_rect,
 				visual.tile->memory,

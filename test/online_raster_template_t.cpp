@@ -520,6 +520,119 @@ class OnlineRasterTemplateTest : public QObject
 		QVERIFY(!pixels);
 	}
 
+	void zoomOutReprojectsCachedDescendantsAsProvisionalCoverage()
+	{
+		Map map;
+		georeferenceMap(map);
+		OnlineRasterTemplate online(snapshotFixture(), &map);
+		online.setTemplateState(Template::Unloaded);
+		QVERIFY2(online.loadTemplateFile(), qPrintable(online.errorString()));
+
+		for (qint64 row = 0; row < 2; ++row)
+		{
+			for (qint64 column = 0; column < 2; ++column)
+			{
+				online.insertTile(
+					{ 2, column, row },
+					{ paddedImage(
+						  { 4, 4 },
+						  QColor::fromHsv(int(90 * (2 * row + column)), 255, 255)),
+					  true, false });
+			}
+		}
+
+		bool transparent = false;
+		bool missing = false;
+		bool pixels = false;
+		auto const window = OnlineRasterTemplate::TileWindow { 1, 0, 0, 0, 0 };
+		auto const visuals = online.visualTiles(
+			window, true, &transparent, &missing, &pixels);
+		QCOMPARE(visuals.size(), 4);
+		QVERIFY(!transparent);
+		QVERIFY(!missing);
+		QVERIFY(pixels);
+		for (auto const& visual : visuals)
+		{
+			QCOMPARE(visual.requested, (OnlineRasterTileKey { 1, 0, 0 }));
+			QCOMPARE(visual.cached.zoom, 2);
+			QVERIFY(visual.provisional);
+			QVERIFY(visual.tile);
+			QVERIFY(visual.target_rect.isValid());
+			QCOMPARE(visual.target_rect.size(), QSizeF(0.5, 0.5));
+		}
+
+		online.wanted_window_ = window;
+		QVector<RasterTemplateTile> tiles;
+		online.collectRasterTiles(
+			mapRectForWindow(online, window), 1.0e-5, true, tiles);
+		QVERIFY(tiles.size() >= 4);
+		QVERIFY(std::ranges::all_of(tiles, [](auto const& tile) {
+			return !tile.missing && tile.provisional && tile.has_image_to_map;
+		}));
+	}
+
+	void partialCachedDescendantsPreservePixelsAndReportMissingCoverage()
+	{
+		Map map;
+		georeferenceMap(map);
+		OnlineRasterTemplate online(snapshotFixture(), &map);
+		online.setTemplateState(Template::Unloaded);
+		QVERIFY2(online.loadTemplateFile(), qPrintable(online.errorString()));
+		online.insertTile(
+			{ 2, 0, 0 }, { paddedImage({ 4, 4 }, Qt::red), true, false });
+
+		bool transparent = false;
+		bool missing = false;
+		bool pixels = false;
+		auto const visuals = online.visualTiles(
+			{ 1, 0, 0, 0, 0 }, true, &transparent, &missing, &pixels);
+		QVERIFY(!transparent);
+		QVERIFY(missing);
+		QVERIFY(pixels);
+		QCOMPARE(std::ranges::count_if(visuals, [](auto const& visual) {
+			return visual.tile != nullptr;
+		}), 1);
+		QCOMPARE(std::ranges::count_if(visuals, [](auto const& visual) {
+			return visual.tile == nullptr;
+		}), 1);
+	}
+
+	void transparentCachedDescendantsBuildOneCurrentScaleAtlas()
+	{
+		Map map;
+		georeferenceMap(map);
+		OnlineRasterTemplate online(snapshotFixture(), &map);
+		online.setTemplateState(Template::Unloaded);
+		QVERIFY2(online.loadTemplateFile(), qPrintable(online.errorString()));
+		for (qint64 row = 0; row < 2; ++row)
+		{
+			for (qint64 column = 0; column < 2; ++column)
+			{
+				online.insertTile(
+					{ 2, column, row },
+					{ paddedImage({ 4, 4 }, QColor(20, 40, 60, 128)),
+					  false, false });
+			}
+		}
+
+		auto const window = OnlineRasterTemplate::TileWindow { 1, 0, 0, 0, 0 };
+		online.wanted_window_ = window;
+		auto const map_rect = mapRectForWindow(online, window);
+		QVector<RasterTemplateTile> tiles;
+		online.collectRasterTiles(map_rect, 1.0e-5, true, tiles);
+		QVERIFY(std::ranges::any_of(
+			tiles, [](auto const& tile) { return tile.missing; }));
+		QTRY_VERIFY_WITH_TIMEOUT(
+			online.atlas_.window == window && !online.atlas_.image.isNull(), 5000);
+
+		tiles.clear();
+		online.collectRasterTiles(map_rect, 1.0e-5, true, tiles);
+		QCOMPARE(tiles.size(), 1);
+		QVERIFY(!tiles.front().missing);
+		QVERIFY(tiles.front().provisional);
+		QVERIFY(tiles.front().has_image_to_map);
+	}
+
 	void decodeValidatesDimensionsAndBuildsGutters()
 	{
 		Map map;

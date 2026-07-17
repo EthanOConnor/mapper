@@ -538,6 +538,47 @@ void TemplateLayerPlannerTest::rebuildsRasterSceneForCurrentZoomGeometry()
 	QVERIFY(ready.above_map.front().scene != complete_scene);
 }
 
+void TemplateLayerPlannerTest::reusesResidentPixelsWhileRebuildingProvisionalGeometry()
+{
+	Map map;
+	MapView view { &map };
+	auto pixels = solidImage({ 4, 4 }, Qt::blue);
+	auto initial = tile(pixels, { -2, -2, 4, 4 });
+	initial.image_to_map = QTransform(1, 0, 0, 1, -2, -2);
+	initial.has_image_to_map = true;
+	auto raster = std::make_unique<SyntheticRasterTemplate>(
+		&map, QVector<RasterTemplateTile> { std::move(initial) },
+		QRectF(-2, -2, 4, 4));
+	auto* raster_ptr = raster.get();
+	map.addTemplate(0, std::move(raster));
+	map.setFirstFrontTemplate(1);
+	view.setTemplateVisibility(map.getTemplate(0), { 1, true });
+
+	render::TemplateLayerPlanner planner;
+	auto const first = planner.plan(map, view, { -8, -8, 16, 16 }, 1);
+	QVERIFY(first.complete);
+	QCOMPARE(first.newly_resident_images, std::size_t(1));
+	QCOMPARE(first.below_map.size(), std::size_t(1));
+	auto const first_scene = first.below_map.front().scene;
+
+	auto fallback = tile(pixels, { -2, -2, 4, 4 });
+	fallback.image_to_map = QTransform(0.75, 0.1, -0.05, 0.9, -1.5, -2.25);
+	fallback.has_image_to_map = true;
+	fallback.provisional = true;
+	raster_ptr->setTiles({ std::move(fallback) });
+	auto const second = planner.plan(map, view, { -8, -8, 16, 16 }, 2);
+	QVERIFY(!second.complete);
+	QCOMPARE(second.newly_resident_images, std::size_t(0));
+	QCOMPARE(second.below_map.size(), std::size_t(1));
+	QVERIFY(second.below_map.front().scene != first_scene);
+	auto const command = std::ranges::find_if(
+		second.below_map.front().scene->commands,
+		[](auto const& value) { return std::holds_alternative<render::DrawImage>(value); });
+	QVERIFY(command != second.below_map.front().scene->commands.end());
+	QCOMPARE(std::get<render::DrawImage>(*command).image_to_scene.dx, -1.5);
+	QCOMPARE(std::get<render::DrawImage>(*command).image_to_scene.dy, -2.25);
+}
+
 void TemplateLayerPlannerTest::drawsProvisionalDirectTilesBeforeExactTiles()
 {
 	Map map;
