@@ -935,9 +935,82 @@ bool MapWidget::event(QEvent* event)
 	case QEvent::TouchUpdate:
 	case QEvent::TouchEnd:
 	case QEvent::TouchCancel:
+	{
+		auto const* touch = static_cast<QTouchEvent*>(event);
 		if (static_cast<QTouchEvent*>(event)->points().count() >= 2)
+		{
+			single_touch_mouse_active = false;
 			return true;
+		}
+
+#if defined(Q_OS_ANDROID)
+		if (event->type() == QEvent::TouchCancel)
+		{
+			if (!single_touch_mouse_active)
+				return true;
+			single_touch_mouse_active = false;
+			QMouseEvent release(
+				QEvent::MouseButtonRelease,
+				single_touch_position, single_touch_position,
+				single_touch_global_position,
+				Qt::LeftButton, Qt::NoButton, touch->modifiers(),
+				Qt::MouseEventSynthesizedByQt
+			);
+			release.setTimestamp(touch->timestamp());
+			QCoreApplication::sendEvent(this, &release);
+			return true;
+		}
+
+		if (touch->points().size() != 1)
+			return true;
+		auto const& point = touch->points().front();
+		single_touch_position = point.position();
+		single_touch_global_position = point.globalPosition();
+
+		QEvent::Type mouse_type;
+		Qt::MouseButton button;
+		Qt::MouseButtons buttons;
+		switch (event->type())
+		{
+		case QEvent::TouchBegin:
+			single_touch_mouse_active = true;
+			mouse_type = QEvent::MouseButtonPress;
+			button = Qt::LeftButton;
+			buttons = Qt::LeftButton;
+			break;
+		case QEvent::TouchUpdate:
+			if (!single_touch_mouse_active)
+				return true;
+			mouse_type = QEvent::MouseMove;
+			button = Qt::NoButton;
+			buttons = Qt::LeftButton;
+			break;
+		case QEvent::TouchEnd:
+			if (!single_touch_mouse_active)
+				return true;
+			single_touch_mouse_active = false;
+			mouse_type = QEvent::MouseButtonRelease;
+			button = Qt::LeftButton;
+			buttons = Qt::NoButton;
+			break;
+		default:
+			Q_UNREACHABLE();
+		}
+
+		QMouseEvent mouse(
+			mouse_type,
+			single_touch_position, single_touch_position,
+			single_touch_global_position,
+			button, buttons, touch->modifiers(),
+			Qt::MouseEventSynthesizedByQt
+		);
+		mouse.setTimestamp(touch->timestamp());
+		QCoreApplication::sendEvent(this, &mouse);
+		return true;
+#else
 		break;
+#endif
+	}
 		
 	case QEvent::KeyPress:
 		// No focus changing in QWidget::event if Tab is handled by tool.

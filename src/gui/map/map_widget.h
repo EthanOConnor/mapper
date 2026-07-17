@@ -486,6 +486,9 @@ private:
 	 *  whether the user interacts or recently interacted with the widget. */
 	QTime last_mouse_release_time;
 	int current_pressed_buttons;
+	bool single_touch_mouse_active = false;
+	QPointF single_touch_position;
+	QPointF single_touch_global_position;
 	
 	/** Optional GPS display */
 	GPSDisplay* gps_display;
