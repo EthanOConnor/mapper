@@ -149,6 +149,12 @@ MapWidget::MapWidget(bool show_help, QWidget* parent)
 	setSizePolicy(QSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding));
 	vello_canvas->setGeometry(rect());
 	vello_canvas->setPresentationCursor(cursor());
+	zoom_limit_feedback_timer.setSingleShot(true);
+	zoom_limit_feedback_timer.setInterval(450);
+	connect(&zoom_limit_feedback_timer, &QTimer::timeout, this, [this]() {
+		zoom_limit_feedback = ZoomLimitFeedback::None;
+		updateZoomDisplay();
+	});
 }
 
 MapWidget::~MapWidget()
@@ -556,30 +562,78 @@ qreal MapWidget::startPinching(const QPoint& center)
 	drag_start_pos  = center;
 	pinching_center = center;
 	pinching_factor = 1.0;
+	clearZoomLimitFeedback();
 	return pinching_factor;
 }
 
-void MapWidget::updatePinching(const QPoint& center, qreal factor)
+void MapWidget::updatePinching(const QPoint& center, qreal incremental_factor)
 {
 	Q_ASSERT(pinching);
+	if (!qIsFinite(incremental_factor) || incremental_factor <= 0)
+		return;
+
+	auto const base_zoom = view->getZoom();
+	auto const requested_factor = pinching_factor * incremental_factor;
+	auto const minimum_factor = MapView::zoom_out_limit / base_zoom;
+	auto const maximum_factor = MapView::zoom_in_limit / base_zoom;
+	auto const bounded_factor = qBound(minimum_factor, requested_factor, maximum_factor);
+	auto const hit_minimum = requested_factor < minimum_factor;
+	auto const hit_maximum = requested_factor > maximum_factor;
+	auto const factor_changed = !qFuzzyCompare(pinching_factor, bounded_factor);
+	auto const center_changed = pinching_center != center;
+
 	pinching_center = center;
-	pinching_factor = factor;
+	pinching_factor = bounded_factor;
+	if (hit_minimum)
+		showZoomLimitFeedback(ZoomLimitFeedback::Minimum);
+	else if (hit_maximum)
+		showZoomLimitFeedback(ZoomLimitFeedback::Maximum);
+	else
+		clearZoomLimitFeedback();
 	updateZoomDisplay();
-	scheduleFrameUpdate();
+	if (factor_changed || center_changed)
+		scheduleFrameUpdate();
 }
 
-void MapWidget::finishPinching(const QPoint& center, qreal factor)
+void MapWidget::finishPinching(const QPoint& center)
 {
+	auto const factor = pinching_factor;
 	pinching = false;
+	pinching_factor = 1.0;
 	view->finishPanning(center - drag_start_pos);
 	view->setZoom(factor * view->getZoom(), viewportToView(center));
+	// A clamped zoom is intentionally a MapView no-op, so synchronize the
+	// indicator explicitly instead of relying on viewChanged().
+	updateZoomDisplay();
 }
 
 void MapWidget::cancelPinching()
 {
 	pinching = false;
 	pinching_factor = 1.0;
+	clearZoomLimitFeedback();
+	updateZoomDisplay();
 	scheduleFrameUpdate();
+}
+
+void MapWidget::showZoomLimitFeedback(ZoomLimitFeedback limit)
+{
+	if (zoom_limit_feedback != limit)
+	{
+		zoom_limit_feedback = limit;
+		updateZoomDisplay();
+	}
+	if (!zoom_limit_feedback_timer.isActive())
+		zoom_limit_feedback_timer.start();
+}
+
+void MapWidget::clearZoomLimitFeedback()
+{
+	if (zoom_limit_feedback == ZoomLimitFeedback::None)
+		return;
+	zoom_limit_feedback = ZoomLimitFeedback::None;
+	zoom_limit_feedback_timer.stop();
+	updateZoomDisplay();
 }
 
 void MapWidget::moveMap(int steps_x, int steps_y)
@@ -796,7 +850,12 @@ void MapWidget::updateZoomDisplay()
 		auto zoom = view->getZoom();
 		if (pinching)
 			zoom *= pinching_factor;
-		zoom_display(tr("%1x", "Zoom factor").arg(zoom, 0, 'g', 3));
+		auto text = tr("%1x", "Zoom factor").arg(zoom, 0, 'g', 3);
+		if (zoom_limit_feedback == ZoomLimitFeedback::Maximum)
+			text += tr(" · max", "Zoom limit feedback");
+		else if (zoom_limit_feedback == ZoomLimitFeedback::Minimum)
+			text += tr(" · min", "Zoom limit feedback");
+		zoom_display(text);
 	}
 }
 
@@ -983,10 +1042,22 @@ void MapWidget::gestureEvent(QGestureEvent* event)
 			pinch->setTotalScaleFactor(factor);
 			break;
 		case Qt::GestureUpdated:
-			updatePinching(center, factor);
+			// Consume the delta since the last gesture event. Using Qt's total
+			// factor here retains overshoot beyond a zoom limit, forcing the user
+			// to pay down an invisible zoom debt before motion reverses.
+			updatePinching(
+				center,
+				pinch->changeFlags().testFlag(QPinchGesture::ScaleFactorChanged)
+					? pinch->scaleFactor() : 1.0
+			);
 			break;
 		case Qt::GestureFinished:
-			finishPinching(center, factor);
+			updatePinching(
+				center,
+				pinch->changeFlags().testFlag(QPinchGesture::ScaleFactorChanged)
+					? pinch->scaleFactor() : 1.0
+			);
+			finishPinching(center);
 			break;
 		case Qt::GestureCanceled:
 			cancelPinching();
@@ -1327,6 +1398,7 @@ void MapWidget::wheelEvent(QWheelEvent* event)
 	{
 		if (view)
 		{
+			auto const old_zoom = view->getZoom();
 			auto degrees = vertical_delta / 8.0;
 			auto num_steps = degrees / 15.0;
 			auto cursor_pos_view = viewportToView(event->position());
@@ -1341,6 +1413,18 @@ void MapWidget::wheelEvent(QWheelEvent* event)
 			{
 				view->zoomSteps(num_steps);
 				updateCursorposLabel(view->viewToMapF(cursor_pos_view));
+			}
+			auto const new_zoom = view->getZoom();
+			if (qFuzzyCompare(old_zoom, new_zoom))
+			{
+				if (num_steps > 0 && qFuzzyCompare(new_zoom, MapView::zoom_in_limit))
+					showZoomLimitFeedback(ZoomLimitFeedback::Maximum);
+				else if (num_steps < 0 && qFuzzyCompare(new_zoom, MapView::zoom_out_limit))
+					showZoomLimitFeedback(ZoomLimitFeedback::Minimum);
+			}
+			else
+			{
+				clearZoomLimitFeedback();
 			}
 			
 			// Send a mouse move event to the current tool as zooming out can move the mouse position on the map
