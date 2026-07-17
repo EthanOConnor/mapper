@@ -573,6 +573,7 @@ void MapWidget::finishPinching(const QPoint& center, qreal factor)
 	pinching = false;
 	view->finishPanning(center - drag_start_pos);
 	view->setZoom(factor * view->getZoom(), viewportToView(center));
+	scheduleFrameUpdate();
 }
 
 void MapWidget::cancelPinching()
