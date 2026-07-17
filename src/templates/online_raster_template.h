@@ -82,6 +82,7 @@ class OnlineRasterTemplate final : public TemplateImage
 	LookupResult tryToFindTemplateFile(const QString& map_path) override;
 	QSize getRasterPixelSize() const override;
 	QRectF calculateTemplateBoundingBox() const override;
+	QRectF getRasterRenderClip(bool on_screen) const override;
 
 	const imagery::ImagerySourceSnapshot* sourceSnapshot() const noexcept;
 	void setDisplayName(const QString& name);
@@ -304,6 +305,8 @@ class OnlineRasterTemplate final : public TemplateImage
 											 const QRectF& source_rect,
 											 QRectF* map_bounds = nullptr,
 											 double* residual_map_units = nullptr) const;
+	QRectF sourceMapBounds() const;
+	QRectF onScreenMapBounds() const;
 
 	TileWindow tileWindowForMapRect(const QRectF& map_rect, int zoom,
 								   bool exact_output = false,

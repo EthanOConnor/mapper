@@ -21,6 +21,7 @@ private slots:
 	void retainsRasterMemoryLeaseWithImmutableScene();
 	void leasesTransparentMosaicPeakAndRetainedMemory();
 	void marksFallbackLayersIncomplete();
+	void retainsCompleteRasterSceneAcrossZoomHandoff();
 	void drawsProvisionalDirectTilesBeforeExactTiles();
 	void respectsExplicitImageToMapTransform();
 	void preservesOpaqueGuttersWithoutTileSeams();

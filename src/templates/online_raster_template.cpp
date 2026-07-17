@@ -1265,9 +1265,20 @@ void OnlineRasterTemplate::updateRenderContext(const ViewRenderContext& context)
 {
 	if (template_state != Loaded || !sourceReady())
 		return;
+	auto visible_map_rect = context.visible_map_rect;
+	auto const screen_bounds = onScreenMapBounds();
+	if (screen_bounds.isValid())
+		visible_map_rect = visible_map_rect.intersected(screen_bounds);
+	if (visible_map_rect.isEmpty())
+	{
+		auto const replace_pending = !wanted_window_.isEmpty();
+		wanted_window_ = {};
+		queueWindow(wanted_window_, replace_pending);
+		return;
+	}
 	auto const pixels_per_map_unit = Util::mmToPixelPhysical(context.view_zoom);
-	auto const zoom = chooseZoom(context.visible_map_rect, pixels_per_map_unit);
-	auto window = withOverscan(tileWindowForMapRect(context.visible_map_rect, zoom), 1);
+	auto const zoom = chooseZoom(visible_map_rect, pixels_per_map_unit);
+	auto window = withOverscan(tileWindowForMapRect(visible_map_rect, zoom), 1);
 	auto const replace_pending = wanted_window_ != window;
 	wanted_window_ = window;
 	queueWindow(window, replace_pending);
@@ -3706,17 +3717,26 @@ void OnlineRasterTemplate::collectRasterTiles(const QRectF& map_clip_rect, doubl
 {
 	if (template_state != Loaded || !sourceReady())
 		return;
+	auto clipped_map_rect = map_clip_rect;
+	if (on_screen)
+	{
+		auto const screen_bounds = onScreenMapBounds();
+		if (screen_bounds.isValid())
+			clipped_map_rect = clipped_map_rect.intersected(screen_bounds);
+		if (clipped_map_rect.isEmpty())
+			return;
+	}
 	auto zoom = on_screen && !wanted_window_.isEmpty()
 					? wanted_window_.zoom
 					: (!on_screen && output_preparation_active_ && !output_window_.isEmpty()
 						   ? output_window_.zoom
-						   : chooseZoom(map_clip_rect, scale, !on_screen));
+						   : chooseZoom(clipped_map_rect, scale, !on_screen));
 	if (zoom < 0)
 	{
 		out.push_back({ {}, map_clip_rect, {}, 0, true, false });
 		return;
 	}
-	auto const window = tileWindowForMapRect(map_clip_rect, zoom, !on_screen);
+	auto const window = tileWindowForMapRect(clipped_map_rect, zoom, !on_screen);
 	if (window.isEmpty())
 		return;
 	if (!on_screen
@@ -3837,7 +3857,7 @@ QRectF OnlineRasterTemplate::mapBoundsForSourceBounds(const imagery::CrsBounds& 
 	return result;
 }
 
-QRectF OnlineRasterTemplate::calculateTemplateBoundingBox() const
+QRectF OnlineRasterTemplate::sourceMapBounds() const
 {
 	if (!sourceReady())
 		return last_render_bounds_;
@@ -3858,6 +3878,33 @@ QRectF OnlineRasterTemplate::calculateTemplateBoundingBox() const
 	auto const first = tile_matrix->tileBounds(min_column, min_row);
 	auto const last = tile_matrix->tileBounds(max_column, max_row);
 	return mapBoundsForSourceBounds({ first.west, last.south, last.east, first.north });
+}
+
+QRectF OnlineRasterTemplate::onScreenMapBounds() const
+{
+	auto const source_bounds = sourceMapBounds();
+	if (!map)
+		return source_bounds;
+	auto const content_bounds = map->calculateExtent(false, false).normalized();
+	if (!content_bounds.isValid() || content_bounds.isEmpty())
+		return source_bounds;
+	auto const padded = content_bounds.adjusted(
+		-content_bounds.width() * 0.2,
+		-content_bounds.height() * 0.2,
+		content_bounds.width() * 0.2,
+		content_bounds.height() * 0.2
+	);
+	return source_bounds.isValid() ? source_bounds.intersected(padded) : padded;
+}
+
+QRectF OnlineRasterTemplate::calculateTemplateBoundingBox() const
+{
+	return onScreenMapBounds();
+}
+
+QRectF OnlineRasterTemplate::getRasterRenderClip(bool on_screen) const
+{
+	return on_screen ? onScreenMapBounds() : QRectF {};
 }
 
 QRectF OnlineRasterTemplate::getTemplateExtent() const

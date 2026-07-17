@@ -90,6 +90,19 @@ list. Mapper warns before embedding the complete endpoint in the map. Anyone
 who can read that map file may be able to read the endpoint, including its
 query parameters.
 
+## Screen extent and zooming
+
+On screen, imagery is clipped to the map's drawn-object extent with 20 percent
+padding on every side, and tiles wholly outside that area are not requested.
+This keeps a broad service coverage area from changing **Zoom entire map** or
+using cache space far beyond the working map. A map with no drawn objects falls
+back to the source's published tile extent.
+
+During zooming, Mapper keeps the last complete imagery scene visible while the
+replacement level is downloaded, decoded and admitted to the renderer. The new
+level replaces it as one scene, avoiding a white intermediate frame or a
+partially updated tile grid.
+
 ## Offline use
 
 Enable **Templates → Work offline for imagery** to prevent network access and

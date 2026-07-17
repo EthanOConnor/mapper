@@ -75,6 +75,7 @@ struct TileKey
 struct LayerKey
 {
 	Transform template_to_map;
+	Rect render_clip;
 	std::vector<TileKey> tiles;
 
 	bool operator==(const LayerKey& other) const
@@ -85,9 +86,24 @@ struct LayerKey
 		       && template_to_map.m22 == other.template_to_map.m22
 		       && template_to_map.dx == other.template_to_map.dx
 		       && template_to_map.dy == other.template_to_map.dy
+		       && render_clip.x == other.render_clip.x
+		       && render_clip.y == other.render_clip.y
+		       && render_clip.width == other.render_clip.width
+		       && render_clip.height == other.render_clip.height
 		       && tiles == other.tiles;
 	}
 };
+
+PathPtr rectanglePath(Rect rect)
+{
+	PathBuilder path(FillRule::Winding);
+	path.moveTo({ rect.x, rect.y });
+	path.lineTo({ rect.x + rect.width, rect.y });
+	path.lineTo({ rect.x + rect.width, rect.y + rect.height });
+	path.lineTo({ rect.x, rect.y + rect.height });
+	path.close();
+	return path.finish();
+}
 
 Transform templateToMapTransform(const Template& source)
 {
@@ -368,6 +384,7 @@ public:
 	{
 		LayerKey key;
 		std::shared_ptr<const RenderIR> scene;
+		double view_scale = 0;
 	};
 
 	TemplateLayerPlan plan(const Map& map,
@@ -402,7 +419,9 @@ public:
 				image->collectRasterTiles(
 					toQRectF(visible_map_rect), template_scale, on_screen, source_tiles
 				);
-				layer = layerFor(*image, source_tiles, result, on_screen);
+				layer = layerFor(
+					*image, source_tiles, result, on_screen, template_scale
+				);
 			}
 			else if (auto const* map_template = dynamic_cast<const TemplateMap*>(source))
 			{
@@ -454,6 +473,13 @@ public:
 		{
 			if (!live_layers.contains(it->first))
 				it = layers_.erase(it);
+			else
+				++it;
+		}
+		for (auto it = staging_layers_.begin(); it != staging_layers_.end(); )
+		{
+			if (!live_layers.contains(it->first))
+				it = staging_layers_.erase(it);
 			else
 				++it;
 		}
@@ -532,19 +558,26 @@ private:
 	std::shared_ptr<const RenderIR> layerFor(const TemplateImage& source,
 	                                        const QVector<RasterTemplateTile>& source_tiles,
 	                                        TemplateLayerPlan& result,
-	                                        bool on_screen)
+	                                        bool on_screen,
+	                                        double view_scale)
 	{
 		LayerKey full_key;
 		full_key.template_to_map = templateToMapTransform(source);
+		full_key.render_clip = fromQRectF(source.getRasterRenderClip(on_screen));
+		bool source_complete = true;
 		std::vector<SourceTile> source_images;
 		source_images.reserve(std::size_t(source_tiles.size()));
 		for (auto const& tile : source_tiles)
 		{
 			if (tile.provisional)
+			{
 				result.complete = false;
+				source_complete = false;
+			}
 			if (tile.missing)
 			{
 				result.complete = false;
+				source_complete = false;
 				continue;
 			}
 			if (tile.image.isNull() || !tile.template_rect.isValid()
@@ -577,7 +610,23 @@ private:
 
 		auto found = layers_.find(&source);
 		if (found != layers_.end() && found->second.key == full_key)
+		{
+			if (source_complete)
+			{
+				found->second.view_scale = view_scale;
+				staging_layers_.erase(&source);
+			}
 			return found->second.scene;
+		}
+		auto const retain_zoom_scene = [&]() -> std::shared_ptr<const RenderIR> {
+			if (!on_screen || found == layers_.end())
+				return {};
+			auto const scale = std::max({ 1.0, std::abs(view_scale),
+			                              std::abs(found->second.view_scale) });
+			if (std::abs(view_scale - found->second.view_scale) <= scale * 1.0e-9)
+				return {};
+			return found->second.scene;
+		};
 		if (!on_screen && found != layers_.end())
 		{
 			// Exact multi-page output does not need the previous page as a
@@ -586,11 +635,20 @@ private:
 			// budget at once.
 			layers_.erase(found);
 			found = layers_.end();
+			staging_layers_.erase(&source);
 		}
 		if (source_images.empty())
 		{
+			if (auto retained = retain_zoom_scene())
+				return retained;
 			layers_.erase(&source);
+			staging_layers_.erase(&source);
 			return {};
+		}
+		if (!source_complete)
+		{
+			if (auto retained = retain_zoom_scene())
+				return retained;
 		}
 
 		auto const has_direct_tiles = std::ranges::any_of(
@@ -610,29 +668,39 @@ private:
 			if (on_screen && result.newly_resident_images >= max_new_images_per_frame)
 			{
 				result.complete = false;
+				if (auto retained = retain_zoom_scene())
+					return retained;
 				return {};
 			}
 			auto mosaic = transparentMosaic(source_images);
 			if (!mosaic.image)
 			{
 				result.complete = false;
+				if (auto retained = retain_zoom_scene())
+					return retained;
 				return {};
 			}
 
 			if (next_revision_ == std::numeric_limits<Revision>::max())
 				qFatal("Raster layer revision space exhausted");
 			RenderIRBuilder builder(next_revision_++);
+			if (full_key.render_clip.isValid())
+				builder.pushClip(rectanglePath(full_key.render_clip));
 			builder.pushTransform(full_key.template_to_map);
 			builder.drawImage(mosaic.image, mosaic.target);
 			builder.popTransform();
+			if (full_key.render_clip.isValid())
+				builder.popClip();
 			auto scene = builder.finish();
 			++result.newly_resident_images;
-			layers_[&source] = { std::move(full_key), scene };
+			layers_[&source] = { std::move(full_key), scene, view_scale };
+			staging_layers_.erase(&source);
 			return scene;
 		}
 
 		LayerKey key;
 		key.template_to_map = full_key.template_to_map;
+		key.render_clip = full_key.render_clip;
 		std::vector<std::pair<TileKey, std::shared_ptr<const ImageData>>> tiles;
 		tiles.reserve(source_images.size());
 		for (auto const& tile : source_images)
@@ -646,16 +714,27 @@ private:
 			if (!image)
 			{
 				result.complete = false;
+				source_complete = false;
 				continue;
 			}
 			key.tiles.push_back(tile.key);
 			tiles.emplace_back(tile.key, std::move(image));
 		}
 		if (found != layers_.end() && found->second.key == key)
+		{
+			if (source_complete)
+			{
+				found->second.view_scale = view_scale;
+				staging_layers_.erase(&source);
+			}
 			return found->second.scene;
+		}
 		if (tiles.empty())
 		{
+			if (auto retained = retain_zoom_scene())
+				return retained;
 			layers_.erase(&source);
+			staging_layers_.erase(&source);
 			return {};
 		}
 		std::stable_sort(
@@ -667,6 +746,8 @@ private:
 		if (next_revision_ == std::numeric_limits<Revision>::max())
 			qFatal("Raster layer revision space exhausted");
 		RenderIRBuilder builder(next_revision_++);
+		if (key.render_clip.isValid())
+			builder.pushClip(rectanglePath(key.render_clip));
 		for (auto const& [tile, image] : tiles)
 		{
 			if (tile.direct_to_map)
@@ -680,8 +761,19 @@ private:
 				builder.popTransform();
 			}
 		}
+		if (key.render_clip.isValid())
+			builder.popClip();
 		auto scene = builder.finish();
-		layers_[&source] = { std::move(key), scene };
+		if (!source_complete)
+		{
+			if (auto retained = retain_zoom_scene())
+			{
+				staging_layers_[&source] = { std::move(key), scene, view_scale };
+				return retained;
+			}
+		}
+		layers_[&source] = { std::move(key), scene, view_scale };
+		staging_layers_.erase(&source);
 		return scene;
 	}
 
@@ -719,6 +811,7 @@ private:
 
 	Revision next_revision_ = 1;
 	std::unordered_map<const TemplateImage*, CachedLayer> layers_;
+	std::unordered_map<const TemplateImage*, CachedLayer> staging_layers_;
 	std::map<ImageKey, std::weak_ptr<const ImageData>> images_;
 	std::map<ImageKey, bool> opacity_;
 	std::unordered_map<const TemplateMap*, std::unique_ptr<TemplateLayerPlanner>> child_planners_;

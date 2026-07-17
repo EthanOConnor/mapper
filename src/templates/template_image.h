@@ -170,6 +170,8 @@ public:
 	                                double scale,
 	                                bool on_screen,
 	                                QVector<RasterTemplateTile>& out) const;
+	/** Optional map-coordinate clip applied to this raster layer. */
+	virtual QRectF getRasterRenderClip(bool on_screen) const;
 	bool canBeDrawnOnto() const override { return drawable; }
 
 	/**

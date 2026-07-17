@@ -58,6 +58,11 @@ public:
 		out += tiles_;
 	}
 
+	void setTiles(QVector<RasterTemplateTile> tiles)
+	{
+		tiles_ = std::move(tiles);
+	}
+
 private:
 	QVector<RasterTemplateTile> tiles_;
 	QRectF extent_;
@@ -462,6 +467,55 @@ void TemplateLayerPlannerTest::marksFallbackLayersIncomplete()
 	QVERIFY(!plan.complete);
 	QCOMPARE(plan.below_map.size(), std::size_t(1));
 	QCOMPARE(imageCommandCount(plan.below_map.front()), std::size_t(1));
+}
+
+void TemplateLayerPlannerTest::retainsCompleteRasterSceneAcrossZoomHandoff()
+{
+	Map map;
+	MapView view { &map };
+	auto raster = std::make_unique<SyntheticRasterTemplate>(
+		&map,
+		QVector<RasterTemplateTile> {
+			tile(solidImage({ 4, 4 }, Qt::red), { -2, -2, 4, 4 })
+		},
+		QRectF(-2, -2, 4, 4));
+	auto* raster_ptr = raster.get();
+	map.addTemplate(0, std::move(raster));
+	map.setFirstFrontTemplate(1);
+	view.setTemplateVisibility(map.getTemplate(0), { 1, true });
+
+	render::TemplateLayerPlanner planner;
+	auto first = planner.plan(map, view, { -8, -8, 16, 16 }, 1);
+	QVERIFY(first.complete);
+	QCOMPARE(first.below_map.size(), std::size_t(1));
+	auto const complete_scene = first.below_map.front().scene;
+
+	raster_ptr->setTiles({ RasterTemplateTile {
+		{}, { -4, -4, 8, 8 }, {}, 0, true, false
+	} });
+	auto loading = planner.plan(map, view, { -8, -8, 16, 16 }, 2);
+	QVERIFY(!loading.complete);
+	QCOMPARE(loading.below_map.size(), std::size_t(1));
+	QCOMPARE(loading.below_map.front().scene, complete_scene);
+
+	QVector<RasterTemplateTile> next_zoom;
+	for (int index = 0; index < 6; ++index)
+	{
+		next_zoom.push_back(tile(
+			solidImage({ 2, 2 }, QColor::fromHsv(index * 30, 255, 255)),
+			{ -6.0 + index * 2.0, -1, 2, 2 }
+		));
+	}
+	raster_ptr->setTiles(std::move(next_zoom));
+	loading = planner.plan(map, view, { -8, -8, 16, 16 }, 2);
+	QVERIFY(!loading.complete);
+	QCOMPARE(loading.newly_resident_images, std::size_t(4));
+	QCOMPARE(loading.below_map.front().scene, complete_scene);
+	auto ready = planner.plan(map, view, { -8, -8, 16, 16 }, 2);
+	QVERIFY(ready.complete);
+	QCOMPARE(ready.newly_resident_images, std::size_t(2));
+	QCOMPARE(ready.below_map.size(), std::size_t(1));
+	QVERIFY(ready.below_map.front().scene != complete_scene);
 }
 
 void TemplateLayerPlannerTest::drawsProvisionalDirectTilesBeforeExactTiles()

@@ -123,6 +123,14 @@ provisional imagery. Preparation finishes before a printer/PDF/image/KMZ paint
 engine is opened, so cancellation or missing exact imagery cannot leave a
 nominally successful partial export.
 
+Screen planning intersects the visible view with the drawn map-object extent
+padded by 20 percent per side. That intersection bounds tile scheduling and is
+also emitted as a backend-neutral raster-layer clip, so a coarse edge tile
+cannot visually expand the working extent. Exact output remains governed by
+the requested output rectangle. Across a zoom-level transition, the planner
+retains the last complete raster scene while a separate staging scene admits
+the replacement images in bounded batches, then swaps the scene atomically.
+
 File output is committed transactionally. PDF and standalone image writers
 target `QSaveFile`. An image plus world-file export stages both files under a
 per-destination process lock; a bounded journal and sibling image backup make

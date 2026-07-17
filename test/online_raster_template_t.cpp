@@ -18,6 +18,9 @@
 
 #include "core/georeferencing.h"
 #include "core/map.h"
+#include "core/map_color.h"
+#include "core/objects/object.h"
+#include "core/symbols/line_symbol.h"
 #include "global.h"
 #include "imagery/imagery_source_snapshot.h"
 #include "templates/online_raster_template.h"
@@ -434,6 +437,51 @@ class OnlineRasterTemplateTest : public QObject
 				 (OnlineRasterTemplate::TileWindow{ 2, 1, 2, 1, 2 }));
 		QVERIFY(!online.tileAllowed({ 2, 0, 1 }));
 		QVERIFY(online.tileAllowed({ 2, 1, 1 }));
+	}
+
+	void screenExtentTracksMapContentWithMargin()
+	{
+		Map map;
+		georeferenceMap(map);
+		OnlineRasterTemplate online(snapshotFixture(), &map);
+		QVERIFY(online.loadTemplateFile());
+		auto const source_bounds = online.sourceMapBounds().normalized();
+		QVERIFY(source_bounds.isValid());
+		QVERIFY(!source_bounds.isEmpty());
+
+		auto const content_seed = QRectF(-1000, -500, 2000, 1000);
+		auto* color = new MapColor;
+		color->setRgb(MapColorRgb(Qt::black));
+		map.addColor(color, 0);
+		auto* symbol = new LineSymbol;
+		symbol->setColor(color);
+		symbol->setLineWidth(1);
+		map.addSymbol(symbol, 0);
+		auto* object = new PathObject(symbol, {
+			MapCoord(content_seed.topLeft()),
+			MapCoord(content_seed.topRight()),
+			MapCoord(content_seed.bottomRight()),
+			MapCoord(content_seed.bottomLeft()),
+		}, &map);
+		map.addObject(object);
+
+		auto const content_bounds = map.calculateExtent(false, false).normalized();
+		auto const expected = source_bounds.intersected(content_bounds.adjusted(
+			-content_bounds.width() * 0.2,
+			-content_bounds.height() * 0.2,
+			content_bounds.width() * 0.2,
+			content_bounds.height() * 0.2));
+		QCOMPARE(online.calculateTemplateBoundingBox(), expected);
+		QVERIFY(expected.width() < source_bounds.width() * 0.2);
+		QVERIFY(expected.height() < source_bounds.height() * 0.2);
+
+		auto const outside = QRectF(
+			source_bounds.topLeft(),
+			QSizeF(source_bounds.width() * 0.05,
+			       source_bounds.height() * 0.05));
+		QVector<RasterTemplateTile> screen_tiles;
+		online.collectRasterTiles(outside, 1, true, screen_tiles);
+		QVERIFY(screen_tiles.isEmpty());
 	}
 
 	void fallbackCropIsExactAndPrintDisallowsIt()
