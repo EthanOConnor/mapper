@@ -38,6 +38,9 @@ private slots:
 	void mobileSecondaryPagesReplaceMapSurface();
 	
 	void editTool();
+	void arrowKeysNudgeSelection();
+	void arrowKeyAutoRepeatIsSingleUndoStep();
+	void arrowKeysPanWithoutSelection();
 	void panToolRecoversFromLostRelease();
 	void panDefersTemplateSceneIntegration();
 	void wheelDefersTemplateSceneIntegrationUntilIdle();

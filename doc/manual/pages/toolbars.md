@@ -73,7 +73,7 @@ F6
 
 Use this tool to move the map by clicking the map and dragging the mouse.
 
-*Note:* You may always move the map by dragging with middle mouse button, or by using the arrow keys.
+*Note:* You may always move the map by dragging with the middle mouse button. The arrow keys move the map when no objects are selected. When objects are selected, the arrow keys nudge the complete selection by one screen pixel at the current zoom and rotation; hold Shift to nudge by ten screen pixels.
 
 #### ![ ](../mapper-images/view-zoom-in.png) ![ ](../mapper-images/view-zoom-out.png) Zoom in / Zoom out {#zoom_in_out}
 F7, + / F8, -
