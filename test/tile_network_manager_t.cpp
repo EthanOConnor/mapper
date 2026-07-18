@@ -130,6 +130,7 @@ private:
 		case 200: return QByteArrayLiteral("OK");
 		case 302: return QByteArrayLiteral("Found");
 		case 304: return QByteArrayLiteral("Not Modified");
+		case 401: return QByteArrayLiteral("Unauthorized");
 		case 404: return QByteArrayLiteral("Not Found");
 		case 503: return QByteArrayLiteral("Service Unavailable");
 		default: return QByteArrayLiteral("Error");
@@ -169,6 +170,13 @@ private:
 			respond(
 				socket, 200, {}, QByteArrayLiteral("tile"),
 				QByteArrayLiteral("Content-Type: image/png\r\n"));
+		}
+		else if (path == QLatin1String("/auth"))
+		{
+			if (request.contains("Authorization: Bearer map-token\r\n"))
+				respond(socket, 200, {}, QByteArrayLiteral("authorized"));
+			else
+				respond(socket, 401, {}, {});
 		}
 		else if (path.startsWith(QLatin1String("/empty")))
 		{
@@ -427,6 +435,81 @@ void TileNetworkManagerTest::approvesPrivateOriginsExplicitly()
 	QCOMPARE(
 		resultAt(spy, 2).outcome,
 		TileNetworkResult::Outcome::Rejected);
+}
+
+void TileNetworkManagerTest::injectsBearerOnlyForExactOriginAndBypassesSharedCache()
+{
+	MiniHttpServer server;
+	MiniHttpServer redirect_target;
+	QTemporaryDir directory;
+	QVERIFY(directory.isValid());
+	TileNetworkManager manager(configFor(directory));
+	QSignalSpy spy(&manager, &TileNetworkManager::finished);
+	QVERIFY(manager.setBearerCredential(
+		server.url(QStringLiteral("/")),
+		QByteArrayLiteral("map-token"),
+		QByteArrayLiteral("account-one")));
+
+	manager.submit(request(server.url(QStringLiteral("/auth")), 1));
+	QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 1, 2000);
+	QCOMPARE(resultAt(spy, 0).outcome, TileNetworkResult::Outcome::Success);
+	QVERIFY(server.lastRequest().contains("Authorization: Bearer map-token\r\n"));
+
+	manager.submit(request(server.url(QStringLiteral("/cache")), 1));
+	QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 2, 2000);
+	manager.submit(request(server.url(QStringLiteral("/cache")), 1));
+	QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 3, 2000);
+	QCOMPARE(server.paths().count(QStringLiteral("/cache")), 2);
+
+	server.setRedirectTarget(redirect_target.url(QStringLiteral("/ok")));
+	manager.submit(request(server.url(QStringLiteral("/private-redirect")), 1));
+	QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 4, 3000);
+	QCOMPARE(resultAt(spy, 3).outcome, TileNetworkResult::Outcome::Success);
+	QVERIFY(!redirect_target.lastRequest().contains("Authorization:"));
+
+	manager.clearBearerCredential(server.url(QStringLiteral("/")));
+	manager.submit(request(server.url(QStringLiteral("/auth")), 1));
+	QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 5, 2000);
+	QCOMPARE(resultAt(spy, 4).outcome, TileNetworkResult::Outcome::PermanentError);
+}
+
+void TileNetworkManagerTest::credentialChangesCancelRequestsAndPartitionNegativeCache()
+{
+	MiniHttpServer server;
+	QTemporaryDir directory;
+	QVERIFY(directory.isValid());
+	auto config = configFor(directory);
+	config.max_active_total = 1;
+	TileNetworkManager manager(config);
+	QSignalSpy results(&manager, &TileNetworkManager::finished);
+	QSignalSpy changes(&manager, &TileNetworkManager::bearerCredentialChanged);
+	auto const origin = server.url(QStringLiteral("/"));
+	QVERIFY(manager.setBearerCredential(
+		origin, QByteArrayLiteral("account-a-token"),
+		QByteArrayLiteral("stable-server-account")));
+	QCOMPARE(changes.size(), 1);
+
+	manager.submit(request(server.url(QStringLiteral("/empty-credential")), 1));
+	QTRY_COMPARE_WITH_TIMEOUT(results.size(), 1, 2000);
+	manager.submit(request(server.url(QStringLiteral("/empty-credential")), 1));
+	QTRY_COMPARE_WITH_TIMEOUT(results.size(), 2, 2000);
+	QCOMPARE(server.paths().count(QStringLiteral("/empty-credential")), 1);
+	QVERIFY(resultAt(results, 1).from_cache);
+
+	manager.submit(request(server.url(QStringLiteral("/hold/credential")), 1));
+	QTRY_COMPARE_WITH_TIMEOUT(server.heldCount(), 1, 2000);
+	QVERIFY(manager.setBearerCredential(
+		origin, QByteArrayLiteral("account-b-token"),
+		QByteArrayLiteral("stable-server-account")));
+	QCOMPARE(changes.size(), 2);
+	QTRY_COMPARE_WITH_TIMEOUT(results.size(), 3, 2000);
+	QCOMPARE(resultAt(results, 2).outcome, TileNetworkResult::Outcome::Cancelled);
+	QVERIFY(resultAt(results, 2).body.isEmpty());
+
+	manager.submit(request(server.url(QStringLiteral("/empty-credential")), 1));
+	QTRY_COMPARE_WITH_TIMEOUT(results.size(), 4, 2000);
+	QCOMPARE(server.paths().count(QStringLiteral("/empty-credential")), 2);
+	server.releaseAll();
 }
 
 void TileNetworkManagerTest::handlesRedirectsEmptyTilesAndBodyLimits()

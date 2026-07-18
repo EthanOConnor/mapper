@@ -21,6 +21,9 @@ The modernization foundation was completed and published at
 are historical design and verification context. The architecture and product
 scenarios below remain current guidance for descendants of the tag.
 
+Product descendants add their own focused contracts. The map-lifecycle branch
+is documented in the [connected Map Hub workflow](map-hub-workflow.md).
+
 ## Scope
 
 This is pure modernization. There is no feature work in this campaign. GNSS,

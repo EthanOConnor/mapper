@@ -30,6 +30,7 @@
 #include <QString>
 #include <QStringList>
 
+#include "collaboration/managed_map_workspace.h"
 #include "core/autosave.h"
 #include "fileformats/file_format.h"
 
@@ -41,6 +42,7 @@ class QLabel;
 class QMenu;
 class QStackedWidget;
 class QToolBar;
+class QTimer;
 class QWidget;
 
 namespace OpenOrienteering {
@@ -305,6 +307,23 @@ public slots:
 	 * May open a new main window.
 	 */
 	void showNewMapWizard();
+
+	/** Open the connected map library and this user's assignments. */
+	void showMapHub();
+
+	/** Create an ordinary .omap map bound to a server-created workspace. */
+	void createConnectedMap(const ManagedMapWorkspace& workspace);
+
+	/** Open a verified server artifact and normalize imports to a managed .omap. */
+	bool openConnectedWorkspace(const QString& source_path,
+	                            const QString& normalized_omap_path,
+	                            ManagedMapWorkspace workspace);
+
+	/** Save and upload an immutable checkpoint for the current managed map. */
+	void checkpointMapHub();
+
+	/** Submit the current managed-map checkpoint for review. */
+	void submitMapHub();
 	
 	/**
 	 * Show a file-open dialog and load the select file.
@@ -513,6 +532,12 @@ private:
 	
 	void createFileMenu();
 	void createHelpMenu();
+	MainWindow* createNewMapWithWizard(unsigned int required_scale = 0,
+	                                   const QString& required_crs = {},
+	                                   const QString& required_symbol_standard = {});
+	void checkpointMapHub(bool submit_after);
+	void updateMapHubActions();
+	void renewMapHubLeaseIfNeeded();
 
 	static MainWindow* findMainWindow(const QString& file_name);
 	
@@ -533,6 +558,10 @@ private:
 	QAction* recent_file_act[max_recent_files];
 	QAction* settings_act;
 	QAction* close_act;
+	QAction* map_hub_checkpoint_act = nullptr;
+	QAction* map_hub_submit_act = nullptr;
+	QTimer* map_hub_lease_timer = nullptr;
+	bool map_hub_lease_renewal_pending = false;
 	QLabel* status_label;
 	Toast* toast = nullptr;
 	

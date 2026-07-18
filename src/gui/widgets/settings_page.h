@@ -52,6 +52,10 @@ public:
 	 * Returns the title of this page.
 	 */
 	virtual QString title() const = 0;
+
+signals:
+	/** A page could not apply its values; the settings dialog must stay open. */
+	void applyFailed();
 	
 public slots:	
 	/**

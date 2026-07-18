@@ -17,6 +17,8 @@ private slots:
 	void rejectsUnsafeUrls();
 	void canonicalizesIpv6OriginsExactly();
 	void approvesPrivateOriginsExplicitly();
+	void injectsBearerOnlyForExactOriginAndBypassesSharedCache();
+	void credentialChangesCancelRequestsAndPartitionNegativeCache();
 	void handlesRedirectsEmptyTilesAndBodyLimits();
 	void reportsExactPrivateRedirectTarget();
 	void boundsAndExpiresNegativeCache();

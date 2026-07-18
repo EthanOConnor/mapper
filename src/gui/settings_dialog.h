@@ -107,6 +107,7 @@ private:
 	 * The box of standard dialog buttons.
 	 */
 	QDialogButtonBox* button_box;
+	bool apply_failed = false;
 	
 	int scrollbar_extent;
 };

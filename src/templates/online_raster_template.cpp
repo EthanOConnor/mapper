@@ -353,6 +353,28 @@ void OnlineRasterTemplate::initializeConnections()
 			&OnlineRasterTemplate::onMapGeoreferencingChanged);
 	connect(network_, &imagery::TileNetworkManager::finished, this,
 			&OnlineRasterTemplate::onNetworkFinished);
+	connect(network_, &imagery::TileNetworkManager::bearerCredentialChanged, this,
+			[this](const QString& origin) {
+				if (!source_)
+					return;
+				auto uses_origin = false;
+				for (auto const& tile_url : source_->tile_urls)
+				{
+					if (imagery::TileNetworkManager::canonicalOrigin(
+					      QUrl(tile_url.value)) == origin)
+					{
+						uses_origin = true;
+						break;
+					}
+				}
+				if (!uses_origin)
+					return;
+				auto const bounds = calculateTemplateBoundingBox();
+				resetRuntime(true);
+				if (bounds.isValid())
+					map->setTemplateAreaDirty(
+						this, bounds, getTemplateBoundingBoxPixelBorder());
+			});
 	connect(network_, &imagery::TileNetworkManager::privateOriginApprovalChanged, this,
 				[this](const QString& origin, bool approved) {
 					if (!approved || !source_)

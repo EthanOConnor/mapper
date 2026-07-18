@@ -41,6 +41,7 @@
 #include <QList>
 #include <QListWidget>
 #include <QListWidgetItem>
+#include <QMessageBox>
 #include <QPushButton>
 #include <QSettings>
 #include <QSpacerItem>
@@ -60,7 +61,9 @@
 
 namespace OpenOrienteering {
 
-NewMapDialog::NewMapDialog(QWidget* parent) : QDialog(parent, Qt::WindowSystemMenuHint | Qt::WindowTitleHint)
+NewMapDialog::NewMapDialog(QWidget* parent)
+ : QDialog(parent, Qt::WindowSystemMenuHint | Qt::WindowTitleHint)
+ , requirement_label(new QLabel(this))
 {
 	this->setWhatsThis(Util::makeWhatThis("new_map.html"));
 	setWindowTitle(tr("Create new map"));
@@ -68,6 +71,9 @@ NewMapDialog::NewMapDialog(QWidget* parent) : QDialog(parent, Qt::WindowSystemMe
 	auto form_layout = new QFormLayout();
 	
 	form_layout->addRow(new QLabel(tr("Choose the scale and symbol set for the new map.")));
+	requirement_label->setWordWrap(true);
+	requirement_label->hide();
+	form_layout->addRow(requirement_label);
 	
 	form_layout->addItem(Util::SpacerItem::create(this));
 	
@@ -143,6 +149,26 @@ QString NewMapDialog::getSelectedSymbolSetPath() const
 	return item->data(Qt::UserRole).toString();
 }
 
+void NewMapDialog::setInitialScale(unsigned int scale, bool locked)
+{
+	if (scale == 0)
+		return;
+	scale_combo->setEditText(QString::number(scale));
+	updateSymbolSetList();
+	scale_combo->setEnabled(!locked);
+}
+
+void NewMapDialog::setRequiredSymbolStandard(const QString& standard)
+{
+	required_symbol_standard = standard.trimmed();
+	requirement_label->setVisible(!required_symbol_standard.isEmpty());
+	requirement_label->setText(
+	  tr("Map Hub requires symbol standard %1. Compatible installed symbol "
+	     "sets are selectable below; a custom file must be confirmed.")
+	    .arg(required_symbol_standard));
+	updateSymbolSetList();
+}
+
 void NewMapDialog::accept()
 {
 	QSettings settings;
@@ -172,6 +198,8 @@ void NewMapDialog::updateSymbolSetList()
 	item->setData(Qt::UserRole, QVariant(QString{}));
 	item->setIcon(ActionIcon::fromName(u"new"));
 	symbol_set_list->addItem(item);
+	if (!required_symbol_standard.isEmpty())
+		item->setFlags(item->flags() & ~Qt::ItemIsEnabled);
 	
 	const auto control = ActionIcon::fromName(u"control");
 	auto it = symbol_set_map.find(scale);
@@ -182,6 +210,9 @@ void NewMapDialog::updateSymbolSetList()
 			item = new QListWidgetItem(symbol_set.completeBaseName());
 			item->setData(Qt::UserRole, symbol_set.canonicalFilePath());
 			item->setIcon(control);
+			if (!required_symbol_standard.isEmpty()
+			    && !symbol_set.completeBaseName().contains(required_symbol_standard, Qt::CaseInsensitive))
+				item->setFlags(item->flags() & ~Qt::ItemIsEnabled);
 			symbol_set_list->addItem(item);
 		}
 	}
@@ -201,6 +232,9 @@ void NewMapDialog::updateSymbolSetList()
 				item = new QListWidgetItem(symbol_set.completeBaseName() + remark);
 				item->setData(Qt::UserRole, symbol_set.canonicalFilePath());
 				item->setIcon(control);
+				if (!required_symbol_standard.isEmpty()
+				    && !symbol_set.completeBaseName().contains(required_symbol_standard, Qt::CaseInsensitive))
+					item->setFlags(item->flags() & ~Qt::ItemIsEnabled);
 				symbol_set_list->addItem(item);
 			}
 		}
@@ -211,8 +245,17 @@ void NewMapDialog::updateSymbolSetList()
 	load_from_file->setIcon(ActionIcon::fromName(u"open"));
 	symbol_set_list->addItem(load_from_file);
 	
-	// Select second row, which usually is the first (and only) symbol set
-	symbol_set_list->setCurrentRow(1);
+	// Select the first enabled installed symbol set, falling back to the custom
+	// file action when Map Hub requires a standard which is not installed.
+	for (int row = 1; row < symbol_set_list->count(); ++row)
+	{
+		auto* candidate = symbol_set_list->item(row);
+		if (candidate->flags().testFlag(Qt::ItemIsEnabled))
+		{
+			symbol_set_list->setCurrentItem(candidate);
+			break;
+		}
+	}
 }
 
 void NewMapDialog::symbolSetDoubleClicked(QListWidgetItem* item)
@@ -264,6 +307,16 @@ void NewMapDialog::showFileDialog()
 	QString path = FileDialog::getOpenFileName(this, tr("Load symbol set from a file..."), open_directory, filters);
 	path = QFileInfo(path).canonicalFilePath();
 	if (path.isEmpty())
+		return;
+	if (!required_symbol_standard.isEmpty()
+	    && !QFileInfo(path).completeBaseName().contains(required_symbol_standard, Qt::CaseInsensitive)
+	    && QMessageBox::question(
+	         this, tr("Confirm symbol standard"),
+	         tr("Map Hub requires %1, but the selected file name does not "
+	            "identify that standard:\n%2\n\nUse this symbol set only if you have "
+	            "verified that it implements %1.")
+	           .arg(required_symbol_standard, path),
+	         QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
 		return;
 	
 	load_from_file->setData(Qt::UserRole, path);

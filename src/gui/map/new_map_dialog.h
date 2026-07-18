@@ -32,6 +32,7 @@
 class QCheckBox;
 class QComboBox;
 class QDir;
+class QLabel;
 class QListWidget;
 class QListWidgetItem;
 class QPushButton;
@@ -62,6 +63,12 @@ public:
 	 *  Returns an empty string if the map shall be created with an empty symbol set. 
 	 */
 	QString getSelectedSymbolSetPath() const;
+
+	/** Set and optionally lock the map scale for a server-managed workflow. */
+	void setInitialScale(unsigned int scale, bool locked = false);
+
+	/** Require the user to choose or confirm the server-managed symbol standard. */
+	void setRequiredSymbolStandard(const QString& standard);
 	
 public slots:
 	/** Updates the list of symbol sets for the chosen map scale [denominator]. */
@@ -119,6 +126,9 @@ private:
 	
 	/** The map scale input widget. */
 	QComboBox* scale_combo;
+
+	/** Describes a Map Hub symbol-standard requirement. */
+	QLabel* requirement_label;
 	
 	/** The symbol set selection widget. */
 	QListWidget* symbol_set_list;
@@ -131,6 +141,8 @@ private:
 	
 	/** The button for accepting the selected map scale and symbol set. */
 	QPushButton* create_button;
+
+	QString required_symbol_standard;
 };
 
 

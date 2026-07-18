@@ -58,6 +58,14 @@ struct TileNetworkRequest
 	QByteArray if_modified_since;
 	/** Zero uses Config::max_response_bytes. */
 	qint64 max_response_bytes = 0;
+	/**
+	 * Ephemeral credential injected by TileNetworkManager for an explicitly
+	 * trusted origin. Never serialized into an imagery source or map.
+	 */
+	QByteArray bearer_token;
+	QByteArray credential_identity;
+	QString credential_origin;
+	quint64 credential_generation = 0;
 };
 
 struct TileNetworkResult
@@ -200,11 +208,22 @@ public:
 	bool revokePrivateOrigin(const QUrl& url);
 	bool isPrivateOriginApproved(const QUrl& url) const;
 
+	/**
+	 * Register an in-memory bearer credential for one exact origin.
+	 * Authenticated imagery bypasses the shared HTTP disk cache, preventing
+	 * account-specific responses from crossing login boundaries.
+	 */
+	bool setBearerCredential(const QUrl& origin, QByteArray token, QByteArray identity);
+	void clearBearerCredential(const QUrl& origin);
+	void clearBearerCredentials();
+
 signals:
 	void offlineModeChanged(bool offline);
 	void privateOriginApprovalChanged(
 		const QString& origin,
 		bool approved);
+	/** Emitted whenever an origin's authenticated identity changes or is removed. */
+	void bearerCredentialChanged(const QString& origin);
 	void finished(
 		OpenOrienteering::imagery::TileNetworkManager::Token token,
 		const OpenOrienteering::imagery::TileNetworkResult& result);
@@ -227,9 +246,19 @@ private:
 	std::atomic<quint64> network_mode_generation_ { 1 };
 	mutable QMutex network_mode_mutex_;
 	mutable QMutex permissions_mutex_;
+	struct BearerCredential
+	{
+		QByteArray token;
+		QByteArray identity;
+		quint64 generation = 0;
+	};
+	mutable QMutex credentials_mutex_;
+	QHash<QString, BearerCredential> bearer_credentials_;
+	quint64 next_credential_generation_ = 1;
 	QSet<QString> approved_private_origins_;
 	QHash<QString, quint64> private_origin_generations_;
 	quint64 next_private_origin_generation_ = 1;
+	quint64 credentialGeneration(const QString& origin) const;
 };
 
 }  // namespace OpenOrienteering::imagery

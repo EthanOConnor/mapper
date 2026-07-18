@@ -309,6 +309,8 @@ QByteArray negativeCacheKey(const TileNetworkRequest& request)
 	representation.append('\n');
 	representation.append(request.referer.toUtf8());
 	representation.append('\n');
+	representation.append(request.credential_identity);
+	representation.append('\n');
 	auto statuses = request.empty_http_status_codes;
 	std::sort(statuses.begin(), statuses.end());
 	for (auto const status : std::as_const(statuses))
@@ -363,10 +365,20 @@ QString validateRequest(
 		       && !value.contains('\0');
 	};
 	if (!valid_header(request.if_none_match)
-	    || !valid_header(request.if_modified_since))
+	    || !valid_header(request.if_modified_since)
+	    || !valid_header(request.bearer_token)
+	    || !valid_header(request.credential_identity))
 	{
 		return TileNetworkManager::tr(
 			"The imagery conditional request headers are invalid.");
+	}
+	if ((!request.bearer_token.isEmpty() || !request.credential_identity.isEmpty())
+	    && (request.bearer_token.isEmpty() || request.credential_identity.isEmpty()
+	        || request.credential_origin.isEmpty()
+	        || request.bearer_token.size() > 4096
+	        || request.credential_identity.size() > 128))
+	{
+		return TileNetworkManager::tr("The imagery bearer credential is invalid.");
 	}
 	if (request.max_response_bytes < 0
 	    || request.max_response_bytes > config.max_response_bytes)
@@ -602,6 +614,19 @@ public:
 			cancel(token);
 	}
 
+	void bearerCredentialChanged(const QString& origin)
+	{
+		Q_ASSERT(QThread::currentThread() == thread());
+		QVector<Token> tokens;
+		for (auto it = entries_.cbegin(); it != entries_.cend(); ++it)
+		{
+			if ((*it)->request.credential_origin == origin)
+				tokens.push_back(it.key());
+		}
+		for (auto const token : tokens)
+			cancel(token);
+	}
+
 	void setOfflineMode(bool offline)
 	{
 		Q_ASSERT(QThread::currentThread() == thread());
@@ -744,6 +769,8 @@ private:
 		QString private_permission_origin;
 		QUrl private_permission_url;
 		quint64 private_permission_generation = 0;
+		QString credential_origin;
+		quint64 credential_generation = 0;
 	};
 
 	struct DestinationDecision
@@ -777,6 +804,12 @@ private:
 	{
 		auto const facade = facade_;
 		return facade ? facade->privateOriginGeneration(origin) : 0;
+	}
+
+	quint64 credentialGeneration(const QString& origin) const
+	{
+		auto const facade = facade_;
+		return facade ? facade->credentialGeneration(origin) : 0;
 	}
 
 	TileNetworkManager::NetworkModeSnapshot networkModeSnapshot() const
@@ -813,6 +846,8 @@ private:
 			entry.private_permission_origin,
 			entry.private_permission_url,
 			entry.private_permission_generation,
+			entry.request.credential_origin,
+			entry.request.credential_generation,
 		};
 	}
 
@@ -1303,12 +1338,13 @@ private:
 		}
 		reserveResultCapacity(entry);
 
-		if (cache_only && !entry->request.referer.isEmpty())
+		auto const credentialed = !entry->request.bearer_token.isEmpty();
+		if (cache_only && (!entry->request.referer.isEmpty() || credentialed))
 		{
 			TileNetworkResult result;
 			result.outcome = TileNetworkResult::Outcome::OfflineMiss;
 			result.error_string = TileNetworkManager::tr(
-				"Referer-dependent imagery is not stored in the offline HTTP cache.");
+				"Credential- or Referer-dependent imagery is not stored in the offline HTTP cache.");
 			finish(entry, std::move(result));
 			return;
 		}
@@ -1332,6 +1368,14 @@ private:
 			request.setRawHeader(
 				QByteArrayLiteral("Referer"),
 				entry->request.referer.toUtf8());
+		}
+		if (credentialed
+		    && TileNetworkManager::canonicalOrigin(entry->current_url)
+		         == entry->request.credential_origin)
+		{
+			request.setRawHeader(
+				QByteArrayLiteral("Authorization"),
+				QByteArrayLiteral("Bearer ") + entry->request.bearer_token);
 		}
 		if (entry->request.payload_kind
 		    == NetworkPayloadKind::JsonDocument)
@@ -1383,9 +1427,10 @@ private:
 			QNetworkRequest::Manual);
 		request.setAttribute(QNetworkRequest::UseCredentialsAttribute, false);
 		auto const referer_dependent = !entry->request.referer.isEmpty();
+		auto const private_representation = referer_dependent || credentialed;
 		request.setAttribute(
 			QNetworkRequest::CacheLoadControlAttribute,
-			referer_dependent
+			private_representation
 				? QNetworkRequest::AlwaysNetwork
 					: cache_only
 					? QNetworkRequest::AlwaysCache
@@ -1395,7 +1440,7 @@ private:
 						: QNetworkRequest::PreferNetwork);
 		request.setAttribute(
 			QNetworkRequest::CacheSaveControlAttribute,
-			!referer_dependent
+			!private_representation
 			&& entry->request.payload_kind
 			     == NetworkPayloadKind::TileImage);
 		request.setMaximumRedirectsAllowed(config_.max_redirects);
@@ -1858,12 +1903,25 @@ private:
 					    && result.outcome
 					      != TileNetworkResult::Outcome::Rejected)
 					{
+						auto const credential_changed =
+							guard.credential_generation != 0
+							&& facade->credentialGeneration(
+								guard.credential_origin)
+							     != guard.credential_generation;
 						auto const private_permission_changed =
 							guard.private_permission_generation != 0
 							&& facade->privateOriginGeneration(
 								guard.private_permission_origin)
 							     != guard.private_permission_generation;
-						if (private_permission_changed)
+						if (credential_changed)
+						{
+							result.body.clear();
+							result.outcome =
+								TileNetworkResult::Outcome::Cancelled;
+							result.error_string = TileNetworkManager::tr(
+								"The imagery account changed before the response was delivered.");
+						}
+						else if (private_permission_changed)
 						{
 							result.body.clear();
 							result.outcome =
@@ -2038,6 +2096,24 @@ bool TileNetworkManager::isPublicDestinationAddress(
 
 TileNetworkManager::Token TileNetworkManager::submit(TileNetworkRequest request)
 {
+	// Credentials are manager-owned. Ignore anything a catalog/runtime caller
+	// attempted to place in these transport-only fields.
+	request.bearer_token.clear();
+	request.credential_identity.clear();
+	request.credential_origin.clear();
+	request.credential_generation = 0;
+	{
+		QMutexLocker lock(&credentials_mutex_);
+		auto const origin = canonicalOrigin(request.url);
+		auto const credential = bearer_credentials_.constFind(origin);
+		if (credential != bearer_credentials_.cend())
+		{
+			request.bearer_token = credential->token;
+			request.credential_identity = credential->identity;
+			request.credential_origin = origin;
+			request.credential_generation = credential->generation;
+		}
+	}
 	auto const token = next_token_.fetch_add(1);
 	if (token == 0)
 		qFatal("Imagery network token space exhausted");
@@ -2048,6 +2124,82 @@ TileNetworkManager::Token TileNetworkManager::submit(TileNetworkRequest request)
 		},
 		Qt::QueuedConnection);
 	return token;
+}
+
+bool TileNetworkManager::setBearerCredential(const QUrl& origin, QByteArray token, QByteArray identity)
+{
+	auto const canonical = canonicalOrigin(origin);
+	if (canonical.isEmpty() || token.isEmpty() || token.size() > 4096
+	    || identity.isEmpty() || identity.size() > 128
+	    || token.contains('\r') || token.contains('\n') || token.contains('\0')
+	    || identity.contains('\r') || identity.contains('\n') || identity.contains('\0'))
+	{
+		return false;
+	}
+	QByteArray credential_identity = identity;
+	credential_identity.append('\0');
+	credential_identity.append(token);
+	identity = QCryptographicHash::hash(
+		credential_identity, QCryptographicHash::Sha256).toHex();
+	{
+		QMutexLocker lock(&credentials_mutex_);
+		auto const existing = bearer_credentials_.constFind(canonical);
+		if (existing != bearer_credentials_.cend()
+		    && existing->token == token && existing->identity == identity)
+			return true;
+		auto const generation = next_credential_generation_++;
+		if (generation == 0)
+			qFatal("Imagery credential generation space exhausted");
+		bearer_credentials_.insert(
+			canonical,
+			{ std::move(token), std::move(identity), generation });
+		QMetaObject::invokeMethod(
+			worker_,
+			[worker = worker_, canonical] {
+				worker->bearerCredentialChanged(canonical);
+			},
+			Qt::QueuedConnection);
+	}
+	emit bearerCredentialChanged(canonical);
+	return true;
+}
+
+void TileNetworkManager::clearBearerCredential(const QUrl& origin)
+{
+	auto const canonical = canonicalOrigin(origin);
+	{
+		QMutexLocker lock(&credentials_mutex_);
+		if (!bearer_credentials_.remove(canonical))
+			return;
+		QMetaObject::invokeMethod(
+			worker_,
+			[worker = worker_, canonical] {
+				worker->bearerCredentialChanged(canonical);
+			},
+			Qt::QueuedConnection);
+	}
+	emit bearerCredentialChanged(canonical);
+}
+
+void TileNetworkManager::clearBearerCredentials()
+{
+	QStringList origins;
+	{
+		QMutexLocker lock(&credentials_mutex_);
+		origins = bearer_credentials_.keys();
+		bearer_credentials_.clear();
+		for (auto const& origin : std::as_const(origins))
+		{
+			QMetaObject::invokeMethod(
+				worker_,
+				[worker = worker_, origin] {
+					worker->bearerCredentialChanged(origin);
+				},
+				Qt::QueuedConnection);
+		}
+	}
+	for (auto const& origin : std::as_const(origins))
+		emit bearerCredentialChanged(origin);
 }
 
 void TileNetworkManager::cancel(Token token)
@@ -2215,6 +2367,15 @@ quint64 TileNetworkManager::privateOriginGeneration(
 {
 	QMutexLocker lock(&permissions_mutex_);
 	return private_origin_generations_.value(origin);
+}
+
+quint64 TileNetworkManager::credentialGeneration(const QString& origin) const
+{
+	QMutexLocker lock(&credentials_mutex_);
+	auto const credential = bearer_credentials_.constFind(origin);
+	return credential == bearer_credentials_.cend()
+	       ? 0
+	       : credential->generation;
 }
 
 }  // namespace OpenOrienteering::imagery

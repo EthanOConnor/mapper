@@ -153,6 +153,8 @@ QWidget* HomeScreenWidgetDesktop::makeMenuWidget(HomeScreenController* controlle
 	QAbstractButton* button_open_map = makeButton(
 	  tr("Open map ..."), ActionIcon::fromName(u"open"));
 	menu_layout->addWidget(button_open_map);
+	QAbstractButton* button_map_hub = makeButton(tr("Map Hub — library and my work…"));
+	menu_layout->addWidget(button_map_hub);
 	
 	menu_layout->addStretch(1);
 	
@@ -175,6 +177,7 @@ QWidget* HomeScreenWidgetDesktop::makeMenuWidget(HomeScreenController* controlle
 	
 	connect(button_new_map, &QAbstractButton::clicked, window, &MainWindow::showNewMapWizard);
 	connect(button_open_map, &QAbstractButton::clicked, window, &MainWindow::showOpenDialog);
+	connect(button_map_hub, &QAbstractButton::clicked, window, &MainWindow::showMapHub);
 	connect(button_touch, &QAbstractButton::toggled, this, [](bool enabled) { Settings::getInstance().setTouchModeEnabled(enabled); });
 	connect(button_settings, &QAbstractButton::clicked, window, &MainWindow::showSettings);
 	connect(button_about, &QAbstractButton::clicked, window, &MainWindow::showAbout);
@@ -345,10 +348,13 @@ HomeScreenWidgetMobile::HomeScreenWidgetMobile(HomeScreenController* controller,
 	auto* document_buttons = new QHBoxLayout();
 	auto* new_button = new QPushButton(tr("Create new map"));
 	auto* open_button = new QPushButton(tr("Open map"));
+	auto* map_hub_button = new QPushButton(tr("Map Hub"));
 	connect(new_button, &QPushButton::clicked, controller->getWindow(), &MainWindow::showNewMapWizard);
 	connect(open_button, &QPushButton::clicked, controller->getWindow(), &MainWindow::showOpenDialog);
+	connect(map_hub_button, &QPushButton::clicked, controller->getWindow(), &MainWindow::showMapHub);
 	document_buttons->addWidget(new_button);
 	document_buttons->addWidget(open_button);
+	document_buttons->addWidget(map_hub_button);
 	layout->addLayout(document_buttons);
 	
 	file_list_widget = makeFileListWidget();
