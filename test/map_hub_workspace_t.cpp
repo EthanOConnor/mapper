@@ -99,6 +99,23 @@ void MapHubWorkspaceTest::validatesServerTransport() {
       QUrl(QStringLiteral("file:///tmp/map"))));
 }
 
+void MapHubWorkspaceTest::identifiesMapperWorkspacePackageTypes() {
+  for (const auto &package_type :
+       {QStringLiteral("basemap"), QStringLiteral("new_mapping"),
+        QStringLiteral("remap"), QStringLiteral("update"),
+        QStringLiteral("field_check"), QStringLiteral("review")}) {
+    QVERIFY2(MapHubApiClient::isMapperWorkspacePackageType(package_type),
+             qPrintable(package_type));
+  }
+
+  for (const auto &package_type :
+       {QStringLiteral("course_design"), QStringLiteral("production"),
+        QStringLiteral(""), QStringLiteral("future_package")}) {
+    QVERIFY2(!MapHubApiClient::isMapperWorkspacePackageType(package_type),
+             qPrintable(package_type));
+  }
+}
+
 void MapHubWorkspaceTest::hashesArtifactsExactly() {
   QTemporaryDir directory;
   QVERIFY(directory.isValid());

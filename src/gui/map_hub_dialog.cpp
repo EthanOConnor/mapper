@@ -49,14 +49,17 @@ namespace {
 constexpr int id_role = Qt::UserRole;
 constexpr int project_id_role = Qt::UserRole + 1;
 constexpr int status_role = Qt::UserRole + 2;
+constexpr int package_type_role = Qt::UserRole + 3;
 
 bool assignmentCanStart(const QTreeWidgetItem *item) {
   if (!item)
     return false;
   const auto status = item->data(0, status_role).toString();
-  return status == QLatin1String("offered") ||
-         status == QLatin1String("accepted") ||
-         status == QLatin1String("active");
+  const auto package_type = item->data(0, package_type_role).toString();
+  return MapHubApiClient::isMapperWorkspacePackageType(package_type) &&
+         (status == QLatin1String("offered") ||
+          status == QLatin1String("accepted") ||
+          status == QLatin1String("active"));
 }
 
 QString safeFileName(QString title) {
@@ -497,6 +500,8 @@ void MapHubDialog::populate(const QJsonObject &response) {
                   object.value(QStringLiteral("project_id")).toString());
     item->setData(0, status_role,
                   object.value(QStringLiteral("status")).toString());
+    item->setData(0, package_type_role,
+                  object.value(QStringLiteral("type")).toString());
     assignment_list->addTopLevelItem(item);
   }
   assignment_list->resizeColumnToContents(0);
@@ -538,10 +543,17 @@ QString MapHubDialog::projectTitle(const QString &project_id) const {
 void MapHubDialog::updateActions() {
   auto *assignment = assignment_list->currentItem();
   start_button->setEnabled(!busy && assignmentCanStart(assignment));
-  start_button->setToolTip(
-      assignment && !assignmentCanStart(assignment)
-          ? tr("This assignment is no longer open for editing.")
-          : tr("Open or resume the assignment's managed workspace."));
+  if (assignment &&
+      !MapHubApiClient::isMapperWorkspacePackageType(
+          assignment->data(0, package_type_role).toString())) {
+    start_button->setToolTip(
+        tr("Manage this assignment in Map Hub; it is not a Mapper map workspace."));
+  } else {
+    start_button->setToolTip(
+        assignment && !assignmentCanStart(assignment)
+            ? tr("This assignment is no longer open for editing.")
+            : tr("Open or resume the assignment's managed workspace."));
+  }
   open_project_button->setEnabled(!busy && project_list->currentItem());
 }
 
@@ -640,6 +652,14 @@ void MapHubDialog::startSelectedAssignment() {
   if (!item || busy)
     return;
   if (!assignmentCanStart(item)) {
+    const auto package_type = item->data(0, package_type_role).toString();
+    if (!MapHubApiClient::isMapperWorkspacePackageType(package_type)) {
+      QMessageBox::information(
+          this, tr("Managed in Map Hub"),
+          tr("This assignment is tracked in Map Hub and does not create a "
+             "Mapper map workspace."));
+      return;
+    }
     QMessageBox::information(
         this, tr("Assignment is not editable"),
         tr("This assignment is %1 and cannot be started or resumed.")

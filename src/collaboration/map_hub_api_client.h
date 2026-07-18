@@ -61,6 +61,7 @@ public:
 
   static QString sha256ForFile(const QString &path, QString *error = nullptr);
   static bool isAcceptableServerUrl(const QUrl &url);
+  static bool isMapperWorkspacePackageType(const QString &package_type);
 
 signals:
   void downloadProgress(qint64 received, qint64 total);

@@ -12,7 +12,9 @@ replace `.omap`, embed a database document in it, or weaken OCAD import/export.
    toolbar. The two views show the current library and assignments for the
    connected account. Library records expose the exact approved revision and
    checksum, but never open a detached editable copy; editing starts from an
-   assigned managed workspace.
+   assigned managed workspace. Course-design and print-production assignments
+   remain visible, but are managed in Map Hub instead of being opened as map
+   workspaces; Purple Pen remains the producer of their course files and PDFs.
 3. Starting an assignment asks the server for the current workspace and, when
    required, an exclusive editing lease. Mapper downloads the approved base to
    a new local workspace, verifies its SHA-256 before opening it, and

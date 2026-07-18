@@ -16,6 +16,7 @@ private slots:
   void recordRoundTripsWithoutSecrets();
   void recordIsBoundToCanonicalMapPath();
   void validatesServerTransport();
+  void identifiesMapperWorkspacePackageTypes();
   void hashesArtifactsExactly();
 };
 

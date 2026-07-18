@@ -112,6 +112,16 @@ bool MapHubApiClient::isAcceptableServerUrl(const QUrl &url) {
           url.host() == QLatin1String("::1"));
 }
 
+bool MapHubApiClient::isMapperWorkspacePackageType(
+    const QString &package_type) {
+  return package_type == QLatin1String("basemap") ||
+         package_type == QLatin1String("new_mapping") ||
+         package_type == QLatin1String("remap") ||
+         package_type == QLatin1String("update") ||
+         package_type == QLatin1String("field_check") ||
+         package_type == QLatin1String("review");
+}
+
 bool MapHubApiClient::isConfigured() const {
   return isAcceptableServerUrl(server_url) && !bearer_token.trimmed().isEmpty();
 }
