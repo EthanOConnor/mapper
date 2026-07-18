@@ -38,6 +38,8 @@ PrintProgressDialog::PrintProgressDialog(MapPrinter* map_printer, QWidget* paren
 	setWindowModality(Qt::ApplicationModal); // Required for OSX, cf. QTBUG-40112
 	setRange(0, 100);
 	setMinimumDuration(0);
+	setAutoReset(false);
+	setAutoClose(false);
 	setValue(0);
 	
 	Q_ASSERT(map_printer);
@@ -52,11 +54,17 @@ PrintProgressDialog::~PrintProgressDialog()
 
 void PrintProgressDialog::paintRequested(QPrinter* printer)
 {
+	reset();
+	setValue(0);
 	if (!map_printer->printMap(printer))
 	{
+		if (wasCanceled() || map_printer->outputWasCanceled())
+			return;
 		QMessageBox::warning(
 		  parentWidget(), tr("Printing", "PrintWidget"),
-		  tr("An error occurred during processing.", "PrintWidget"),
+		  map_printer->outputError().isEmpty()
+		    ? tr("An error occurred during processing.", "PrintWidget")
+		    : map_printer->outputError(),
 		  QMessageBox::Ok, QMessageBox::Ok );
 	}
 }
@@ -65,12 +73,18 @@ void PrintProgressDialog::setProgress(int value, const QString& status)
 {
 	setLabelText(status);
 	setValue(value);
-	if (!isVisible() && value < maximum())
+	if (value >= maximum())
+	{
+		hide();
+	}
+	else if (!isVisible())
 	{
 		show();
 	}
 	
-	QApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 100 /* ms */); // Drawing and Cancel events
+	// The dialog is application-modal, so accepting all events lets its Cancel
+	// button work without exposing the rest of the UI to re-entrant input.
+	QApplication::processEvents(QEventLoop::AllEvents, 100 /* ms */);
 }
 
 

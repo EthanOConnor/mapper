@@ -193,6 +193,29 @@ add_unit_test(util_t ../src/util/util
 	../src/util/translation_util
 )
 
+# Low-level imagery contracts stay independent of the full Mapper runtime.
+add_test_helper(arcgis_tile_service_t)
+target_link_libraries(arcgis_tile_service_t PRIVATE Mapper::ImageryCore)
+add_test_helper(imagery_core_t)
+target_link_libraries(imagery_core_t PRIVATE Mapper::ImageryCore)
+add_test_helper(manual_imagery_source_t)
+target_link_libraries(manual_imagery_source_t PRIVATE Mapper::ImageryCore)
+add_test_helper(oic_catalog_t)
+target_link_libraries(oic_catalog_t PRIVATE Mapper::ImageryCore)
+add_test_helper(imagery_catalog_store_t)
+target_link_libraries(imagery_catalog_store_t PRIVATE Mapper::ImageryCore)
+add_test_helper(imagery_catalog_repository_t)
+target_link_libraries(imagery_catalog_repository_t PRIVATE
+  Mapper::ImageryNetwork
+  Qt6::Network
+)
+add_test_helper(imagery_network_permissions_t)
+target_link_libraries(imagery_network_permissions_t PRIVATE
+  Mapper::ImageryNetwork
+)
+add_test_helper(tile_network_manager_t)
+target_link_libraries(tile_network_manager_t PRIVATE Mapper::ImageryNetwork Qt6::Network)
+
 # Benchmarks
 add_system_test(coord_xml_t MANUAL)
 
@@ -207,9 +230,13 @@ if(Mapper_USE_GDAL)
 endif()
 add_system_test(map_t)
 add_system_test(map_printer_t)
+add_system_test(imagery_source_model_t)
 add_system_test(object_t)
 add_system_test(object_query_t)
+add_system_test(online_raster_template_t)
+add_system_test(online_imagery_dialog_t)
 add_system_test(path_object_t)
+add_system_test(raster_resource_manager_t)
 add_system_test(template_layer_planner_t)
 target_link_libraries(template_layer_planner_t PRIVATE Mapper::VelloBackend)
 add_system_test(render_ir_t)

@@ -15,6 +15,8 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <span>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -164,10 +166,56 @@ struct StrokeStyle
 
 struct ImageData
 {
+	ImageData() = default;
+	ImageData(std::uint32_t width,
+	          std::uint32_t height,
+	          std::uint32_t bytes_per_row,
+	          std::shared_ptr<const std::vector<std::uint8_t>> rgba8,
+	          std::shared_ptr<void> memory_keepalive = {})
+	 : width(width)
+	 , height(height)
+	 , bytes_per_row(bytes_per_row)
+	 , rgba8(std::move(rgba8))
+	 , memory_keepalive(std::move(memory_keepalive))
+	{}
+	ImageData(std::uint32_t width,
+	          std::uint32_t height,
+	          std::uint32_t bytes_per_row,
+	          std::shared_ptr<const void> external_storage,
+	          const std::uint8_t* external_rgba8,
+	          std::size_t external_size,
+	          std::shared_ptr<void> memory_keepalive = {})
+	 : width(width)
+	 , height(height)
+	 , bytes_per_row(bytes_per_row)
+	 , memory_keepalive(std::move(memory_keepalive))
+	 , external_storage(std::move(external_storage))
+	 , external_rgba8(external_rgba8)
+	 , external_size(external_size)
+	{}
+
 	std::uint32_t width = 0;
 	std::uint32_t height = 0;
 	std::uint32_t bytes_per_row = 0;
 	std::shared_ptr<const std::vector<std::uint8_t>> rgba8;
+	/** Optional accounting lease retained for the pixel buffer's lifetime. */
+	std::shared_ptr<void> memory_keepalive;
+	/**
+	 * Optional immutable external pixel owner. Raster sources use this to
+	 * retain a straight-RGBA QImage without copying it into a second CPU buffer.
+	 */
+	std::shared_ptr<const void> external_storage;
+	const std::uint8_t* external_rgba8 = nullptr;
+	std::size_t external_size = 0;
+
+	std::span<const std::uint8_t> bytes() const noexcept
+	{
+		if (rgba8)
+			return *rgba8;
+		if (external_storage && external_rgba8 && external_size > 0)
+			return { external_rgba8, external_size };
+		return {};
+	}
 };
 
 struct PushTransform
@@ -225,7 +273,8 @@ struct StrokeEllipse
 struct DrawImage
 {
 	std::shared_ptr<const ImageData> image;
-	Rect target;
+	Rect source;
+	Transform image_to_scene;
 	double opacity = 1;
 };
 
@@ -284,6 +333,10 @@ public:
 	                   QualityHint quality = QualityHint::Default);
 	void drawImage(std::shared_ptr<const ImageData> image, Rect target,
 	               double opacity = 1);
+	void drawImage(std::shared_ptr<const ImageData> image, Rect source,
+	               Rect target, double opacity = 1);
+	void drawImage(std::shared_ptr<const ImageData> image, Rect source,
+	               Transform image_to_scene, double opacity = 1);
 	void drawLinePattern(PathPtr outline, Color color, double angle,
 	                     double spacing, double offset, double line_width);
 	void append(const RenderIR& scene);

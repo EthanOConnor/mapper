@@ -458,8 +458,8 @@ void FramePipelineTest::overlayPatternsAndImagesStayRetained()
 		if (auto const* image = std::get_if<render::DrawImage>(&command))
 		{
 			first_image = image->image;
-			QCOMPARE(image->target.width, 12.0);
-			QCOMPARE(image->target.height, 8.0);
+			QCOMPARE(image->source.width * image->image_to_scene.m11, 12.0);
+			QCOMPARE(image->source.height * image->image_to_scene.m22, 8.0);
 		}
 	}
 	QCOMPARE(pattern_count, 2);
@@ -582,6 +582,46 @@ void FramePipelineTest::mapWidgetUsesTheFrameContract()
 	);
 }
 
+void FramePipelineTest::mapWidgetDiscardsZoomLimitOvershoot()
+{
+	Map map;
+	MapView view(nullptr, &map);
+	view.setZoom(MapView::zoom_in_limit);
+	MapWidget widget(false);
+	QString zoom_display;
+	widget.resize(800, 600);
+	widget.setMapView(&view);
+	widget.setZoomDisplay([&zoom_display](const QString& text) {
+		zoom_display = text;
+	});
+	auto* canvas_widget = widget.findChild<QWidget*>(QStringLiteral("mapVelloCanvas"));
+	QVERIFY(canvas_widget);
+	auto* canvas = dynamic_cast<presentation::VelloCanvas*>(canvas_widget);
+	QVERIFY(canvas);
+	QTRY_VERIFY_WITH_TIMEOUT(canvas->currentFrame(), 5000);
+	QCoreApplication::processEvents();
+	auto const limit_frame_id = canvas->currentFrame()->id;
+
+	QWheelEvent overshoot(
+		QPointF(400, 300), QPointF(400, 300), {}, QPoint(0, 120),
+		Qt::NoButton, Qt::NoModifier, Qt::ScrollUpdate, false
+	);
+	QCoreApplication::sendEvent(&widget, &overshoot);
+	QCOMPARE(view.getZoom(), MapView::zoom_in_limit);
+	QVERIFY(zoom_display.contains(QStringLiteral("max")));
+	QTest::qWait(550);
+	QCOMPARE(canvas->currentFrame()->id, limit_frame_id);
+
+	QWheelEvent reverse(
+		QPointF(400, 300), QPointF(400, 300), {}, QPoint(0, -120),
+		Qt::NoButton, Qt::NoModifier, Qt::ScrollUpdate, false
+	);
+	QCoreApplication::sendEvent(&widget, &reverse);
+	QCOMPARE(view.getZoom(), MapView::zoom_in_limit / std::sqrt(2.0));
+	QVERIFY(!zoom_display.contains(QStringLiteral("max")));
+	QTRY_VERIFY_WITH_TIMEOUT(canvas->currentFrame()->id > limit_frame_id, 5000);
+}
+
 void FramePipelineTest::mapWidgetConvergesRasterBatches()
 {
 	Map map;
@@ -610,7 +650,7 @@ void FramePipelineTest::mapWidgetConvergesRasterBatches()
 		canvas->currentFrame() && frameImageCount(*canvas->currentFrame()) == 10,
 		5000
 	);
-	QCOMPARE(source_ptr->collectionCount(), 3);
+	QCOMPARE(source_ptr->collectionCount(), 1);
 }
 
 void FramePipelineTest::mapWidgetWaitsForMissingRasterSource()

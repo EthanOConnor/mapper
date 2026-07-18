@@ -19,6 +19,26 @@ Switches the display of the [template setup window](templates.md#setup) on the m
 
 ---
 
+#### Add online imagery...
+
+Opens the [online imagery source browser](online-imagery.md). Sources may come
+from installed OIC catalogs, a direct XYZ/TMS URL, or a cached ArcGIS service.
+
+
+#### Manage imagery catalogs...
+
+Imports, reviews, updates and removes OIC catalogs. Existing maps keep their
+embedded source snapshots when a catalog changes.
+
+
+#### Work offline for imagery
+
+Prevents imagery network access and uses only tiles already present in the
+local cache.
+
+
+---
+
 #### Open template...
 
 Opens a template file directly without going through the setup window.

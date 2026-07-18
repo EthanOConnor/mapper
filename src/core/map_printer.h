@@ -46,6 +46,7 @@
 template <class Key, class T>
 class QHash;
 class QImage;
+class QIODevice;
 class QPainter;
 class QPagedPaintDevice;
 class QPdfWriter;
@@ -348,10 +349,39 @@ public:
 
 	/** Creates a PDF writer configured according to the current settings. */
 	std::unique_ptr<QPdfWriter> makePdfWriter(const QString& filename) const;
+
+	/**
+	 * Creates a PDF writer which writes to an already-open device.
+	 *
+	 * The caller retains ownership of the device and must keep it alive until
+	 * the writer is destroyed.
+	 */
+	std::unique_ptr<QPdfWriter> makePdfWriter(QIODevice* device) const;
 	
 	/** Takes the settings from the given printer, 
 	 *  and generates signals for changing properties. */
 	void takePrinterSettings(const QPrinter* printer);
+
+	/**
+	 * Resolves all exact template resources needed by the configured output.
+	 *
+	 * This bounded, cancellable preflight runs before any print paint engine is
+	 * opened. Call finishOutput() after the final drawPage(), or rely on
+	 * printMap() which manages the pair automatically.
+	 */
+	bool prepareOutput();
+
+	/**
+	 * Resolves exact template resources for an explicit map extent.
+	 *
+	 * Use this overload when an exporter renders an area different from the
+	 * configured print area. The supplied extent must cover every map clip
+	 * rendered before finishOutput() is called.
+	 */
+	bool prepareOutput(const QRectF& map_extent);
+	void finishOutput(bool cancelled = false);
+	const QString& outputError() const noexcept { return output_error; }
+	bool outputWasCanceled() const noexcept { return cancel_print_map; }
 	
 	/** Prints the map to the given printer.
 	 * 
@@ -493,6 +523,9 @@ protected:
 	/** Updates the scale adjustment and page breaks. */
 	void mapScaleChanged();
 
+	/** Applies this printer's PDF output settings to an existing writer. */
+	void configurePdfWriter(QPdfWriter& writer) const;
+
 	/** Renders all configured pages to an active painter. */
 	bool printPages(QPagedPaintDevice* device, QPainter* painter, int copy_count);
 	
@@ -504,6 +537,10 @@ protected:
 	std::vector<qreal> h_page_pos;
 	std::vector<qreal> v_page_pos;
 	bool cancel_print_map = false;
+	bool output_preparation_active = false;
+	QRectF output_preparation_extent;
+	mutable QString output_error;
+	std::vector<Template*> output_templates;
 	mutable render::FramePlanner frame_planner;
 	mutable render::TemplateLayerPlanner template_layer_planner;
 };

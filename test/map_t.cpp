@@ -22,6 +22,7 @@
 #include <QtTest>
 #include <QBuffer>
 #include <QMessageBox>
+#include <QSignalSpy>
 #include <QTextStream>
 
 #include "test_config.h"
@@ -126,6 +127,28 @@ void MapTest::printerConfigTest()
 	QVERIFY(map.hasPrinterConfig());
 	map.resetPrinterConfig();
 	QVERIFY(!map.hasPrinterConfig());
+}
+
+
+void MapTest::zoomLimitDoesNotInvalidateView()
+{
+	Map map;
+	MapView view { &map };
+	QSignalSpy changes { &view, &MapView::viewChanged };
+
+	view.setZoom(MapView::zoom_in_limit);
+	QCOMPARE(changes.size(), 1);
+	view.zoomSteps(1);
+	view.setZoom(MapView::zoom_in_limit * 2);
+	QCOMPARE(view.getZoom(), MapView::zoom_in_limit);
+	QCOMPARE(changes.size(), 1);
+
+	view.setZoom(MapView::zoom_out_limit);
+	QCOMPARE(changes.size(), 2);
+	view.zoomSteps(-1);
+	view.setZoom(MapView::zoom_out_limit / 2);
+	QCOMPARE(view.getZoom(), MapView::zoom_out_limit);
+	QCOMPARE(changes.size(), 2);
 }
 
 void MapTest::presentationRequestsTest()

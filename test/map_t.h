@@ -43,6 +43,9 @@ private slots:
 
 	/** Tests backend-neutral presentation invalidation requests. */
 	void presentationRequestsTest();
+
+	/** Tests that clamped zoom input does not publish redundant view changes. */
+	void zoomLimitDoesNotInvalidateView();
 	
 	/** Tests if special colors are correctly handled. */
 	void specialColorsTest();

@@ -26,6 +26,7 @@ struct TemplateLayerPlan
 	std::vector<VectorPass> above_map;
 	bool complete = true;
 	std::size_t newly_resident_images = 0;
+	std::size_t newly_resident_bytes = 0;
 };
 
 /**
@@ -43,6 +44,9 @@ public:
 
 	TemplateLayerPlanner(const TemplateLayerPlanner&) = delete;
 	TemplateLayerPlanner& operator=(const TemplateLayerPlanner&) = delete;
+
+	/** Releases all retained template scenes and immutable image snapshots. */
+	void clear();
 
 	TemplateLayerPlan plan(const Map& map,
 	                     const MapView& view,

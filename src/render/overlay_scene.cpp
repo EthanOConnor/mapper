@@ -399,10 +399,11 @@ std::shared_ptr<const ImageData> OverlaySceneBuilder::image(const QImage& source
 	}
 	auto data = std::make_shared<const ImageData>(ImageData {
 		std::uint32_t(converted.width()),
-		std::uint32_t(converted.height()),
-		std::uint32_t(row_bytes),
-		std::move(bytes),
-	});
+			std::uint32_t(converted.height()),
+			std::uint32_t(row_bytes),
+			std::move(bytes),
+			{},
+		});
 	if (images_.size() >= 128)
 		images_.clear();
 	images_.emplace(stable_key, data);
