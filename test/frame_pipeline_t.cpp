@@ -650,7 +650,7 @@ void FramePipelineTest::mapWidgetConvergesRasterBatches()
 		canvas->currentFrame() && frameImageCount(*canvas->currentFrame()) == 10,
 		5000
 	);
-	QCOMPARE(source_ptr->collectionCount(), 3);
+	QCOMPARE(source_ptr->collectionCount(), 1);
 }
 
 void FramePipelineTest::mapWidgetWaitsForMissingRasterSource()

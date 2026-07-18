@@ -26,6 +26,7 @@ struct TemplateLayerPlan
 	std::vector<VectorPass> above_map;
 	bool complete = true;
 	std::size_t newly_resident_images = 0;
+	std::size_t newly_resident_bytes = 0;
 };
 
 /**

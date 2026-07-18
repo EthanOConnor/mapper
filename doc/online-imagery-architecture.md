@@ -106,6 +106,15 @@ Opaque tiles become direct image-to-map primitives and can remain independent.
 This gives the screen backend granular resource admission and avoids building
 a viewport-sized CPU mosaic.
 
+Decoded straight-RGBA tile storage is shared directly into the immutable render
+snapshot. The planner retains the source `QImage` backing store and its memory
+lease instead of copying every admitted tile into a second C++ byte vector;
+Vello then creates and caches the one backend-owned image resource. New image
+admission is bounded by both bytes and resource count, and the per-frame budget
+is divided across visible raster layers. Multiple active sources therefore make
+progress together rather than template-list order allowing one source to
+monopolize a sequence of intermediate frames.
+
 Independent translucent tiles would blend their shared edges more than once.
 A translucent screen window is therefore composed once into a retained
 premultiplied atlas. Exact output divides large translucent extents into
@@ -161,7 +170,10 @@ and derived atlases have separate bounded queues and working-set checks.
 Retained raster memory is budgeted across all online templates. Accounting
 leases follow shared pixels into queued atlas workers and immutable renderer
 snapshots, so cache eviction never reports memory as released while another
-owner still holds it. Once exact translucent atlases are complete, their
+owner still holds it. Renderer admission separately reserves the backend image
+copy while sharing the decoded source allocation, so the steady-state screen
+path holds the necessary source and backend resources without an intermediate
+planner copy. Once exact translucent atlases are complete, their
 source-tile pins are released and renderer snapshot memory is reserved before
 preflight reports Ready. Admission uses application-wide least-recently-used
 eviction before applying backpressure, continuing past externally pinned

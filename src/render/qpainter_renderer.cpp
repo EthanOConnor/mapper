@@ -247,9 +247,9 @@ void QPainterRenderer::render(QPainter& painter, const RenderIR& ir,
 			}
 			else if constexpr (std::is_same_v<T, DrawImage>)
 			{
-				if (!op.image || !op.image->rgba8)
+				if (!op.image)
 					return;
-				auto const& bytes = *op.image->rgba8;
+				auto const bytes = op.image->bytes();
 				auto const required_size = std::uint64_t(op.image->bytes_per_row) * op.image->height;
 				if (op.image->width == 0 || op.image->height == 0
 				    || op.image->width > std::uint32_t(std::numeric_limits<int>::max())
