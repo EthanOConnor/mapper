@@ -1065,6 +1065,20 @@ public:
 	 * Deletes the selected objects and creates an undo step for this action.
 	 */
 	void deleteSelectedObjects();
+
+	/**
+	 * Moves every selected object by the same native map-coordinate offset.
+	 *
+	 * The first move in a keyboard nudge creates an undo step. Auto-repeat
+	 * continuations can extend that move without creating one undo step per
+	 * repeated key event.
+	 *
+	 * @param offset Offset in native map coordinates.
+	 * @param create_undo_step Whether to record the selection's current state.
+	 * @return True if the selection was moved, false if it was empty, the
+	 *         offset was zero, or the move would exceed coordinate storage.
+	 */
+	bool moveSelectedObjects(const MapCoord& offset, bool create_undo_step = true);
 	
 	/**
 	 * Enlarges the given rect to cover all selected objects.

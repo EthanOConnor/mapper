@@ -35,6 +35,9 @@ private slots:
 	void newMapStartsWithoutFormat();
 	
 	void editTool();
+	void arrowKeysNudgeSelection();
+	void arrowKeyAutoRepeatIsSingleUndoStep();
+	void arrowKeysPanWithoutSelection();
 	
 	void paintOnTemplateFeature();
 	

@@ -23,6 +23,7 @@
 #define OPENORIENTEERING_MAP_WIDGET_H
 
 #include <functional>
+#include <set>
 
 #include <Qt>
 #include <QtGlobal>
@@ -66,6 +67,7 @@ class Map;
 class MapEditorActivity;
 class MapEditorTool;
 class MapRenderables;
+class Object;
 class PieMenu;
 class Template;
 class TouchCursor;
@@ -372,6 +374,8 @@ private:
 	void scheduleFrameUpdate();
 	void renderFrame();
 	void updatePlaceholder();
+	bool nudgeSelection(QKeyEvent* event, int viewport_dx, int viewport_dy);
+	void resetNudgeState();
 	
 	/**
 	 * Calculates the bounding box of the given map coordinates rect and
@@ -420,6 +424,8 @@ private:
 	MapView* view;
 	MapEditorTool* tool;
 	MapEditorActivity* activity;
+	std::set<Object*> nudge_selection;
+	int nudge_key = 0;
 	
 	CoordsType coords_type;
 	

@@ -160,6 +160,7 @@ void MapWidget::setMapView(MapView* view)
 {
 	if (this->view != view)
 	{
+		resetNudgeState();
 		if (this->view)
 		{
 			auto* map = this->view->getMap();
@@ -250,6 +251,8 @@ void MapWidget::setMapView(MapView* view)
 
 void MapWidget::setTool(MapEditorTool* tool)
 {
+	resetNudgeState();
+
 	// Redraw if touch cursor usage changes
 	bool redrawTouchCursor = (touch_cursor && this->tool && tool
 		&& (this->tool->usesTouchCursor() || tool->usesTouchCursor()));
@@ -1182,6 +1185,7 @@ void MapWidget::resizeEvent(QResizeEvent* event)
 
 void MapWidget::mousePressEvent(QMouseEvent* event)
 {
+	resetNudgeState();
 	current_pressed_buttons = event->buttons();
 	if (touch_cursor && tool && tool->usesTouchCursor())
 	{
@@ -1371,8 +1375,11 @@ bool MapWidget::keyPressEventFilter(QKeyEvent* event)
 {
 	if (tool && tool->keyPressEvent(event))
 	{
+		resetNudgeState();
 		return true;
 	}
+
+	const auto nudge_pixels = event->modifiers().testFlag(Qt::ShiftModifier) ? 10 : 1;
 	
 	switch (event->key())
 	{
@@ -1384,34 +1391,106 @@ bool MapWidget::keyPressEventFilter(QKeyEvent* event)
 		return true;
 		
 	case Qt::Key_Up:
+		if (nudgeSelection(event, 0, -nudge_pixels))
+			return true;
 		moveMap(0, -1);
 		return true;
 		
 	case Qt::Key_Down:
+		if (nudgeSelection(event, 0, nudge_pixels))
+			return true;
 		moveMap(0, 1);
 		return true;
 		
 	case Qt::Key_Left:
+		if (nudgeSelection(event, -nudge_pixels, 0))
+			return true;
 		moveMap(-1, 0);
 		return true;
 		
 	case Qt::Key_Right:
+		if (nudgeSelection(event, nudge_pixels, 0))
+			return true;
 		moveMap(1, 0);
 		return true;
 		
 	default:
+		resetNudgeState();
 		return false;
 	}
 }
 
 bool MapWidget::keyReleaseEventFilter(QKeyEvent* event)
 {
-	if (tool && tool->keyReleaseEvent(event))
+	const auto handled = tool && tool->keyReleaseEvent(event);
+	if (!event->isAutoRepeat() && event->key() == nudge_key)
+		resetNudgeState();
+
+	return handled;
+}
+
+bool MapWidget::nudgeSelection(QKeyEvent* event, int viewport_dx, int viewport_dy)
+{
+	if (!view)
+		return false;
+
+	auto* map = view->getMap();
+	if (!map || map->selectedObjects().empty())
 	{
-		return true; // NOLINT
+		resetNudgeState();
+		return false;
 	}
-	
-	return false;
+	if (tool && tool->editingInProgress())
+		return true;
+
+	const auto start = viewportToMapF(QPointF{});
+	const auto end = viewportToMapF(QPointF{qreal(viewport_dx), qreal(viewport_dy)});
+	const auto exact_dx = 1000.0 * (end.x() - start.x());
+	const auto exact_dy = 1000.0 * (end.y() - start.y());
+	auto dx = qRound64(exact_dx);
+	auto dy = qRound64(exact_dy);
+
+	// At the highest zoom levels, one viewport pixel can be smaller than the
+	// 0.001 mm coordinate quantum. Pick the closest directional quantum so an
+	// arrow press never silently does nothing.
+	if (dx == 0 && dy == 0)
+	{
+		if (qAbs(exact_dx) >= qAbs(exact_dy))
+			dx = exact_dx < 0 ? -1 : 1;
+		else
+			dy = exact_dy < 0 ? -1 : 1;
+	}
+
+	MapCoord offset;
+	try
+	{
+		offset = MapCoord::fromNative64(dx, dy);
+	}
+	catch (const std::range_error&)
+	{
+		resetNudgeState();
+		return true;
+	}
+
+	const auto start_undo_step = !event->isAutoRepeat()
+	                             || nudge_key != event->key()
+	                             || nudge_selection != map->selectedObjects();
+	if (map->moveSelectedObjects(offset, start_undo_step))
+	{
+		nudge_selection = map->selectedObjects();
+		nudge_key = event->key();
+	}
+	else
+	{
+		resetNudgeState();
+	}
+	return true;
+}
+
+void MapWidget::resetNudgeState()
+{
+	nudge_selection.clear();
+	nudge_key = 0;
 }
 
 QVariant MapWidget::inputMethodQuery(Qt::InputMethodQuery property) const
@@ -1450,6 +1529,7 @@ void MapWidget::enableTouchCursor(bool enabled)
 
 void MapWidget::focusOutEvent(QFocusEvent* event)
 {
+	resetNudgeState();
 	if (tool)
 		tool->focusOutEvent(event);
 	QWidget::focusOutEvent(event);
