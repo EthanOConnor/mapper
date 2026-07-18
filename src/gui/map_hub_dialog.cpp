@@ -12,6 +12,7 @@
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDateTime>
+#include <QDesktopServices>
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFileDialog>
@@ -19,6 +20,7 @@
 #include <QFormLayout>
 #include <QFrame>
 #include <QHBoxLayout>
+#include <QHash>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QLabel>
@@ -54,6 +56,8 @@ constexpr int id_role = Qt::UserRole;
 constexpr int project_id_role = Qt::UserRole + 1;
 constexpr int status_role = Qt::UserRole + 2;
 constexpr int package_type_role = Qt::UserRole + 3;
+constexpr int item_kind_role = Qt::UserRole + 4;
+constexpr int web_url_role = Qt::UserRole + 5;
 
 bool assignmentCanStart(const QTreeWidgetItem *item) {
   if (!item)
@@ -103,6 +107,14 @@ QString artifactExtension(const QJsonObject &revision) {
 QString projectManifestUrl(const QString &server, const QString &project_id) {
   auto url = QUrl::fromUserInput(server).adjusted(QUrl::StripTrailingSlash);
   url.setPath(QStringLiteral("/api/v1/projects/%1/manifest").arg(project_id));
+  url.setQuery({});
+  url.setFragment({});
+  return url.toString(QUrl::FullyEncoded);
+}
+
+QString eventWebUrl(const QString &server, const QString &event_id) {
+  auto url = QUrl::fromUserInput(server).adjusted(QUrl::StripTrailingSlash);
+  url.setPath(QStringLiteral("/events/%1/").arg(event_id));
   url.setQuery({});
   url.setFragment({});
   return url.toString(QUrl::FullyEncoded);
@@ -399,10 +411,11 @@ MapHubDialog::MapHubDialog(MainWindow *window)
                                     first_use_page)),
       connection_label(new QLabel(this)), activity_label(new QLabel(this)),
       tabs(new QTabWidget(this)), assignment_list(new QTreeWidget(this)),
-      project_list(new QTreeWidget(this)),
+      project_list(new QTreeWidget(this)), event_list(new QTreeWidget(this)),
       start_button(new QPushButton(tr("Start selected assignment"), this)),
       open_project_button(
           new QPushButton(tr("Current revision details…"), this)),
+      open_event_button(new QPushButton(tr("Open event in Map Hub…"), this)),
       new_button(new QPushButton(tr("New connected map…"), this)),
       refresh_button(new QPushButton(tr("Refresh"), this)) {
   setWindowTitle(tr("Map Hub — library and assignments"));
@@ -478,14 +491,19 @@ MapHubDialog::MapHubDialog(MainWindow *window)
   assignment_list->setHeaderLabels(
       {tr("Assignment"), tr("Map"), tr("Status"), tr("Due")});
   assignment_list->setRootIsDecorated(false);
-  project_list->setHeaderLabels(
-      {tr("Map"), tr("Venue"), tr("Status"), tr("Revision")});
-  project_list->setRootIsDecorated(false);
+  project_list->setHeaderLabels({tr("Venue / map"), tr("City / type"),
+                                 tr("Status"), tr("Revision"), tr("Events")});
+  project_list->setRootIsDecorated(true);
+  event_list->setHeaderLabels({tr("Event"), tr("Date"), tr("Venue"), tr("Map"),
+                               tr("Status"), tr("Series")});
+  event_list->setRootIsDecorated(true);
+  tabs->addTab(project_list, tr("Venues & maps"));
+  tabs->addTab(event_list, tr("Events"));
   tabs->addTab(assignment_list, tr("My work"));
-  tabs->addTab(project_list, tr("Map library"));
   auto *buttons = new QHBoxLayout;
   buttons->addWidget(start_button);
   buttons->addWidget(open_project_button);
+  buttons->addWidget(open_event_button);
   buttons->addWidget(new_button);
   buttons->addStretch();
   buttons->addWidget(refresh_button);
@@ -512,6 +530,8 @@ MapHubDialog::MapHubDialog(MainWindow *window)
           &MapHubDialog::startSelectedAssignment);
   connect(open_project_button, &QPushButton::clicked, this,
           &MapHubDialog::openSelectedProject);
+  connect(open_event_button, &QPushButton::clicked, this,
+          &MapHubDialog::openSelectedEvent);
   connect(new_button, &QPushButton::clicked, this,
           &MapHubDialog::createConnectedMap);
   connect(close, &QPushButton::clicked, this, &QDialog::reject);
@@ -519,10 +539,16 @@ MapHubDialog::MapHubDialog(MainWindow *window)
           &MapHubDialog::updateActions);
   connect(project_list, &QTreeWidget::itemSelectionChanged, this,
           &MapHubDialog::updateActions);
+  connect(event_list, &QTreeWidget::itemSelectionChanged, this,
+          &MapHubDialog::updateActions);
+  connect(tabs, &QTabWidget::currentChanged, this,
+          &MapHubDialog::updateActions);
   connect(assignment_list, &QTreeWidget::itemDoubleClicked, this,
           [this] { startSelectedAssignment(); });
   connect(project_list, &QTreeWidget::itemDoubleClicked, this,
           [this] { openSelectedProject(); });
+  connect(event_list, &QTreeWidget::itemDoubleClicked, this,
+          [this] { openSelectedEvent(); });
   refresh();
 }
 
@@ -755,7 +781,7 @@ void MapHubDialog::refresh() {
   imagery::TileNetworkManager::instance().setBearerCredential(
       QUrl(server), credential.token.toUtf8(),
       MapHubCredentials::accountName(server).toUtf8());
-  setBusy(true, tr("Loading the latest library and assignments…"));
+  setBusy(true, tr("Loading venues, maps, events, and assignments…"));
   client->library([this, server](const QJsonObject &response,
                                  const MapHubApiClient::Error &error) {
     if (error) {
@@ -797,27 +823,132 @@ void MapHubDialog::populate(const QJsonObject &response) {
   assignment_list->resizeColumnToContents(0);
   assignment_list->resizeColumnToContents(1);
   project_list->clear();
+  QHash<QString, int> project_counts;
+  QHash<QString, int> event_counts;
+  for (const auto value :
+       response.value(QStringLiteral("projects")).toArray()) {
+    for (const auto venue :
+         value.toObject().value(QStringLiteral("venues")).toArray())
+      ++project_counts[venue.toObject().value(QStringLiteral("id")).toString()];
+  }
+  for (const auto value : response.value(QStringLiteral("events")).toArray()) {
+    const auto venue_id =
+        value.toObject().value(QStringLiteral("venue_id")).toString();
+    if (!venue_id.isEmpty())
+      ++event_counts[venue_id];
+  }
+  QHash<QString, QTreeWidgetItem *> venue_items;
+  for (const auto value : response.value(QStringLiteral("venues")).toArray()) {
+    auto venue = value.toObject();
+    const auto venue_id = venue.value(QStringLiteral("id")).toString();
+    auto *item = new QTreeWidgetItem({
+        venue.value(QStringLiteral("name")).toString(),
+        venue.value(QStringLiteral("city")).toString(),
+        venue.value(QStringLiteral("status")).toString(),
+        {},
+        event_counts.value(venue_id) == 0
+            ? tr("—")
+            : tr("%n event(s)", nullptr, event_counts.value(venue_id)),
+    });
+    item->setData(0, item_kind_role, QStringLiteral("venue"));
+    item->setToolTip(
+        0, tr("%n map project(s)", nullptr, project_counts.value(venue_id)));
+    project_list->addTopLevelItem(item);
+    venue_items.insert(venue_id, item);
+  }
+  QTreeWidgetItem *unassigned = nullptr;
   for (const auto value :
        response.value(QStringLiteral("projects")).toArray()) {
     auto object = value.toObject();
-    QStringList venues;
-    for (const auto venue :
-         object.value(QStringLiteral("venue_names")).toArray())
-      venues.append(venue.toString());
     auto revision = object.value(QStringLiteral("current_revision")).toObject();
-    auto *item = new QTreeWidgetItem({
-        object.value(QStringLiteral("title")).toString(),
-        venues.join(QStringLiteral(", ")),
-        object.value(QStringLiteral("status")).toString(),
-        revision.isEmpty()
-            ? tr("—")
-            : tr("r%1").arg(revision.value(QStringLiteral("number")).toInt()),
-    });
-    item->setData(0, id_role, object.value(QStringLiteral("id")).toString());
-    project_list->addTopLevelItem(item);
+    auto add_project = [&](QTreeWidgetItem *parent) {
+      auto *item = new QTreeWidgetItem({
+          object.value(QStringLiteral("title")).toString(),
+          object.value(QStringLiteral("kind")).toString(),
+          object.value(QStringLiteral("status")).toString(),
+          revision.isEmpty()
+              ? tr("—")
+              : tr("r%1").arg(revision.value(QStringLiteral("number")).toInt()),
+          {},
+      });
+      item->setData(0, id_role, object.value(QStringLiteral("id")).toString());
+      item->setData(0, item_kind_role, QStringLiteral("project"));
+      parent->addChild(item);
+    };
+    auto project_venues = object.value(QStringLiteral("venues")).toArray();
+    if (project_venues.isEmpty()) {
+      if (!unassigned) {
+        unassigned =
+            new QTreeWidgetItem({tr("No venue assigned"), {}, {}, {}, {}});
+        unassigned->setData(0, item_kind_role, QStringLiteral("venue"));
+        project_list->addTopLevelItem(unassigned);
+      }
+      add_project(unassigned);
+    } else {
+      for (const auto venue : project_venues) {
+        auto *parent = venue_items.value(
+            venue.toObject().value(QStringLiteral("id")).toString());
+        if (parent)
+          add_project(parent);
+      }
+    }
   }
   project_list->resizeColumnToContents(0);
   project_list->resizeColumnToContents(1);
+
+  event_list->clear();
+  QTreeWidgetItem *upcoming_events = nullptr;
+  QTreeWidgetItem *earlier_events = nullptr;
+  QTreeWidgetItem *undated_events = nullptr;
+  auto event_group = [&](const QString &label,
+                         QTreeWidgetItem *&group) -> QTreeWidgetItem * {
+    if (!group) {
+      group = new QTreeWidgetItem({label, {}, {}, {}, {}, {}});
+      group->setData(0, item_kind_role, QStringLiteral("event_group"));
+      event_list->addTopLevelItem(group);
+    }
+    return group;
+  };
+  const auto server =
+      Settings::getInstance().getSetting(Settings::MapHub_ServerUrl).toString();
+  for (const auto value : response.value(QStringLiteral("events")).toArray()) {
+    auto object = value.toObject();
+    const auto date_text =
+        object.value(QStringLiteral("event_date")).toString();
+    const auto date = QDate::fromString(date_text, Qt::ISODate);
+    QTreeWidgetItem *parent = nullptr;
+    if (!date.isValid())
+      parent = event_group(tr("Date not set"), undated_events);
+    else if (date >= QDate::currentDate())
+      parent = event_group(tr("Upcoming events"), upcoming_events);
+    else
+      parent = event_group(tr("Earlier events"), earlier_events);
+    auto *item = new QTreeWidgetItem({
+        object.value(QStringLiteral("title")).toString(),
+        date.isValid() ? QLocale().toString(date, QLocale::ShortFormat)
+                       : tr("—"),
+        object.value(QStringLiteral("venue_name")).toString(),
+        object.value(QStringLiteral("map_project_title")).toString(),
+        object.value(QStringLiteral("status")).toString(),
+        object.value(QStringLiteral("series_name")).toString(),
+    });
+    item->setData(0, id_role, object.value(QStringLiteral("id")).toString());
+    item->setData(0, item_kind_role, QStringLiteral("event"));
+    item->setData(
+        0, web_url_role,
+        eventWebUrl(server, object.value(QStringLiteral("id")).toString()));
+    if (parent == earlier_events)
+      parent->insertChild(0, item);
+    else
+      parent->addChild(item);
+  }
+  if (upcoming_events)
+    upcoming_events->setExpanded(true);
+  if (undated_events)
+    undated_events->setExpanded(true);
+  event_list->resizeColumnToContents(0);
+  event_list->resizeColumnToContents(1);
+  updateActions();
 }
 
 QString MapHubDialog::projectTitle(const QString &project_id) const {
@@ -831,8 +962,14 @@ QString MapHubDialog::projectTitle(const QString &project_id) const {
 }
 
 void MapHubDialog::updateActions() {
+  const auto current_tab = tabs->currentWidget();
+  const auto showing_projects = current_tab == project_list;
+  const auto showing_events = current_tab == event_list;
+  const auto showing_assignments = current_tab == assignment_list;
   auto *assignment = assignment_list->currentItem();
-  start_button->setEnabled(!busy && assignmentCanStart(assignment));
+  start_button->setVisible(showing_assignments);
+  start_button->setEnabled(showing_assignments && !busy &&
+                           assignmentCanStart(assignment));
   if (assignment && !MapHubApiClient::isMapperWorkspacePackageType(
                         assignment->data(0, package_type_role).toString())) {
     start_button->setToolTip(tr("Manage this assignment in Map Hub; it is not "
@@ -843,7 +980,17 @@ void MapHubDialog::updateActions() {
             ? tr("This assignment is no longer open for editing.")
             : tr("Open or resume the assignment's managed workspace."));
   }
-  open_project_button->setEnabled(!busy && project_list->currentItem());
+  open_project_button->setVisible(showing_projects);
+  open_project_button->setEnabled(
+      showing_projects && !busy && project_list->currentItem() &&
+      project_list->currentItem()->data(0, item_kind_role).toString() ==
+          QLatin1String("project"));
+  open_event_button->setVisible(showing_events);
+  open_event_button->setEnabled(
+      showing_events && !busy && event_list->currentItem() &&
+      event_list->currentItem()->data(0, item_kind_role).toString() ==
+          QLatin1String("event"));
+  new_button->setVisible(showing_projects);
 }
 
 QString MapHubDialog::uniqueDestination(const QString &project_title,
@@ -891,7 +1038,8 @@ QString MapHubDialog::uniqueDestination(const QString &project_title,
 
 void MapHubDialog::openSelectedProject() {
   auto *item = project_list->currentItem();
-  if (!item || busy)
+  if (!item || busy ||
+      item->data(0, item_kind_role).toString() != QLatin1String("project"))
     return;
   auto project_id = item->data(0, id_role).toString();
   auto title = item->text(0);
@@ -934,6 +1082,19 @@ void MapHubDialog::openSelectedProject() {
                 .arg(name.isEmpty() ? QString{} : tr(" — %1").arg(name))
                 .arg(sha.isEmpty() ? tr("not supplied") : sha));
       });
+}
+
+void MapHubDialog::openSelectedEvent() {
+  auto *item = event_list->currentItem();
+  if (!item || busy ||
+      item->data(0, item_kind_role).toString() != QLatin1String("event"))
+    return;
+  const auto url = QUrl(item->data(0, web_url_role).toString());
+  if (!url.isValid() || !MapHubApiClient::isAcceptableServerUrl(url) ||
+      !QDesktopServices::openUrl(url)) {
+    QMessageBox::warning(this, tr("Could not open event"),
+                         tr("Mapper could not open this event in Map Hub."));
+  }
 }
 
 void MapHubDialog::startSelectedAssignment() {

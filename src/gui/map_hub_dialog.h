@@ -36,6 +36,7 @@ private slots:
   void refresh();
   void startSelectedAssignment();
   void openSelectedProject();
+  void openSelectedEvent();
   void createConnectedMap();
   void updateActions();
   void browseFirstUseWorkspace();
@@ -83,8 +84,10 @@ private:
   QTabWidget *tabs;
   QTreeWidget *assignment_list;
   QTreeWidget *project_list;
+  QTreeWidget *event_list;
   QPushButton *start_button;
   QPushButton *open_project_button;
+  QPushButton *open_event_button;
   QPushButton *new_button;
   QPushButton *refresh_button;
   QJsonObject library_response;
