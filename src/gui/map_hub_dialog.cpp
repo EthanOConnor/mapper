@@ -9,10 +9,12 @@
 #include <QAbstractItemView>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDateTime>
 #include <QDialogButtonBox>
 #include <QDir>
+#include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QFrame>
@@ -28,6 +30,7 @@
 #include <QScrollArea>
 #include <QSettings>
 #include <QSpinBox>
+#include <QStackedWidget>
 #include <QStandardPaths>
 #include <QTabWidget>
 #include <QTreeWidget>
@@ -38,6 +41,7 @@
 #include "collaboration/map_hub_api_client.h"
 #include "collaboration/map_hub_credentials.h"
 #include "collaboration/map_hub_imagery_catalog.h"
+#include "core/document_path.h"
 #include "gui/main_window.h"
 #include "imagery/tile_network_manager.h"
 #include "settings.h"
@@ -102,6 +106,18 @@ QString projectManifestUrl(const QString &server, const QString &project_id) {
   url.setQuery({});
   url.setFragment({});
   return url.toString(QUrl::FullyEncoded);
+}
+
+QString defaultMapHubWorkspaceRoot() {
+#ifdef Q_OS_ANDROID
+  return QDir(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation))
+      .filePath(QStringLiteral("map-hub-workspaces"));
+#else
+  return QDir(QStandardPaths::writableLocation(
+                  QStandardPaths::DocumentsLocation))
+      .filePath(
+          QCoreApplication::translate("MapHubDialog", "Mapper Workspaces"));
+#endif
 }
 
 class ConnectedMapDialog final : public QDialog {
@@ -366,6 +382,21 @@ private:
 
 MapHubDialog::MapHubDialog(MainWindow *window)
     : QDialog(window), window(window), client(nullptr),
+      pages(new QStackedWidget(this)), first_use_page(new QWidget(this)),
+      library_page(new QWidget(this)),
+      first_use_status(new QLabel(first_use_page)),
+      first_use_server(new QLineEdit(first_use_page)),
+      first_use_workspace(new QLineEdit(first_use_page)),
+      first_use_token(new QLineEdit(first_use_page)),
+      first_use_invite(new QLineEdit(first_use_page)),
+      first_use_username(new QLineEdit(first_use_page)),
+      first_use_display_name(new QLineEdit(first_use_page)),
+      first_use_password(new QLineEdit(first_use_page)),
+      first_use_browse(new QPushButton(tr("Choose…"), first_use_page)),
+      connect_button(
+          new QPushButton(tr("Connect and open Map Hub"), first_use_page)),
+      redeem_button(new QPushButton(tr("Create account and open Map Hub"),
+                                    first_use_page)),
       connection_label(new QLabel(this)), activity_label(new QLabel(this)),
       tabs(new QTabWidget(this)), assignment_list(new QTreeWidget(this)),
       project_list(new QTreeWidget(this)),
@@ -375,7 +406,73 @@ MapHubDialog::MapHubDialog(MainWindow *window)
       new_button(new QPushButton(tr("New connected map…"), this)),
       refresh_button(new QPushButton(tr("Refresh"), this)) {
   setWindowTitle(tr("Map Hub — library and assignments"));
-  resize(880, 580);
+  resize(880, 640);
+
+  auto *first_use_title = new QLabel(tr("Connect to Map Hub"), first_use_page);
+  auto title_font = first_use_title->font();
+  title_font.setPointSizeF(title_font.pointSizeF() * 1.65);
+  title_font.setBold(true);
+  first_use_title->setFont(title_font);
+  auto *first_use_intro = new QLabel(
+      tr("Use the invitation from your map librarian to create an account, or "
+         "connect an existing account token."),
+      first_use_page);
+  first_use_intro->setWordWrap(true);
+  first_use_status->setWordWrap(true);
+
+  first_use_server->setPlaceholderText(
+      QStringLiteral("https://maps.example.org"));
+  auto *workspace_row = new QWidget(first_use_page);
+  auto *workspace_layout = new QHBoxLayout(workspace_row);
+  workspace_layout->setContentsMargins({});
+  workspace_layout->addWidget(first_use_workspace, 1);
+  workspace_layout->addWidget(first_use_browse);
+  auto *connection_form = new QFormLayout;
+  connection_form->addRow(tr("Map Hub server:"), first_use_server);
+  connection_form->addRow(tr("Local map workspaces:"), workspace_row);
+
+  auto *account_tabs = new QTabWidget(first_use_page);
+  auto *invitation_page = new QWidget(account_tabs);
+  auto *invitation_form = new QFormLayout(invitation_page);
+  first_use_invite->setEchoMode(QLineEdit::Password);
+  first_use_password->setEchoMode(QLineEdit::Password);
+  first_use_password->setPlaceholderText(tr("At least 12 characters"));
+  invitation_form->addRow(tr("Invitation token:"), first_use_invite);
+  invitation_form->addRow(tr("Username:"), first_use_username);
+  invitation_form->addRow(tr("Display name:"), first_use_display_name);
+  invitation_form->addRow(tr("Password:"), first_use_password);
+  invitation_form->addRow(redeem_button);
+  account_tabs->addTab(invitation_page, tr("I have an invitation"));
+
+  auto *token_page = new QWidget(account_tabs);
+  auto *token_form = new QFormLayout(token_page);
+  first_use_token->setEchoMode(QLineEdit::Password);
+  first_use_token->setPlaceholderText(tr("Mapper API token"));
+  auto *token_help = new QLabel(
+      tr("Use this if a Map Hub administrator gave you an account token "
+         "instead of an invitation."),
+      token_page);
+  token_help->setWordWrap(true);
+  token_form->addRow(token_help);
+  token_form->addRow(tr("Account token:"), first_use_token);
+  token_form->addRow(connect_button);
+  account_tabs->addTab(token_page, tr("I already have an account token"));
+
+  auto *first_use_close = new QPushButton(tr("Not now"), first_use_page);
+  auto *first_use_buttons = new QHBoxLayout;
+  first_use_buttons->addStretch();
+  first_use_buttons->addWidget(first_use_close);
+  auto *first_use_layout = new QVBoxLayout(first_use_page);
+  first_use_layout->addStretch();
+  first_use_layout->addWidget(first_use_title);
+  first_use_layout->addWidget(first_use_intro);
+  first_use_layout->addSpacing(8);
+  first_use_layout->addLayout(connection_form);
+  first_use_layout->addWidget(account_tabs);
+  first_use_layout->addWidget(first_use_status);
+  first_use_layout->addLayout(first_use_buttons);
+  first_use_layout->addStretch();
+
   connection_label->setWordWrap(true);
   activity_label->setWordWrap(true);
   assignment_list->setHeaderLabels(
@@ -394,11 +491,22 @@ MapHubDialog::MapHubDialog(MainWindow *window)
   buttons->addWidget(refresh_button);
   auto *close = new QPushButton(tr("Close"), this);
   buttons->addWidget(close);
+  auto *library_layout = new QVBoxLayout(library_page);
+  library_layout->addWidget(connection_label);
+  library_layout->addWidget(tabs, 1);
+  library_layout->addWidget(activity_label);
+  library_layout->addLayout(buttons);
+  pages->addWidget(first_use_page);
+  pages->addWidget(library_page);
   auto *layout = new QVBoxLayout(this);
-  layout->addWidget(connection_label);
-  layout->addWidget(tabs, 1);
-  layout->addWidget(activity_label);
-  layout->addLayout(buttons);
+  layout->addWidget(pages);
+  connect(first_use_browse, &QPushButton::clicked, this,
+          &MapHubDialog::browseFirstUseWorkspace);
+  connect(connect_button, &QPushButton::clicked, this,
+          &MapHubDialog::connectExistingAccount);
+  connect(redeem_button, &QPushButton::clicked, this,
+          &MapHubDialog::redeemFirstUseInvitation);
+  connect(first_use_close, &QPushButton::clicked, this, &QDialog::reject);
   connect(refresh_button, &QPushButton::clicked, this, &MapHubDialog::refresh);
   connect(start_button, &QPushButton::clicked, this,
           &MapHubDialog::startSelectedAssignment);
@@ -419,6 +527,184 @@ MapHubDialog::MapHubDialog(MainWindow *window)
 }
 
 MapHubDialog::~MapHubDialog() = default;
+
+void MapHubDialog::showFirstUse(const QString &problem) {
+  auto server =
+      Settings::getInstance().getSetting(Settings::MapHub_ServerUrl).toString();
+  if (server.trimmed().isEmpty())
+    server = QStringLiteral("https://maps.zudark.net");
+  first_use_server->setText(server);
+  auto workspace_root = Settings::getInstance()
+                            .getSetting(Settings::MapHub_WorkspaceRoot)
+                            .toString();
+  if (workspace_root.trimmed().isEmpty())
+    workspace_root = defaultMapHubWorkspaceRoot();
+  first_use_workspace->setText(workspace_root);
+  first_use_status->setText(problem);
+  pages->setCurrentWidget(first_use_page);
+  first_use_invite->setFocus();
+}
+
+void MapHubDialog::showLibrary() { pages->setCurrentWidget(library_page); }
+
+void MapHubDialog::setFirstUseBusy(bool value, const QString &message) {
+  first_use_status->setText(message);
+  first_use_server->setEnabled(!value);
+  first_use_workspace->setEnabled(!value);
+  first_use_browse->setEnabled(!value);
+  first_use_token->setEnabled(!value);
+  first_use_invite->setEnabled(!value);
+  first_use_username->setEnabled(!value);
+  first_use_display_name->setEnabled(!value);
+  first_use_password->setEnabled(!value);
+  connect_button->setEnabled(!value);
+  redeem_button->setEnabled(!value);
+}
+
+void MapHubDialog::browseFirstUseWorkspace() {
+  auto selected = QFileDialog::getExistingDirectory(
+      this, tr("Choose Map Hub workspace folder"), first_use_workspace->text());
+  if (!selected.isEmpty())
+    first_use_workspace->setText(selected);
+}
+
+bool MapHubDialog::firstUseConnection(QString &server,
+                                      QString &workspace_root) {
+  auto url = QUrl::fromUserInput(first_use_server->text().trimmed());
+  if (!MapHubApiClient::isAcceptableServerUrl(url)) {
+    QMessageBox::warning(this, tr("Map Hub"),
+                         tr("Enter an HTTPS Map Hub URL. HTTP is allowed only "
+                            "for localhost development."));
+    return false;
+  }
+  server = url.adjusted(QUrl::StripTrailingSlash).toString();
+  workspace_root = first_use_workspace->text().trimmed();
+  if (workspace_root.isEmpty())
+    workspace_root = defaultMapHubWorkspaceRoot();
+  if (DocumentPath::isContentUri(workspace_root)) {
+    QMessageBox::warning(
+        this, tr("Map Hub"),
+        tr("Choose a local folder for Map Hub workspaces. Individual maps can "
+           "still be exported through the document provider."));
+    return false;
+  }
+  workspace_root = QDir(workspace_root).absolutePath();
+  if (!QDir().mkpath(workspace_root) ||
+      !QFileInfo(workspace_root).isWritable()) {
+    QMessageBox::warning(
+        this, tr("Map Hub"),
+        tr("Mapper could not create or write to the local workspace folder."));
+    return false;
+  }
+  return true;
+}
+
+bool MapHubDialog::saveFirstUseConnection(const QString &server,
+                                          const QString &workspace_root,
+                                          const QString &token,
+                                          QString &error) {
+  auto stored = MapHubCredentials::writeToken(server, token);
+  if (!stored) {
+    error = stored.error;
+    return false;
+  }
+  auto old_server =
+      Settings::getInstance().getSetting(Settings::MapHub_ServerUrl).toString();
+  if (old_server != server)
+    imagery::TileNetworkManager::instance().clearBearerCredential(
+        QUrl(old_server));
+  Settings::getInstance().setSetting(Settings::MapHub_ServerUrl, server);
+  Settings::getInstance().setSetting(Settings::MapHub_WorkspaceRoot,
+                                     workspace_root);
+  imagery::TileNetworkManager::instance().setBearerCredential(
+      QUrl(server), token.toUtf8(),
+      MapHubCredentials::accountName(server).toUtf8());
+  return true;
+}
+
+void MapHubDialog::connectExistingAccount() {
+  QString server;
+  QString workspace_root;
+  if (!firstUseConnection(server, workspace_root))
+    return;
+  auto token = first_use_token->text().trimmed();
+  if (token.isEmpty()) {
+    QMessageBox::warning(this, tr("Map Hub"),
+                         tr("Enter the account token you were given."));
+    return;
+  }
+  setFirstUseBusy(true, tr("Checking the account…"));
+  auto *request_client = new MapHubApiClient(server, token, this);
+  request_client->library([this, request_client, server, workspace_root,
+                           token](const QJsonObject &,
+                                  const MapHubApiClient::Error &error) {
+    request_client->deleteLater();
+    if (error) {
+      setFirstUseBusy(false, error.message);
+      return;
+    }
+    QString storage_error;
+    if (!saveFirstUseConnection(server, workspace_root, token, storage_error)) {
+      setFirstUseBusy(false, storage_error);
+      return;
+    }
+    first_use_token->clear();
+    refresh();
+  });
+}
+
+void MapHubDialog::redeemFirstUseInvitation() {
+  QString server;
+  QString workspace_root;
+  if (!firstUseConnection(server, workspace_root))
+    return;
+  QJsonObject account{
+      {QStringLiteral("invite_token"), first_use_invite->text().trimmed()},
+      {QStringLiteral("username"), first_use_username->text().trimmed()},
+      {QStringLiteral("display_name"),
+       first_use_display_name->text().trimmed()},
+      {QStringLiteral("password"), first_use_password->text()},
+  };
+  if (account.value(QStringLiteral("invite_token")).toString().isEmpty() ||
+      account.value(QStringLiteral("username")).toString().isEmpty() ||
+      account.value(QStringLiteral("display_name")).toString().isEmpty() ||
+      first_use_password->text().size() < 12) {
+    QMessageBox::warning(this, tr("Map Hub"),
+                         tr("Enter the invitation, username, display name, and "
+                            "a password of at least 12 characters."));
+    return;
+  }
+  setFirstUseBusy(true, tr("Creating the account…"));
+  auto *request_client = new MapHubApiClient(server, {}, this);
+  request_client->redeemInvite(
+      account,
+      [this, request_client, server, workspace_root](
+          const QJsonObject &response, const MapHubApiClient::Error &error) {
+        request_client->deleteLater();
+        first_use_password->clear();
+        if (error) {
+          setFirstUseBusy(false, error.message);
+          return;
+        }
+        auto token = response.value(QStringLiteral("token")).toString();
+        QString storage_error;
+        if (token.isEmpty() || !saveFirstUseConnection(server, workspace_root,
+                                                       token, storage_error)) {
+          setFirstUseBusy(
+              false,
+              token.isEmpty()
+                  ? tr("The account was created, but Map Hub did not return "
+                       "an account token. Ask the administrator to reconnect "
+                       "this account.")
+                  : tr("The account was created, but Mapper could not store "
+                       "the connection: %1")
+                        .arg(storage_error));
+          return;
+        }
+        first_use_invite->clear();
+        refresh();
+      });
+}
 
 void MapHubDialog::setBusy(bool value, const QString &message) {
   busy = value;
@@ -449,19 +735,23 @@ void MapHubDialog::refresh() {
       Settings::getInstance().getSetting(Settings::MapHub_ServerUrl).toString();
   auto credential = MapHubCredentials::readToken(server);
   if (!credential.error.isEmpty()) {
-    connection_label->setText(
-        tr("Credential error: %1 Open Settings → Map Hub to reconnect.")
-            .arg(credential.error));
-    setBusy(false);
+    showFirstUse(tr("Mapper could not read the saved Map Hub account: %1")
+                     .arg(credential.error));
+    setFirstUseBusy(false, first_use_status->text());
+    return;
+  }
+  if (credential.token.isEmpty()) {
+    showFirstUse();
+    setFirstUseBusy(false);
     return;
   }
   client = new MapHubApiClient(server, credential.token, this);
   if (!client->isConfigured()) {
-    connection_label->setText(client->configurationError() + QLatin1Char(' ') +
-                              tr("Open Settings → Map Hub to connect."));
-    setBusy(false);
+    showFirstUse(client->configurationError());
+    setFirstUseBusy(false, first_use_status->text());
     return;
   }
+  showLibrary();
   imagery::TileNetworkManager::instance().setBearerCredential(
       QUrl(server), credential.token.toUtf8(),
       MapHubCredentials::accountName(server).toUtf8());
@@ -543,11 +833,10 @@ QString MapHubDialog::projectTitle(const QString &project_id) const {
 void MapHubDialog::updateActions() {
   auto *assignment = assignment_list->currentItem();
   start_button->setEnabled(!busy && assignmentCanStart(assignment));
-  if (assignment &&
-      !MapHubApiClient::isMapperWorkspacePackageType(
-          assignment->data(0, package_type_role).toString())) {
-    start_button->setToolTip(
-        tr("Manage this assignment in Map Hub; it is not a Mapper map workspace."));
+  if (assignment && !MapHubApiClient::isMapperWorkspacePackageType(
+                        assignment->data(0, package_type_role).toString())) {
+    start_button->setToolTip(tr("Manage this assignment in Map Hub; it is not "
+                                "a Mapper map workspace."));
   } else {
     start_button->setToolTip(
         assignment && !assignmentCanStart(assignment)
