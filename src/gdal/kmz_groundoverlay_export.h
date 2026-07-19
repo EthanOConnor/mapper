@@ -81,14 +81,21 @@ public:
 	void setProgressObserver(QProgressDialog* observer) noexcept;
 	
 	QString errorString() const;
+	bool wasCanceled() const;
 	
-	bool doExport(const MapPrinter& map_printer, int tile_width_px = 512);
+	bool doExport(MapPrinter& map_printer, int tile_width_px = 512);
 	
 	
 protected:
-	bool doExport(const MapPrinter& map_printer, const Metrics& metrics, const std::vector<Tile>& tiles);
+	bool doExport(MapPrinter& map_printer, const Metrics& metrics, const std::vector<Tile>& tiles);
 	
 	std::vector<Tile> makeTiles(const QRectF& extent_map, const Metrics& metrics) const;
+
+	/** Returns the actual overscanned map clip painted for a tile. */
+	static QRectF renderClip(const Tile& tile) noexcept;
+
+	/** Returns the union of all map clips painted by the export. */
+	static QRectF renderExtent(const std::vector<Tile>& tiles) noexcept;
 	
 	void writeKml(QByteArray& buffer, const std::vector<Tile>& tiles) const;
 	
@@ -102,23 +109,32 @@ protected:
 	void mkdir(const QByteArray& path) const;
 	
 	
-	void setMaximumProgress(int value) const;
-	
-	int maximumProgress() const;
+	void setMaximumProgress(int value);
 	
 	void setProgress(int value) const;
-	
-	bool wasCanceled() const;
+
+	bool beginStagedOutput(std::vector<Tile>& tiles);
+	bool commitStagedOutput();
+	void cleanupPartialOutput(const std::vector<Tile>& tiles);
+	void pruneStagedOutputFiles();
+	void pruneDirectAssetDirectories(
+		const QByteArray& keep_relative_path = {});
 	
 private:
 	const Map& map;
 	QProgressDialog* progress_observer = nullptr;
+	QByteArray output_filepath_utf8;
 	QByteArray basepath_utf8;
 	QByteArray doc_filepath_utf8;
+	QByteArray staging_filepath_utf8;
+	QByteArray direct_assets_relative_utf8;
 	QString error_message;
 	qreal overlap = 0.000000000001;
 	int precision = 13;
+	int tile_progress_maximum = 1;
 	bool is_kmz = false;
+	bool cancelled = false;
+	bool files_directory_existed = false;
 	
 };
 

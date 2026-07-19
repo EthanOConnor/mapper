@@ -9,6 +9,9 @@ has_children: true
 [Introduction to Templates](templates.md){: .subpage}
 Types of templates, loading and positioning
 
+[Online imagery](online-imagery.md){: .subpage}
+Streaming tiled imagery and OIC catalogs
+
 [Adjusting template positions](template_adjust.md){: .subpage}
 For non-georeferenced templates
 
@@ -17,4 +20,3 @@ Vectorizing line features in raster graphics templates.
 
 [Geospatial data](gdal.md){: .subpage}
 Geospatial raster data and vector data support based on GDAL.
-

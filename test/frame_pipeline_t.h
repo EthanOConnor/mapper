@@ -21,6 +21,7 @@ private slots:
 	void viewportOverlayUsesTheSharedFrameContract();
 	void overlayPatternsAndImagesStayRetained();
 	void mapWidgetUsesTheFrameContract();
+	void mapWidgetDiscardsZoomLimitOvershoot();
 	void mapWidgetConvergesRasterBatches();
 	void mapWidgetWaitsForMissingRasterSource();
 	void nativeSurfacePublishesOrderedLifecycle();

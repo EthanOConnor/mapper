@@ -17,6 +17,7 @@ private slots:
 	void initTestCase();
 	void immutableSnapshotSurvivesEdit();
 	void curvedLineKeepsBothBorders();
+	void cosmeticAndMinimumStrokesRemainVisible();
 	void referenceRendererInterpretsIr();
 	void antialiasPolicyPreservesCallerIntent();
 };

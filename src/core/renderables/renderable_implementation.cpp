@@ -51,6 +51,36 @@
 
 namespace OpenOrienteering {
 
+namespace {
+
+qreal effectiveStrokeWidth(qreal nominal_width,
+                           int color_priority,
+                           const RenderPrimitiveConfig& config)
+{
+	// QPainter's zero-width pen is a one-device-pixel cosmetic stroke. RenderIR
+	// backends require a positive width, so preserve that semantic explicitly in
+	// map units for the current view. Baseline view and ForceMinSize both rely on
+	// this behavior.
+	auto const device_pixel = config.scaling > 0 ? 1 / config.scaling : qreal(1);
+	if (color_priority < 0 && color_priority != MapColor::Registration)
+		return nominal_width > 0 ? nominal_width * device_pixel : device_pixel;
+	if (nominal_width <= 0
+	    || (config.options.testFlag(RenderConfig::ForceMinSize)
+	        && nominal_width * config.scaling < 1))
+		return device_pixel;
+	return nominal_width;
+}
+
+bool omitSubpixelStroke(qreal nominal_width, const RenderPrimitiveConfig& config)
+{
+	// Match the legacy screen optimization without discarding cosmetic strokes.
+	return nominal_width > 0
+	    && config.options.testFlag(RenderConfig::Screen)
+	    && nominal_width * config.scaling < 0.125;
+}
+
+}  // namespace
+
 // ### DotRenderable ###
 
 DotRenderable::DotRenderable(const PointSymbol* symbol, MapCoordF coord)
@@ -96,14 +126,9 @@ CircleRenderable::CircleRenderable(const PointSymbol* symbol, MapCoordF coord)
 void CircleRenderable::appendTo(render::RenderIRBuilder& builder,
 	                            const RenderPrimitiveConfig& config) const
 {
-	auto width = line_width;
-	if (color_priority < 0 && color_priority != MapColor::Registration)
-		width /= config.scaling;
-	else if (config.options.testFlag(RenderConfig::ForceMinSize) && width * config.scaling < 1)
-		width = 0;
-
-	if (config.options.testFlag(RenderConfig::Screen) && line_width * config.scaling < 0.125)
+	if (omitSubpixelStroke(line_width, config))
 		return;
+	auto const width = effectiveStrokeWidth(line_width, color_priority, config);
 
 	auto bounds = render::fromQRectF(rect);
 	if (config.options.testFlag(RenderConfig::ForceMinSize) && rect.width() * config.scaling < 1.5)
@@ -425,14 +450,9 @@ void LineRenderable::extentIncludeJoin(quint32 i, qreal half_line_width, const L
 void LineRenderable::appendTo(render::RenderIRBuilder& builder,
 	                          const RenderPrimitiveConfig& config) const
 {
-	auto width = line_width;
-	if (color_priority < 0 && color_priority != MapColor::Registration)
-		width /= config.scaling;
-	else if (config.options.testFlag(RenderConfig::ForceMinSize) && width * config.scaling < 1)
-		width = 0;
-
-	if (config.options.testFlag(RenderConfig::Screen) && line_width * config.scaling < 0.125)
+	if (omitSubpixelStroke(line_width, config))
 		return;
+	auto const width = effectiveStrokeWidth(line_width, color_priority, config);
 
 	builder.strokePath(
 		path,

@@ -70,7 +70,8 @@ render::FramePacketPtr completeOperationFrame(render::FrameId id)
 	auto pixels = std::make_shared<const std::vector<std::uint8_t>>(
 		std::vector<std::uint8_t> { 0, 255, 0, 255 }
 	);
-	auto image = std::make_shared<const render::ImageData>(render::ImageData { 1, 1, 4, pixels });
+	auto image = std::make_shared<const render::ImageData>(
+		render::ImageData { 1, 1, 4, pixels, {} });
 	builder.drawImage(image, { 96, 8, 16, 16 });
 	builder.drawLinePattern(rectangle(88, 40, 120, 72), render::fromQColor(Qt::magenta),
 	                        0, 4, 0, 1);
@@ -125,13 +126,14 @@ render::FramePacketPtr mapFrame(Map& map, QSize viewport,
 	});
 }
 
-QImage referenceImage(const render::FramePacket& frame)
+QImage referenceImage(const render::FramePacket& frame,
+                      QColor background = Qt::white)
 {
 	auto const width = qCeil(frame.view.width * frame.view.device_pixel_ratio);
 	auto const height = qCeil(frame.view.height * frame.view.device_pixel_ratio);
 	QImage image(width, height, QImage::Format_ARGB32_Premultiplied);
 	image.setDevicePixelRatio(frame.view.device_pixel_ratio);
-	image.fill(Qt::white);
+	image.fill(background);
 	QPainter painter(&image);
 	painter.setRenderHint(QPainter::Antialiasing, true);
 	auto const completion = render::QPainterFrameRenderer().render(painter, frame);
@@ -293,6 +295,108 @@ void VelloRendererTest::offscreenGpuMatchesReference()
 	        << "high-delta pixels" << difference.high_delta_pixels;
 	QVERIFY(difference.mean_channel_delta < 3);
 	QVERIFY(difference.high_delta_pixels < actual.width() * actual.height() / 50);
+}
+
+void VelloRendererTest::cubicBezierRemainsCurvedOnGpu()
+{
+	// Map geometry is retained in millimetres and enlarged by the view transform.
+	// Exercise that split explicitly; flattening before the pass transform would
+	// turn a small-world-coordinate cubic into a visibly faceted polyline.
+	constexpr auto world_scale = 0.001;
+	render::RenderIRBuilder builder(45, { 0, 0, 64 * world_scale, 64 * world_scale });
+	render::PathBuilder curve;
+	curve.moveTo({ 8 * world_scale, 56 * world_scale });
+	curve.cubicTo(
+		{ 8 * world_scale, 8 * world_scale },
+		{ 56 * world_scale, 8 * world_scale },
+		{ 56 * world_scale, 56 * world_scale }
+	);
+	builder.strokePath(
+		curve.finish(), render::fromQColor(Qt::black),
+		{ .width = 2 * world_scale, .cap = render::LineCap::Flat,
+		  .join = render::LineJoin::Round, .miter_limit = 4 }
+	);
+
+	auto frame = std::make_shared<render::FramePacket>();
+	frame->id = 10;
+	frame->revision = 45;
+	frame->view = { 64, 64, 1, { 1 / world_scale, 0, 0, 1 / world_scale, 0, 0 } };
+	frame->vector_passes.push_back({ builder.finish() });
+
+	render::VelloRenderer renderer;
+	auto const rendered = renderer.renderOffscreen(frame);
+	QVERIFY2(rendered, renderer.lastError().c_str());
+	auto const actual = imageFromVello(*rendered);
+	auto const expected = referenceImage(*frame);
+
+	// A cubic reaches the center around y=20. Treating its control points as
+	// polyline vertices instead would draw a horizontal segment around y=8.
+	QVERIFY(actual.pixelColor(32, 20).lightness() < 80);
+	QVERIFY(actual.pixelColor(32, 8).lightness() > 220);
+	auto const difference = compareImages(actual, expected);
+	QVERIFY(difference.mean_channel_delta < 1.5);
+}
+
+void VelloRendererTest::affineImageSourceCropMatchesReference()
+{
+	constexpr auto width = std::uint32_t(6);
+	constexpr auto height = std::uint32_t(6);
+	auto pixels = std::make_shared<std::vector<std::uint8_t>>(
+		std::size_t(width * height * 4), std::uint8_t(0)
+	);
+	for (auto y = std::uint32_t(0); y < height; ++y)
+	{
+		for (auto x = std::uint32_t(0); x < width; ++x)
+		{
+			auto const offset = std::size_t((y * width + x) * 4);
+			(*pixels)[offset + 0] = 255;
+			(*pixels)[offset + 1] = 0;
+			(*pixels)[offset + 2] = 255;
+			(*pixels)[offset + 3] = 255;
+			if (x >= 1 && x < 5 && y >= 1 && y < 5)
+			{
+				(*pixels)[offset + 0] = std::uint8_t(20 + x * 15);
+				(*pixels)[offset + 1] = std::uint8_t(160 + y * 12);
+				(*pixels)[offset + 2] = 35;
+				(*pixels)[offset + 3] = std::uint8_t(80 + x * 20);
+			}
+		}
+	}
+	auto image = std::make_shared<const render::ImageData>(render::ImageData {
+		width, height, width * 4, std::move(pixels), {}
+	});
+
+	render::RenderIRBuilder builder(44, { 0, 0, 64, 64 });
+	builder.drawImage(
+		std::move(image),
+		{ 1, 1, 4, 4 },
+		{ 4, 1, -1, 4, 20, 10 }
+	);
+	auto frame = std::make_shared<render::FramePacket>();
+	frame->id = 9;
+	frame->revision = 44;
+	frame->view = { 64, 64, 1, {} };
+	frame->vector_passes.push_back({ builder.finish() });
+
+	render::VelloRenderer renderer;
+	auto const transparent = render::Color { 0, 0, 0, 0 };
+	auto const rendered = renderer.renderOffscreen(frame, transparent);
+	QVERIFY2(rendered, renderer.lastError().c_str());
+	auto const actual = imageFromVello(*rendered);
+	auto const expected = referenceImage(*frame, Qt::transparent);
+
+	QCOMPARE(actual.pixelColor(8, 8), QColor(Qt::transparent));
+	QCOMPARE(expected.pixelColor(8, 8), QColor(Qt::transparent));
+	QVERIFY(actual.pixelColor(29, 25).green() > 100);
+	QVERIFY(actual.pixelColor(29, 25).alpha() > 50);
+
+	auto const difference = compareImages(actual, expected);
+	qInfo() << "Affine cropped image Vello/QPainter mean channel delta"
+	        << difference.mean_channel_delta
+	        << "high-delta pixels" << difference.high_delta_pixels;
+	QVERIFY(difference.mean_channel_delta < 3.2);
+	QVERIFY(difference.high_delta_pixels
+	        < 2 * (actual.width() + actual.height()));
 }
 
 void VelloRendererTest::miterLimitOneMatchesReference()

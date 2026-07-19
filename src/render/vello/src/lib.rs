@@ -149,7 +149,8 @@ mod ffi {
         fn scene_draw_image(
             scene: &mut SceneBuilder,
             image: &RetainedImage,
-            target: Rect,
+            source: Rect,
+            image_to_scene: Transform,
             opacity: f64,
         ) -> bool;
         fn scene_draw_line_pattern(
@@ -528,11 +529,15 @@ fn new_retained_image(
 fn scene_draw_image(
     scene: &mut SceneBuilder,
     retained: &RetainedImage,
-    target: ffi::Rect,
+    source: ffi::Rect,
+    image_to_scene: ffi::Transform,
     opacity: f64,
 ) -> bool {
     scene.command_count += 1;
-    let Some(target) = rect(target) else {
+    let Some(source) = rect(source) else {
+        return false;
+    };
+    let Some(image_to_scene) = finite_transform(image_to_scene) else {
         return false;
     };
     let Some(image) = retained.image.clone() else {
@@ -543,6 +548,15 @@ fn scene_draw_image(
     }
     let width = image.width;
     let height = image.height;
+    let source = Rect::new(
+        source.x0.max(0.0),
+        source.y0.max(0.0),
+        source.x1.min(f64::from(width)),
+        source.y1.min(f64::from(height)),
+    );
+    if source.width() <= 0.0 || source.height() <= 0.0 {
+        return false;
+    }
     let brush = ImageBrush {
         image,
         sampler: ImageSampler {
@@ -552,14 +566,13 @@ fn scene_draw_image(
             alpha: opacity.clamp(0.0, 1.0) as f32,
         },
     };
-    let image_to_target = Affine::translate((target.x0, target.y0))
-        * Affine::scale_non_uniform(
-            target.width() / f64::from(width),
-            target.height() / f64::from(height),
-        );
-    scene
-        .scene
-        .draw_image(&brush, scene.transform() * image_to_target);
+    scene.scene.fill(
+        Fill::NonZero,
+        scene.transform() * image_to_scene,
+        &brush,
+        None,
+        &source,
+    );
     true
 }
 

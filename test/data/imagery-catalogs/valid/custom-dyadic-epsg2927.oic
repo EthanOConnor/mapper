@@ -1,0 +1,125 @@
+{
+  "$schema": "https://example.test/schemas/imagery-source-catalog-v1.schema.json",
+  "format": "org.openorienteering.imagery-catalog",
+  "version": 1,
+  "id": "org.example.mapping.synthetic-pierce",
+  "revision": 1,
+  "name": "Synthetic custom-grid catalog",
+  "description": "A neutral EPSG:2927 fixture derived from a regional cached service.",
+  "publisher": {
+    "name": "Example Mapping Club",
+    "url": "https://www.example.org/",
+    "contactUrl": "https://www.example.org/contact"
+  },
+  "created": "2026-07-01",
+  "updated": "2026-07-09",
+  "catalogLicense": "CC0-1.0",
+  "requires": ["tile-matrix-set.ogc-2.0", "tile-matrix-set.dyadic.v1"],
+  "sources": [
+    {
+      "id": "synthetic-aerial-2025",
+      "name": "Synthetic aerial 2025",
+      "description": "Exercises a non-global origin, request options, and translation.",
+      "type": "raster-tiles",
+      "tiles": ["https://tiles.example.test/arcgis/rest/services/aerial/MapServer/tile/${z}/${y}/${x}"],
+      "scheme": "xyz",
+      "format": "image/jpeg",
+      "minTileMatrix": "0",
+      "maxTileMatrix": "2",
+      "tileMatrixSet": {
+        "id": "org.example.synthetic-epsg2927",
+        "title": "Synthetic EPSG:2927 dyadic pyramid",
+        "crs": "EPSG:2927",
+        "orderedAxes": ["E", "N"],
+        "tileMatrices": [
+          {
+            "id": "0",
+            "scaleDenominator": 4354285.714285714,
+            "cellSize": 1219.2,
+            "pointOfOrigin": [890000, 967000],
+            "cornerOfOrigin": "topLeft",
+            "tileWidth": 256,
+            "tileHeight": 256,
+            "matrixWidth": 8,
+            "matrixHeight": 4
+          },
+          {
+            "id": "1",
+            "scaleDenominator": 2177142.857142857,
+            "cellSize": 609.6,
+            "pointOfOrigin": [890000, 967000],
+            "cornerOfOrigin": "topLeft",
+            "tileWidth": 256,
+            "tileHeight": 256,
+            "matrixWidth": 16,
+            "matrixHeight": 8
+          },
+          {
+            "id": "2",
+            "scaleDenominator": 1088571.4285714286,
+            "cellSize": 304.8,
+            "pointOfOrigin": [890000, 967000],
+            "cornerOfOrigin": "topLeft",
+            "tileWidth": 256,
+            "tileHeight": 256,
+            "matrixWidth": 32,
+            "matrixHeight": 16
+          }
+        ]
+      },
+      "tileMatrixLimits": [
+        {
+          "tileMatrix": "2",
+          "minTileRow": 1,
+          "maxTileRow": 12,
+          "minTileCol": 2,
+          "maxTileCol": 28
+        }
+      ],
+      "request": {
+        "referer": "https://www.example.org/maps/",
+        "emptyHttpStatusCodes": [204, 404]
+      },
+      "category": "aerial",
+      "startDate": "2025-04-01",
+      "endDate": "2025-09-30",
+      "coverage": {
+        "type": "Polygon",
+        "coordinates": [[[-122.9, 46.8], [-122.0, 46.8], [-122.0, 47.4], [-122.9, 47.4], [-122.9, 46.8]]]
+      },
+      "notices": {
+        "attributionText": "Synthetic test imagery",
+        "sourceUrl": "https://www.example.org/imagery",
+        "termsUrl": "https://www.example.org/terms",
+        "notes": "Not a production imagery source."
+      },
+      "registration": {
+        "direction": "source-to-corrected",
+        "sourceFrame": {"crs": "EPSG:2927"},
+        "targetFrame": {
+          "crs": "EPSG:2927",
+          "id": "org.example.mapping.survey-frame-2026"
+        },
+        "operation": {
+          "type": "translation2d",
+          "unit": "crs",
+          "dx": -0.42,
+          "dy": 0.17
+        },
+        "provenance": {
+          "method": "survey-control",
+          "observed": "2026-06-20",
+          "author": "Example Mapping Team",
+          "rmsError": 0.12,
+          "notes": "Fit from synthetic control points."
+        }
+      },
+      "extensions": {
+        "org.example.mapping-team": {"reviewedBy": "Test suite"}
+      }
+    }
+  ],
+  "extensions": {
+    "org.example.mapping-team": {"fixture": true}
+  }
+}

@@ -347,6 +347,11 @@ void TemplateImage::collectRasterTiles(const QRectF&, double, bool, QVector<Rast
 	});
 }
 
+QRectF TemplateImage::getRasterRenderClip(bool) const
+{
+	return {};
+}
+
 QPointF TemplateImage::calcCenterOfGravity(QRgb background_color)
 {
 	int num_points = 0;

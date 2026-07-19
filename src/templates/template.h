@@ -28,6 +28,7 @@
 
 #include <QtGlobal>
 #include <QFlags>
+#include <QMetaType>
 #include <QObject>
 #include <QPointF>
 #include <QRectF>
@@ -62,6 +63,60 @@ struct ViewRenderContext
 	QRectF visible_map_rect;
 	double view_zoom = 1.0;
 };
+
+/** Status of exact resources required for print and export rendering. */
+struct OutputRenderPreparation
+{
+	enum class State
+	{
+		Ready,
+		Pending,
+		Failed,
+	};
+
+	State state = State::Ready;
+	qsizetype ready_resources = 0;
+	qsizetype total_resources = 0;
+	QString error;
+};
+
+/**
+ * Current state of resources used by a template.
+ *
+ * Counts are mutually exclusive current-resource buckets, and multiple buckets
+ * may be nonzero at once. The message is optional, non-persistent detail
+ * suitable for user interfaces.
+ */
+struct TemplateResourceStatus
+{
+	enum class Condition
+	{
+		Ready,
+		Loading,
+		Offline,
+		TransientFailure,
+		PermanentFailure,
+	};
+
+	qsizetype ready_resources = 0;
+	qsizetype loading_resources = 0;
+	qsizetype offline_resources = 0;
+	qsizetype transient_failures = 0;
+	qsizetype permanent_failures = 0;
+	QString message;
+
+	/** Returns the most actionable condition represented by the counts. */
+	Condition dominantCondition() const noexcept;
+
+	/** Returns whether this status contains information worth presenting. */
+	bool isReported() const noexcept;
+
+	/** Returns the sum of all resource counts. */
+	qsizetype totalResources() const noexcept;
+};
+
+bool operator==(const TemplateResourceStatus& lhs, const TemplateResourceStatus& rhs) noexcept;
+bool operator!=(const TemplateResourceStatus& lhs, const TemplateResourceStatus& rhs) noexcept;
 
 
 /**
@@ -377,6 +432,28 @@ public:
 
 	/** Publishes the current view goal to asynchronous template sources. */
 	virtual void updateRenderContext(const ViewRenderContext& context);
+
+	/**
+	 * Requests exact resources for a non-screen render.
+	 *
+	 * Implementations must never satisfy this contract with provisional
+	 * lower-resolution content. The caller polls while State::Pending and
+	 * calls finishOutputPreparation() exactly once after a non-ready result or
+	 * after all output drawing has completed.
+	 */
+	virtual OutputRenderPreparation prepareForOutput(
+		const QRectF& map_rect,
+		double pixels_per_map_unit);
+	virtual void finishOutputPreparation(bool cancelled);
+
+	/**
+	 * Returns the current, non-persistent resource status.
+	 *
+	 * The default implementation returns the value most recently published
+	 * with setResourceStatus(). Implementations maintaining their own status
+	 * may override this and call notifyResourceStatusChanged() after changes.
+	 */
+	virtual TemplateResourceStatus resourceStatus() const;
 	
 	/** 
 	 * Calculates the template's bounding box in map coordinates.
@@ -652,6 +729,14 @@ signals:
 	 * Emitted whenever template_state was changed.
 	 */
 	void templateStateChanged();
+
+	/**
+	 * Emitted after the resource status changes.
+	 *
+	 * Bursts of changes on the template's thread are coalesced into one
+	 * event-loop notification so views can update without tile-level churn.
+	 */
+	void resourceStatusChanged();
 	
 	
 protected:
@@ -659,6 +744,22 @@ protected:
 	 * Sets the error description which will be returned by errorString().
 	 */
 	void setErrorString(const QString &text);
+
+	/**
+	 * Publishes a new resource status.
+	 *
+	 * Calls from another thread are safely queued to the template's thread.
+	 * Negative counts are normalized to zero.
+	 */
+	void setResourceStatus(TemplateResourceStatus status);
+
+	/**
+	 * Schedules a coalesced resourceStatusChanged() notification.
+	 *
+	 * This is intended for implementations which override resourceStatus()
+	 * instead of using setResourceStatus().
+	 */
+	void notifyResourceStatusChanged();
 	
 	
 	/**
@@ -754,6 +855,10 @@ protected:
 	bool is_georeferenced = false;
 	
 private:	
+	/// Default resource status storage; runtime-only and deliberately not copied.
+	TemplateResourceStatus resource_status;
+	bool resource_status_change_pending = false;
+
 	// Properties for non-georeferenced templates (invalid if is_georeferenced is true) 
 	
 	/// Bounds correction offset for map templates. Must be masked out when saving.
@@ -796,6 +901,7 @@ protected:
 
 }  // namespace OpenOrienteering
 
+Q_DECLARE_METATYPE(OpenOrienteering::TemplateResourceStatus)
 Q_DECLARE_OPERATORS_FOR_FLAGS(OpenOrienteering::Template::ScribbleOptions)
 
 

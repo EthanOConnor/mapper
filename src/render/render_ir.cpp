@@ -172,7 +172,32 @@ void RenderIRBuilder::strokeEllipse(Rect bounds, Color color, StrokeStyle style,
 void RenderIRBuilder::drawImage(std::shared_ptr<const ImageData> image, Rect target,
 	                             double opacity)
 {
-	ir_->commands.emplace_back(DrawImage { std::move(image), target, opacity });
+	auto const source = image
+	                  ? Rect { 0, 0, double(image->width), double(image->height) }
+	                  : Rect {};
+	drawImage(std::move(image), source, target, opacity);
+}
+
+void RenderIRBuilder::drawImage(std::shared_ptr<const ImageData> image, Rect source,
+	                             Rect target, double opacity)
+{
+	Transform image_to_scene;
+	if (source.isValid() && target.isValid())
+	{
+		image_to_scene.m11 = target.width / source.width;
+		image_to_scene.m22 = target.height / source.height;
+		image_to_scene.dx = target.x - source.x * image_to_scene.m11;
+		image_to_scene.dy = target.y - source.y * image_to_scene.m22;
+	}
+	drawImage(std::move(image), source, image_to_scene, opacity);
+}
+
+void RenderIRBuilder::drawImage(std::shared_ptr<const ImageData> image, Rect source,
+	                             Transform image_to_scene, double opacity)
+{
+	ir_->commands.emplace_back(DrawImage {
+		std::move(image), source, image_to_scene, opacity
+	});
 }
 
 void RenderIRBuilder::drawLinePattern(PathPtr outline, Color color, double angle,

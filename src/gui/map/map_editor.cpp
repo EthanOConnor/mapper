@@ -114,6 +114,9 @@
 #include "gui/configure_grid_dialog.h"
 #include "gui/file_dialog.h"
 #include "gui/georeferencing_dialog.h"
+#include "gui/imagery/catalog_manager_dialog.h"
+#include "gui/imagery/imagery_network_permissions_dialog.h"
+#include "gui/imagery/online_imagery_dialog.h"
 #include "gui/main_window.h"
 #include "gui/print_widget.h"
 #include "gui/simple_course_dialog.h"
@@ -140,6 +143,11 @@
 #include "sensors/gps_display.h"
 #include "sensors/gps_temporary_markers.h"
 #include "sensors/gps_track_recorder.h"
+#include "imagery/imagery_catalog_repository.h"
+#include "imagery/imagery_network_permissions.h"
+#include "imagery/imagery_source_snapshot.h"
+#include "imagery/tile_network_manager.h"
+#include "templates/online_raster_template.h"
 #include "templates/paint_on_template_feature.h"
 #include "templates/template.h"
 #include "templates/template_dialog_reopen.h"
@@ -1040,6 +1048,47 @@ void MapEditorController::createActions()
 	//QAction* template_config_window_act = newCheckAction("templateconfigwindow", tr("Template configurations window"), this, SLOT(showTemplateConfigurationsWindow(bool)), "window-new", tr("Show/Hide the template configurations window"));
 	//QAction* template_visibilities_window_act = newCheckAction("templatevisibilitieswindow", tr("Template visibilities window"), this, SLOT(showTemplateVisbilitiesWindow(bool)), "window-new", tr("Show/Hide the template visibilities window"));
 	open_template_act = newAction("opentemplate", tr("Open template..."), this, SLOT(openTemplateClicked()), nullptr, QString{}, "templates_menu.html");
+	online_imagery_act = newAction(
+		"openonlineimagery",
+		tr("Add online imagery…"),
+		this,
+		SLOT(addOnlineImageryClicked()),
+		"image",
+		tr("Browse installed OIC catalogs or enter a tiled imagery URL"),
+		"templates_menu.html");
+	manage_imagery_catalogs_act = newAction(
+		"manageimagerycatalogs",
+		tr("Manage imagery catalogs…"),
+		this,
+		SLOT(manageImageryCatalogsClicked()),
+		nullptr,
+		QString{},
+		"templates_menu.html");
+	manage_imagery_network_permissions_act = newAction(
+		"manageimagerynetworkpermissions",
+		tr("Imagery network permissions…"),
+		this,
+		SLOT(manageImageryNetworkPermissionsClicked()),
+		nullptr,
+		tr("Review or revoke private-network imagery access on this device"),
+		"templates_menu.html");
+	// Observe blocked origins before map templates can make network requests.
+	(void)imagery::ImageryNetworkPermissions::instance();
+	offline_imagery_act = newCheckAction(
+		"offlineimagery",
+		tr("Work offline for imagery"),
+		this,
+		SLOT(setOfflineImagery(bool)),
+		nullptr,
+		tr("Use only imagery already present in the local HTTP cache"),
+		"templates_menu.html");
+	offline_imagery_act->setChecked(
+		imagery::TileNetworkManager::instance().offlineMode());
+	connect(
+		&imagery::TileNetworkManager::instance(),
+		&imagery::TileNetworkManager::offlineModeChanged,
+		offline_imagery_act,
+		&QAction::setChecked);
 	reopen_template_act = newAction("reopentemplate", tr("Reopen template..."), this, SLOT(reopenTemplateClicked()), nullptr, QString{}, "templates_menu.html");
 
 	tags_window_act = newCheckAction("tagswindow", tr("Tag editor"), this, SLOT(showTagsWindow(bool)), "tag-editor", tr("Show/Hide the tag editor window"), "tag_editor.html");
@@ -1293,6 +1342,11 @@ void MapEditorController::createMenuAndToolbars()
 	template_menu->addAction(template_window_act);
 	/*template_menu->addAction(template_config_window_act);
 	template_menu->addAction(template_visibilities_window_act);*/
+	template_menu->addSeparator();
+	template_menu->addAction(online_imagery_act);
+	template_menu->addAction(manage_imagery_catalogs_act);
+	template_menu->addAction(manage_imagery_network_permissions_act);
+	template_menu->addAction(offline_imagery_act);
 	template_menu->addSeparator();
 	template_menu->addAction(open_template_act);
 	template_menu->addAction(reopen_template_act);
@@ -2342,6 +2396,97 @@ void MapEditorController::openTemplateClicked()
 		showTemplateWindow(true);
 	}
 }
+
+void MapEditorController::addOnlineImageryClicked()
+{
+	if (map->getGeoreferencing().getState()
+	    != Georeferencing::Geospatial)
+	{
+		auto const answer = QMessageBox::question(
+			window,
+			tr("Georeferencing required"),
+			tr("Online imagery needs a georeferenced map. "
+			   "Open the georeferencing settings now?"),
+			QMessageBox::Yes | QMessageBox::Cancel,
+			QMessageBox::Yes);
+		if (answer == QMessageBox::Yes)
+			georeferencing_act->trigger();
+		return;
+	}
+
+	auto& repository =
+		imagery::ImageryCatalogRepository::instance();
+	auto& network = imagery::TileNetworkManager::instance();
+	auto& permissions =
+		imagery::ImageryNetworkPermissions::instance();
+	OnlineImageryDialog dialog(
+		repository,
+		network,
+		window,
+		&permissions);
+	if (dialog.exec() != QDialog::Accepted)
+		return;
+
+	QString error;
+	auto snapshot = imagery::ImagerySourceSnapshotCodec::encode(
+		dialog.selectedSource(),
+		&error);
+	if (!snapshot)
+	{
+		QMessageBox::warning(
+			window,
+			tr("Could not add online imagery"),
+			error);
+		return;
+	}
+	auto online = std::make_unique<OnlineRasterTemplate>(
+		std::move(*snapshot),
+		map);
+	if (!dialog.displayName().isEmpty())
+		online->setDisplayName(dialog.displayName());
+	if (!online->setupAndLoad(window, map_widget->getMapView()))
+	{
+		QMessageBox::warning(
+			window,
+			tr("Could not add online imagery"),
+			online->errorString());
+		return;
+	}
+	map->addTemplate(-1, std::move(online));
+	hideAllTemplates(false);
+	showTemplateWindow(true);
+}
+
+
+void MapEditorController::manageImageryCatalogsClicked()
+{
+	CatalogManagerDialog dialog(
+		imagery::ImageryCatalogRepository::instance(),
+		window,
+		&imagery::ImageryNetworkPermissions::instance());
+	dialog.exec();
+}
+
+
+void MapEditorController::manageImageryNetworkPermissionsClicked()
+{
+	ImageryNetworkPermissionsDialog dialog(
+		imagery::ImageryNetworkPermissions::instance(),
+		window);
+	dialog.exec();
+}
+
+
+void MapEditorController::setOfflineImagery(bool offline)
+{
+	imagery::TileNetworkManager::instance().setOfflineMode(offline);
+	window->showStatusBarMessage(
+		offline
+			? tr("Imagery is offline; only cached tiles will be used.")
+			: tr("Imagery is online."),
+		3000);
+}
+
 
 void MapEditorController::reopenTemplateClicked()
 {

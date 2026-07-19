@@ -198,7 +198,7 @@ public:
 			images.erase(found);
 		}
 
-		auto const& bytes = *image->rgba8;
+		auto const bytes = image->bytes();
 		auto retained = std::make_shared<RetainedImage>(ffi::new_retained_image(
 			rust::Slice<const std::uint8_t> { bytes.data(), bytes.size() },
 			image->width, image->height, image->bytes_per_row
@@ -283,11 +283,12 @@ public:
 				}
 				else if constexpr (std::is_same_v<T, DrawImage>)
 				{
-					if (!op.image || !op.image->rgba8)
+					if (!op.image || op.image->bytes().empty())
 						throw std::logic_error("Vello received invalid immutable image data");
 					auto const image = retainImage(op.image);
 					auto const accepted = ffi::scene_draw_image(
-						*builder, *image->image, ffiRect(op.target), op.opacity
+						*builder, *image->image, ffiRect(op.source),
+						ffiTransform(op.image_to_scene), op.opacity
 					);
 					if (!accepted)
 						throw std::logic_error("Vello rejected immutable image data");

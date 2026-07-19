@@ -58,9 +58,41 @@ public:
 		out += tiles_;
 	}
 
+	void setTiles(QVector<RasterTemplateTile> tiles)
+	{
+		tiles_ = std::move(tiles);
+	}
+
 private:
 	QVector<RasterTemplateTile> tiles_;
 	QRectF extent_;
+};
+
+class CountingRasterLease final : public RasterMemoryLease
+{
+public:
+	CountingRasterLease(qint64* counter, qint64 bytes)
+	 : counter(counter)
+	 , bytes(bytes)
+	{
+		*counter += bytes;
+	}
+
+	~CountingRasterLease() override
+	{
+		*counter -= bytes;
+	}
+
+	void shrinkTo(qint64 retained_bytes) noexcept override
+	{
+		retained_bytes = std::clamp<qint64>(
+			retained_bytes, 0, bytes);
+		*counter -= bytes - retained_bytes;
+		bytes = retained_bytes;
+	}
+
+	qint64* counter = nullptr;
+	qint64 bytes = 0;
 };
 
 QImage solidImage(QSize size, QColor color)
@@ -138,10 +170,14 @@ std::size_t imageCommandCount(const render::VectorPass& pass)
 	});
 }
 
-QImage renderReference(const render::FramePacket& frame)
+QImage renderReference(const render::FramePacket& frame,
+                       QColor background = Qt::white)
 {
-	QImage image(16, 16, QImage::Format_ARGB32_Premultiplied);
-	image.fill(Qt::white);
+	auto const width = qCeil(frame.view.width * frame.view.device_pixel_ratio);
+	auto const height = qCeil(frame.view.height * frame.view.device_pixel_ratio);
+	QImage image(width, height, QImage::Format_ARGB32_Premultiplied);
+	image.setDevicePixelRatio(frame.view.device_pixel_ratio);
+	image.fill(background);
 	QPainter painter(&image);
 	auto const completion = render::QPainterFrameRenderer().render(painter, frame);
 	Q_ASSERT(completion.status == render::FrameStatus::Presented);
@@ -157,10 +193,12 @@ QColor velloPixel(const render::VelloImage& image, QPoint point)
 	return view.pixelColor(point);
 }
 
-QImage renderVello(const render::FramePacketPtr& frame)
+QImage renderVello(
+	const render::FramePacketPtr& frame,
+	render::Color background = { 65535, 65535, 65535, 65535 })
 {
 	render::VelloRenderer renderer;
-	auto const rendered = renderer.renderOffscreen(frame);
+	auto const rendered = renderer.renderOffscreen(frame, background);
 	Q_ASSERT_X(rendered, Q_FUNC_INFO, renderer.lastError().c_str());
 	QImage view(
 		rendered->rgba8.data(), int(rendered->width), int(rendered->height),
@@ -224,6 +262,109 @@ void TemplateLayerPlannerTest::preservesLayerOrderAndRetainedScenes()
 	QVERIFY(std::abs(actual.blue() - expected.blue()) <= 2);
 }
 
+void TemplateLayerPlannerTest::
+	retainsRasterMemoryLeaseWithImmutableScene()
+{
+	Map map;
+	MapView view { &map };
+	qint64 reserved_bytes = 0;
+	auto image = solidImage({ 4, 4 }, Qt::red);
+	auto const target = QRectF(-2, -2, 4, 4);
+	RasterTemplateTile source_tile(
+		image,
+		target,
+		QRectF(QPointF(0, 0), QSizeF(image.size())),
+		quint64(image.cacheKey()),
+		false,
+		false,
+		{},
+		false,
+		{},
+		[&reserved_bytes](qint64 bytes) {
+			return std::make_shared<CountingRasterLease>(
+				&reserved_bytes, bytes);
+		});
+	map.addTemplate(
+		0,
+		std::make_unique<SyntheticRasterTemplate>(
+			&map,
+			QVector<RasterTemplateTile> {
+				std::move(source_tile)
+			},
+			target));
+	view.setTemplateVisibility(
+		map.getTemplate(0), { 1, true });
+
+	{
+		render::TemplateLayerPlanner planner;
+		auto plan = planner.plan(
+			map, view,
+			render::fromQRectF(target), 1);
+		QVERIFY(plan.complete);
+		QCOMPARE(reserved_bytes, qint64(4 * 4 * 4));
+		auto const& pass = plan.below_map.empty()
+		                 ? plan.above_map.front()
+		                 : plan.below_map.front();
+		auto const draw = std::ranges::find_if(
+			pass.scene->commands,
+			[](auto const& command) {
+				return std::holds_alternative<render::DrawImage>(command);
+			});
+		QVERIFY(draw != pass.scene->commands.end());
+		auto const* image = std::get_if<render::DrawImage>(&*draw);
+		QVERIFY(image);
+		QVERIFY(!image->image->rgba8);
+		QVERIFY(!image->image->bytes().empty());
+		plan = {};
+		QCOMPARE(reserved_bytes, qint64(4 * 4 * 4));
+	}
+	QCOMPARE(reserved_bytes, qint64(0));
+}
+
+void TemplateLayerPlannerTest::
+	leasesTransparentMosaicPeakAndRetainedMemory()
+{
+	Map map;
+	MapView view { &map };
+	qint64 reserved_bytes = 0;
+	qint64 requested_bytes = 0;
+	auto reserve = [&reserved_bytes, &requested_bytes](qint64 bytes) {
+		requested_bytes = bytes;
+		return std::make_shared<CountingRasterLease>(
+			&reserved_bytes, bytes);
+	};
+	auto left = solidImage({ 4, 4 }, QColor(255, 0, 0, 128));
+	auto right = solidImage({ 4, 4 }, QColor(0, 0, 255, 128));
+	auto left_tile = tile(left, { -4, -2, 4, 4 });
+	auto right_tile = tile(right, { 0, -2, 4, 4 });
+	left_tile.reserve_render_memory = reserve;
+	right_tile.reserve_render_memory = reserve;
+	map.addTemplate(
+		0,
+		std::make_unique<SyntheticRasterTemplate>(
+			&map,
+			QVector<RasterTemplateTile> {
+				std::move(left_tile),
+				std::move(right_tile),
+			},
+			QRectF(-4, -2, 8, 4)));
+	view.setTemplateVisibility(map.getTemplate(0), { 1, true });
+
+	{
+		render::TemplateLayerPlanner planner;
+		auto plan = planner.plan(
+			map, view, { -4, -2, 8, 4 }, 1, false);
+		QVERIFY(plan.complete);
+		QCOMPARE(plan.newly_resident_images, std::size_t(1));
+		QCOMPARE(requested_bytes, qint64(2 * 8 * 4 * 4));
+		QCOMPARE(reserved_bytes, qint64(8 * 4 * 4));
+		plan = {};
+		planner.clear();
+		QCOMPARE(reserved_bytes, qint64(0));
+	}
+	QCOMPARE(reserved_bytes, qint64(0));
+}
+
 void TemplateLayerPlannerTest::recordsVectorMapAndTrackTemplates()
 {
 	auto const test_dir = QDir(QString::fromUtf8(MAPPER_TEST_SOURCE_DIR));
@@ -269,13 +410,13 @@ void TemplateLayerPlannerTest::boundsImageAdmissionAndPreservesVelloIdentity()
 	Map map;
 	MapView view { &map };
 	QVector<RasterTemplateTile> tiles;
-	for (int index = 0; index < 6; ++index)
+	for (int index = 0; index < 200; ++index)
 	{
-		auto image = solidImage({ 2, 2 }, QColor::fromHsv(index * 30, 255, 255));
-		tiles.push_back(tile(std::move(image), { -6.0 + index * 2.0, -1, 2, 2 }));
+		auto image = solidImage({ 2, 2 }, QColor::fromHsv(index % 360, 255, 255));
+		tiles.push_back(tile(std::move(image), { -200.0 + index * 2.0, -1, 2, 2 }));
 	}
 	map.addTemplate(0, std::make_unique<SyntheticRasterTemplate>(
-		&map, std::move(tiles), QRectF(-6, -1, 12, 2)
+		&map, std::move(tiles), QRectF(-200, -1, 400, 2)
 	));
 	map.setFirstFrontTemplate(1);
 	view.setTemplateVisibility(map.getTemplate(0), { 1, true });
@@ -294,32 +435,68 @@ void TemplateLayerPlannerTest::boundsImageAdmissionAndPreservesVelloIdentity()
 	QVERIFY(renderer.setSurface(surface));
 
 	{
-		auto first = template_planner.plan(map, view, { -8, -8, 16, 16 }, 1);
+		auto first = template_planner.plan(map, view, { -256, -8, 512, 16 }, 1);
 		QVERIFY(!first.complete);
-		QCOMPARE(first.newly_resident_images, std::size_t(4));
+		QCOMPARE(first.newly_resident_images, std::size_t(192));
 		QCOMPARE(first.below_map.size(), std::size_t(1));
-		QCOMPARE(imageCommandCount(first.below_map.front()), std::size_t(4));
+		QCOMPARE(imageCommandCount(first.below_map.front()), std::size_t(192));
 		auto const frame = frameFor(*snapshot, frame_planner, std::move(first));
 		QVERIFY(renderer.submit(frame, surface));
-		QCOMPARE(renderer.cachedImageCount(), std::size_t(4));
+		QCOMPARE(renderer.cachedImageCount(), std::size_t(192));
 	}
 
-	auto second = template_planner.plan(map, view, { -8, -8, 16, 16 }, 1);
+	auto second = template_planner.plan(map, view, { -256, -8, 512, 16 }, 1);
 	QVERIFY(second.complete);
-	QCOMPARE(second.newly_resident_images, std::size_t(2));
+	QCOMPARE(second.newly_resident_images, std::size_t(8));
 	QCOMPARE(second.below_map.size(), std::size_t(1));
-	QCOMPARE(imageCommandCount(second.below_map.front()), std::size_t(6));
+	QCOMPARE(imageCommandCount(second.below_map.front()), std::size_t(200));
 	auto const complete_scene = second.below_map.front().scene;
 	{
 		auto const frame = frameFor(*snapshot, frame_planner, std::move(second));
 		QVERIFY(renderer.submit(frame, surface));
-		QCOMPARE(renderer.cachedImageCount(), std::size_t(6));
+		QCOMPARE(renderer.cachedImageCount(), std::size_t(200));
 	}
 
-	auto third = template_planner.plan(map, view, { -8, -8, 16, 16 }, 1);
+	auto third = template_planner.plan(map, view, { -256, -8, 512, 16 }, 1);
 	QVERIFY(third.complete);
 	QCOMPARE(third.newly_resident_images, std::size_t(0));
 	QCOMPARE(third.below_map.front().scene, complete_scene);
+}
+
+void TemplateLayerPlannerTest::sharesImageAdmissionAcrossVisibleRasterLayers()
+{
+	Map map;
+	MapView view { &map };
+	for (int layer = 0; layer < 4; ++layer)
+	{
+		QVector<RasterTemplateTile> tiles;
+		for (int index = 0; index < 60; ++index)
+		{
+			auto image = solidImage(
+				{ 2, 2 }, QColor::fromHsv((layer * 60 + index) % 360, 255, 255));
+			tiles.push_back(tile(
+				std::move(image), { -60.0 + index * 2.0, -1, 2, 2 }));
+		}
+		map.addTemplate(layer, std::make_unique<SyntheticRasterTemplate>(
+			&map, std::move(tiles), QRectF(-60, -1, 120, 2)));
+		view.setTemplateVisibility(map.getTemplate(layer), { 1, true });
+	}
+	map.setFirstFrontTemplate(4);
+
+	render::TemplateLayerPlanner planner;
+	auto first = planner.plan(map, view, { -64, -8, 128, 16 }, 1);
+	QVERIFY(!first.complete);
+	QCOMPARE(first.newly_resident_images, std::size_t(192));
+	QCOMPARE(first.below_map.size(), std::size_t(4));
+	for (auto const& pass : first.below_map)
+		QCOMPARE(imageCommandCount(pass), std::size_t(48));
+
+	auto second = planner.plan(map, view, { -64, -8, 128, 16 }, 1);
+	QVERIFY(second.complete);
+	QCOMPARE(second.newly_resident_images, std::size_t(48));
+	QCOMPARE(second.below_map.size(), std::size_t(4));
+	for (auto const& pass : second.below_map)
+		QCOMPARE(imageCommandCount(pass), std::size_t(60));
 }
 
 void TemplateLayerPlannerTest::marksFallbackLayersIncomplete()
@@ -341,20 +518,234 @@ void TemplateLayerPlannerTest::marksFallbackLayersIncomplete()
 	QCOMPARE(imageCommandCount(plan.below_map.front()), std::size_t(1));
 }
 
-void TemplateLayerPlannerTest::preservesTransparentGuttersWithoutTileSeams()
+void TemplateLayerPlannerTest::rebuildsRasterSceneForCurrentZoomGeometry()
 {
-	QImage source(16, 8, QImage::Format_RGBA8888);
-	for (int y = 0; y < source.height(); ++y)
-	{
-		for (int x = 0; x < source.width(); ++x)
-		{
-			source.setPixelColor(
-				x, y,
-				QColor(20 + x * 12, 190 - x * 7, 30 + y * 20, 80 + x * 8)
-			);
-		}
-	}
+	Map map;
+	MapView view { &map };
+	auto raster = std::make_unique<SyntheticRasterTemplate>(
+		&map,
+		QVector<RasterTemplateTile> {
+			tile(solidImage({ 4, 4 }, Qt::red), { -2, -2, 4, 4 })
+		},
+		QRectF(-2, -2, 4, 4));
+	auto* raster_ptr = raster.get();
+	map.addTemplate(0, std::move(raster));
+	map.setFirstFrontTemplate(0);
+	view.setTemplateVisibility(map.getTemplate(0), { 1, true });
 
+	render::TemplateLayerPlanner planner;
+	auto first = planner.plan(map, view, { -8, -8, 16, 16 }, 1);
+	QVERIFY(first.complete);
+	QCOMPARE(first.above_map.size(), std::size_t(1));
+	auto const complete_scene = first.above_map.front().scene;
+
+	raster_ptr->setTiles({ RasterTemplateTile {
+		{}, { -4, -4, 8, 8 }, {}, 0, true, false
+	} });
+	auto loading = planner.plan(map, view, { -8, -8, 16, 16 }, 2);
+	QVERIFY(!loading.complete);
+	QCOMPARE(loading.above_map.size(), std::size_t(1));
+	QCOMPARE(loading.above_map.front().scene, complete_scene);
+
+	// A translucent partial replacement cannot be layered over retained pixels
+	// without changing opacity, so it remains an all-or-nothing transition.
+	auto translucent = tile(
+		solidImage({ 4, 4 }, QColor(0, 0, 255, 128)), { -2, -2, 2, 4 }
+	);
+	raster_ptr->setTiles({
+		std::move(translucent),
+		RasterTemplateTile { {}, { 0, -2, 2, 4 }, {}, 0, true, false },
+	});
+	loading = planner.plan(map, view, { -8, -8, 16, 16 }, 2);
+	QVERIFY(!loading.complete);
+	QCOMPARE(loading.above_map.size(), std::size_t(1));
+	QCOMPARE(loading.above_map.front().scene, complete_scene);
+
+	// A partial opaque replacement refines over retained coverage. The current
+	// half must win, while the missing half remains covered by the old scene.
+	auto partial = tile(
+		solidImage({ 4, 4 }, Qt::blue), { -2, -2, 2, 4 }
+	);
+	raster_ptr->setTiles({
+		std::move(partial),
+		RasterTemplateTile { {}, { 0, -2, 2, 4 }, {}, 0, true, false },
+	});
+	loading = planner.plan(map, view, { -8, -8, 16, 16 }, 2);
+	QVERIFY(!loading.complete);
+	QCOMPARE(loading.above_map.size(), std::size_t(1));
+	auto const snapshot = map.publishRenderSnapshot();
+	QVERIFY(snapshot);
+	render::FramePlanner frame_planner;
+	auto transition_frame = frameFor(
+		*snapshot, frame_planner, std::move(loading)
+	);
+	auto transition = renderReference(*transition_frame);
+	QCOMPARE(transition.pixelColor(7, 8), QColor(Qt::blue));
+	QCOMPARE(transition.pixelColor(9, 8), QColor(Qt::red));
+
+	auto provisional = tile(
+		solidImage({ 8, 4 }, Qt::blue), { -4, -2, 8, 4 }
+	);
+	provisional.provisional = true;
+	raster_ptr->setTiles({ std::move(provisional) });
+	loading = planner.plan(map, view, { -8, -8, 16, 16 }, 2);
+	QVERIFY(!loading.complete);
+	QCOMPARE(loading.above_map.size(), std::size_t(1));
+	QCOMPARE(imageCommandCount(loading.above_map.front()), std::size_t(1));
+	QVERIFY(loading.above_map.front().scene != complete_scene);
+	transition_frame = frameFor(
+		*snapshot, frame_planner, std::move(loading)
+	);
+	transition = renderReference(*transition_frame);
+	QCOMPARE(transition.pixelColor(6, 8), QColor(Qt::blue));
+	QCOMPARE(transition.pixelColor(10, 8), QColor(Qt::blue));
+
+	QVector<RasterTemplateTile> next_zoom;
+	for (int index = 0; index < 6; ++index)
+	{
+		next_zoom.push_back(tile(
+			solidImage({ 2, 2 }, QColor::fromHsv(index * 30, 255, 255)),
+			{ -6.0 + index * 2.0, -1, 2, 2 }
+		));
+	}
+	raster_ptr->setTiles(std::move(next_zoom));
+	loading = planner.plan(map, view, { -8, -8, 16, 16 }, 2);
+	QVERIFY(loading.complete);
+	QCOMPARE(loading.newly_resident_images, std::size_t(6));
+	QCOMPARE(loading.above_map.size(), std::size_t(1));
+	QVERIFY(loading.above_map.front().scene != complete_scene);
+	auto ready = planner.plan(map, view, { -8, -8, 16, 16 }, 2);
+	QVERIFY(ready.complete);
+	QCOMPARE(ready.newly_resident_images, std::size_t(0));
+	QCOMPARE(ready.above_map.size(), std::size_t(1));
+	QVERIFY(ready.above_map.front().scene != complete_scene);
+}
+
+void TemplateLayerPlannerTest::reusesResidentPixelsWhileRebuildingProvisionalGeometry()
+{
+	Map map;
+	MapView view { &map };
+	auto pixels = solidImage({ 4, 4 }, Qt::blue);
+	auto initial = tile(pixels, { -2, -2, 4, 4 });
+	initial.image_to_map = QTransform(1, 0, 0, 1, -2, -2);
+	initial.has_image_to_map = true;
+	auto raster = std::make_unique<SyntheticRasterTemplate>(
+		&map, QVector<RasterTemplateTile> { std::move(initial) },
+		QRectF(-2, -2, 4, 4));
+	auto* raster_ptr = raster.get();
+	map.addTemplate(0, std::move(raster));
+	map.setFirstFrontTemplate(1);
+	view.setTemplateVisibility(map.getTemplate(0), { 1, true });
+
+	render::TemplateLayerPlanner planner;
+	auto const first = planner.plan(map, view, { -8, -8, 16, 16 }, 1);
+	QVERIFY(first.complete);
+	QCOMPARE(first.newly_resident_images, std::size_t(1));
+	QCOMPARE(first.below_map.size(), std::size_t(1));
+	auto const first_scene = first.below_map.front().scene;
+
+	auto fallback = tile(pixels, { -2, -2, 4, 4 });
+	fallback.image_to_map = QTransform(0.75, 0.1, -0.05, 0.9, -1.5, -2.25);
+	fallback.has_image_to_map = true;
+	fallback.provisional = true;
+	raster_ptr->setTiles({ std::move(fallback) });
+	auto const second = planner.plan(map, view, { -8, -8, 16, 16 }, 2);
+	QVERIFY(!second.complete);
+	QCOMPARE(second.newly_resident_images, std::size_t(0));
+	QCOMPARE(second.below_map.size(), std::size_t(1));
+	QVERIFY(second.below_map.front().scene != first_scene);
+	auto const command = std::ranges::find_if(
+		second.below_map.front().scene->commands,
+		[](auto const& value) { return std::holds_alternative<render::DrawImage>(value); });
+	QVERIFY(command != second.below_map.front().scene->commands.end());
+	QCOMPARE(std::get<render::DrawImage>(*command).image_to_scene.dx, -1.5);
+	QCOMPARE(std::get<render::DrawImage>(*command).image_to_scene.dy, -2.25);
+}
+
+void TemplateLayerPlannerTest::drawsProvisionalDirectTilesBeforeExactTiles()
+{
+	Map map;
+	MapView view { &map };
+	auto exact = tile(solidImage({ 4, 4 }, Qt::blue), { -2, -2, 4, 4 });
+	exact.image_to_map = QTransform(1, 0, 0, 1, -2, -2);
+	exact.has_image_to_map = true;
+	auto fallback = tile(solidImage({ 4, 4 }, Qt::red), { -2, -2, 4, 4 });
+	fallback.provisional = true;
+	fallback.image_to_map = exact.image_to_map;
+	fallback.has_image_to_map = true;
+	map.addTemplate(0, std::make_unique<SyntheticRasterTemplate>(
+		&map,
+		QVector<RasterTemplateTile> {
+			std::move(exact),
+			std::move(fallback),
+		},
+		QRectF(-2, -2, 4, 4)
+	));
+	map.setFirstFrontTemplate(1);
+	view.setTemplateVisibility(map.getTemplate(0), { 1, true });
+
+	render::TemplateLayerPlanner template_planner;
+	auto plan = template_planner.plan(map, view, { -8, -8, 16, 16 }, 1);
+	QVERIFY(!plan.complete);
+	QCOMPARE(plan.below_map.size(), std::size_t(1));
+	QCOMPARE(imageCommandCount(plan.below_map.front()), std::size_t(2));
+
+	auto const snapshot = map.publishRenderSnapshot();
+	QVERIFY(snapshot);
+	render::FramePlanner frame_planner;
+	auto const frame = frameFor(*snapshot, frame_planner, std::move(plan));
+	auto const rendered = renderReference(*frame, Qt::transparent);
+	QCOMPARE(rendered.pixelColor(8, 8), QColor(Qt::blue));
+}
+
+void TemplateLayerPlannerTest::respectsExplicitImageToMapTransform()
+{
+	Map map;
+	MapView view { &map };
+	auto direct = tile(solidImage({ 4, 3 }, Qt::magenta), { 100, 200, 4, 3 });
+	direct.image_to_map = QTransform(1.25, 0.2, -0.15, 0.9, -2.5, -1.25);
+	direct.has_image_to_map = true;
+	auto raster = std::make_unique<SyntheticRasterTemplate>(
+		&map, QVector<RasterTemplateTile> { std::move(direct) }, QRectF(-4, -3, 8, 6)
+	);
+	raster->setTemplateX(5000);
+	raster->setTemplateY(-3000);
+	raster->setTemplateScaleX(7);
+	raster->setTemplateRotation(0.35);
+	map.addTemplate(0, std::move(raster));
+	map.setFirstFrontTemplate(1);
+	view.setTemplateVisibility(map.getTemplate(0), { 1, true });
+
+	render::TemplateLayerPlanner planner;
+	auto const plan = planner.plan(map, view, { -8, -8, 16, 16 }, 1);
+	QVERIFY(plan.complete);
+	QCOMPARE(plan.below_map.size(), std::size_t(1));
+	QCOMPARE(imageCommandCount(plan.below_map.front()), std::size_t(1));
+	auto const command = std::ranges::find_if(
+		plan.below_map.front().scene->commands,
+		[](auto const& value) { return std::holds_alternative<render::DrawImage>(value); }
+	);
+	QVERIFY(command != plan.below_map.front().scene->commands.end());
+	auto const& image = std::get<render::DrawImage>(*command);
+	QCOMPARE(image.source.x, 0.0);
+	QCOMPARE(image.source.y, 0.0);
+	QCOMPARE(image.source.width, 4.0);
+	QCOMPARE(image.source.height, 3.0);
+	QCOMPARE(image.image_to_scene.m11, 1.25);
+	QCOMPARE(image.image_to_scene.m12, 0.2);
+	QCOMPARE(image.image_to_scene.m21, -0.15);
+	QCOMPARE(image.image_to_scene.m22, 0.9);
+	QCOMPARE(image.image_to_scene.dx, -2.5);
+	QCOMPARE(image.image_to_scene.dy, -1.25);
+}
+
+namespace {
+
+void verifyGutterSeams(
+	QImage source,
+	std::size_t expected_images,
+	int max_channel_delta)
+{
 	Map tiled_map;
 	MapView tiled_view { &tiled_map };
 	auto left = source.copy(0, 0, 9, 8);
@@ -388,6 +779,9 @@ void TemplateLayerPlannerTest::preservesTransparentGuttersWithoutTileSeams()
 	auto whole_plan = whole_planner.plan(whole_map, whole_view, { -10, -7, 20, 14 }, 3.2);
 	QVERIFY(tiled_plan.complete);
 	QVERIFY(whole_plan.complete);
+	QCOMPARE(tiled_plan.newly_resident_images, expected_images);
+	QCOMPARE(tiled_plan.below_map.size(), std::size_t(1));
+	QCOMPARE(imageCommandCount(tiled_plan.below_map.front()), expected_images);
 
 	auto const tiled_snapshot = tiled_map.publishRenderSnapshot();
 	auto const whole_snapshot = whole_map.publishRenderSnapshot();
@@ -395,12 +789,17 @@ void TemplateLayerPlannerTest::preservesTransparentGuttersWithoutTileSeams()
 	QVERIFY(whole_snapshot);
 	render::FramePlanner tiled_frame_planner;
 	render::FramePlanner whole_frame_planner;
-	auto const tiled = renderVello(scaledFrameFor(
+	auto const tiled_frame = scaledFrameFor(
 		*tiled_snapshot, tiled_frame_planner, std::move(tiled_plan)
-	));
-	auto const whole = renderVello(scaledFrameFor(
+	);
+	auto const whole_frame = scaledFrameFor(
 		*whole_snapshot, whole_frame_planner, std::move(whole_plan)
-	));
+	);
+	auto const transparent = render::Color { 0, 0, 0, 0 };
+	auto const tiled = renderVello(tiled_frame, transparent);
+	auto const whole = renderVello(whole_frame, transparent);
+	auto const tiled_reference = renderReference(*tiled_frame, Qt::transparent);
+	auto const whole_reference = renderReference(*whole_frame, Qt::transparent);
 
 	// The source boundary projects to x=32.25. Compare a narrow band across
 	// it against one monolithic image, including fractional transform coverage.
@@ -410,16 +809,62 @@ void TemplateLayerPlannerTest::preservesTransparentGuttersWithoutTileSeams()
 		{
 			auto const actual = tiled.pixelColor(x, y);
 			auto const expected = whole.pixelColor(x, y);
+			auto const reference_actual = tiled_reference.pixelColor(x, y);
+			auto const reference_expected = whole_reference.pixelColor(x, y);
 			QVERIFY2(
-				std::abs(actual.red() - expected.red()) <= 2
-				&& std::abs(actual.green() - expected.green()) <= 2
-				&& std::abs(actual.blue() - expected.blue()) <= 2,
+				std::abs(actual.red() - expected.red()) <= max_channel_delta
+				&& std::abs(actual.green() - expected.green()) <= max_channel_delta
+				&& std::abs(actual.blue() - expected.blue()) <= max_channel_delta
+				&& std::abs(actual.alpha() - expected.alpha()) <= max_channel_delta,
 				qPrintable(QStringLiteral("tile seam at %1,%2: %3 vs %4")
 				           .arg(x).arg(y).arg(actual.name(QColor::HexArgb),
 				                              expected.name(QColor::HexArgb)))
 			);
+			QVERIFY2(
+				std::abs(reference_actual.red() - reference_expected.red()) <= max_channel_delta
+				&& std::abs(reference_actual.green() - reference_expected.green()) <= max_channel_delta
+				&& std::abs(reference_actual.blue() - reference_expected.blue()) <= max_channel_delta
+				&& std::abs(reference_actual.alpha() - reference_expected.alpha()) <= max_channel_delta,
+				qPrintable(QStringLiteral("reference tile seam at %1,%2: %3 vs %4")
+				           .arg(x).arg(y).arg(reference_actual.name(QColor::HexArgb),
+				                              reference_expected.name(QColor::HexArgb)))
+			);
 		}
 	}
+}
+
+}  // namespace
+
+void TemplateLayerPlannerTest::preservesOpaqueGuttersWithoutTileSeams()
+{
+	QImage source(16, 8, QImage::Format_RGB32);
+	for (int y = 0; y < source.height(); ++y)
+	{
+		for (int x = 0; x < source.width(); ++x)
+		{
+			source.setPixelColor(
+				x, y,
+				QColor(20 + x * 12, 190 - x * 7, 30 + y * 20)
+			);
+		}
+	}
+	verifyGutterSeams(std::move(source), 2, 8);
+}
+
+void TemplateLayerPlannerTest::preservesTransparentGuttersWithoutTileSeams()
+{
+	QImage source(16, 8, QImage::Format_RGBA8888);
+	for (int y = 0; y < source.height(); ++y)
+	{
+		for (int x = 0; x < source.width(); ++x)
+		{
+			source.setPixelColor(
+				x, y,
+				QColor(20 + x * 12, 190 - x * 7, 30 + y * 20, 80 + x * 8)
+			);
+		}
+	}
+	verifyGutterSeams(std::move(source), 1, 2);
 }
 
 QTEST_MAIN(TemplateLayerPlannerTest)

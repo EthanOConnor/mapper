@@ -28,6 +28,10 @@
 #include <QtMath>
 #include <QByteArray>
 #include <QColor>
+#include <QCoreApplication>
+#include <QDeadlineTimer>
+#include <QElapsedTimer>
+#include <QEventLoop>
 #include <QFlags>
 #include <QHash>
 #include <QImage>
@@ -488,7 +492,10 @@ MapPrinter::MapPrinter(Map& map, const MapView* view, QObject* parent)
 	connect(&map.getGeoreferencing(), &Georeferencing::transformationChanged, this, &MapPrinter::mapScaleChanged);
 }
 
-MapPrinter::~MapPrinter() = default;
+MapPrinter::~MapPrinter()
+{
+	finishOutput(true);
+}
 
 
 void MapPrinter::saveConfig() const
@@ -583,26 +590,39 @@ std::unique_ptr<QPrinter> MapPrinter::makePrinter() const
 std::unique_ptr<QPdfWriter> MapPrinter::makePdfWriter(const QString& filename) const
 {
 	auto writer = std::make_unique<QPdfWriter>(filename);
-	if (separationsModeSelected())
-		writer->setColorModel(QPdfWriter::ColorModel::Grayscale);
-	else if (options.color_mode == MapPrinterOptions::DeviceCmyk)
-		writer->setColorModel(QPdfWriter::ColorModel::CMYK);
-	else
-		writer->setColorModel(QPdfWriter::ColorModel::RGB);
+	configurePdfWriter(*writer);
+	return writer;
+}
 
-	writer->setResolution(options.resolution);
+std::unique_ptr<QPdfWriter> MapPrinter::makePdfWriter(QIODevice* device) const
+{
+	Q_ASSERT(device);
+	auto writer = std::make_unique<QPdfWriter>(device);
+	configurePdfWriter(*writer);
+	return writer;
+}
+
+void MapPrinter::configurePdfWriter(QPdfWriter& writer) const
+{
+	if (separationsModeSelected())
+		writer.setColorModel(QPdfWriter::ColorModel::Grayscale);
+	else if (options.color_mode == MapPrinterOptions::DeviceCmyk)
+		writer.setColorModel(QPdfWriter::ColorModel::CMYK);
+	else
+		writer.setColorModel(QPdfWriter::ColorModel::RGB);
+
+	writer.setResolution(options.resolution);
 	if (page_format.page_size == QPageSize::Custom)
 	{
-		writer->setPageSize(QPageSize{page_format.paper_dimensions, QPageSize::Millimeter});
-		writer->setPageOrientation(QPageLayout::Portrait);
+		writer.setPageSize(QPageSize{page_format.paper_dimensions, QPageSize::Millimeter});
+		writer.setPageOrientation(QPageLayout::Portrait);
 	}
 	else
 	{
-		writer->setPageSize(QPageSize{page_format.page_size});
-		writer->setPageOrientation(page_format.orientation);
+		writer.setPageSize(QPageSize{page_format.page_size});
+		writer.setPageOrientation(page_format.orientation);
 	}
-	writer->setPageMargins(QMarginsF{}, QPageLayout::Millimeter);
-	return writer;
+	writer.setPageMargins(QMarginsF{}, QPageLayout::Millimeter);
 }
 
 bool MapPrinter::isPrinter() const noexcept
@@ -976,6 +996,135 @@ void MapPrinter::takePrinterSettings(const QPrinter* printer)
 	
 }
 
+bool MapPrinter::prepareOutput()
+{
+	return prepareOutput(print_area);
+}
+
+bool MapPrinter::prepareOutput(const QRectF& map_extent)
+{
+	if (output_preparation_active)
+	{
+		if (output_preparation_extent.contains(map_extent))
+			return true;
+		output_error = tr(
+			"Exact output is already prepared for a different map area.");
+		return false;
+	}
+	output_error.clear();
+	output_templates.clear();
+	cancel_print_map = false;
+	if (!map_extent.isValid() || map_extent.isEmpty())
+	{
+		output_error = tr("The exact output area is invalid.");
+		return false;
+	}
+	if (!options.show_templates || separationsModeSelected())
+	{
+		output_preparation_extent = map_extent;
+		output_preparation_active = true;
+		return true;
+	}
+
+	for (int index = 0; index < map.getNumTemplates(); ++index)
+	{
+		auto* source = map.getTemplate(index);
+		if (source->getTemplateState() != Template::Loaded)
+			continue;
+		if (view)
+		{
+			auto const visibility = view->getTemplateVisibility(source);
+			if (!visibility.visible || visibility.opacity <= 0)
+				continue;
+		}
+		output_templates.push_back(source);
+	}
+	if (output_templates.empty())
+	{
+		output_preparation_extent = map_extent;
+		output_preparation_active = true;
+		return true;
+	}
+
+	auto const pixels_per_map_unit =
+		(options.resolution / 25.4) * scale_adjustment;
+	QElapsedTimer elapsed;
+	elapsed.start();
+	constexpr qint64 timeout_ms = 120'000;
+	while (true)
+	{
+		qsizetype ready = 0;
+		qsizetype total = 0;
+		bool pending = false;
+		for (auto* source : output_templates)
+		{
+			auto const preparation = source->prepareForOutput(
+				map_extent, pixels_per_map_unit);
+			ready += preparation.ready_resources;
+			total += preparation.total_resources;
+			if (preparation.state
+			    == OutputRenderPreparation::State::Failed)
+			{
+				output_error = preparation.error.isEmpty()
+				             ? tr("Failed to prepare an exact template resource.")
+				             : preparation.error;
+				finishOutput(true);
+				emit printProgress(100, tr("Error"));
+				return false;
+			}
+			pending |= preparation.state
+			        == OutputRenderPreparation::State::Pending;
+		}
+		if (!pending)
+		{
+			output_preparation_extent = map_extent;
+			output_preparation_active = true;
+			return true;
+		}
+		if (cancel_print_map)
+		{
+			output_error = tr("Canceled");
+			finishOutput(true);
+			emit printProgress(100, tr("Canceled"));
+			return false;
+		}
+		if (elapsed.elapsed() >= timeout_ms)
+		{
+			output_error = tr(
+				"Timed out while preparing exact online imagery.");
+			finishOutput(true);
+			emit printProgress(100, tr("Error"));
+			return false;
+		}
+
+		auto const progress = total > 0
+		                    ? std::clamp(
+			                      int(15 * ready / total), 1, 14)
+		                    : 1;
+		emit printProgress(
+			progress,
+			tr("Preparing online imagery (%1 of %2 tiles)...")
+				.arg(ready)
+				.arg(total));
+		QCoreApplication::processEvents(
+			QEventLoop::AllEvents | QEventLoop::WaitForMoreEvents,
+			QDeadlineTimer(25));
+	}
+}
+
+void MapPrinter::finishOutput(bool cancelled)
+{
+	// The final page scene owns immutable raster snapshots. Release it before
+	// dropping the source-side output pins so exact-output memory does not remain
+	// charged for the lifetime of a long-lived print widget.
+	template_layer_planner.clear();
+	for (auto* source : output_templates)
+		source->finishOutputPreparation(cancelled);
+	output_templates.clear();
+	output_preparation_active = false;
+	output_preparation_extent = {};
+}
+
 
 void MapPrinter::drawPage(QPainter* device_painter, const QRectF& page_extent, QImage* page_buffer) const
 {
@@ -1002,6 +1151,15 @@ void MapPrinter::drawPage(QPainter* device_painter, const QRectF& page_extent, c
 	                          | QPainter::SmoothPixmapTransform;
 	
 	const auto page_region_used = page_extent.intersected(print_area);
+	if (!output_templates.empty()
+	    && !page_region_used.isEmpty()
+	    && !output_preparation_extent.contains(page_region_used))
+	{
+		output_error = tr(
+			"A page was rendered outside the prepared exact-output area.");
+		device_painter->end();
+		return;
+	}
 	const auto output_scaling = units_per_mm * scale_adjustment;
 	const auto output_request = render::RenderRequest {
 		render::fromQRectF(page_region_used),
@@ -1018,6 +1176,8 @@ void MapPrinter::drawPage(QPainter* device_painter, const QRectF& page_extent, c
 		);
 		if (!template_layers.complete)
 		{
+			output_error = tr(
+				"An exact template resource became unavailable during rendering.");
 			device_painter->end();
 			return;
 		}
@@ -1387,13 +1547,19 @@ bool MapPrinter::printMap(QPrinter* printer)
 	// We need to use them for printing.
 	printer->setFullPage(true);
 	takePrinterSettings(printer);
+	if (!prepareOutput())
+		return false;
 	
 	QPainter painter(printer);
 	
 #if defined(Q_OS_WIN)
 	// Invalid printer drivers (notably under Wine) may report no resolution.
 	if (printer->resolution() == 0)
+	{
+		output_error = tr("The printer reported an invalid resolution.");
+		finishOutput(true);
 		return false;
+	}
 
 	if (printer->paintEngine()->type() == QPaintEngine::Picture)
 	{
@@ -1404,13 +1570,19 @@ bool MapPrinter::printMap(QPrinter* printer)
 	}
 #endif
 	
-	return printPages(printer, &painter, 1);
+	auto const result = printPages(printer, &painter, 1);
+	finishOutput(cancel_print_map || !result);
+	return result;
 }
 
 bool MapPrinter::printMap(QPdfWriter* writer, int copy_count)
 {
+	if (!prepareOutput())
+		return false;
 	QPainter painter(writer);
-	return printPages(writer, &painter, copy_count);
+	auto const result = printPages(writer, &painter, copy_count);
+	finishOutput(cancel_print_map || !result);
+	return result;
 }
 
 bool MapPrinter::printPages(QPagedPaintDevice* device, QPainter* painter, int copy_count)
@@ -1455,7 +1627,13 @@ bool MapPrinter::printPages(QPagedPaintDevice* device, QPainter* painter, int co
 
 				if (need_new_page)
 				{
-					device->newPage();
+					if (!device->newPage())
+					{
+						output_error = tr(
+							"Could not begin a new output page.");
+						painter->end();
+						break;
+					}
 				}
 
 				const QRectF page_extent{QPointF{hpos, vpos}, extent_size};
@@ -1475,10 +1653,17 @@ bool MapPrinter::printPages(QPagedPaintDevice* device, QPainter* painter, int co
 	
 	if (cancel_print_map)
 	{
+		output_error = ::OpenOrienteering::MapPrinter::tr("Canceled");
 		emit printProgress(100, ::OpenOrienteering::MapPrinter::tr("Canceled"));
+		return false;
 	}
 	else if (!painter->isActive())
 	{
+		if (output_error.isEmpty())
+		{
+			output_error = ::OpenOrienteering::MapPrinter::tr(
+				"The output paint device stopped during rendering.");
+		}
 		emit printProgress(100, ::OpenOrienteering::MapPrinter::tr("Error"));
 		return false;
 	}
