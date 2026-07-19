@@ -69,7 +69,7 @@ void StyleTest::allActionIconsTest()
 	Q_INIT_RESOURCE(resources);
 	const auto files = QDir{QStringLiteral(":/icons")}.entryList(
 	  {QStringLiteral("*.svg")}, QDir::Files, QDir::Name);
-	QCOMPARE(files.size(), 97);
+	QCOMPARE(files.size(), 101);
 
 	for (const auto& file : files)
 	{

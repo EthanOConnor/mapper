@@ -149,8 +149,8 @@ QNetworkRequest MapHubApiClient::request(const QString &relative_path,
   if (!path.startsWith(QLatin1Char('/')))
     path.prepend(QLatin1Char('/'));
   base.setPath(path);
-  base.setQuery({});
-  base.setFragment({});
+  base.setQuery(QString{});
+  base.setFragment(QString{});
   return request(base, authenticated);
 }
 

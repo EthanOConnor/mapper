@@ -283,7 +283,7 @@ MapHubCredentials::readToken(const QString &server_url) {
   auto key = QJniObject::fromString(QString::fromUtf8(account));
   auto value = QJniObject::callStaticObjectMethod<jstring>(
       "org/openorienteering/mapper/SecureCredentialStore", "read",
-      "(Ljava/lang/String;)Ljava/lang/String;", key.object<jstring>());
+      key.object<jstring>());
   QJniEnvironment environment;
   if (environment.checkAndClearExceptions())
     return {
@@ -350,8 +350,7 @@ MapHubCredentials::writeToken(const QString &server_url, const QString &token) {
   auto value = QJniObject::fromString(token);
   auto stored = QJniObject::callStaticMethod<jboolean>(
       "org/openorienteering/mapper/SecureCredentialStore", "write",
-      "(Ljava/lang/String;Ljava/lang/String;)Z", key.object<jstring>(),
-      value.object<jstring>());
+      key.object<jstring>(), value.object<jstring>());
   QJniEnvironment environment;
   if (!stored || environment.checkAndClearExceptions())
     return {{},
@@ -402,7 +401,7 @@ MapHubCredentials::removeToken(const QString &server_url) {
     auto key = QJniObject::fromString(QString::fromUtf8(account));
     auto removed = QJniObject::callStaticMethod<jboolean>(
         "org/openorienteering/mapper/SecureCredentialStore", "remove",
-        "(Ljava/lang/String;)Z", key.object<jstring>());
+        key.object<jstring>());
     QJniEnvironment environment;
     if (!removed || environment.checkAndClearExceptions())
       return {{},
