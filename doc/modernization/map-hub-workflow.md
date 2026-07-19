@@ -6,8 +6,11 @@ replace `.omap`, embed a database document in it, or weaken OCAD import/export.
 
 ## User flow
 
-1. In **Settings → Map Hub**, enter the HTTPS server and either redeem an
-   emailed invitation or store a previously issued Mapper API token.
+1. Open **Map Hub** and enter the HTTPS server. An invitation opens account
+   setup in the system browser, where passkey creation is the default and a
+   password remains available. Copy the one-time Mapper connection token back
+   into Mapper; it is stored in the operating-system credential store. A
+   previously issued Mapper API token can be pasted directly instead.
 2. Open **Map Hub — library and my work** from the home screen, File menu, or
    toolbar. The two views show the current library and assignments for the
    connected account. Library records expose the exact approved revision and

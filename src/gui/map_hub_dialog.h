@@ -41,7 +41,7 @@ private slots:
   void updateActions();
   void browseFirstUseWorkspace();
   void connectExistingAccount();
-  void redeemFirstUseInvitation();
+  void openFirstUseInvitation();
 
 private:
   void showFirstUse(const QString &problem = {});
@@ -73,9 +73,7 @@ private:
   QLineEdit *first_use_workspace;
   QLineEdit *first_use_token;
   QLineEdit *first_use_invite;
-  QLineEdit *first_use_username;
-  QLineEdit *first_use_display_name;
-  QLineEdit *first_use_password;
+  QTabWidget *first_use_account_tabs;
   QPushButton *first_use_browse;
   QPushButton *connect_button;
   QPushButton *redeem_button;

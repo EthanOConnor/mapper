@@ -401,13 +401,11 @@ MapHubDialog::MapHubDialog(MainWindow *window)
       first_use_workspace(new QLineEdit(first_use_page)),
       first_use_token(new QLineEdit(first_use_page)),
       first_use_invite(new QLineEdit(first_use_page)),
-      first_use_username(new QLineEdit(first_use_page)),
-      first_use_display_name(new QLineEdit(first_use_page)),
-      first_use_password(new QLineEdit(first_use_page)),
+      first_use_account_tabs(new QTabWidget(first_use_page)),
       first_use_browse(new QPushButton(tr("Choose…"), first_use_page)),
       connect_button(
           new QPushButton(tr("Connect and open Map Hub"), first_use_page)),
-      redeem_button(new QPushButton(tr("Create account and open Map Hub"),
+      redeem_button(new QPushButton(tr("Set up account in browser…"),
                                     first_use_page)),
       connection_label(new QLabel(this)), activity_label(new QLabel(this)),
       tabs(new QTabWidget(this)), assignment_list(new QTreeWidget(this)),
@@ -444,20 +442,20 @@ MapHubDialog::MapHubDialog(MainWindow *window)
   connection_form->addRow(tr("Map Hub server:"), first_use_server);
   connection_form->addRow(tr("Local map workspaces:"), workspace_row);
 
-  auto *account_tabs = new QTabWidget(first_use_page);
-  auto *invitation_page = new QWidget(account_tabs);
+  auto *invitation_page = new QWidget(first_use_account_tabs);
   auto *invitation_form = new QFormLayout(invitation_page);
   first_use_invite->setEchoMode(QLineEdit::Password);
-  first_use_password->setEchoMode(QLineEdit::Password);
-  first_use_password->setPlaceholderText(tr("At least 12 characters"));
+  auto *invitation_help = new QLabel(
+      tr("Account setup opens in your browser. A passkey is offered first; "
+         "you can choose a password there instead."),
+      invitation_page);
+  invitation_help->setWordWrap(true);
+  invitation_form->addRow(invitation_help);
   invitation_form->addRow(tr("Invitation token:"), first_use_invite);
-  invitation_form->addRow(tr("Username:"), first_use_username);
-  invitation_form->addRow(tr("Display name:"), first_use_display_name);
-  invitation_form->addRow(tr("Password:"), first_use_password);
   invitation_form->addRow(redeem_button);
-  account_tabs->addTab(invitation_page, tr("I have an invitation"));
+  first_use_account_tabs->addTab(invitation_page, tr("I have an invitation"));
 
-  auto *token_page = new QWidget(account_tabs);
+  auto *token_page = new QWidget(first_use_account_tabs);
   auto *token_form = new QFormLayout(token_page);
   first_use_token->setEchoMode(QLineEdit::Password);
   first_use_token->setPlaceholderText(tr("Mapper API token"));
@@ -469,7 +467,8 @@ MapHubDialog::MapHubDialog(MainWindow *window)
   token_form->addRow(token_help);
   token_form->addRow(tr("Account token:"), first_use_token);
   token_form->addRow(connect_button);
-  account_tabs->addTab(token_page, tr("I already have an account token"));
+  first_use_account_tabs->addTab(token_page,
+                                 tr("Paste Mapper connection token"));
 
   auto *first_use_close = new QPushButton(tr("Not now"), first_use_page);
   auto *first_use_buttons = new QHBoxLayout;
@@ -481,7 +480,7 @@ MapHubDialog::MapHubDialog(MainWindow *window)
   first_use_layout->addWidget(first_use_intro);
   first_use_layout->addSpacing(8);
   first_use_layout->addLayout(connection_form);
-  first_use_layout->addWidget(account_tabs);
+  first_use_layout->addWidget(first_use_account_tabs);
   first_use_layout->addWidget(first_use_status);
   first_use_layout->addLayout(first_use_buttons);
   first_use_layout->addStretch();
@@ -523,7 +522,7 @@ MapHubDialog::MapHubDialog(MainWindow *window)
   connect(connect_button, &QPushButton::clicked, this,
           &MapHubDialog::connectExistingAccount);
   connect(redeem_button, &QPushButton::clicked, this,
-          &MapHubDialog::redeemFirstUseInvitation);
+          &MapHubDialog::openFirstUseInvitation);
   connect(first_use_close, &QPushButton::clicked, this, &QDialog::reject);
   connect(refresh_button, &QPushButton::clicked, this, &MapHubDialog::refresh);
   connect(start_button, &QPushButton::clicked, this,
@@ -580,9 +579,7 @@ void MapHubDialog::setFirstUseBusy(bool value, const QString &message) {
   first_use_browse->setEnabled(!value);
   first_use_token->setEnabled(!value);
   first_use_invite->setEnabled(!value);
-  first_use_username->setEnabled(!value);
-  first_use_display_name->setEnabled(!value);
-  first_use_password->setEnabled(!value);
+  first_use_account_tabs->setEnabled(!value);
   connect_button->setEnabled(!value);
   redeem_button->setEnabled(!value);
 }
@@ -679,57 +676,35 @@ void MapHubDialog::connectExistingAccount() {
   });
 }
 
-void MapHubDialog::redeemFirstUseInvitation() {
+void MapHubDialog::openFirstUseInvitation() {
   QString server;
   QString workspace_root;
   if (!firstUseConnection(server, workspace_root))
     return;
-  QJsonObject account{
-      {QStringLiteral("invite_token"), first_use_invite->text().trimmed()},
-      {QStringLiteral("username"), first_use_username->text().trimmed()},
-      {QStringLiteral("display_name"),
-       first_use_display_name->text().trimmed()},
-      {QStringLiteral("password"), first_use_password->text()},
-  };
-  if (account.value(QStringLiteral("invite_token")).toString().isEmpty() ||
-      account.value(QStringLiteral("username")).toString().isEmpty() ||
-      account.value(QStringLiteral("display_name")).toString().isEmpty() ||
-      first_use_password->text().size() < 12) {
+  const auto invitation = first_use_invite->text().trimmed();
+  static const QRegularExpression invitation_pattern(
+      QStringLiteral("^[A-Za-z0-9_-]{20,200}$"));
+  if (!invitation_pattern.match(invitation).hasMatch()) {
     QMessageBox::warning(this, tr("Map Hub"),
-                         tr("Enter the invitation, username, display name, and "
-                            "a password of at least 12 characters."));
+                         tr("Enter the invitation token from your map "
+                            "librarian."));
     return;
   }
-  setFirstUseBusy(true, tr("Creating the account…"));
-  auto *request_client = new MapHubApiClient(server, {}, this);
-  request_client->redeemInvite(
-      account,
-      [this, request_client, server, workspace_root](
-          const QJsonObject &response, const MapHubApiClient::Error &error) {
-        request_client->deleteLater();
-        first_use_password->clear();
-        if (error) {
-          setFirstUseBusy(false, error.message);
-          return;
-        }
-        auto token = response.value(QStringLiteral("token")).toString();
-        QString storage_error;
-        if (token.isEmpty() || !saveFirstUseConnection(server, workspace_root,
-                                                       token, storage_error)) {
-          setFirstUseBusy(
-              false,
-              token.isEmpty()
-                  ? tr("The account was created, but Map Hub did not return "
-                       "an account token. Ask the administrator to reconnect "
-                       "this account.")
-                  : tr("The account was created, but Mapper could not store "
-                       "the connection: %1")
-                        .arg(storage_error));
-          return;
-        }
-        first_use_invite->clear();
-        refresh();
-      });
+  auto url = QUrl::fromUserInput(server).adjusted(QUrl::StripTrailingSlash);
+  url.setPath(QStringLiteral("/join/%1/").arg(invitation));
+  url.setQuery(QString{});
+  url.setFragment(QString{});
+  if (!QDesktopServices::openUrl(url)) {
+    QMessageBox::warning(this, tr("Map Hub"),
+                         tr("Mapper could not open account setup in your "
+                            "browser."));
+    return;
+  }
+  first_use_account_tabs->setCurrentIndex(1);
+  first_use_status->setText(
+      tr("Finish account setup in your browser, copy the Mapper connection "
+         "token, then paste it here."));
+  first_use_token->setFocus();
 }
 
 void MapHubDialog::setBusy(bool value, const QString &message) {
