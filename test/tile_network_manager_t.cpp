@@ -784,7 +784,12 @@ void TileNetworkManagerTest::cancelsClientGenerations()
 	MiniHttpServer server;
 	QTemporaryDir directory;
 	QVERIFY(directory.isValid());
-	TileNetworkManager manager(configFor(directory));
+	auto config = configFor(directory);
+	// Cancellation is the behavior under test. Avoid racing Qt's internal
+	// transfer-timeout abort on a loaded runner as cancelClient() is delivered.
+	config.transfer_timeout = std::chrono::seconds(10);
+	config.absolute_timeout = std::chrono::seconds(10);
+	TileNetworkManager manager(config);
 	QSignalSpy spy(&manager, &TileNetworkManager::finished);
 
 	manager.submit(request(server.url(QStringLiteral("/hold/old")), 42, 3));

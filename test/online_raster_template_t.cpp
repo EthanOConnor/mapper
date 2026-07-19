@@ -799,18 +799,19 @@ class OnlineRasterTemplateTest : public QObject
 		OnlineRasterTemplate online(snapshotFixture(), &map);
 		OnlineRasterTemplate::TileFailure first;
 		first.attempts = 1;
-		first.retry = QDeadlineTimer(10);
+		first.retry = QDeadlineTimer(50);
 		online.failed_tiles_.insert({ 1, 0, 0 }, first);
 		OnlineRasterTemplate::TileFailure second;
 		second.attempts = 1;
-		second.retry = QDeadlineTimer(100);
+		second.retry = QDeadlineTimer(500);
 		online.failed_tiles_.insert({ 1, 1, 0 }, second);
 		online.scheduleNextRetry();
 		QVERIFY(online.retry_timer_.isActive());
-		QTest::qWait(30);
-		QVERIFY(online.retry_timer_.isActive());
-		QTest::qWait(100);
-		QVERIFY(!online.retry_timer_.isActive());
+		QTRY_VERIFY_WITH_TIMEOUT(
+			online.retry_timer_.isActive()
+			&& online.retry_timer_.remainingTime() > 100,
+			300);
+		QTRY_VERIFY_WITH_TIMEOUT(!online.retry_timer_.isActive(), 1000);
 	}
 
 		void partialPanCancelsButRetainsResidentDecodeAdmission()
