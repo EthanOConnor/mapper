@@ -9,6 +9,7 @@
 
 #include <QDialog>
 #include <QJsonObject>
+#include <QPointer>
 
 #include "collaboration/map_hub_api_client.h"
 
@@ -64,7 +65,7 @@ private:
   void setBusy(bool busy, const QString &message = {});
 
   MainWindow *window;
-  MapHubApiClient *client;
+  QPointer<MapHubApiClient> client;
   QStackedWidget *pages;
   QWidget *first_use_page;
   QWidget *library_page;
@@ -76,7 +77,7 @@ private:
   QTabWidget *first_use_account_tabs;
   QPushButton *first_use_browse;
   QPushButton *connect_button;
-  QPushButton *redeem_button;
+  QPushButton *invitation_button;
   QLabel *connection_label;
   QLabel *activity_label;
   QTabWidget *tabs;

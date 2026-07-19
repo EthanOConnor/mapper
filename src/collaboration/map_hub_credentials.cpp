@@ -137,11 +137,38 @@ MapHubCredentials::Result readSecretService(const QString &account) {
                 {QStringLiteral("lookup"), QStringLiteral("application"),
                  QString::fromLatin1(service_name), QStringLiteral("account"),
                  account});
-  if (!process.waitForFinished(10000) ||
-      process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0)
+  if (!process.waitForStarted(5000))
+    return {{},
+            credentialTr("The desktop secret service could not be started."),
+            false};
+  if (!process.waitForFinished(10000)) {
+    process.kill();
+    process.waitForFinished();
+    return {{},
+            credentialTr("The desktop secret service did not respond while "
+                         "reading the Map Hub credential."),
+            false};
+  }
+  if (process.exitStatus() != QProcess::NormalExit)
+    return {{},
+            credentialTr("The desktop secret service stopped unexpectedly "
+                         "while reading the Map Hub credential."),
+            false};
+  if (process.exitCode() != 0) {
+    // secret-tool reports a missing item as an unsuccessful lookup with no
+    // diagnostic. D-Bus/session/keyring failures include a diagnostic and must
+    // not be mistaken for an account that was never connected.
+    if (process.readAllStandardError().trimmed().isEmpty())
+      return {};
+    return {{},
+            credentialTr("The desktop secret service could not read the Map "
+                         "Hub credential."),
+            false};
+  }
+  auto token = QString::fromUtf8(process.readAllStandardOutput()).trimmed();
+  if (token.isEmpty())
     return {};
-  return {
-      QString::fromUtf8(process.readAllStandardOutput()).trimmed(), {}, false};
+  return {token, {}, false};
 }
 
 MapHubCredentials::Result writeSecretService(const QString &account,

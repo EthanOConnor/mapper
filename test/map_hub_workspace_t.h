@@ -17,6 +17,7 @@ private slots:
   void recordIsBoundToCanonicalMapPath();
   void validatesServerTransport();
   void identifiesMapperWorkspacePackageTypes();
+  void classifiesWorkspaceBaselines();
   void hashesArtifactsExactly();
 };
 

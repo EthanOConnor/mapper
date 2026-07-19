@@ -28,7 +28,7 @@ public slots:
 private slots:
   void testConnection();
   void clearCredential();
-  void redeemInvite();
+  void openInvitation();
 
 private:
   QString effectiveToken() const;
@@ -42,10 +42,7 @@ private:
   QPushButton *test_button;
   QPushButton *clear_button;
   QLineEdit *invite_edit;
-  QLineEdit *username_edit;
-  QLineEdit *display_name_edit;
-  QLineEdit *password_edit;
-  QPushButton *redeem_button;
+  QPushButton *invitation_button;
   QString loaded_server;
 };
 

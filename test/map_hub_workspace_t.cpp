@@ -116,6 +116,22 @@ void MapHubWorkspaceTest::identifiesMapperWorkspacePackageTypes() {
   }
 }
 
+void MapHubWorkspaceTest::classifiesWorkspaceBaselines() {
+  using WorkspaceBaseline = MapHubApiClient::WorkspaceBaseline;
+  QCOMPARE(MapHubApiClient::classifyWorkspaceBaseline({}),
+           WorkspaceBaseline::NoRevision);
+  QCOMPARE(MapHubApiClient::classifyWorkspaceBaseline(
+               {{QStringLiteral("id"), QStringLiteral("revision-id")}}),
+           WorkspaceBaseline::IncompleteRevision);
+  QCOMPARE(MapHubApiClient::classifyWorkspaceBaseline(
+               {{QStringLiteral("download_url"), QStringLiteral("http://[")}}),
+           WorkspaceBaseline::IncompleteRevision);
+  QCOMPARE(MapHubApiClient::classifyWorkspaceBaseline(
+               {{QStringLiteral("download_url"),
+                 QStringLiteral("https://maps.example.test/artifacts/map")}}),
+           WorkspaceBaseline::ArtifactReference);
+}
+
 void MapHubWorkspaceTest::hashesArtifactsExactly() {
   QTemporaryDir directory;
   QVERIFY(directory.isValid());

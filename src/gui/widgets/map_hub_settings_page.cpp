@@ -6,6 +6,7 @@
 
 #include "map_hub_settings_page.h"
 
+#include <QDesktopServices>
 #include <QDir>
 #include <QFileDialog>
 #include <QFormLayout>
@@ -15,6 +16,7 @@
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QStandardPaths>
 #include <QToolButton>
 
@@ -33,10 +35,9 @@ MapHubSettingsPage::MapHubSettingsPage(QWidget *parent)
       credential_status(new QLabel(this)),
       test_button(new QPushButton(tr("Test connection"), this)),
       clear_button(new QPushButton(tr("Disconnect"), this)),
-      invite_edit(new QLineEdit(this)), username_edit(new QLineEdit(this)),
-      display_name_edit(new QLineEdit(this)),
-      password_edit(new QLineEdit(this)),
-      redeem_button(new QPushButton(tr("Create account and connect"), this)) {
+      invite_edit(new QLineEdit(this)),
+      invitation_button(
+          new QPushButton(tr("Set up account in browser…"), this)) {
   auto *layout = new QFormLayout(this);
   layout->addRow(Util::Headline::create(tr("Map Hub server")));
   server_edit->setPlaceholderText(QStringLiteral("https://maps.example.org"));
@@ -68,13 +69,14 @@ MapHubSettingsPage::MapHubSettingsPage(QWidget *parent)
 
   layout->addRow(Util::Headline::create(tr("Use an emailed invitation")));
   invite_edit->setEchoMode(QLineEdit::Password);
-  password_edit->setEchoMode(QLineEdit::Password);
-  password_edit->setPlaceholderText(tr("At least 12 characters"));
+  auto *invitation_help = new QLabel(
+      tr("Account setup opens in your browser. A passkey is offered first. "
+         "When setup finishes, paste the Mapper connection token above."),
+      this);
+  invitation_help->setWordWrap(true);
+  layout->addRow(invitation_help);
   layout->addRow(tr("Invitation token:"), invite_edit);
-  layout->addRow(tr("Username:"), username_edit);
-  layout->addRow(tr("Display name:"), display_name_edit);
-  layout->addRow(tr("Password:"), password_edit);
-  layout->addRow(redeem_button);
+  layout->addRow(invitation_button);
 
   connect(browse, &QToolButton::clicked, this, [this] {
     auto selected = QFileDialog::getExistingDirectory(
@@ -87,8 +89,8 @@ MapHubSettingsPage::MapHubSettingsPage(QWidget *parent)
           &MapHubSettingsPage::testConnection);
   connect(clear_button, &QPushButton::clicked, this,
           &MapHubSettingsPage::clearCredential);
-  connect(redeem_button, &QPushButton::clicked, this,
-          &MapHubSettingsPage::redeemInvite);
+  connect(invitation_button, &QPushButton::clicked, this,
+          &MapHubSettingsPage::openInvitation);
   reset();
 }
 
@@ -106,7 +108,8 @@ void MapHubSettingsPage::updateCredentialStatus() {
     credential_status->setText(tr("Credential error: %1").arg(result.error));
   else if (result.token.isEmpty())
     credential_status->setText(
-        tr("Not connected. You can paste a token or redeem an invitation."));
+        tr("Not connected. Paste a Mapper connection token, or use an emailed "
+           "invitation to set up an account in your browser."));
   else if (result.used_fallback)
     credential_status->setText(
         tr("Connected. This system has no desktop secret service, so the token "
@@ -180,13 +183,12 @@ void MapHubSettingsPage::reset() {
   workspace_root_edit->setText(root);
   token_edit->clear();
   invite_edit->clear();
-  password_edit->clear();
   updateCredentialStatus();
 }
 
 void MapHubSettingsPage::setBusy(bool busy) {
   test_button->setEnabled(!busy);
-  redeem_button->setEnabled(!busy);
+  invitation_button->setEnabled(!busy);
   server_edit->setEnabled(!busy);
 }
 
@@ -228,53 +230,32 @@ void MapHubSettingsPage::clearCredential() {
   updateCredentialStatus();
 }
 
-void MapHubSettingsPage::redeemInvite() {
-  QJsonObject account{
-      {QStringLiteral("invite_token"), invite_edit->text().trimmed()},
-      {QStringLiteral("username"), username_edit->text().trimmed()},
-      {QStringLiteral("display_name"), display_name_edit->text().trimmed()},
-      {QStringLiteral("password"), password_edit->text()},
-  };
-  if (account.value(QStringLiteral("invite_token")).toString().isEmpty() ||
-      account.value(QStringLiteral("username")).toString().isEmpty() ||
-      account.value(QStringLiteral("display_name")).toString().isEmpty() ||
-      password_edit->text().size() < 12) {
+void MapHubSettingsPage::openInvitation() {
+  const auto server = server_edit->text().trimmed();
+  const auto server_url = QUrl::fromUserInput(server);
+  if (!MapHubApiClient::isAcceptableServerUrl(server_url)) {
     QMessageBox::warning(this, tr("Map Hub"),
-                         tr("Enter the invitation, username, display name, and "
-                            "a password of at least 12 characters."));
+                         tr("Enter an HTTPS Map Hub URL. HTTP is allowed only "
+                            "for localhost development."));
     return;
   }
-  setBusy(true);
-  auto *client = new MapHubApiClient(server_edit->text().trimmed(), {}, this);
-  client->redeemInvite(account, [this,
-                                 client](const QJsonObject &response,
-                                         const MapHubApiClient::Error &error) {
-    setBusy(false);
-    client->deleteLater();
-    password_edit->clear();
-    if (error) {
-      QMessageBox::warning(this, tr("Could not create account"), error.message);
-      return;
-    }
-    auto result = MapHubCredentials::writeToken(
-        server_edit->text().trimmed(),
-        response.value(QStringLiteral("token")).toString());
-    if (!result) {
-      QMessageBox::warning(this, tr("Account created, but not connected"),
-                           result.error);
-      return;
-    }
-    imagery::TileNetworkManager::instance().setBearerCredential(
-        QUrl(server_edit->text().trimmed()),
-        response.value(QStringLiteral("token")).toString().toUtf8(),
-        MapHubCredentials::accountName(server_edit->text().trimmed()).toUtf8());
-    invite_edit->clear();
-    setSetting(Settings::MapHub_ServerUrl, server_edit->text().trimmed());
-    updateCredentialStatus();
-    QMessageBox::information(
-        this, tr("Map Hub"),
-        tr("Your account is connected. Mapper can now open your assignments."));
-  });
+  const auto invitation = invite_edit->text().trimmed();
+  static const QRegularExpression invitation_pattern(
+      QStringLiteral("^[A-Za-z0-9_-]{20,200}$"));
+  if (!invitation_pattern.match(invitation).hasMatch()) {
+    QMessageBox::warning(this, tr("Map Hub"),
+                         tr("Enter the invitation token from your map "
+                            "librarian."));
+    return;
+  }
+  auto url = server_url.adjusted(QUrl::StripTrailingSlash);
+  url.setPath(QStringLiteral("/join/%1/").arg(invitation));
+  url.setQuery(QString{});
+  url.setFragment(QString{});
+  if (!QDesktopServices::openUrl(url))
+    QMessageBox::warning(this, tr("Map Hub"),
+                         tr("Mapper could not open account setup in your "
+                            "browser."));
 }
 
 } // namespace OpenOrienteering

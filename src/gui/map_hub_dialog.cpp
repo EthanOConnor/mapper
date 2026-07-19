@@ -405,8 +405,8 @@ MapHubDialog::MapHubDialog(MainWindow *window)
       first_use_browse(new QPushButton(tr("Choose…"), first_use_page)),
       connect_button(
           new QPushButton(tr("Connect and open Map Hub"), first_use_page)),
-      redeem_button(new QPushButton(tr("Set up account in browser…"),
-                                    first_use_page)),
+      invitation_button(new QPushButton(tr("Set up account in browser…"),
+                                        first_use_page)),
       connection_label(new QLabel(this)), activity_label(new QLabel(this)),
       tabs(new QTabWidget(this)), assignment_list(new QTreeWidget(this)),
       project_list(new QTreeWidget(this)), event_list(new QTreeWidget(this)),
@@ -452,7 +452,7 @@ MapHubDialog::MapHubDialog(MainWindow *window)
   invitation_help->setWordWrap(true);
   invitation_form->addRow(invitation_help);
   invitation_form->addRow(tr("Invitation token:"), first_use_invite);
-  invitation_form->addRow(redeem_button);
+  invitation_form->addRow(invitation_button);
   first_use_account_tabs->addTab(invitation_page, tr("I have an invitation"));
 
   auto *token_page = new QWidget(first_use_account_tabs);
@@ -521,7 +521,7 @@ MapHubDialog::MapHubDialog(MainWindow *window)
           &MapHubDialog::browseFirstUseWorkspace);
   connect(connect_button, &QPushButton::clicked, this,
           &MapHubDialog::connectExistingAccount);
-  connect(redeem_button, &QPushButton::clicked, this,
+  connect(invitation_button, &QPushButton::clicked, this,
           &MapHubDialog::openFirstUseInvitation);
   connect(first_use_close, &QPushButton::clicked, this, &QDialog::reject);
   connect(refresh_button, &QPushButton::clicked, this, &MapHubDialog::refresh);
@@ -581,7 +581,7 @@ void MapHubDialog::setFirstUseBusy(bool value, const QString &message) {
   first_use_invite->setEnabled(!value);
   first_use_account_tabs->setEnabled(!value);
   connect_button->setEnabled(!value);
-  redeem_button->setEnabled(!value);
+  invitation_button->setEnabled(!value);
 }
 
 void MapHubDialog::browseFirstUseWorkspace() {
@@ -730,8 +730,10 @@ void MapHubDialog::showError(const QString &title,
 }
 
 void MapHubDialog::refresh() {
-  if (client)
+  if (client) {
     client->deleteLater();
+    client = nullptr;
+  }
   auto server =
       Settings::getInstance().getSetting(Settings::MapHub_ServerUrl).toString();
   auto credential = MapHubCredentials::readToken(server);
@@ -757,17 +759,21 @@ void MapHubDialog::refresh() {
       QUrl(server), credential.token.toUtf8(),
       MapHubCredentials::accountName(server).toUtf8());
   setBusy(true, tr("Loading venues, maps, events, and assignments…"));
-  client->library([this, server](const QJsonObject &response,
-                                 const MapHubApiClient::Error &error) {
-    if (error) {
-      connection_label->setText(
-          tr("Could not connect to %1: %2").arg(server, error.message));
-      setBusy(false);
-      return;
-    }
-    populate(response);
-    setBusy(false);
-  });
+  auto *request_client = client.data();
+  request_client->library(
+      [this, server, request_client](const QJsonObject &response,
+                                     const MapHubApiClient::Error &error) {
+        if (client != request_client)
+          return;
+        if (error) {
+          connection_label->setText(
+              tr("Could not connect to %1: %2").arg(server, error.message));
+          setBusy(false);
+          return;
+        }
+        populate(response);
+        setBusy(false);
+      });
 }
 
 void MapHubDialog::populate(const QJsonObject &response) {
@@ -1225,10 +1231,22 @@ void MapHubDialog::beginWorkspace(const QJsonObject &response,
       lease.value(QStringLiteral("expires_at")).toString(), Qt::ISODate);
   auto download_url =
       QUrl(effective_revision.value(QStringLiteral("download_url")).toString());
-  if (!download_url.isValid() || download_url.isEmpty()) {
+  const auto baseline =
+      MapHubApiClient::classifyWorkspaceBaseline(effective_revision);
+  if (baseline == MapHubApiClient::WorkspaceBaseline::NoRevision) {
     setBusy(false);
     window->createConnectedMap(managed);
     accept();
+    return;
+  }
+  if (baseline == MapHubApiClient::WorkspaceBaseline::IncompleteRevision) {
+    setBusy(false);
+    QMessageBox::warning(
+        this, tr("Incomplete map baseline"),
+        tr("Map Hub identified an existing base revision but did not provide "
+           "a valid artifact download URL. Mapper did not create a blank map; "
+           "refresh the assignment or ask the map librarian to repair the "
+           "revision."));
     return;
   }
   static const QRegularExpression sha256_pattern(

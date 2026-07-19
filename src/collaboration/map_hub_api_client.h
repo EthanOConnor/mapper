@@ -23,6 +23,12 @@ namespace OpenOrienteering {
 class MapHubApiClient : public QObject {
   Q_OBJECT
 public:
+  enum class WorkspaceBaseline {
+    NoRevision,
+    ArtifactReference,
+    IncompleteRevision,
+  };
+
   struct Error {
     int http_status = 0;
     QString code;
@@ -55,13 +61,14 @@ public:
                       JsonHandler handler);
   void renewLease(const QString &workspace_id, const QString &editing_lease,
                   JsonHandler handler);
-  void redeemInvite(const QJsonObject &account, JsonHandler handler);
   void downloadArtifact(const QUrl &url, const QString &expected_sha256,
                         const QString &destination, DownloadHandler handler);
 
   static QString sha256ForFile(const QString &path, QString *error = nullptr);
   static bool isAcceptableServerUrl(const QUrl &url);
   static bool isMapperWorkspacePackageType(const QString &package_type);
+  static WorkspaceBaseline
+  classifyWorkspaceBaseline(const QJsonObject &revision);
 
 signals:
   void downloadProgress(qint64 received, qint64 total);

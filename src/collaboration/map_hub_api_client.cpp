@@ -122,6 +122,17 @@ bool MapHubApiClient::isMapperWorkspacePackageType(
          package_type == QLatin1String("review");
 }
 
+MapHubApiClient::WorkspaceBaseline
+MapHubApiClient::classifyWorkspaceBaseline(const QJsonObject &revision) {
+  if (revision.isEmpty())
+    return WorkspaceBaseline::NoRevision;
+  const QUrl download_url(
+      revision.value(QStringLiteral("download_url")).toString());
+  if (!download_url.isValid() || download_url.isEmpty())
+    return WorkspaceBaseline::IncompleteRevision;
+  return WorkspaceBaseline::ArtifactReference;
+}
+
 bool MapHubApiClient::isConfigured() const {
   return isAcceptableServerUrl(server_url) && !bearer_token.trimmed().isEmpty();
 }
@@ -417,12 +428,6 @@ void MapHubApiClient::renewLease(const QString &workspace_id,
   if (!editing_lease.isEmpty())
     req.setRawHeader("X-Editing-Lease", editing_lease.toUtf8());
   finishJson(network->post(req, QByteArray{}), std::move(handler));
-}
-
-void MapHubApiClient::redeemInvite(const QJsonObject &account,
-                                   JsonHandler handler) {
-  sendJson("POST", QStringLiteral("/api/v1/invites/redeem"), account, false,
-           std::move(handler));
 }
 
 QString MapHubApiClient::sha256ForFile(const QString &path, QString *error) {
