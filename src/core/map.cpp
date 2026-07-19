@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <type_traits>
 #include <utility>
@@ -894,6 +895,43 @@ void Map::deleteSelectedObjects()
 		undo_step->removeContainedObjects(true);
 		push(undo_step);
 	}
+}
+
+bool Map::moveSelectedObjects(const MapCoord& offset, bool create_undo_step)
+{
+	if (object_selection.empty() || (offset.nativeX() == 0 && offset.nativeY() == 0))
+		return false;
+
+	const auto min_coord = std::numeric_limits<qint32>::min();
+	const auto max_coord = std::numeric_limits<qint32>::max();
+	for (const auto* object : object_selection)
+	{
+		for (const auto& coord : object->getRawCoordinateVector())
+		{
+			const auto x = qint64(coord.nativeX()) + offset.nativeX();
+			const auto y = qint64(coord.nativeY()) + offset.nativeY();
+			if (x < min_coord || x > max_coord || y < min_coord || y > max_coord)
+				return false;
+		}
+	}
+
+	if (create_undo_step)
+	{
+		auto* undo_step = new ReplaceObjectsUndoStep(this);
+		for (auto* object : object_selection)
+			undo_step->addObject(object, object->duplicate());
+		push(undo_step);
+	}
+
+	for (auto* object : object_selection)
+	{
+		object->move(offset);
+		object->update();
+	}
+
+	setObjectsDirty();
+	emitSelectionEdited();
+	return true;
 }
 
 void Map::includeSelectionRect(QRectF& rect) const

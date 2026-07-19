@@ -36,6 +36,9 @@ private slots:
 	void framePublishesTemplateContextBeforeRasterCollection();
 	
 	void editTool();
+	void arrowKeysNudgeSelection();
+	void arrowKeyAutoRepeatIsSingleUndoStep();
+	void arrowKeysPanWithoutSelection();
 	
 	void paintOnTemplateFeature();
 	

@@ -30,6 +30,7 @@
 #include <QtTest>
 #include <QApplication>
 #include <QEvent>
+#include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPoint>
 #include <QPointF>
@@ -38,10 +39,14 @@
 #include "core/map.h"
 #include "core/map_color.h"
 #include "core/map_coord.h"
+#include "core/map_part.h"
 #include "core/objects/object.h"
 #include "core/objects/object_query.h"
+#include "core/objects/text_object.h"
+#include "core/symbols/area_symbol.h"
 #include "core/symbols/line_symbol.h"
 #include "core/symbols/point_symbol.h"
+#include "core/symbols/text_symbol.h"
 #include "global.h"
 #include "gui/main_window.h"
 #include "gui/map/map_editor.h"
@@ -51,6 +56,7 @@
 #include "templates/template_image.h"
 #include "tools/edit_point_tool.h"
 #include "tools/edit_tool.h"
+#include "undo/undo_manager.h"
 
 using namespace OpenOrienteering;
 
@@ -290,6 +296,154 @@ void ToolsTest::editTool()
 	
 	// Cleanup
 	editor.editor->setTool(nullptr);
+}
+
+
+void ToolsTest::arrowKeysNudgeSelection()
+{
+	TestMap map;
+	TestMapEditor editor(map.map);
+	auto* const black = map.map->getColor(0);
+
+	auto* point_symbol = new PointSymbol();
+	map.map->addSymbol(point_symbol, map.map->getNumSymbols());
+	auto* point = new PointObject(point_symbol);
+	point->setPosition(200, 300);
+	map.map->addObject(point);
+
+	auto* area_symbol = new AreaSymbol();
+	area_symbol->setColor(black);
+	map.map->addSymbol(area_symbol, map.map->getNumSymbols());
+	auto* area = new PathObject(area_symbol);
+	area->addCoordinate(MapCoord::fromNative(100, 100));
+	area->addCoordinate(MapCoord::fromNative(100, 400));
+	area->addCoordinate(MapCoord::fromNative(400, 400));
+	area->addCoordinate(MapCoord::fromNative(400, 100));
+	area->addCoordinate(MapCoord::fromNative(100, 100, MapCoord::ClosePoint));
+	map.map->addObject(area);
+
+	auto* text_symbol = new TextSymbol();
+	text_symbol->setColor(black);
+	map.map->addSymbol(text_symbol, map.map->getNumSymbols());
+	auto* text = new TextObject(text_symbol);
+	text->setBox(500, 600, 2.0, 3.0);
+	text->setText(QLatin1String("Nudge"));
+	map.map->addObject(text);
+	const auto text_box_size = text->getBoxSize();
+
+	map.map->clearObjectSelection(false);
+	map.map->addObjectToSelection(map.line_object, false);
+	map.map->addObjectToSelection(point, false);
+	map.map->addObjectToSelection(area, false);
+	map.map->addObjectToSelection(text, true);
+	QCOMPARE(map.map->getNumSelectedObjects(), 4);
+	editor.editor->setTool(new EditPointTool(editor.editor, nullptr));
+
+	auto* const view = editor.map_widget->getMapView();
+	view->setZoom(8.0);
+	view->setRotation(0.61);
+
+	std::vector<MapCoordVector> original_coords;
+	for (int i = 0; i < map.map->getCurrentPart()->getNumObjects(); ++i)
+		original_coords.push_back(map.map->getCurrentPart()->getObject(i)->getRawCoordinateVector());
+
+	const auto point_before = editor.map_widget->mapToViewport(point->getRawCoordinateVector()[0]);
+	const auto undo_count = map.map->undoManager().undoStepCount();
+	QKeyEvent right_press(QEvent::KeyPress, Qt::Key_Right, Qt::NoModifier);
+	QVERIFY(editor.map_widget->keyPressEventFilter(&right_press));
+	QKeyEvent right_release(QEvent::KeyRelease, Qt::Key_Right, Qt::NoModifier);
+	QVERIFY(!editor.map_widget->keyReleaseEventFilter(&right_release));
+
+	const auto point_after_right = editor.map_widget->mapToViewport(point->getRawCoordinateVector()[0]);
+	QVERIFY(qAbs(point_after_right.x() - point_before.x() - 1.0) < 0.1);
+	QVERIFY(qAbs(point_after_right.y() - point_before.y()) < 0.1);
+	QCOMPARE(text->getBoxSize(), text_box_size);
+	QCOMPARE(map.map->undoManager().undoStepCount(), undo_count + 1);
+
+	const auto dx = point->getRawCoordinateVector()[0].nativeX() - original_coords[1][0].nativeX();
+	const auto dy = point->getRawCoordinateVector()[0].nativeY() - original_coords[1][0].nativeY();
+	QVERIFY(dx != 0 || dy != 0);
+	for (int object_index = 0; object_index < map.map->getCurrentPart()->getNumObjects(); ++object_index)
+	{
+		const auto* object = map.map->getCurrentPart()->getObject(object_index);
+		const auto& before = original_coords[std::size_t(object_index)];
+		const auto& after = object->getRawCoordinateVector();
+		QCOMPARE(after.size(), before.size());
+		for (MapCoordVector::size_type coord_index = 0; coord_index < before.size(); ++coord_index)
+		{
+			auto expected = before[coord_index];
+			expected.setNativeX(expected.nativeX() + dx);
+			expected.setNativeY(expected.nativeY() + dy);
+			QCOMPARE(after[coord_index], expected);
+		}
+	}
+
+	const auto point_before_coarse = point_after_right;
+	QKeyEvent up_press(QEvent::KeyPress, Qt::Key_Up, Qt::ShiftModifier);
+	QVERIFY(editor.map_widget->keyPressEventFilter(&up_press));
+	QKeyEvent up_release(QEvent::KeyRelease, Qt::Key_Up, Qt::ShiftModifier);
+	QVERIFY(!editor.map_widget->keyReleaseEventFilter(&up_release));
+	const auto point_after_coarse = editor.map_widget->mapToViewport(point->getRawCoordinateVector()[0]);
+	QVERIFY(qAbs(point_after_coarse.x() - point_before_coarse.x()) < 0.1);
+	QVERIFY(qAbs(point_after_coarse.y() - point_before_coarse.y() + 10.0) < 0.1);
+	QCOMPARE(map.map->undoManager().undoStepCount(), undo_count + 2);
+
+	QVERIFY(map.map->undoManager().undo());
+	QVERIFY(map.map->undoManager().undo());
+	for (int object_index = 0; object_index < map.map->getCurrentPart()->getNumObjects(); ++object_index)
+		QCOMPARE(map.map->getCurrentPart()->getObject(object_index)->getRawCoordinateVector(),
+		         original_coords[std::size_t(object_index)]);
+
+	QVERIFY(map.map->undoManager().redo());
+	QVERIFY(map.map->undoManager().redo());
+	editor.editor->setTool(nullptr);
+}
+
+
+void ToolsTest::arrowKeyAutoRepeatIsSingleUndoStep()
+{
+	TestMap map;
+	TestMapEditor editor(map.map);
+	map.map->addObjectToSelection(map.line_object, true);
+
+	const auto original_coord = map.line_object->getCoordinate(0);
+	const auto viewport_before = editor.map_widget->mapToViewport(original_coord);
+	const auto undo_count = map.map->undoManager().undoStepCount();
+
+	QKeyEvent initial_press(QEvent::KeyPress, Qt::Key_Right, Qt::NoModifier);
+	QVERIFY(editor.map_widget->keyPressEventFilter(&initial_press));
+	for (int i = 0; i < 2; ++i)
+	{
+		QKeyEvent repeat_press(QEvent::KeyPress, Qt::Key_Right, Qt::NoModifier, QString{}, true, 1);
+		QVERIFY(editor.map_widget->keyPressEventFilter(&repeat_press));
+	}
+	QKeyEvent final_release(QEvent::KeyRelease, Qt::Key_Right, Qt::NoModifier);
+	QVERIFY(!editor.map_widget->keyReleaseEventFilter(&final_release));
+
+	const auto viewport_after = editor.map_widget->mapToViewport(map.line_object->getCoordinate(0));
+	QVERIFY(qAbs(viewport_after.x() - viewport_before.x() - 3.0) < 0.1);
+	QVERIFY(qAbs(viewport_after.y() - viewport_before.y()) < 0.1);
+	QCOMPARE(map.map->undoManager().undoStepCount(), undo_count + 1);
+
+	QVERIFY(map.map->undoManager().undo());
+	QCOMPARE(map.map->getCurrentPart()->getObject(0)->getRawCoordinateVector()[0], original_coord);
+	QVERIFY(map.map->undoManager().redo());
+}
+
+
+void ToolsTest::arrowKeysPanWithoutSelection()
+{
+	TestMap map;
+	TestMapEditor editor(map.map);
+	QVERIFY(map.map->selectedObjects().empty());
+
+	const auto object_coord = map.line_object->getCoordinate(0);
+	const auto center = editor.map_widget->getMapView()->center();
+	QKeyEvent right_press(QEvent::KeyPress, Qt::Key_Right, Qt::NoModifier);
+	QVERIFY(editor.map_widget->keyPressEventFilter(&right_press));
+
+	QCOMPARE(map.line_object->getCoordinate(0), object_coord);
+	QVERIFY(editor.map_widget->getMapView()->center() != center);
 }
 
 
