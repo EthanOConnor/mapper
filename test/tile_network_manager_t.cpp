@@ -292,6 +292,19 @@ TileNetworkManager::Config configFor(
 	return config;
 }
 
+TileNetworkManager::Config controlledRequestConfig(
+	const QTemporaryDir& directory)
+{
+	auto config = configFor(directory);
+	// Tests using /hold/ control completion themselves. Keep Qt's network
+	// deadlines from racing the explicit release, cancel or abort operation on
+	// a loaded runner.
+	config.first_byte_timeout = std::chrono::seconds(30);
+	config.transfer_timeout = std::chrono::seconds(30);
+	config.absolute_timeout = std::chrono::seconds(30);
+	return config;
+}
+
 TileNetworkRequest request(
 	QUrl url,
 	quint64 client,
@@ -478,7 +491,7 @@ void TileNetworkManagerTest::credentialChangesCancelRequestsAndPartitionNegative
 	MiniHttpServer server;
 	QTemporaryDir directory;
 	QVERIFY(directory.isValid());
-	auto config = configFor(directory);
+	auto config = controlledRequestConfig(directory);
 	config.max_active_total = 1;
 	TileNetworkManager manager(config);
 	QSignalSpy results(&manager, &TileNetworkManager::finished);
@@ -784,11 +797,7 @@ void TileNetworkManagerTest::cancelsClientGenerations()
 	MiniHttpServer server;
 	QTemporaryDir directory;
 	QVERIFY(directory.isValid());
-	auto config = configFor(directory);
-	// Cancellation is the behavior under test. Avoid racing Qt's internal
-	// transfer-timeout abort on a loaded runner as cancelClient() is delivered.
-	config.transfer_timeout = std::chrono::seconds(10);
-	config.absolute_timeout = std::chrono::seconds(10);
+	auto config = controlledRequestConfig(directory);
 	TileNetworkManager manager(config);
 	QSignalSpy spy(&manager, &TileNetworkManager::finished);
 
@@ -810,7 +819,7 @@ void TileNetworkManagerTest::enteringOfflineModeAbortsActiveRequests()
 	MiniHttpServer server;
 	QTemporaryDir directory;
 	QVERIFY(directory.isValid());
-	TileNetworkManager manager(configFor(directory));
+	TileNetworkManager manager(controlledRequestConfig(directory));
 	QSignalSpy spy(&manager, &TileNetworkManager::finished);
 
 	manager.submit(request(
@@ -834,7 +843,7 @@ void TileNetworkManagerTest::offlineTransitionRejectsQueuedOnlineSuccess()
 	MiniHttpServer server;
 	QTemporaryDir directory;
 	QVERIFY(directory.isValid());
-	TileNetworkManager manager(configFor(directory));
+	TileNetworkManager manager(controlledRequestConfig(directory));
 	QSignalSpy spy(&manager, &TileNetworkManager::finished);
 
 	manager.submit(request(
@@ -860,7 +869,7 @@ void TileNetworkManagerTest::revokingPrivateOriginRejectsActiveAndQueuedRequests
 	MiniHttpServer server;
 	QTemporaryDir directory;
 	QVERIFY(directory.isValid());
-	auto config = configFor(directory);
+	auto config = controlledRequestConfig(directory);
 	config.allow_private_networks = false;
 	config.max_active_total = 1;
 	config.max_active_per_host = 1;
@@ -895,7 +904,7 @@ void TileNetworkManagerTest::revocationRejectsQueuedPrivateSuccess()
 	MiniHttpServer server;
 	QTemporaryDir directory;
 	QVERIFY(directory.isValid());
-	auto config = configFor(directory);
+	auto config = controlledRequestConfig(directory);
 	config.allow_private_networks = false;
 	TileNetworkManager manager(config);
 	QSignalSpy spy(&manager, &TileNetworkManager::finished);
@@ -927,7 +936,7 @@ void TileNetworkManagerTest::enforcesFairnessAndQueueBounds()
 	MiniHttpServer server;
 	QTemporaryDir directory;
 	QVERIFY(directory.isValid());
-	auto config = configFor(directory);
+	auto config = controlledRequestConfig(directory);
 	config.max_active_total = 1;
 	config.max_active_per_host = 1;
 	config.max_active_per_client = 1;
@@ -981,19 +990,13 @@ void TileNetworkManagerTest::boundsOutstandingResultDelivery()
 	MiniHttpServer server;
 	QTemporaryDir directory;
 	QVERIFY(directory.isValid());
-	auto config = configFor(directory);
+	auto config = controlledRequestConfig(directory);
 	config.max_active_total = 4;
 	config.max_active_per_host = 4;
 	config.max_active_per_client = 4;
 	config.max_outstanding_results = 4;
 	config.max_outstanding_response_bytes =
 		2 * config.max_response_bytes;
-	// This test controls completion explicitly. Keep every transport deadline
-	// outside the assertion window so a loaded CI runner cannot turn the held
-	// requests into timeout results before each release is observed.
-	config.first_byte_timeout = std::chrono::seconds(30);
-	config.transfer_timeout = std::chrono::seconds(30);
-	config.absolute_timeout = std::chrono::seconds(30);
 	TileNetworkManager manager(config);
 	QSignalSpy spy(&manager, &TileNetworkManager::finished);
 
