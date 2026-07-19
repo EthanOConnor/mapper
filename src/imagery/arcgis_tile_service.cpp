@@ -157,7 +157,7 @@ std::optional<QUrl> normalizedServiceUrl(const QUrl& input)
 
 	auto result = input;
 	result.setPath(match.captured(1));
-	result.setFragment({});
+	result.setFragment(QString{});
 	result.setQuery(filteredServiceQuery(input), QUrl::StrictMode);
 	return result;
 }

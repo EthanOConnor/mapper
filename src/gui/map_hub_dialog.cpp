@@ -107,16 +107,16 @@ QString artifactExtension(const QJsonObject &revision) {
 QString projectManifestUrl(const QString &server, const QString &project_id) {
   auto url = QUrl::fromUserInput(server).adjusted(QUrl::StripTrailingSlash);
   url.setPath(QStringLiteral("/api/v1/projects/%1/manifest").arg(project_id));
-  url.setQuery({});
-  url.setFragment({});
+  url.setQuery(QString{});
+  url.setFragment(QString{});
   return url.toString(QUrl::FullyEncoded);
 }
 
 QString eventWebUrl(const QString &server, const QString &event_id) {
   auto url = QUrl::fromUserInput(server).adjusted(QUrl::StripTrailingSlash);
   url.setPath(QStringLiteral("/events/%1/").arg(event_id));
-  url.setQuery({});
-  url.setFragment({});
+  url.setQuery(QString{});
+  url.setFragment(QString{});
   return url.toString(QUrl::FullyEncoded);
 }
 

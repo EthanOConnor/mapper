@@ -245,7 +245,7 @@ bool classifyArcGis(
 
 	result.service_url = probe;
 	result.service_url.setPath(match.captured(1));
-	result.service_url.setFragment({});
+	result.service_url.setFragment(QString{});
 	auto const service_query = filteredArcGisQuery(probe);
 	result.service_url.setQuery(service_query, QUrl::StrictMode);
 	auto discovery_text =

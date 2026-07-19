@@ -46,7 +46,7 @@ QString credentialTr(const char *source) {
 QByteArray serverKey(const QString &server_url) {
   auto url = QUrl::fromUserInput(server_url);
   auto credential_scope = url.fragment();
-  url.setPath({});
+  url.setPath(QString{});
   url.setQuery(QString{});
   url.setFragment(QString{});
   auto normalized =
