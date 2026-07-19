@@ -63,6 +63,9 @@ namespace {
 
 constexpr int max_screen_subsampling = 64;
 constexpr qsizetype max_queued_screen_tiles = 64;
+// Bound per-view work even when the visible exact-resolution set cannot fit
+// the cache. The effective limit is reduced for larger decoded tile formats.
+constexpr qsizetype max_attempted_screen_tiles = 512;
 
 int tileSubsamplingForScale(double scale, const QSize& block_size)
 {
@@ -398,8 +401,11 @@ void GdalTemplate::updateRenderContext(const ViewRenderContext& context)
 
 	auto const scale = std::max(getTemplateScaleX(), getTemplateScaleY()) * context.view_zoom;
 	auto const subsampling = chooseTiledSubsampling(Util::mmToPixelPhysical(scale));
-	auto const window = tileWindowForMapRect(context.visible_map_rect, subsampling);
-	auto const replace_pending_tiles = !wanted_window.intersects(window);
+	auto const window = screenTileWindowForMapRect(
+		context.visible_map_rect, subsampling
+	);
+	auto const replace_pending_tiles = !(wanted_window == window)
+	                                   && !wanted_window.intersects(window);
 	wanted_window = window;
 	queueWantedTiles(window, replace_pending_tiles);
 }
@@ -515,6 +521,8 @@ void GdalTemplate::shutdownTiledSource()
 	tiled_dataset.reset();
 
 	queued_tiles.clear();
+	attempted_window = {};
+	attempted_tiles.clear();
 
 	tile_cache.clear();
 	tiled_raster_info = GdalImageReader::RasterInfo();
@@ -551,14 +559,22 @@ void GdalTemplate::queueWantedTiles(const TileWindow& window, bool replace_pendi
 		tile_pool.clear();
 		queued_tiles.clear();
 	}
+	if (replace_pending_tiles || !(window == attempted_window))
+	{
+		attempted_window = window;
+		attempted_tiles.clear();
+	}
 
 	if (window.isEmpty())
+		return;
+	auto const admission_budget = screenTileAdmissionBudget();
+	if (attempted_tiles.size() >= admission_budget)
 		return;
 
 	auto planIfMissing = [this, &missing_tiles, &planned_tiles](
 		const GdalTileKey& key, double dist_sq, bool fallback) {
 		if (tile_cache.contains(key) || queued_tiles.contains(key)
-		    || planned_tiles.contains(key))
+		    || attempted_tiles.contains(key) || planned_tiles.contains(key))
 		{
 			return;
 		}
@@ -605,6 +621,8 @@ void GdalTemplate::queueWantedTiles(const TileWindow& window, bool replace_pendi
 				     coarser >= safe_subsampling * 2;
 				     coarser >>= 1)
 				{
+					if (!isTiledSubsamplingAligned(coarser))
+						continue;
 					auto const coarser_x = int(qint64(tx) * safe_subsampling / coarser);
 					auto const coarser_y = int(qint64(ty) * safe_subsampling / coarser);
 					planIfMissing(
@@ -635,13 +653,18 @@ void GdalTemplate::queueWantedTiles(const TileWindow& window, bool replace_pendi
 	auto available_slots = std::max<qsizetype>(
 		0, max_queued_screen_tiles - queued_tiles.size()
 	);
+	auto available_admissions = std::max<qsizetype>(
+		0, admission_budget - attempted_tiles.size()
+	);
 	for (auto const& missing : missing_tiles)
 	{
-		if (available_slots == 0)
+		if (available_slots == 0 || available_admissions == 0)
 			break;
 		auto const key = missing.key;
-		if (tile_cache.contains(key) || queued_tiles.contains(key))
+		if (tile_cache.contains(key) || queued_tiles.contains(key)
+		    || attempted_tiles.contains(key))
 			continue;
+		attempted_tiles.insert(key);
 		queued_tiles.insert(key, generation);
 		tile_pool.start([this, key, generation] {
 			auto tile = readTileImage(
@@ -659,6 +682,7 @@ void GdalTemplate::queueWantedTiles(const TileWindow& window, bool replace_pendi
 			);
 		}, missing.fallback ? 2 : 1);
 		--available_slots;
+		--available_admissions;
 	}
 }
 
@@ -913,6 +937,34 @@ GdalTemplate::TileWindow GdalTemplate::tileWindowForMapRect(const QRectF& map_re
 }
 
 
+GdalTemplate::TileWindow GdalTemplate::screenTileWindowForMapRect(
+	const QRectF& map_rect, int subsampling) const
+{
+	auto window = tileWindowForMapRect(map_rect, subsampling);
+	auto const admission_budget = screenTileAdmissionBudget();
+	auto const max_subsampling = std::max(1, std::min({
+		tiled_raster_info.block_size.width(),
+		tiled_raster_info.block_size.height(),
+		max_screen_subsampling,
+	}));
+
+	while (window.tileCount() > admission_budget)
+	{
+		auto coarser = window.subsampling * 2;
+		while (coarser <= max_subsampling
+		       && !isTiledSubsamplingAligned(coarser))
+		{
+			coarser *= 2;
+		}
+		if (coarser > max_subsampling)
+			return {};
+		window = tileWindowForMapRect(map_rect, coarser);
+	}
+
+	return window;
+}
+
+
 // static
 GdalTileKey GdalTemplate::tileKey(int tile_x, int tile_y, int subsampling)
 {
@@ -930,19 +982,40 @@ int GdalTemplate::chooseTileSubsampling(double scale, const QSize& block_size)
 int GdalTemplate::chooseTiledSubsampling(double scale) const
 {
 	auto subsampling = chooseTileSubsampling(scale, tiled_raster_info.block_size);
-	if (!has_tiled_origin_tile)
-		return subsampling;
 
 	// GDAL WMS/TMS overview bands lose the sub-tile remainder bits of TileX
 	// and TileY when the origin is not aligned with the overview factor.
 	// Restrict GDAL to overview levels that keep the cropped origin aligned.
-	while (subsampling > 1
-	       && (tiled_origin_tile.x() % subsampling != 0
-	           || tiled_origin_tile.y() % subsampling != 0))
+	while (subsampling > 1 && !isTiledSubsamplingAligned(subsampling))
 	{
 		subsampling >>= 1;
 	}
 	return subsampling;
+}
+
+
+bool GdalTemplate::isTiledSubsamplingAligned(int subsampling) const
+{
+	auto const safe_subsampling = std::max(1, subsampling);
+	return !has_tiled_origin_tile
+	       || (tiled_origin_tile.x() % safe_subsampling == 0
+	           && tiled_origin_tile.y() % safe_subsampling == 0);
+}
+
+
+qsizetype GdalTemplate::screenTileAdmissionBudget() const
+{
+	auto const block_size = tiled_raster_info.block_size;
+	auto const bits_per_pixel = std::max(
+		8, int(QImage::toPixelFormat(tiled_raster_info.image_format).bitsPerPixel())
+	);
+	auto const decoded_bytes = qint64(block_size.width()) * block_size.height()
+	                           * bits_per_pixel / 8;
+	auto const estimated_cost = std::max<qint64>(1, (decoded_bytes + 1023) / 1024);
+	auto const cache_capacity = tile_cache.maxCost() / estimated_cost;
+	return std::clamp<qsizetype>(
+		cache_capacity, max_queued_screen_tiles, max_attempted_screen_tiles
+	);
 }
 
 
