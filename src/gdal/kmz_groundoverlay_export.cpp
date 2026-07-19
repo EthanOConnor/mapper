@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iterator>
+#include <memory>
 #include <vector>
 
 #include <cpl_vsi.h>
@@ -613,7 +614,7 @@ bool KmzGroundOverlayExport::beginStagedOutput(
 	auto const fileinfo = QFileInfo(output_path);
 	auto const staging_prefix = QString::fromLatin1(
 		stagingFilePrefix(output_filepath_utf8, is_kmz));
-	QTemporaryFile staging(
+	auto staging = std::make_unique<QTemporaryFile>(
 		fileinfo.absolutePath()
 		+ QLatin1Char('/')
 		+ staging_prefix
@@ -623,20 +624,26 @@ bool KmzGroundOverlayExport::beginStagedOutput(
 		+ (is_kmz
 		       ? QStringLiteral(".kmz")
 		       : QStringLiteral(".part")));
-	staging.setAutoRemove(true);
-	if (!staging.open())
+	staging->setAutoRemove(true);
+	if (!staging->open())
 	{
 		error_message = tr("Could not create a temporary export file: %1")
-			.arg(staging.errorString());
+			.arg(staging->errorString());
 		return false;
 	}
 	staging_filepath_utf8 =
-		staging.fileName().toUtf8();
-	staging.close();
+		staging->fileName().toUtf8();
+	staging->close();
 
 	if (is_kmz)
 	{
-		if (!QFile::remove(
+		// QTemporaryFile intentionally retains its native file handle after
+		// close() so that it can reopen the same unique path. Windows therefore
+		// cannot remove the path through a second QFile while the owner lives.
+		// Destroying the owner releases the handle and performs auto-removal
+		// before GDAL creates a fresh archive at that path.
+		staging.reset();
+		if (QFileInfo::exists(
 			    QString::fromUtf8(staging_filepath_utf8)))
 		{
 			error_message = tr(
@@ -697,7 +704,7 @@ bool KmzGroundOverlayExport::beginStagedOutput(
 				direct_assets_relative_utf8
 				+ '/' + tile.name;
 		assets.setAutoRemove(false);
-		staging.setAutoRemove(false);
+		staging->setAutoRemove(false);
 	}
 	return true;
 }
