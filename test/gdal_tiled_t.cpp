@@ -218,6 +218,99 @@ private slots:
 		QVERIFY(source.queued_tiles.size() <= 64);
 	}
 
+	void oversizedScreenWindowConvergesWithinAdmissionBudget()
+	{
+		QTemporaryDir dir;
+		QVERIFY(dir.isValid());
+		auto const path = createGeoTiff(
+			dir.filePath(QStringLiteral("oversized-window.tif")),
+			{ 2048, 2048 }, { 64, 64 }, false
+		);
+		QVERIFY(!path.isEmpty());
+
+		Map map;
+		GdalTemplate source(path, &map);
+		QVERIFY(source.loadTemplateFileImpl());
+		source.raster_owner.setConcurrencyLimit(
+			RasterResourceManager::Lane::BlockingIo, 4
+		);
+		// Force every decoded tile out of the cache. A stable scheduler must
+		// still attempt each admitted key at most once for this view.
+		source.tile_cache.setMaxCost(1);
+		GdalTemplate::TileWindow window { 0, 0, 31, 31, 1 };
+		source.wanted_window = window;
+		auto const admission_budget = source.screenTileAdmissionBudget();
+		QCOMPARE(admission_budget, 64);
+		source.queueWantedTiles(window, true);
+
+		QTRY_COMPARE_WITH_TIMEOUT(
+			source.attempted_tiles.size(), admission_budget, 15000
+		);
+		QTRY_VERIFY_WITH_TIMEOUT(source.queued_tiles.isEmpty(), 15000);
+		QVERIFY(source.attempted_window == window);
+		QVERIFY(source.tile_cache.totalCost() <= source.tile_cache.maxCost());
+
+		auto const stable_attempts = source.attempted_tiles;
+		QTest::qWait(250);
+		QVERIFY(source.attempted_tiles == stable_attempts);
+		QVERIFY(source.queued_tiles.isEmpty());
+	}
+
+	void oddTmsOriginNeverQueuesMisalignedFallbacks()
+	{
+		QTemporaryDir dir;
+		QVERIFY(dir.isValid());
+		auto const path = createGeoTiff(
+			dir.filePath(QStringLiteral("odd-origin.tif")),
+			{ 1024, 1024 }, { 64, 64 }, false
+		);
+		QVERIFY(!path.isEmpty());
+
+		Map map;
+		GdalTemplate source(path, &map);
+		QVERIFY(source.loadTemplateFileImpl());
+		source.raster_owner.setConcurrencyLimit(
+			RasterResourceManager::Lane::BlockingIo, 1
+		);
+		source.has_tiled_origin_tile = true;
+		source.tiled_origin_tile = { 3, 5 };
+		QCOMPARE(source.chooseTiledSubsampling(0.25), 1);
+		source.tile_cache.setMaxCost(1);
+		QVERIFY(source.screenTileWindowForMapRect(
+			source.getTemplateExtent(), 1
+		).isEmpty());
+
+		source.queueWantedTiles({ 0, 0, 15, 15, 1 }, true);
+		QVERIFY(!source.attempted_tiles.isEmpty());
+		for (auto const& key : source.attempted_tiles)
+			QCOMPARE(key.subsampling, 1);
+
+		source.shutdownTiledSource();
+		QVERIFY(source.attempted_tiles.isEmpty());
+	}
+
+	void oversizedScreenWindowUsesCoarsestFittingOverview()
+	{
+		QTemporaryDir dir;
+		QVERIFY(dir.isValid());
+		auto const path = createGeoTiff(
+			dir.filePath(QStringLiteral("adaptive-overview.tif")),
+			{ 2048, 2048 }, { 64, 64 }, false
+		);
+		QVERIFY(!path.isEmpty());
+
+		Map map;
+		GdalTemplate source(path, &map);
+		QVERIFY(source.loadTemplateFileImpl());
+		source.tile_cache.setMaxCost(1);
+		auto const window = source.screenTileWindowForMapRect(
+			source.getTemplateExtent(), 1
+		);
+		QVERIFY(!window.isEmpty());
+		QCOMPARE(window.subsampling, 4);
+		QCOMPARE(window.tileCount(), 64);
+	}
+
 	void nonGeoreferencedLargeRasterStaysTiled()
 	{
 		QTemporaryDir dir;

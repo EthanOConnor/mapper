@@ -133,6 +133,13 @@ private:
 			return tile_x_min > tile_x_max || tile_y_min > tile_y_max;
 		}
 
+		qint64 tileCount() const
+		{
+			return isEmpty() ? 0
+			       : qint64(tile_x_max - tile_x_min + 1)
+			           * qint64(tile_y_max - tile_y_min + 1);
+		}
+
 		bool operator==(const TileWindow& other) const
 		{
 			return tile_x_min == other.tile_x_min
@@ -169,6 +176,7 @@ private:
 	void onTileLoadFailed(const GdalTileKey& key);
 	void markTileAreaDirty(int tile_x, int tile_y, int subsampling);
 	TileWindow tileWindowForMapRect(const QRectF& map_rect, int subsampling) const;
+	TileWindow screenTileWindowForMapRect(const QRectF& map_rect, int subsampling) const;
 	const QImage* findBestCachedTile(int tile_x, int tile_y, int subsampling, QRectF* source_rect) const;
 
 	static bool readTmsTileOrigin(const QString& template_path, QPoint* origin_tile);
@@ -188,6 +196,8 @@ private:
 	                                         const QRect& cached_rect,
 	                                         const QSize& cached_image_size);
 	int chooseTiledSubsampling(double scale) const;
+	bool isTiledSubsamplingAligned(int subsampling) const;
+	qsizetype screenTileAdmissionBudget() const;
 	int workerCountForSource() const;
 
 	struct TileFailure
@@ -207,6 +217,8 @@ private:
 		RasterResourceManager::instance().createOwner();
 	QSet<GdalTileKey> queued_tiles;
 	QHash<GdalTileKey, TileFailure> failed_tiles;
+	TileWindow attempted_window;
+	QSet<GdalTileKey> attempted_tiles;
 
 	QCache<GdalTileKey, QImage> tile_cache;
 };
