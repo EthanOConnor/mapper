@@ -246,15 +246,6 @@ jobs:
         if: runner.os != 'Linux'
         run: ctest --preset ${{ matrix.preset }} --output-on-failure --parallel 4
 
-      - name: Diagnose macOS tile-network crash
-        if: runner.os == 'macOS' && failure()
-        continue-on-error: true
-        run: >-
-          lldb --batch
-          --one-line run
-          --one-line-on-crash "thread backtrace all"
-          -- build/${{ matrix.preset }}/test/tile_network_manager_t
-
       - name: Test under Xvfb
         if: runner.os == 'Linux'
         run: xvfb-run --auto-servernum ctest --preset ${{ matrix.preset }} --output-on-failure --parallel 4

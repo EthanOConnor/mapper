@@ -268,6 +268,10 @@ set_tests_properties(
 # This test presents and activates a real native child window. Competing GUI
 # tests can prevent the hosted window system from reporting it exposed.
 set_tests_properties(frame_pipeline_t PROPERTIES RUN_SERIAL TRUE)
+# This test coordinates a real loopback server, a dedicated Qt network thread,
+# and deliberately held replies. Run it without competing test processes so
+# hosted scheduler load cannot perturb its controlled delivery boundaries.
+set_tests_properties(tile_network_manager_t PROPERTIES RUN_SERIAL TRUE)
 
 # Manual parity helper used to compare exact upstream and modernization
 # checkpoints without adding another product-facing export path.
