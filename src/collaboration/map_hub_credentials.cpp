@@ -263,8 +263,8 @@ MapHubCredentials::readToken(const QString &server_url) {
   CFRelease(data);
   return {token, {}, false};
 #elif defined(Q_OS_WIN)
-  auto target = QString::fromLatin1(service_name) + QLatin1Char('/') +
-                QString::fromUtf8(account);
+  const QString target = QString::fromLatin1(service_name) + QLatin1Char('/') +
+                         QString::fromUtf8(account);
   PCREDENTIALW credential = nullptr;
   if (!CredReadW(reinterpret_cast<LPCWSTR>(target.utf16()), CRED_TYPE_GENERIC,
                  0, &credential)) {
@@ -335,8 +335,8 @@ MapHubCredentials::writeToken(const QString &server_url, const QString &token) {
             false};
   return {token, {}, false};
 #elif defined(Q_OS_WIN)
-  auto target = QString::fromLatin1(service_name) + QLatin1Char('/') +
-                QString::fromUtf8(account);
+  QString target = QString::fromLatin1(service_name) + QLatin1Char('/') +
+                   QString::fromUtf8(account);
   CREDENTIALW credential{};
   credential.Type = CRED_TYPE_GENERIC;
   credential.TargetName = reinterpret_cast<LPWSTR>(target.data());
@@ -394,8 +394,8 @@ MapHubCredentials::removeToken(const QString &server_url) {
                 .arg(status),
             false};
 #elif defined(Q_OS_WIN)
-  auto target = QString::fromLatin1(service_name) + QLatin1Char('/') +
-                QString::fromUtf8(account);
+  const QString target = QString::fromLatin1(service_name) + QLatin1Char('/') +
+                         QString::fromUtf8(account);
   if (!CredDeleteW(reinterpret_cast<LPCWSTR>(target.utf16()), CRED_TYPE_GENERIC,
                    0) &&
       GetLastError() != ERROR_NOT_FOUND)
