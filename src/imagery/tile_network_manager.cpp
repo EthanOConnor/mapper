@@ -588,7 +588,22 @@ public:
 		entry->cancelled = true;
 		if (entry->reply)
 		{
-			entry->reply->abort();
+			auto* reply = entry->reply.data();
+			// QNetworkReply::abort() emits finished synchronously on some Qt
+			// network backends. Complete explicit cancellation without entering
+			// replyFinished() reentrantly while cancelClient() is mutating the
+			// scheduler's entry tables.
+			disconnect(reply, nullptr, this, nullptr);
+			TileNetworkResult result;
+			result.outcome = TileNetworkResult::Outcome::Cancelled;
+			result.final_url = reply->url();
+			result.etag = reply->rawHeader(QByteArrayLiteral("ETag"));
+			result.last_modified =
+				reply->rawHeader(QByteArrayLiteral("Last-Modified"));
+			reply->abort();
+			releaseActive(entry);
+			finish(entry, std::move(result));
+			dispatch();
 			return;
 		}
 		eraseQueued(entry);

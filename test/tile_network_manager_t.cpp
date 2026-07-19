@@ -799,6 +799,10 @@ void TileNetworkManagerTest::cancelsClientGenerations()
 	QCOMPARE(resultAt(spy, 0).outcome, TileNetworkResult::Outcome::Cancelled);
 	QCOMPARE(resultAt(spy, 0).client_id, quint64(42));
 	QCOMPARE(resultAt(spy, 0).generation, quint64(3));
+
+	manager.submit(request(server.url(QStringLiteral("/ok")), 42, 4));
+	QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 2, 2000);
+	QCOMPARE(resultAt(spy, 1).outcome, TileNetworkResult::Outcome::Success);
 }
 
 void TileNetworkManagerTest::enteringOfflineModeAbortsActiveRequests()
