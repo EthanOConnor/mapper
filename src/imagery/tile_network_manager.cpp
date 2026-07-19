@@ -588,22 +588,7 @@ public:
 		entry->cancelled = true;
 		if (entry->reply)
 		{
-			auto* reply = entry->reply.data();
-			// QNetworkReply::abort() emits finished synchronously on some Qt
-			// network backends. Complete explicit cancellation without entering
-			// replyFinished() reentrantly while cancelClient() is mutating the
-			// scheduler's entry tables.
-			disconnect(reply, nullptr, this, nullptr);
-			TileNetworkResult result;
-			result.outcome = TileNetworkResult::Outcome::Cancelled;
-			result.final_url = reply->url();
-			result.etag = reply->rawHeader(QByteArrayLiteral("ETag"));
-			result.last_modified =
-				reply->rawHeader(QByteArrayLiteral("Last-Modified"));
-			reply->abort();
-			releaseActive(entry);
-			finish(entry, std::move(result));
-			dispatch();
+			entry->reply->abort();
 			return;
 		}
 		eraseQueued(entry);
@@ -1494,9 +1479,13 @@ private:
 			}
 			entry->body += chunk;
 		});
-		connect(reply, &QNetworkReply::finished, this, [this, entry] {
-			replyFinished(entry);
-		});
+		// abort() may emit finished synchronously. Always finish on the next
+		// worker event so cancellation, offline, permission and timeout paths
+		// cannot mutate scheduler tables reentrantly from inside abort().
+		connect(
+			reply, &QNetworkReply::finished, this,
+			[this, entry] { replyFinished(entry); },
+			Qt::QueuedConnection);
 		QTimer::singleShot(
 			config_.first_byte_timeout,
 			reply,
