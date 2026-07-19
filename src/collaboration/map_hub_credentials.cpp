@@ -29,8 +29,8 @@
 #include <QJniObject>
 #include <QtCore/qcoreapplication_platform.h>
 #elif defined(Q_OS_WIN)
-#include <wincred.h>
 #include <windows.h>
+#include <wincred.h>
 #endif
 
 namespace OpenOrienteering {
