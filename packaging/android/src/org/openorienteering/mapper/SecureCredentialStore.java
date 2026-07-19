@@ -11,8 +11,6 @@ import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyProperties;
 import android.util.Base64;
 
-import org.qtproject.qt.android.QtNative;
-
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
 
@@ -29,8 +27,8 @@ public final class SecureCredentialStore {
 
     private SecureCredentialStore() {}
 
-    private static Context context() {
-        return QtNative.getContext().getApplicationContext();
+    private static Context applicationContext(Context context) {
+        return context.getApplicationContext();
     }
 
     private static SecretKey key() throws Exception {
@@ -51,7 +49,7 @@ public final class SecureCredentialStore {
         return generator.generateKey();
     }
 
-    public static boolean write(String account, String secret) {
+    public static boolean write(Context context, String account, String secret) {
         try {
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
             cipher.init(Cipher.ENCRYPT_MODE, key());
@@ -59,16 +57,17 @@ public final class SecureCredentialStore {
             byte[] ciphertext = cipher.doFinal(secret.getBytes(StandardCharsets.UTF_8));
             String value = Base64.encodeToString(cipher.getIV(), Base64.NO_WRAP)
                     + ":" + Base64.encodeToString(ciphertext, Base64.NO_WRAP);
-            return context().getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
+            return applicationContext(context).getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
                     .edit().putString(account, value).commit();
         } catch (Exception exception) {
             return false;
         }
     }
 
-    public static String read(String account) {
+    public static String read(Context context, String account) {
         try {
-            SharedPreferences preferences = context().getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE);
+            SharedPreferences preferences = applicationContext(context)
+                    .getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE);
             String value = preferences.getString(account, "");
             if (value == null || value.isEmpty())
                 return "";
@@ -86,8 +85,8 @@ public final class SecureCredentialStore {
         }
     }
 
-    public static boolean remove(String account) {
-        return context().getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
+    public static boolean remove(Context context, String account) {
+        return applicationContext(context).getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
                 .edit().remove(account).commit();
     }
 }

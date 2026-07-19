@@ -27,6 +27,7 @@
 #elif defined(Q_OS_ANDROID)
 #include <QJniEnvironment>
 #include <QJniObject>
+#include <QtCore/qcoreapplication_platform.h>
 #elif defined(Q_OS_WIN)
 #include <wincred.h>
 #include <windows.h>
@@ -46,8 +47,8 @@ QByteArray serverKey(const QString &server_url) {
   auto url = QUrl::fromUserInput(server_url);
   auto credential_scope = url.fragment();
   url.setPath({});
-  url.setQuery({});
-  url.setFragment({});
+  url.setQuery(QString{});
+  url.setFragment(QString{});
   auto normalized =
       url.adjusted(QUrl::RemoveUserInfo | QUrl::StripTrailingSlash)
           .toString(QUrl::FullyEncoded) +
@@ -280,9 +281,12 @@ MapHubCredentials::readToken(const QString &server_url) {
   CredFree(credential);
   return {token, {}, false};
 #elif defined(Q_OS_ANDROID)
+  auto context = QNativeInterface::QAndroidApplication::context();
   auto key = QJniObject::fromString(QString::fromUtf8(account));
-  auto value = QJniObject::callStaticObjectMethod<jstring>(
+  auto value = QJniObject::callStaticObjectMethod(
       "org/openorienteering/mapper/SecureCredentialStore", "read",
+      "(Landroid/content/Context;Ljava/lang/String;)Ljava/lang/String;",
+      context.object<jobject>(),
       key.object<jstring>());
   QJniEnvironment environment;
   if (environment.checkAndClearExceptions())
@@ -346,10 +350,13 @@ MapHubCredentials::writeToken(const QString &server_url, const QString &token) {
             false};
   return {token, {}, false};
 #elif defined(Q_OS_ANDROID)
+  auto context = QNativeInterface::QAndroidApplication::context();
   auto key = QJniObject::fromString(QString::fromUtf8(account));
   auto value = QJniObject::fromString(token);
   auto stored = QJniObject::callStaticMethod<jboolean>(
       "org/openorienteering/mapper/SecureCredentialStore", "write",
+      "(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;)Z",
+      context.object<jobject>(),
       key.object<jstring>(), value.object<jstring>());
   QJniEnvironment environment;
   if (!stored || environment.checkAndClearExceptions())
@@ -398,9 +405,12 @@ MapHubCredentials::removeToken(const QString &server_url) {
             false};
 #elif defined(Q_OS_ANDROID)
   {
+    auto context = QNativeInterface::QAndroidApplication::context();
     auto key = QJniObject::fromString(QString::fromUtf8(account));
     auto removed = QJniObject::callStaticMethod<jboolean>(
         "org/openorienteering/mapper/SecureCredentialStore", "remove",
+        "(Landroid/content/Context;Ljava/lang/String;)Z",
+        context.object<jobject>(),
         key.object<jstring>());
     QJniEnvironment environment;
     if (!removed || environment.checkAndClearExceptions())

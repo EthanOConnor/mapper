@@ -979,6 +979,10 @@ void TileNetworkManagerTest::boundsOutstandingResultDelivery()
 	config.max_outstanding_results = 4;
 	config.max_outstanding_response_bytes =
 		2 * config.max_response_bytes;
+	// This test controls completion explicitly. Keep the transport deadline well
+	// outside the assertion window so a loaded CI runner cannot turn all four
+	// held requests into timeout results before the first release is observed.
+	config.absolute_timeout = std::chrono::seconds(10);
 	TileNetworkManager manager(config);
 	QSignalSpy spy(&manager, &TileNetworkManager::finished);
 
