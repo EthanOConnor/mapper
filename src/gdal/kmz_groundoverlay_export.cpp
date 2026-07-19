@@ -636,8 +636,10 @@ bool KmzGroundOverlayExport::beginStagedOutput(
 
 	if (is_kmz)
 	{
-		if (!QFile::remove(
-			    QString::fromUtf8(staging_filepath_utf8)))
+		// Let QTemporaryFile close and remove its own native handle.  Removing
+		// the path through a second QFile can fail on Windows while the
+		// temporary-file engine still owns the file.
+		if (!staging.remove())
 		{
 			error_message = tr(
 				"Could not initialize the temporary KMZ archive.");
