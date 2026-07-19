@@ -74,6 +74,12 @@ QByteArray catalogBytes()
 }  // namespace
 
 
+void OnlineImageryDialogTest::initTestCase()
+{
+	Q_INIT_RESOURCE(resources);
+}
+
+
 void OnlineImageryDialogTest::resolvesDirectManualSource()
 {
 	QTemporaryDir directory;

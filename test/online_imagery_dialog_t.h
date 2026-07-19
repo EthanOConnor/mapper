@@ -14,6 +14,7 @@ class OnlineImageryDialogTest : public QObject
 Q_OBJECT
 
 private slots:
+	void initTestCase();
 	void resolvesDirectManualSource();
 	void exposesAdvancedTmsAndTileSize();
 	void selectsCatalogSourceByStableHandle();
