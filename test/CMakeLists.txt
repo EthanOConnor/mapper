@@ -184,6 +184,13 @@ endif()
 add_unit_test(grid_t ../src/util/util)
 add_unit_test(key_value_container_t ../src/util/key_value_container)
 add_unit_test(locale_t ../src/util/translation_util)
+add_unit_test(map_hub_workspace_t
+	../src/collaboration/managed_map_workspace
+	../src/collaboration/map_hub_api_client
+	../src/collaboration/map_hub_imagery_catalog
+	../src/core/document_path
+)
+target_link_libraries(map_hub_workspace_t PRIVATE Mapper::ImageryCore Mapper::ImageryNetwork Qt6::Network)
 add_unit_test(map_color_t ../src/core/map_color)
 add_unit_test(ocd_t ../src/fileformats/ocd_types)
 add_unit_test(ocd_parameter_stream_reader_t ../src/fileformats/ocd_parameter_stream_reader)
@@ -192,6 +199,29 @@ add_unit_test(util_t ../src/util/util
 	../src/settings
 	../src/util/translation_util
 )
+
+# Low-level imagery contracts stay independent of the full Mapper runtime.
+add_test_helper(arcgis_tile_service_t)
+target_link_libraries(arcgis_tile_service_t PRIVATE Mapper::ImageryCore)
+add_test_helper(imagery_core_t)
+target_link_libraries(imagery_core_t PRIVATE Mapper::ImageryCore)
+add_test_helper(manual_imagery_source_t)
+target_link_libraries(manual_imagery_source_t PRIVATE Mapper::ImageryCore)
+add_test_helper(oic_catalog_t)
+target_link_libraries(oic_catalog_t PRIVATE Mapper::ImageryCore)
+add_test_helper(imagery_catalog_store_t)
+target_link_libraries(imagery_catalog_store_t PRIVATE Mapper::ImageryCore)
+add_test_helper(imagery_catalog_repository_t)
+target_link_libraries(imagery_catalog_repository_t PRIVATE
+  Mapper::ImageryNetwork
+  Qt6::Network
+)
+add_test_helper(imagery_network_permissions_t)
+target_link_libraries(imagery_network_permissions_t PRIVATE
+  Mapper::ImageryNetwork
+)
+add_test_helper(tile_network_manager_t)
+target_link_libraries(tile_network_manager_t PRIVATE Mapper::ImageryNetwork Qt6::Network)
 
 # Benchmarks
 add_system_test(coord_xml_t MANUAL)
@@ -207,9 +237,13 @@ if(Mapper_USE_GDAL)
 endif()
 add_system_test(map_t)
 add_system_test(map_printer_t)
+add_system_test(imagery_source_model_t)
 add_system_test(object_t)
 add_system_test(object_query_t)
+add_system_test(online_raster_template_t)
+add_system_test(online_imagery_dialog_t)
 add_system_test(path_object_t)
+add_system_test(raster_resource_manager_t)
 add_system_test(template_layer_planner_t)
 target_link_libraries(template_layer_planner_t PRIVATE Mapper::VelloBackend)
 add_system_test(render_ir_t)
@@ -235,6 +269,10 @@ set_tests_properties(
 # This test presents and activates a real native child window. Competing GUI
 # tests can prevent the hosted window system from reporting it exposed.
 set_tests_properties(frame_pipeline_t PROPERTIES RUN_SERIAL TRUE)
+# This test coordinates a real loopback server, a dedicated Qt network thread,
+# and deliberately held replies. Run it without competing test processes so
+# hosted scheduler load cannot perturb its controlled delivery boundaries.
+set_tests_properties(tile_network_manager_t PROPERTIES RUN_SERIAL TRUE)
 
 # Manual parity helper used to compare exact upstream and modernization
 # checkpoints without adding another product-facing export path.

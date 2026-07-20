@@ -317,7 +317,11 @@ void MapView::setZoom(double value, const QPointF& center)
 
 void MapView::setZoom(double value)
 {
-	zoom = qBound(zoom_out_limit, value, zoom_in_limit);
+	auto const bounded_zoom = qBound(zoom_out_limit, value, zoom_in_limit);
+	if (qFuzzyCompare(zoom, bounded_zoom))
+		return;
+
+	zoom = bounded_zoom;
 	updateTransform();
 	emit viewChanged(ZoomChange);
 }

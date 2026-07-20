@@ -21,6 +21,8 @@
 
 #include "template_map.h"
 
+#include <algorithm>
+#include <cmath>
 #include <utility>
 
 #include <QtGlobal>
@@ -105,6 +107,7 @@ TemplateMap::TemplateMap(const TemplateMap& proto)
 
 TemplateMap::~TemplateMap()
 {
+	finishOutputPreparation(true);
 	if (template_state == Loaded)
 		unloadTemplateFile();
 }
@@ -234,6 +237,7 @@ bool TemplateMap::postLoadSetup(QWidget* dialog_parent, bool& out_center_in_view
 
 void TemplateMap::unloadTemplateFileImpl()
 {
+	finishOutputPreparation(true);
 	template_map.reset();
 }
 
@@ -354,6 +358,77 @@ const Map* TemplateMap::templateMap() const
 bool TemplateMap::includesChildTemplates() const noexcept
 {
 	return false;
+}
+
+OutputRenderPreparation TemplateMap::prepareForOutput(
+	const QRectF& map_rect,
+	double pixels_per_map_unit)
+{
+	if (!includesChildTemplates() || !template_map)
+		return {};
+
+	if (!output_preparation_active)
+	{
+		output_preparation_active = true;
+		output_templates.clear();
+		output_templates.reserve(std::size_t(template_map->getNumTemplates()));
+		for (int index = 0; index < template_map->getNumTemplates(); ++index)
+		{
+			auto* source = template_map->getTemplate(index);
+			if (source->getTemplateState() == Template::Loaded)
+				output_templates.push_back(source);
+		}
+	}
+
+	auto template_rect = map_rect;
+	if (!isTemplateGeoreferenced())
+	{
+		template_rect = {};
+		rectIncludeSafe(
+			template_rect, mapToTemplate(MapCoordF(map_rect.topLeft())));
+		rectIncludeSafe(
+			template_rect, mapToTemplate(MapCoordF(map_rect.topRight())));
+		rectIncludeSafe(
+			template_rect, mapToTemplate(MapCoordF(map_rect.bottomLeft())));
+		rectIncludeSafe(
+			template_rect, mapToTemplate(MapCoordF(map_rect.bottomRight())));
+	}
+	auto const template_scale = std::max(
+		1.0e-9,
+		pixels_per_map_unit * std::max(
+			std::abs(getTemplateScaleX()),
+			std::abs(getTemplateScaleY())));
+
+	OutputRenderPreparation result;
+	for (auto* source : output_templates)
+	{
+		auto const preparation = source->prepareForOutput(
+			template_rect, template_scale);
+		result.ready_resources += preparation.ready_resources;
+		result.total_resources += preparation.total_resources;
+		if (preparation.state == OutputRenderPreparation::State::Failed)
+		{
+			result.state = OutputRenderPreparation::State::Failed;
+			if (result.error.isEmpty())
+				result.error = preparation.error;
+		}
+		else if (preparation.state == OutputRenderPreparation::State::Pending
+		         && result.state != OutputRenderPreparation::State::Failed)
+		{
+			result.state = OutputRenderPreparation::State::Pending;
+		}
+	}
+	return result;
+}
+
+void TemplateMap::finishOutputPreparation(bool cancelled)
+{
+	if (!output_preparation_active)
+		return;
+	for (auto* source : output_templates)
+		source->finishOutputPreparation(cancelled);
+	output_templates.clear();
+	output_preparation_active = false;
 }
 
 Map* TemplateMap::templateMap()

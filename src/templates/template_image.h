@@ -22,7 +22,9 @@
 #ifndef OPENORIENTEERING_TEMPLATE_IMAGE_H
 #define OPENORIENTEERING_TEMPLATE_IMAGE_H
 
+#include <functional>
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include <QtGlobal>
@@ -51,14 +53,53 @@ class Georeferencing;
 class Map;
 class MapCoordF;
 
+/** Application-wide accounting lease for raster pixel allocations. */
+class RasterMemoryLease
+{
+public:
+	virtual ~RasterMemoryLease() = default;
+	virtual void shrinkTo(qint64 bytes) noexcept = 0;
+};
+
+using RasterMemoryReserver =
+	std::function<std::shared_ptr<RasterMemoryLease>(qint64 bytes)>;
+
 struct RasterTemplateTile
 {
+	RasterTemplateTile() = default;
+	RasterTemplateTile(
+		QImage image,
+		QRectF template_rect,
+		QRectF source_rect,
+		quint64 cache_key = 0,
+		bool missing = false,
+		bool provisional = false,
+		QTransform image_to_map = {},
+		bool has_image_to_map = false,
+		std::shared_ptr<RasterMemoryLease> pixel_memory = {},
+		RasterMemoryReserver reserve_render_memory = {})
+	 : image(std::move(image))
+	 , template_rect(std::move(template_rect))
+	 , source_rect(std::move(source_rect))
+	 , cache_key(cache_key)
+	 , missing(missing)
+	 , provisional(provisional)
+	 , image_to_map(std::move(image_to_map))
+	 , has_image_to_map(has_image_to_map)
+	 , pixel_memory(std::move(pixel_memory))
+	 , reserve_render_memory(std::move(reserve_render_memory))
+	{}
+
 	QImage image;
 	QRectF template_rect;
 	QRectF source_rect;
 	quint64 cache_key = 0;
 	bool missing = false;
 	bool provisional = false;
+	QTransform image_to_map;
+	bool has_image_to_map = false;
+	std::shared_ptr<RasterMemoryLease> pixel_memory;
+	RasterMemoryReserver reserve_render_memory;
 };
 
 
@@ -129,6 +170,8 @@ public:
 	                                double scale,
 	                                bool on_screen,
 	                                QVector<RasterTemplateTile>& out) const;
+	/** Optional map-coordinate clip applied to this raster layer. */
+	virtual QRectF getRasterRenderClip(bool on_screen) const;
 	bool canBeDrawnOnto() const override { return drawable; }
 
 	/**

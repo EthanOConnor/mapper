@@ -158,6 +158,10 @@ Settings::Settings()
 	// Paint On Template tool settings
 	registerSetting(PaintOnTemplateTool_Colors, "PaintOnTemplateTool/colors", QLatin1String("FF0000,FFFF00,00FF00,DB00D9,0000FF,D15C00,000000"));
 
+	// Connected Map Hub. Bearer credentials deliberately do not live here.
+	registerSetting(MapHub_ServerUrl, "MapHub/server_url", QLatin1String("https://maps.zudark.net"));
+	registerSetting(MapHub_WorkspaceRoot, "MapHub/workspace_root", QVariant(QString{}));
+
 	QSettings settings;
 	
 #ifndef Q_OS_ANDROID

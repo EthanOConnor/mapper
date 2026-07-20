@@ -110,6 +110,11 @@ set(Mapper_Common_SRCS
   global.cpp
   mapper_resource.cpp
   settings.cpp
+
+	collaboration/managed_map_workspace.cpp
+	collaboration/map_hub_api_client.cpp
+	collaboration/map_hub_credentials.cpp
+	collaboration/map_hub_imagery_catalog.cpp
   
   core/autosave.cpp
   core/crs_template.cpp
@@ -184,6 +189,7 @@ set(Mapper_Common_SRCS
   gui/home_screen_controller.cpp
   gui/main_window.cpp
   gui/main_window_controller.cpp
+	gui/map_hub_dialog.cpp
   gui/modifier_key.cpp
   gui/print_progress_dialog.cpp
   gui/print_tool.cpp
@@ -195,6 +201,12 @@ set(Mapper_Common_SRCS
   gui/text_browser_dialog.cpp
   gui/touch_cursor.cpp
   gui/util_gui.cpp
+
+  gui/imagery/catalog_import_dialog.cpp
+  gui/imagery/catalog_manager_dialog.cpp
+  gui/imagery/imagery_network_permissions_dialog.cpp
+  gui/imagery/imagery_source_model.cpp
+  gui/imagery/online_imagery_dialog.cpp
   
   gui/map/new_map_dialog.cpp
   gui/map/map_dialog_scale.cpp
@@ -229,6 +241,7 @@ set(Mapper_Common_SRCS
   gui/widgets/crs_selector.cpp
   gui/widgets/editor_settings_page.cpp
   gui/widgets/general_settings_page.cpp
+	gui/widgets/map_hub_settings_page.cpp
   gui/widgets/home_screen_widget.cpp
   gui/widgets/key_button_bar.cpp
   gui/widgets/mapper_proxystyle.cpp
@@ -249,6 +262,8 @@ set(Mapper_Common_SRCS
   
   templates/paint_on_template_feature.cpp
   templates/paint_on_template_tool.cpp
+  templates/online_raster_template.cpp
+  templates/raster_resource_manager.cpp
   templates/template.cpp
   templates/template_adjust.cpp
   templates/template_dialog_reopen.cpp
@@ -349,6 +364,8 @@ qt_add_resources(Mapper_Common "mapper-translations"
 target_link_libraries(Mapper_Common
   PUBLIC
   Clipper2::Clipper2
+  Mapper::ImageryCore
+  Mapper::ImageryNetwork
   Mapper::RenderIR
   ${PROJ_LIBRARIES}
   Qt6::Widgets
@@ -379,6 +396,12 @@ target_compile_definitions(Mapper_Common PRIVATE
 target_compile_definitions(Mapper_Common INTERFACE
   MAPPER_COMMON_LIB
 )
+
+if(APPLE)
+	target_link_libraries(Mapper_Common PRIVATE "-framework Security")
+elseif(WIN32)
+	target_link_libraries(Mapper_Common PRIVATE Advapi32)
+endif()
 
 
 mapper_translations_sources(${Mapper_Common_SRCS} ${Mapper_Common_HEADERS})
@@ -474,6 +497,22 @@ install(TARGETS Mapper
   BUNDLE DESTINATION "${MAPPER_RUNTIME_DESTINATION}"   # macOS
   LIBRARY DESTINATION "${MAPPER_LIBRARY_DESTINATION}"
 )
+
+# Headless companion used by Map Hub to freeze the exact event revision into
+# a token-scoped public raster. It intentionally renders map objects only: no
+# authoring helpers, templates, or third-party basemap can leak into feedback.
+if(NOT ANDROID)
+	qt_add_executable(MapperMapRenderer collaboration/map_hub_renderer.cpp)
+	mapper_target_defaults(MapperMapRenderer)
+	target_link_libraries(MapperMapRenderer PRIVATE Mapper_Common)
+	target_compile_definitions(MapperMapRenderer PRIVATE
+		QT_NO_CAST_FROM_ASCII
+		QT_NO_CAST_TO_ASCII
+		QT_USE_QSTRINGBUILDER
+	)
+	set_target_properties(MapperMapRenderer PROPERTIES OUTPUT_NAME "mapper-map-render")
+	install(TARGETS MapperMapRenderer RUNTIME DESTINATION "${MAPPER_RUNTIME_DESTINATION}")
+endif()
 
 
 # Workaround for "assistant" not being in PATH.

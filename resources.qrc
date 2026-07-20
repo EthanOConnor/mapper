@@ -46,6 +46,7 @@
         <file alias="icons/draw-rectangle.svg">images/classic/draw-rectangle.svg</file>
         <file alias="icons/draw-text.svg">images/classic/draw-text.svg</file>
         <file alias="icons/georeferencing.svg">images/classic/georeferencing.svg</file>
+        <file alias="icons/folder.svg">images/classic/folder.svg</file>
         <file alias="icons/gps-distance-rings.svg">images/classic/gps-distance-rings.svg</file>
         <file alias="icons/gps-temporary-clear.svg">images/classic/gps-temporary-clear.svg</file>
         <file alias="icons/gps-temporary-path.svg">images/classic/gps-temporary-path.svg</file>
@@ -53,6 +54,8 @@
         <file alias="icons/grid.svg">images/classic/grid.svg</file>
         <file alias="icons/group.svg">images/classic/group.svg</file>
         <file alias="icons/help.svg">images/classic/help.svg</file>
+        <file alias="icons/image.svg">images/classic/image.svg</file>
+        <file alias="icons/info.svg">images/classic/info.svg</file>
         <file alias="icons/magnifying-glass.svg">images/classic/magnifying-glass.svg</file>
         <file alias="icons/map-information.svg">images/classic/map-information.svg</file>
         <file alias="icons/map-parts.svg">images/classic/map-parts.svg</file>
@@ -120,6 +123,7 @@
         <file alias="icons/view-zoom-in.svg">images/classic/view-zoom-in.svg</file>
         <file alias="icons/view-zoom-out.svg">images/classic/view-zoom-out.svg</file>
         <file alias="icons/window-new.svg">images/classic/window-new.svg</file>
+        <file alias="icons/warning.svg">images/classic/warning.svg</file>
         <file>images/mapper-icon/Mapper-128.png</file>
         <file alias="doc/tip-of-the-day/tips.txt">doc/tip-of-the-day/tips_en.txt</file>
     </qresource>

@@ -55,6 +55,7 @@
 #include "gui/util_gui.h"
 #include "gui/widgets/editor_settings_page.h"
 #include "gui/widgets/general_settings_page.h"
+#include "gui/widgets/map_hub_settings_page.h"
 #include "gui/widgets/paint_on_template_settings_page.h"
 #include "gui/widgets/settings_page.h"
 
@@ -215,6 +216,7 @@ void SettingsDialog::addPages()
 {
 	addPage(new GeneralSettingsPage(this));
 	addPage(new EditorSettingsPage(this));
+	addPage(new MapHubSettingsPage(this));
 #ifdef MAPPER_USE_GDAL
 	addPage(new GdalSettingsPage(this));
 #endif
@@ -226,6 +228,8 @@ void SettingsDialog::addPages()
 
 void SettingsDialog::addPage(SettingsPage* page)
 {
+	connect(page, &SettingsPage::applyFailed, this,
+	        [this] { apply_failed = true; });
 	if (stack_widget)
 	{
 		if (auto form_layout = qobject_cast<QFormLayout*>(page->layout()))
@@ -280,7 +284,10 @@ void SettingsDialog::buttonPressed(QAbstractButton* button)
 	switch (id)
 	{
 	case QDialogButtonBox::Ok:
+		apply_failed = false;
 		callOnAllPages(&SettingsPage::apply);
+		if (apply_failed)
+			break;
 		if (stack_widget && stack_widget->currentIndex() > 0)
 		{
 			stack_widget->setCurrentIndex(0);

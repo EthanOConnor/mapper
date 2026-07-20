@@ -36,6 +36,7 @@
 #include <QSize>
 #include <QString>
 #include <QTime>
+#include <QTimer>
 #include <QVariant>
 #include <QWidget>
 
@@ -391,11 +392,20 @@ private:
 	 *  Returns the initial zoom factor. */
 	qreal startPinching(const QPoint& center);
 	/** Updates a pinching interaction at the given cursor position. */
-	void updatePinching(const QPoint& center, qreal factor);
+	void updatePinching(const QPoint& center, qreal incremental_factor);
 	/** Ends a pinching interaction at the given cursor position. */
-	void finishPinching(const QPoint& center, qreal factor);
+	void finishPinching(const QPoint& center);
 	/** Cancels a pinching interaction. */
 	void cancelPinching();
+
+	enum class ZoomLimitFeedback
+	{
+		None,
+		Minimum,
+		Maximum,
+	};
+	void showZoomLimitFeedback(ZoomLimitFeedback limit);
+	void clearZoomLimitFeedback();
 	
 	/** Moves the map a given number of big "steps" in x and/or y direction. */
 	void moveMap(int steps_x, int steps_y);
@@ -440,6 +450,8 @@ private:
 	bool pinching;
 	qreal pinching_factor;
 	QPoint pinching_center;
+	ZoomLimitFeedback zoom_limit_feedback = ZoomLimitFeedback::None;
+	QTimer zoom_limit_feedback_timer;
 	bool frame_update_scheduled = false;
 	bool render_context_update_scheduled;
 	

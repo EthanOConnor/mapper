@@ -24,6 +24,7 @@
 #include "core/map.h"
 #include "core/map_part.h"
 #include "core/objects/object.h"
+#include "core/symbols/area_symbol.h"
 #include "core/symbols/line_symbol.h"
 #include "render/qpainter_renderer.h"
 #include "render/qt_render_bridge.h"
@@ -224,6 +225,90 @@ void RenderIrTest::curvedLineKeepsBothBorders()
 	QVERIFY(middle_sides[0] * middle_sides[1] < 0);
 }
 
+void RenderIrTest::cosmeticAndMinimumStrokesRemainVisible()
+{
+	Map map;
+	auto* color = new MapColor;
+	color->setRgb(MapColorRgb(Qt::black));
+	map.addColor(color, 0);
+	map.setBaselineViewEnabled(true);
+
+	auto* line_symbol = new LineSymbol;
+	line_symbol->setColor(color);
+	line_symbol->setLineWidth(0.4);
+	map.addSymbol(line_symbol, 0);
+
+	MapCoord curve_start(-4, 0);
+	curve_start.setCurveStart(true);
+	map.addObject(new PathObject(line_symbol, {
+		curve_start, MapCoord(-2, -2), MapCoord(2, 2), MapCoord(4, 0),
+	}, &map));
+
+	auto* area_symbol = new AreaSymbol;
+	area_symbol->setColor(color);
+	map.addSymbol(area_symbol, 1);
+	auto* area = new PathObject(area_symbol, {
+		MapCoord(-3, 3), MapCoord(3, 3), MapCoord(3, 7), MapCoord(-3, 7),
+	}, &map);
+	area->parts().front().setClosed(true, true);
+	area->updatePathCoords();
+	map.addObject(area);
+
+	auto constexpr scaling = 20.0;
+	auto const ir = map.publishRenderSnapshot()->buildIR({
+		render::fromQRectF(map.calculateExtent(true).adjusted(-1, -1, 1, 1)),
+		scaling,
+		RenderConfig::Tool,
+		1,
+	});
+
+	auto stroke_count = std::size_t(0);
+	auto curved_stroke_count = std::size_t(0);
+	for (auto const& command : ir->commands)
+	{
+		auto const* stroke = std::get_if<render::StrokePath>(&command);
+		if (!stroke)
+			continue;
+		++stroke_count;
+		QCOMPARE(stroke->style.width, 1 / scaling);
+		if (stroke->path && std::ranges::any_of(
+		        stroke->path->elements(),
+		        [](auto const& element) {
+			        return element.verb == render::PathVerb::CubicTo;
+		        }))
+			++curved_stroke_count;
+	}
+	QCOMPARE(stroke_count, std::size_t(2));
+	QCOMPARE(curved_stroke_count, std::size_t(1));
+
+	Map minimum_map;
+	auto* minimum_color = new MapColor;
+	minimum_color->setRgb(MapColorRgb(Qt::black));
+	minimum_map.addColor(minimum_color, 0);
+	auto* minimum_symbol = new LineSymbol;
+	minimum_symbol->setColor(minimum_color);
+	minimum_symbol->setLineWidth(0.02);
+	minimum_map.addSymbol(minimum_symbol, 0);
+	minimum_map.addObject(new PathObject(minimum_symbol, {
+		MapCoord(0, 0), MapCoord(4, 0),
+	}, &minimum_map));
+	auto const minimum_ir = minimum_map.publishRenderSnapshot()->buildIR({
+		render::fromQRectF(minimum_map.calculateExtent(true).adjusted(-1, -1, 1, 1)),
+		scaling,
+		RenderConfig::Tool,
+		1,
+	});
+	auto const minimum_stroke = std::ranges::find_if(
+		minimum_ir->commands,
+		[](auto const& command) {
+			return std::holds_alternative<render::StrokePath>(command);
+		});
+	QVERIFY(minimum_stroke != minimum_ir->commands.end());
+	QCOMPARE(
+		std::get<render::StrokePath>(*minimum_stroke).style.width,
+		1 / scaling);
+}
+
 void RenderIrTest::referenceRendererInterpretsIr()
 {
 	render::RenderIRBuilder builder(42, { 0, 0, 128, 128 });
@@ -250,7 +335,8 @@ void RenderIrTest::referenceRendererInterpretsIr()
 	auto pixels = std::make_shared<const std::vector<std::uint8_t>>(
 		std::vector<std::uint8_t> { 0, 255, 0, 255 }
 	);
-	auto image = std::make_shared<const render::ImageData>(render::ImageData { 1, 1, 4, pixels });
+	auto image = std::make_shared<const render::ImageData>(
+		render::ImageData { 1, 1, 4, pixels, {} });
 	builder.drawImage(image, { 96, 8, 16, 16 });
 	builder.drawLinePattern(rectangle(88, 40, 120, 72), render::fromQColor(Qt::magenta),
 	                        0, 4, 0, 1);

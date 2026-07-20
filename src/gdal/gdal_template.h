@@ -20,22 +20,23 @@
 #ifndef OPENORIENTEERING_GDAL_TEMPLATE_H
 #define OPENORIENTEERING_GDAL_TEMPLATE_H
 
-#include <atomic>
 #include <cstdint>
-#include <optional>
+#include <memory>
 #include <vector>
 
 #include <QCache>
+#include <QDeadlineTimer>
 #include <QHash>
 #include <QImage>
 #include <QPoint>
+#include <QSet>
 #include <QSize>
 #include <QString>
-#include <QThreadPool>
 
 #include <gdal_dataset.h>
 
 #include "gdal/gdal_image_reader.h"
+#include "templates/raster_resource_manager.h"
 #include "templates/template.h"
 #include "templates/template_image.h"
 
@@ -132,6 +133,13 @@ private:
 			return tile_x_min > tile_x_max || tile_y_min > tile_y_max;
 		}
 
+		qint64 tileCount() const
+		{
+			return isEmpty() ? 0
+			       : qint64(tile_x_max - tile_x_min + 1)
+			           * qint64(tile_y_max - tile_y_min + 1);
+		}
+
 		bool operator==(const TileWindow& other) const
 		{
 			return tile_x_min == other.tile_x_min
@@ -154,12 +162,21 @@ private:
 
 	void shutdownTiledSource();
 	void queueWantedTiles(const TileWindow& window, bool replace_pending_tiles);
-	QImage readTileImage(int tile_x, int tile_y, int subsampling,
-	                     std::optional<std::uint64_t> generation = std::nullopt) const;
-	void onTileLoaded(const GdalTileKey& key, QImage tile_image, std::uint64_t generation);
-	void onTileLoadFailed(const GdalTileKey& key, std::uint64_t generation);
+	QImage readTileImage(int tile_x, int tile_y, int subsampling) const;
+	static QImage readTileImage(
+		const std::shared_ptr<GDALDataset>& dataset,
+		const GdalImageReader::RasterInfo& raster_info,
+		const QSize& raster_size,
+		int tile_x,
+		int tile_y,
+		int subsampling,
+		const RasterResourceManager::CancellationToken* cancellation
+	);
+	void onTileLoaded(const GdalTileKey& key, QImage tile_image);
+	void onTileLoadFailed(const GdalTileKey& key);
 	void markTileAreaDirty(int tile_x, int tile_y, int subsampling);
 	TileWindow tileWindowForMapRect(const QRectF& map_rect, int subsampling) const;
+	TileWindow screenTileWindowForMapRect(const QRectF& map_rect, int subsampling) const;
 	const QImage* findBestCachedTile(int tile_x, int tile_y, int subsampling, QRectF* source_rect) const;
 
 	static bool readTmsTileOrigin(const QString& template_path, QPoint* origin_tile);
@@ -179,18 +196,29 @@ private:
 	                                         const QRect& cached_rect,
 	                                         const QSize& cached_image_size);
 	int chooseTiledSubsampling(double scale) const;
+	bool isTiledSubsamplingAligned(int subsampling) const;
+	qsizetype screenTileAdmissionBudget() const;
 	int workerCountForSource() const;
 
-	GDALDatasetUniquePtr tiled_dataset;
+	struct TileFailure
+	{
+		int attempts = 0;
+		QDeadlineTimer retry;
+	};
+
+	std::shared_ptr<GDALDataset> tiled_dataset;
 	GdalImageReader::RasterInfo tiled_raster_info;
 	QSize tiled_raster_size;
 	TileWindow wanted_window;
 	QPoint tiled_origin_tile;
 	bool has_tiled_origin_tile = false;
 
-	std::atomic<std::uint64_t> tile_generation{0};
-	QThreadPool tile_pool;
-	QHash<GdalTileKey, std::uint64_t> queued_tiles;
+	RasterResourceManager::Owner raster_owner =
+		RasterResourceManager::instance().createOwner();
+	QSet<GdalTileKey> queued_tiles;
+	QHash<GdalTileKey, TileFailure> failed_tiles;
+	TileWindow attempted_window;
+	QSet<GdalTileKey> attempted_tiles;
 
 	QCache<GdalTileKey, QImage> tile_cache;
 };

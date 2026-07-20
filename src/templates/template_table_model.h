@@ -50,6 +50,14 @@ public:
 	static constexpr int opacityColumn() { return 1; }
 	static constexpr int groupColumn() { return 2; }
 	static constexpr int nameColumn() { return 3; }
+
+	enum ItemDataRole
+	{
+		/// The complete TemplateResourceStatus value.
+		ResourceStatusRole = Qt::UserRole + 1,
+		/// Localized, accessibility-ready resource status text.
+		ResourceStatusTextRole,
+	};
 	
 	/**
 	 * States of template loading to be signaled when loading is triggered via this model.
@@ -121,6 +129,7 @@ protected:
 	void onTemplateAboutToBeDeleted(int pos, Template* temp);
 	void onTemplateDeleted();
 	void onTemplateStateChanged();
+	void onTemplateResourceStatusChanged();
 	
 private:
 	Map& map;

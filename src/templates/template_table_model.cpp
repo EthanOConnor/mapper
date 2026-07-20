@@ -23,14 +23,18 @@
 
 #include <Qt>
 #include <QtGlobal>
+#include <QApplication>
 #include <QBrush>
 #include <QColor>
 #include <QCoreApplication>
 #include <QFlags>
 #include <QIcon>
 #include <QLatin1String>
+#include <QLocale>
 #include <QModelIndex>
 #include <QPalette>
+#include <QStringList>
+#include <QStyle>
 
 #include "core/map.h"
 #include "core/map_view.h"
@@ -61,6 +65,109 @@ constexpr int combined(int column, Qt::ItemDataRole role)
 	return int(role) * 256 + column + 256;
 }
 
+QString resourceStatusText(const OpenOrienteering::TemplateResourceStatus& status)
+{
+	QStringList parts;
+	auto const countText = [](qsizetype count) {
+		return QLocale().toString(static_cast<qlonglong>(count));
+	};
+	if (status.ready_resources > 0)
+		parts.push_back(
+			QCoreApplication::translate(
+				"OpenOrienteering::TemplateTableModel", "%1 ready")
+				.arg(countText(status.ready_resources)));
+	if (status.loading_resources > 0)
+		parts.push_back(
+			QCoreApplication::translate(
+				"OpenOrienteering::TemplateTableModel", "%1 loading")
+				.arg(countText(status.loading_resources)));
+	if (status.offline_resources > 0)
+		parts.push_back(
+			QCoreApplication::translate(
+				"OpenOrienteering::TemplateTableModel",
+				"%1 waiting for network")
+				.arg(countText(status.offline_resources)));
+	if (status.transient_failures > 0)
+		parts.push_back(
+			QCoreApplication::translate(
+				"OpenOrienteering::TemplateTableModel",
+				"%1 retrying after an error")
+				.arg(countText(status.transient_failures)));
+	if (status.permanent_failures > 0)
+		parts.push_back(
+			QCoreApplication::translate(
+				"OpenOrienteering::TemplateTableModel",
+				"%1 unavailable")
+				.arg(countText(status.permanent_failures)));
+
+	QString text;
+	if (!parts.isEmpty())
+	{
+		auto const separator = QCoreApplication::translate(
+			"OpenOrienteering::TemplateTableModel", ", ");
+		text = QCoreApplication::translate(
+			"OpenOrienteering::TemplateTableModel", "Resources: %1")
+			.arg(parts.join(separator));
+	}
+	if (!status.message.isEmpty())
+	{
+		if (!text.isEmpty())
+			text += QLatin1Char('\n');
+		text += status.message;
+	}
+	return text;
+}
+
+QIcon resourceStatusIcon(
+	const OpenOrienteering::TemplateResourceStatus& status)
+{
+	using Condition =
+		OpenOrienteering::TemplateResourceStatus::Condition;
+
+	if (!status.isReported())
+		return {};
+
+	auto* application =
+		qobject_cast<QApplication*>(QCoreApplication::instance());
+	if (!application)
+		return {};
+
+	auto* style = application->style();
+	auto standard_pixmap = QStyle::SP_MessageBoxInformation;
+	QStyle::StandardPixmap fallback = QStyle::SP_MessageBoxInformation;
+	switch (status.dominantCondition())
+	{
+	case Condition::Ready:
+		standard_pixmap = QStyle::SP_DialogApplyButton;
+		break;
+	case Condition::Loading:
+		standard_pixmap = QStyle::SP_BrowserReload;
+		break;
+	case Condition::Offline:
+		standard_pixmap = QStyle::SP_DriveNetIcon;
+		break;
+	case Condition::TransientFailure:
+		standard_pixmap = QStyle::SP_MessageBoxWarning;
+		break;
+	case Condition::PermanentFailure:
+		standard_pixmap = QStyle::SP_MessageBoxCritical;
+		fallback = QStyle::SP_MessageBoxCritical;
+		break;
+	}
+
+	auto icon = style->standardIcon(standard_pixmap);
+	if (icon.isNull())
+		icon = style->standardIcon(fallback);
+	if (icon.isNull())
+	{
+			icon =
+				status.dominantCondition() == Condition::PermanentFailure
+					? OpenOrienteering::ActionIcon::fromName(u"close")
+					: OpenOrienteering::ActionIcon::fromName(u"info");
+	}
+	return icon;
+}
+
 }
 
 
@@ -87,6 +194,7 @@ TemplateTableModel::TemplateTableModel(Map& map, MapView& view, QObject* parent)
 	{
 		auto* temp = map.getTemplate(i);
 		connect(temp, &Template::templateStateChanged, this, &TemplateTableModel::onTemplateStateChanged);
+		connect(temp, &Template::resourceStatusChanged, this, &TemplateTableModel::onTemplateResourceStatusChanged);
 	}
 }
 
@@ -262,6 +370,11 @@ QVariant TemplateTableModel::mapData(const QModelIndex &index, int role) const
 
 QVariant TemplateTableModel::templateData(Template* temp, const QModelIndex &index, int role) const
 {
+	if (role == ResourceStatusRole)
+		return QVariant::fromValue(temp->resourceStatus());
+	if (role == ResourceStatusTextRole)
+		return resourceStatusText(temp->resourceStatus());
+
 	if (role == Qt::BackgroundRole)
 	{
 #ifdef Q_OS_ANDROID
@@ -304,6 +417,14 @@ QVariant TemplateTableModel::templateData(Template* temp, const QModelIndex &ind
 		if (visibility.visible)
 			return QColor::fromCmykF(0, 0, 0, visibility.opacity);
 		return QColor{Qt::transparent};
+
+	case combined(nameColumn(), Qt::DecorationRole):
+		return resourceStatusIcon(temp->resourceStatus());
+
+	case combined(visibilityColumn(), Qt::DecorationRole):
+		if (touchMode())
+			return resourceStatusIcon(temp->resourceStatus());
+		break;
 		
 	case combined(visibilityColumn(), Qt::DisplayRole):
 		if (!touchMode())
@@ -317,12 +438,46 @@ QVariant TemplateTableModel::templateData(Template* temp, const QModelIndex &ind
 			break;
 		Q_FALLTHROUGH();
 	case combined(nameColumn(), Qt::ToolTipRole):
-		return temp->getTemplatePath();
-	}
-	
-	if (role == Qt::UserRole)
 	{
-		
+		auto tooltip = temp->getTemplatePath();
+		auto const resource_status_text =
+			resourceStatusText(temp->resourceStatus());
+		if (!resource_status_text.isEmpty())
+		{
+			if (!tooltip.isEmpty())
+				tooltip += QLatin1Char('\n');
+			tooltip += resource_status_text;
+		}
+		return tooltip;
+	}
+	}
+
+	auto const is_display_column =
+		index.column() == nameColumn()
+		|| (touchMode() && index.column() == visibilityColumn());
+	if (!is_display_column)
+		return {};
+	if (role != Qt::AccessibleDescriptionRole
+	    && role != Qt::StatusTipRole
+	    && role != Qt::AccessibleTextRole)
+	{
+		return {};
+	}
+
+	auto const resource_status_text =
+		resourceStatusText(temp->resourceStatus());
+	if (role == Qt::AccessibleDescriptionRole
+	    || role == Qt::StatusTipRole)
+	{
+		return resource_status_text;
+	}
+	if (role == Qt::AccessibleTextRole)
+	{
+		if (resource_status_text.isEmpty())
+			return temp->getTemplateFilename();
+		return QCoreApplication::translate(
+			"OpenOrienteering::TemplateTableModel", "%1, %2")
+			.arg(temp->getTemplateFilename(), resource_status_text);
 	}
 	return {};
 }
@@ -418,11 +573,13 @@ void TemplateTableModel::onTemplateAdded(int /*pos*/, Template* temp)
 {
 	endInsertRows();
 	connect(temp, &Template::templateStateChanged, this, &TemplateTableModel::onTemplateStateChanged);
+	connect(temp, &Template::resourceStatusChanged, this, &TemplateTableModel::onTemplateResourceStatusChanged);
 }
 
 void TemplateTableModel::onTemplateChanged(int pos, Template* temp)
 {
 	connect(temp, &Template::templateStateChanged, this, &TemplateTableModel::onTemplateStateChanged);
+	connect(temp, &Template::resourceStatusChanged, this, &TemplateTableModel::onTemplateResourceStatusChanged);
 	auto const row = rowFromPos(pos);
 	emit dataChanged(index(row, 0), index(row, 3));
 }
@@ -460,6 +617,27 @@ void TemplateTableModel::onTemplateStateChanged()
 		auto const row = rowFromPos(pos);
 		emit dataChanged(index(row, 0), index(row, 3));
 	}
+}
+
+void TemplateTableModel::onTemplateResourceStatusChanged()
+{
+	auto pos = map.findTemplateIndex(qobject_cast<Template*>(sender()));
+	if (pos < 0)
+		return;
+
+	auto const row = rowFromPos(pos);
+	emit dataChanged(
+		index(row, 0),
+		index(row, columnCount() - 1),
+		{
+			Qt::DecorationRole,
+			Qt::ToolTipRole,
+			Qt::StatusTipRole,
+			Qt::AccessibleTextRole,
+			Qt::AccessibleDescriptionRole,
+			ResourceStatusRole,
+			ResourceStatusTextRole,
+		});
 }
 
 

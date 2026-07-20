@@ -75,6 +75,8 @@ public:
 		HomeScreen_TipsVisible,
 		HomeScreen_CurrentTip,
 		PaintOnTemplateTool_Colors,
+		MapHub_ServerUrl,
+		MapHub_WorkspaceRoot,
 		END_OF_SETTINGSENUM /* Don't add items below this line. */
 	};
 	

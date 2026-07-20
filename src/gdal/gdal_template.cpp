@@ -32,13 +32,13 @@
 #include <QDebug>
 #include <QFile>
 #include <QImageReader>
-#include <QMetaObject>
 #include <QPointF>
 #include <QRect>
 #include <QRectF>
 #include <QSet>
 #include <QString>
 #include <QThread>
+#include <QTimer>
 #include <QVariant>
 #include <QXmlStreamReader>
 
@@ -63,6 +63,9 @@ namespace {
 
 constexpr int max_screen_subsampling = 64;
 constexpr qsizetype max_queued_screen_tiles = 64;
+// Bound per-view work even when the visible exact-resolution set cannot fit
+// the cache. The effective limit is reduced for larger decoded tile formats.
+constexpr qsizetype max_attempted_screen_tiles = 512;
 
 int tileSubsamplingForScale(double scale, const QSize& block_size)
 {
@@ -144,16 +147,14 @@ QRect decodedSourceRectForTileImpl(const QSize& raster_size,
 
 struct TileReadCancellation
 {
-	const std::atomic<std::uint64_t>* current_generation = nullptr;
-	std::uint64_t expected_generation = 0;
+	const RasterResourceManager::CancellationToken* token = nullptr;
 };
 
 int continueCurrentTileRead(double, const char*, void* data)
 {
 	auto const* cancellation = static_cast<const TileReadCancellation*>(data);
-	return !cancellation || !cancellation->current_generation
-	       || cancellation->current_generation->load(std::memory_order_relaxed)
-	              == cancellation->expected_generation;
+	return !cancellation || !cancellation->token
+	       || !cancellation->token->isCancelled();
 }
 
 }  // namespace
@@ -271,11 +272,11 @@ bool GdalTemplate::loadTemplateFileImpl()
 		GdalManager();
 		CPLErrorReset();
 		auto const path = template_path.toUtf8();
-		tiled_dataset.reset(GDALDataset::Open(
+		tiled_dataset = std::shared_ptr<GDALDataset>(GDALDataset::Open(
 			path.constData(),
 			GDAL_OF_RASTER | GDAL_OF_READONLY | GDAL_OF_THREAD_SAFE | GDAL_OF_VERBOSE_ERROR,
 			nullptr, nullptr, nullptr
-		));
+		), GDALDatasetUniquePtrDeleter {});
 		if (!tiled_dataset)
 		{
 			setErrorString(tr("Failed to open tiled raster: %1")
@@ -327,7 +328,10 @@ bool GdalTemplate::loadTemplateFileImpl()
 			}
 		}
 
-		tile_pool.setMaxThreadCount(workerCountForSource());
+		raster_owner.setConcurrencyLimit(
+			RasterResourceManager::Lane::BlockingIo,
+			workerCountForSource()
+		);
 		return true;
 	}
 
@@ -398,8 +402,11 @@ void GdalTemplate::updateRenderContext(const ViewRenderContext& context)
 
 	auto const scale = std::max(getTemplateScaleX(), getTemplateScaleY()) * context.view_zoom;
 	auto const subsampling = chooseTiledSubsampling(Util::mmToPixelPhysical(scale));
-	auto const window = tileWindowForMapRect(context.visible_map_rect, subsampling);
-	auto const replace_pending_tiles = !wanted_window.intersects(window);
+	auto const window = screenTileWindowForMapRect(
+		context.visible_map_rect, subsampling
+	);
+	auto const replace_pending_tiles = !(wanted_window == window)
+	                                   && !wanted_window.intersects(window);
 	wanted_window = window;
 	queueWantedTiles(window, replace_pending_tiles);
 }
@@ -509,12 +516,13 @@ void GdalTemplate::collectRasterTiles(const QRectF& map_clip_rect,
 
 void GdalTemplate::shutdownTiledSource()
 {
-	tile_generation.fetch_add(1, std::memory_order_relaxed);
-	tile_pool.clear();
-	tile_pool.waitForDone();
+	raster_owner.invalidate();
 	tiled_dataset.reset();
 
 	queued_tiles.clear();
+	failed_tiles.clear();
+	attempted_window = {};
+	attempted_tiles.clear();
 
 	tile_cache.clear();
 	tiled_raster_info = GdalImageReader::RasterInfo();
@@ -547,21 +555,32 @@ void GdalTemplate::queueWantedTiles(const TileWindow& window, bool replace_pendi
 
 	if (replace_pending_tiles)
 	{
-		tile_generation.fetch_add(1, std::memory_order_relaxed);
-		tile_pool.clear();
+		raster_owner.invalidate();
 		queued_tiles.clear();
+		failed_tiles.clear();
+	}
+	if (replace_pending_tiles || !(window == attempted_window))
+	{
+		attempted_window = window;
+		attempted_tiles.clear();
 	}
 
 	if (window.isEmpty())
+		return;
+	auto const admission_budget = screenTileAdmissionBudget();
+	if (attempted_tiles.size() >= admission_budget)
 		return;
 
 	auto planIfMissing = [this, &missing_tiles, &planned_tiles](
 		const GdalTileKey& key, double dist_sq, bool fallback) {
 		if (tile_cache.contains(key) || queued_tiles.contains(key)
-		    || planned_tiles.contains(key))
+		    || attempted_tiles.contains(key) || planned_tiles.contains(key))
 		{
 			return;
 		}
+		auto const failed = failed_tiles.constFind(key);
+		if (failed != failed_tiles.cend() && !failed->retry.hasExpired())
+			return;
 		auto const source = sourceRectForTile(
 			tiled_raster_size, tiled_raster_info.block_size,
 			key.tile_x, key.tile_y, key.subsampling
@@ -605,6 +624,8 @@ void GdalTemplate::queueWantedTiles(const TileWindow& window, bool replace_pendi
 				     coarser >= safe_subsampling * 2;
 				     coarser >>= 1)
 				{
+					if (!isTiledSubsamplingAligned(coarser))
+						continue;
 					auto const coarser_x = int(qint64(tx) * safe_subsampling / coarser);
 					auto const coarser_y = int(qint64(ty) * safe_subsampling / coarser);
 					planIfMissing(
@@ -631,47 +652,81 @@ void GdalTemplate::queueWantedTiles(const TileWindow& window, bool replace_pendi
 	if (missing_tiles.empty())
 		return;
 
-	auto const generation = tile_generation.load(std::memory_order_relaxed);
 	auto available_slots = std::max<qsizetype>(
 		0, max_queued_screen_tiles - queued_tiles.size()
 	);
+	auto available_admissions = std::max<qsizetype>(
+		0, admission_budget - attempted_tiles.size()
+	);
 	for (auto const& missing : missing_tiles)
 	{
-		if (available_slots == 0)
+		if (available_slots == 0 || available_admissions == 0)
 			break;
 		auto const key = missing.key;
-		if (tile_cache.contains(key) || queued_tiles.contains(key))
+		if (tile_cache.contains(key) || queued_tiles.contains(key)
+		    || attempted_tiles.contains(key))
 			continue;
-		queued_tiles.insert(key, generation);
-		tile_pool.start([this, key, generation] {
-			auto tile = readTileImage(
-				key.tile_x, key.tile_y, key.subsampling, generation
-			);
-			QMetaObject::invokeMethod(
-				this,
-				[this, key, tile = std::move(tile), generation]() mutable {
-					if (tile.isNull())
-						onTileLoadFailed(key, generation);
-					else
-						onTileLoaded(key, std::move(tile), generation);
-				},
-				Qt::QueuedConnection
-			);
-		}, missing.fallback ? 2 : 1);
+		auto const accepted = RasterResourceManager::instance().submit(
+			raster_owner,
+			RasterResourceManager::Lane::BlockingIo,
+			missing.fallback
+				? RasterResourceManager::Priority::Coverage
+				: RasterResourceManager::Priority::Visible,
+			this,
+			[
+				dataset = tiled_dataset,
+				raster_info = tiled_raster_info,
+				raster_size = tiled_raster_size,
+				key,
+				receiver = this
+			](const RasterResourceManager::CancellationToken& cancellation) mutable {
+				auto tile = readTileImage(
+					dataset, raster_info, raster_size,
+					key.tile_x, key.tile_y, key.subsampling, &cancellation
+				);
+				return RasterResourceManager::Completion {
+					[receiver, key, tile = std::move(tile)]() mutable {
+						if (tile.isNull())
+							receiver->onTileLoadFailed(key);
+						else
+							receiver->onTileLoaded(key, std::move(tile));
+					}
+				};
+			}
+		);
+		if (!accepted)
+			continue;
+		attempted_tiles.insert(key);
+		queued_tiles.insert(key);
 		--available_slots;
+		--available_admissions;
 	}
 }
 
 
 QImage GdalTemplate::readTileImage(
-	int tile_x, int tile_y, int subsampling,
-	std::optional<std::uint64_t> generation) const
+	int tile_x, int tile_y, int subsampling) const
 {
-	if (!tiled_dataset)
+	return readTileImage(
+		tiled_dataset, tiled_raster_info, tiled_raster_size,
+		tile_x, tile_y, subsampling, nullptr
+	);
+}
+
+QImage GdalTemplate::readTileImage(
+	const std::shared_ptr<GDALDataset>& dataset,
+	const GdalImageReader::RasterInfo& raster_info,
+	const QSize& raster_size,
+	int tile_x,
+	int tile_y,
+	int subsampling,
+	const RasterResourceManager::CancellationToken* cancellation)
+{
+	if (!dataset)
 		return {};
 
 	auto const src = decodedSourceRectForTile(
-		tiled_raster_size, tiled_raster_info.block_size, tile_x, tile_y, subsampling
+		raster_size, raster_info.block_size, tile_x, tile_y, subsampling
 	);
 	if (src.isEmpty())
 		return {};
@@ -680,7 +735,7 @@ QImage GdalTemplate::readTileImage(
 	auto const output_w = std::max(1, (src.width() + safe_subsampling - 1) / safe_subsampling);
 	auto const output_h = std::max(1, (src.height() + safe_subsampling - 1) / safe_subsampling);
 
-	QImage tile(output_w, output_h, tiled_raster_info.image_format);
+	QImage tile(output_w, output_h, raster_info.image_format);
 	if (tile.isNull())
 		return {};
 
@@ -690,40 +745,40 @@ QImage GdalTemplate::readTileImage(
 	INIT_RASTERIO_EXTRA_ARG(extra_arg);
 	if (safe_subsampling > 1)
 		extra_arg.eResampleAlg = GRIORA_Average;
-	TileReadCancellation cancellation { &tile_generation, generation.value_or(0) };
-	if (generation)
+	TileReadCancellation read_cancellation { cancellation };
+	if (cancellation)
 	{
 		extra_arg.pfnProgress = continueCurrentTileRead;
-		extra_arg.pProgressData = &cancellation;
+		extra_arg.pProgressData = &read_cancellation;
 	}
 
 	CPLErrorReset();
-	auto bands = tiled_raster_info.bands;
-	auto result = tiled_dataset->RasterIO(
+	auto bands = raster_info.bands;
+	auto result = dataset->RasterIO(
 		GF_Read,
 		src.x(), src.y(), src.width(), src.height(),
-		tile.bits() + tiled_raster_info.band_offset, output_w, output_h,
+		tile.bits() + raster_info.band_offset, output_w, output_h,
 		GDT_Byte,
 		bands.count(), bands.data(),
-		tiled_raster_info.pixel_space, tile.bytesPerLine(),
-		tiled_raster_info.band_space,
+		raster_info.pixel_space, tile.bytesPerLine(),
+		raster_info.band_space,
 		&extra_arg);
 	if (result >= CE_Warning)
 		return {};
 
-	tiled_raster_info.postprocessing(tile);
+	raster_info.postprocessing(tile);
 	return tile;
 }
 
 
 void GdalTemplate::onTileLoaded(
-	const GdalTileKey& key, QImage tile_image, std::uint64_t generation)
+	const GdalTileKey& key, QImage tile_image)
 {
-	if (queued_tiles.value(key) == generation)
-		queued_tiles.remove(key);
-	if (generation != tile_generation.load(std::memory_order_relaxed) || !isTiledSource())
+	queued_tiles.remove(key);
+	if (!isTiledSource())
 		return;
 
+	failed_tiles.remove(key);
 	auto const cost = tileCacheCost(tile_image);
 	tile_cache.insert(key, new QImage(std::move(tile_image)), cost);
 
@@ -733,10 +788,27 @@ void GdalTemplate::onTileLoaded(
 
 
 void GdalTemplate::onTileLoadFailed(
-	const GdalTileKey& key, std::uint64_t generation)
+	const GdalTileKey& key)
 {
-	if (queued_tiles.value(key) == generation)
-		queued_tiles.remove(key);
+	queued_tiles.remove(key);
+	if (!isTiledSource())
+		return;
+
+	auto& failure = failed_tiles[key];
+	failure.attempts = std::min(failure.attempts + 1, 8);
+	auto const delay = std::min(30'000, 250 << (failure.attempts - 1));
+	failure.retry = QDeadlineTimer(delay);
+
+	queueWantedTiles(wanted_window, false);
+	auto const expected_generation = raster_owner.generation();
+	QTimer::singleShot(delay, this, [this, key, expected_generation] {
+		if (!isTiledSource() || raster_owner.generation() != expected_generation)
+			return;
+		auto const failed = failed_tiles.constFind(key);
+		if (failed == failed_tiles.cend() || !failed->retry.hasExpired())
+			return;
+		queueWantedTiles(wanted_window, false);
+	});
 }
 
 
@@ -913,6 +985,34 @@ GdalTemplate::TileWindow GdalTemplate::tileWindowForMapRect(const QRectF& map_re
 }
 
 
+GdalTemplate::TileWindow GdalTemplate::screenTileWindowForMapRect(
+	const QRectF& map_rect, int subsampling) const
+{
+	auto window = tileWindowForMapRect(map_rect, subsampling);
+	auto const admission_budget = screenTileAdmissionBudget();
+	auto const max_subsampling = std::max(1, std::min({
+		tiled_raster_info.block_size.width(),
+		tiled_raster_info.block_size.height(),
+		max_screen_subsampling,
+	}));
+
+	while (window.tileCount() > admission_budget)
+	{
+		auto coarser = window.subsampling * 2;
+		while (coarser <= max_subsampling
+		       && !isTiledSubsamplingAligned(coarser))
+		{
+			coarser *= 2;
+		}
+		if (coarser > max_subsampling)
+			return {};
+		window = tileWindowForMapRect(map_rect, coarser);
+	}
+
+	return window;
+}
+
+
 // static
 GdalTileKey GdalTemplate::tileKey(int tile_x, int tile_y, int subsampling)
 {
@@ -930,19 +1030,40 @@ int GdalTemplate::chooseTileSubsampling(double scale, const QSize& block_size)
 int GdalTemplate::chooseTiledSubsampling(double scale) const
 {
 	auto subsampling = chooseTileSubsampling(scale, tiled_raster_info.block_size);
-	if (!has_tiled_origin_tile)
-		return subsampling;
 
 	// GDAL WMS/TMS overview bands lose the sub-tile remainder bits of TileX
 	// and TileY when the origin is not aligned with the overview factor.
 	// Restrict GDAL to overview levels that keep the cropped origin aligned.
-	while (subsampling > 1
-	       && (tiled_origin_tile.x() % subsampling != 0
-	           || tiled_origin_tile.y() % subsampling != 0))
+	while (subsampling > 1 && !isTiledSubsamplingAligned(subsampling))
 	{
 		subsampling >>= 1;
 	}
 	return subsampling;
+}
+
+
+bool GdalTemplate::isTiledSubsamplingAligned(int subsampling) const
+{
+	auto const safe_subsampling = std::max(1, subsampling);
+	return !has_tiled_origin_tile
+	       || (tiled_origin_tile.x() % safe_subsampling == 0
+	           && tiled_origin_tile.y() % safe_subsampling == 0);
+}
+
+
+qsizetype GdalTemplate::screenTileAdmissionBudget() const
+{
+	auto const block_size = tiled_raster_info.block_size;
+	auto const bits_per_pixel = std::max(
+		8, int(QImage::toPixelFormat(tiled_raster_info.image_format).bitsPerPixel())
+	);
+	auto const decoded_bytes = qint64(block_size.width()) * block_size.height()
+	                           * bits_per_pixel / 8;
+	auto const estimated_cost = std::max<qint64>(1, (decoded_bytes + 1023) / 1024);
+	auto const cache_capacity = tile_cache.maxCost() / estimated_cost;
+	return std::clamp<qsizetype>(
+		cache_capacity, max_queued_screen_tiles, max_attempted_screen_tiles
+	);
 }
 
 
