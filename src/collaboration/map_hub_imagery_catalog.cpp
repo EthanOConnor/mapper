@@ -89,6 +89,17 @@ QJsonObject MapHubImageryCatalog::catalogDocument(const QJsonObject &manifest,
       source.insert(
           QStringLiteral("notices"),
           QJsonObject{{QStringLiteral("attributionText"), attribution}});
+    auto tile_matrix_limits =
+        layer.value(QStringLiteral("tile_matrix_limits")).toArray();
+    if (!tile_matrix_limits.isEmpty())
+      source.insert(QStringLiteral("tileMatrixLimits"), tile_matrix_limits);
+    auto source_raster = layer.value(QStringLiteral("source_raster")).toObject();
+    if (!source_raster.isEmpty())
+      source.insert(
+          QStringLiteral("extensions"),
+          QJsonObject{{QStringLiteral("org.cascadeoc.maphub"),
+                       QJsonObject{{QStringLiteral("sourceRaster"),
+                                    source_raster}}}});
     sources.append(source);
   }
   if (sources.isEmpty())

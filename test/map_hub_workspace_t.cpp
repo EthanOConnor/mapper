@@ -15,6 +15,8 @@
 
 #include "collaboration/managed_map_workspace.h"
 #include "collaboration/map_hub_api_client.h"
+#include "collaboration/map_hub_imagery_catalog.h"
+#include "imagery/oic_catalog.h"
 
 using namespace OpenOrienteering;
 
@@ -146,6 +148,70 @@ void MapHubWorkspaceTest::hashesArtifactsExactly() {
       QStringLiteral(
           "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"));
   QVERIFY(error.isEmpty());
+}
+
+void MapHubWorkspaceTest::preservesPublishedTileMatrixLimits() {
+  QJsonArray limits{
+      QJsonObject{{QStringLiteral("tileMatrix"), QStringLiteral("12")},
+                  {QStringLiteral("minTileRow"), 1431},
+                  {QStringLiteral("maxTileRow"), 1432},
+                  {QStringLiteral("minTileCol"), 657},
+                  {QStringLiteral("maxTileCol"), 658}},
+  };
+  QJsonObject manifest{
+      {QStringLiteral("id"), QStringLiteral("project-id")},
+      {QStringLiteral("current_revision"),
+       QJsonObject{{QStringLiteral("number"), 2}}},
+      {QStringLiteral("title"), QStringLiteral("Kelsey Creek–Wilburton Hill")},
+      {QStringLiteral("tile_layers"),
+       QJsonArray{QJsonObject{
+           {QStringLiteral("id"), QStringLiteral("intensity")},
+           {QStringLiteral("title"), QStringLiteral("All-return intensity")},
+           {QStringLiteral("type"), QStringLiteral("raster")},
+           {QStringLiteral("url_template"),
+            QStringLiteral("https://maps.example.test/api/v1/tiles/{z}/{x}/{y}.png")},
+           {QStringLiteral("min_zoom"), 12},
+           {QStringLiteral("max_zoom"), 18},
+           {QStringLiteral("tile_matrix_limits"), limits},
+           {QStringLiteral("source_raster"),
+            QJsonObject{
+                {QStringLiteral("artifact_id"), QStringLiteral("artifact-id")},
+                {QStringLiteral("crs"), QStringLiteral("EPSG:6596")},
+                {QStringLiteral("pixel_size"), 0.45720091440182875},
+                {QStringLiteral("download_url"),
+                 QStringLiteral("https://maps.example.test/api/v1/artifacts/artifact-id/download")},
+            }},
+       }}},
+  };
+  QString error;
+  auto document = MapHubImageryCatalog::catalogDocument(
+      manifest,
+      QStringLiteral("https://maps.example.test/api/v1/projects/project-id/manifest"),
+      &error);
+  QVERIFY2(error.isEmpty(), qPrintable(error));
+  auto source = document.value(QStringLiteral("sources")).toArray().at(0).toObject();
+  QCOMPARE(source.value(QStringLiteral("tileMatrixLimits")).toArray(), limits);
+  auto source_raster = source.value(QStringLiteral("extensions"))
+                           .toObject()
+                           .value(QStringLiteral("org.cascadeoc.maphub"))
+                           .toObject()
+                           .value(QStringLiteral("sourceRaster"))
+                           .toObject();
+  QCOMPARE(source_raster.value(QStringLiteral("crs")).toString(),
+           QStringLiteral("EPSG:6596"));
+  auto result = imagery::OicCatalogReader::read(
+      QJsonDocument(document).toJson(QJsonDocument::Compact));
+  QVERIFY(result.accepted());
+  QCOMPARE(result.supportedSourceCount(), qsizetype(1));
+  QCOMPARE(result.catalog.sources.at(0).tile_limit_definitions.size(), qsizetype(1));
+  QCOMPARE(result.catalog.sources.at(0)
+               .extensions.value(QStringLiteral("org.cascadeoc.maphub"))
+               .toObject()
+               .value(QStringLiteral("sourceRaster"))
+               .toObject()
+               .value(QStringLiteral("artifact_id"))
+               .toString(),
+           QStringLiteral("artifact-id"));
 }
 
 QTEST_GUILESS_MAIN(MapHubWorkspaceTest)

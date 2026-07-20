@@ -187,9 +187,10 @@ add_unit_test(locale_t ../src/util/translation_util)
 add_unit_test(map_hub_workspace_t
 	../src/collaboration/managed_map_workspace
 	../src/collaboration/map_hub_api_client
+	../src/collaboration/map_hub_imagery_catalog
 	../src/core/document_path
 )
-target_link_libraries(map_hub_workspace_t PRIVATE Qt6::Network)
+target_link_libraries(map_hub_workspace_t PRIVATE Mapper::ImageryCore Mapper::ImageryNetwork Qt6::Network)
 add_unit_test(map_color_t ../src/core/map_color)
 add_unit_test(ocd_t ../src/fileformats/ocd_types)
 add_unit_test(ocd_parameter_stream_reader_t ../src/fileformats/ocd_parameter_stream_reader)

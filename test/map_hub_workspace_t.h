@@ -19,6 +19,7 @@ private slots:
   void identifiesMapperWorkspacePackageTypes();
   void classifiesWorkspaceBaselines();
   void hashesArtifactsExactly();
+  void preservesPublishedTileMatrixLimits();
 };
 
 #endif
