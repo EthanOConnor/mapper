@@ -1315,6 +1315,12 @@ public:
 	
 	/** Returns the special registration color. */
 	static const MapColor* getRegistrationColor();
+
+	/**
+	 * Returns the shared screen-only color bucket used by self-colored sketch
+	 * renderables. The actual stroke color is stored in the sketch symbol.
+	 */
+	static const MapColor* getSketchColor();
 	
 	/** Returns the special covering white line symbol. */
 	static LineSymbol* getCoveringWhiteLine();
@@ -1596,6 +1602,7 @@ private:
 	static MapColor covering_red;
 	static MapColor undefined_symbol_color;
 	static MapColor registration_color;
+	static MapColor sketch_color;
 	static LineSymbol* covering_white_line;
 	static LineSymbol* covering_red_line;
 	static LineSymbol* undefined_line;
@@ -1645,6 +1652,8 @@ const MapColor* Map::getColor(int i) const
 			return getCoveringWhite();
 		case -900:
 			return getRegistrationColor();
+		case -950:
+			return getSketchColor();
 		case -500:
 			return getUndefinedColor();
 		default:
@@ -1849,6 +1858,12 @@ inline
 const MapColor* Map::getRegistrationColor()
 {
 	return &registration_color;
+}
+
+inline
+const MapColor* Map::getSketchColor()
+{
+	return &sketch_color;
 }
 
 inline

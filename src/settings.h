@@ -226,9 +226,9 @@ public:
 	void setGnssRawLogging(bool enabled);
 	void setGnssNtripActiveProfile(const QString& profile);
 	
-	/// Returns a vector of colors for paint on template tool.
+	/// Returns the field sketch palette (legacy setting key retained).
 	std::vector<QColor> paintOnTemplateColors() const;
-	/// Saves the paint on template tool color vector to settings.
+	/// Saves the field sketch palette (legacy setting key retained).
 	void setPaintOnTemplateColors(const std::vector<QColor>& new_colors);
 	/// Helper method for conversion of config string to vector of color.
 	/// In use by the configuration settings page.

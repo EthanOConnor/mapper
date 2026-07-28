@@ -67,7 +67,7 @@ class MapEditorTool;
 class MapFindFeature;
 class MapView;
 class MapWidget;
-class PaintOnTemplateFeature;
+class SketchLayerFeature;
 class PrintWidget;
 class ReopenTemplateDialog;
 class Symbol;
@@ -86,6 +86,7 @@ class TemplateListWidget;
 class MapEditorController : public MainWindowController
 {
 friend class Map;
+friend class SketchLayerFeature;
 Q_OBJECT
 public:
 	/** See MapEditorController constructor. */
@@ -856,7 +857,7 @@ private:
 	QAction* erase_area_act = {};
 	QAction* distribute_points_act = {};
 	
-	std::unique_ptr<PaintOnTemplateFeature> paint_feature;
+	std::unique_ptr<SketchLayerFeature> sketch_feature;
 	
 	QAction* touch_cursor_action = {};
 	QAction* gps_display_action = {};

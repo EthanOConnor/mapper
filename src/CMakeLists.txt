@@ -145,6 +145,7 @@ set(Mapper_Common_SRCS
   core/map_information.cpp
   core/map_part.cpp
   core/map_printer.cpp
+  core/sketch_layer.cpp
   core/map_view.cpp
   core/path_coord.cpp
   core/storage_location.cpp
@@ -175,6 +176,7 @@ set(Mapper_Common_SRCS
   core/symbols/html_symbol_report.cpp
   core/symbols/line_symbol.cpp
   core/symbols/point_symbol.cpp
+  core/symbols/sketch_symbol.cpp
   core/symbols/symbol.cpp
   core/symbols/symbol_icon_decorator.cpp
   core/symbols/text_symbol.cpp
@@ -235,6 +237,7 @@ set(Mapper_Common_SRCS
   gui/map/map_notes.cpp
   gui/map/map_widget.cpp
   gui/map/rotate_map_dialog.cpp
+  gui/map/sketch_layer_feature.cpp
   gui/map/stretch_map_dialog.cpp
   
   gui/symbols/area_symbol_settings.cpp
@@ -278,8 +281,6 @@ set(Mapper_Common_SRCS
   gui/widgets/text_browser.cpp
   gui/widgets/toast.cpp
   
-  templates/paint_on_template_feature.cpp
-  templates/paint_on_template_tool.cpp
   templates/online_raster_template.cpp
   templates/raster_resource_manager.cpp
   templates/template.cpp
@@ -313,6 +314,7 @@ set(Mapper_Common_SRCS
   tools/edit_tool.cpp
   tools/edit_point_tool.cpp
   tools/edit_line_tool.cpp
+  tools/sketch_tool.cpp
   tools/fill_tool.cpp
   tools/object_selector.cpp
   tools/pan_tool.cpp

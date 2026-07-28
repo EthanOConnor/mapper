@@ -233,7 +233,7 @@ PaintOnTemplateSettingsPage::~PaintOnTemplateSettingsPage() = default;
 
 QString PaintOnTemplateSettingsPage::title() const
 {
-	return tr("Paint on template");
+	return tr("Sketch palette");
 }
 
 

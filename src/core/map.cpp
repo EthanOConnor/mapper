@@ -409,6 +409,7 @@ MapColor Map::covering_white(MapColor::CoveringWhite);
 MapColor Map::covering_red(MapColor::CoveringRed);
 MapColor Map::undefined_symbol_color(MapColor::Undefined);
 MapColor Map::registration_color(MapColor::Registration);
+MapColor Map::sketch_color(MapColor::Sketch);
 LineSymbol* Map::covering_white_line;
 LineSymbol* Map::covering_red_line;
 LineSymbol* Map::undefined_line;

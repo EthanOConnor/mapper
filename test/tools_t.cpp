@@ -28,6 +28,7 @@
 #include <Qt>
 #include <QtGlobal>
 #include <QtTest>
+#include <QAction>
 #include <QApplication>
 #include <QEvent>
 #include <QMouseEvent>
@@ -40,6 +41,7 @@
 #include "core/map_coord.h"
 #include "core/objects/object.h"
 #include "core/objects/object_query.h"
+#include "core/sketch_layer.h"
 #include "core/symbols/line_symbol.h"
 #include "core/symbols/point_symbol.h"
 #include "global.h"
@@ -47,10 +49,11 @@
 #include "gui/map/map_editor.h"
 #include "gui/map/map_find_feature.h"
 #include "gui/map/map_widget.h"
-#include "templates/paint_on_template_feature.h"
 #include "templates/template_image.h"
 #include "tools/edit_point_tool.h"
 #include "tools/edit_tool.h"
+#include "tools/sketch_tool.h"
+#include "undo/undo_manager.h"
 
 using namespace OpenOrienteering;
 
@@ -104,6 +107,16 @@ public:
 	mutable bool collected = false;
 	mutable bool collected_without_context = false;
 };
+
+QAction* actionWithText(QObject* parent, const QString& text)
+{
+	for (auto* action : parent->findChildren<QAction*>())
+	{
+		if (action->text() == text)
+			return action;
+	}
+	return nullptr;
+}
 
 } // namespace
 
@@ -292,29 +305,44 @@ void ToolsTest::editTool()
 	editor.editor->setTool(nullptr);
 }
 
-
-
-void ToolsTest::paintOnTemplateFeature()
+void ToolsTest::sketchToolDrawsWithGlobalUndo()
 {
-	// Designed for images of 100 mm at 10 pixel per mm.
-	QCOMPARE(PaintOnTemplateFeature::alignmentBase(20000), 200);
-	QCOMPARE(PaintOnTemplateFeature::alignmentBase(15000), 100);
-	QCOMPARE(PaintOnTemplateFeature::alignmentBase(10000), 100);
-	QCOMPARE(PaintOnTemplateFeature::alignmentBase(7500) , 100);
-	QCOMPARE(PaintOnTemplateFeature::alignmentBase(5000) , 50);
-	QCOMPARE(PaintOnTemplateFeature::alignmentBase(4000) , 50);
-	QCOMPARE(PaintOnTemplateFeature::alignmentBase(1000) , 10);
-	
-	QCOMPARE(PaintOnTemplateFeature::roundToMultiple(-347,  10), -350);
-	QCOMPARE(PaintOnTemplateFeature::roundToMultiple(-347,  20), -340);
-	QCOMPARE(PaintOnTemplateFeature::roundToMultiple(-347,  50), -350);
-	QCOMPARE(PaintOnTemplateFeature::roundToMultiple(-347, 100), -300);
-	QCOMPARE(PaintOnTemplateFeature::roundToMultiple(347,  10), 350);
-	QCOMPARE(PaintOnTemplateFeature::roundToMultiple(347,  20), 340);
-	QCOMPARE(PaintOnTemplateFeature::roundToMultiple(347,  50), 350);
-	QCOMPARE(PaintOnTemplateFeature::roundToMultiple(347, 100), 300);
+	auto* map = new Map;
+	TestMapEditor editor(map);
+	editor.map_widget->resize(320, 240);
+	auto* sketch_action =
+	    actionWithText(editor.window, QStringLiteral("Sketch"));
+	QVERIFY(sketch_action);
+	QVERIFY(sketch_action->isEnabled());
+	sketch_action->trigger();
+	QVERIFY(qobject_cast<SketchTool*>(editor.editor->getTool()));
+
+	editor.simulateDrag(QPoint(80, 120), QPoint(240, 120));
+	auto* layer = SketchLayer::find(*map);
+	QVERIFY(layer);
+	QCOMPARE(layer->getNumObjects(), 1);
+	QVERIFY(map->undoManager().canUndo());
+
+	QVERIFY(map->undoManager().undo(editor.window));
+	QCOMPARE(layer->getNumObjects(), 0);
+	QVERIFY(map->undoManager().redo(editor.window));
+	QCOMPARE(layer->getNumObjects(), 1);
 }
 
+void ToolsTest::sketchActionCannotMutateReadOnlyMap()
+{
+	auto* map = new Map;
+	TestMapEditor editor(map);
+	editor.editor->setReadOnly(true);
+	auto* sketch_action =
+	    actionWithText(editor.window, QStringLiteral("Sketch"));
+	QVERIFY(sketch_action);
+	QVERIFY(!sketch_action->isEnabled());
+	const auto initial_parts = map->getNumParts();
+	sketch_action->trigger();
+	QCOMPARE(map->getNumParts(), initial_parts);
+	QCOMPARE(SketchLayer::find(*map), nullptr);
+}
 
 void ToolsTest::testFindObjects()
 {

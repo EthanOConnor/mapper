@@ -185,6 +185,7 @@ public:
 	{
 		CoveringRed   = -1005,  ///< Foreground color for tool helper lines
 		CoveringWhite = -1000,  ///< Background color for tool helper lines
+		Sketch         = -950,   ///< Shared screen layer for self-colored sketch renderables
 		Registration  = -900,   ///< Registration Black: all printed colors
 		Undefined     = -500,   ///< Color for objects with undefined symbol
 		Reserved      = -1      ///< Never drawn

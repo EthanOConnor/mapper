@@ -157,7 +157,7 @@
 #include "imagery/imagery_source_snapshot.h"
 #include "imagery/tile_network_manager.h"
 #include "templates/online_raster_template.h"
-#include "templates/paint_on_template_feature.h"
+#include "gui/map/sketch_layer_feature.h"
 #include "templates/template.h"
 #include "templates/template_dialog_reopen.h"
 #include "templates/template_track.h"
@@ -456,6 +456,8 @@ void MapEditorController::setReadOnly(bool value)
 		tags_dock_widget->widget()->setEnabled(!read_only);
 	if (mappart_selector_box)
 		mappart_selector_box->setEnabled(!read_only && !editing_in_progress);
+	if (sketch_feature)
+		sketch_feature->setEnabled(!read_only && !editing_in_progress);
 
 	updateWidgets();
 	enforceReadOnlyActions();
@@ -603,8 +605,8 @@ void MapEditorController::setEditingInProgress(bool value)
 		load_crt_act->setEnabled(!editing_in_progress);
 		symbol_report_feature->setEnabled(!editing_in_progress);
 		
-		// Templates menu
-		paint_feature->setEnabled(!editing_in_progress);
+		// Sketch layer
+		sketch_feature->setEnabled(!read_only && !editing_in_progress);
 		
 		updateObjectDependentActions();
 		updateSymbolDependentActions();
@@ -1430,7 +1432,7 @@ void MapEditorController::createActions()
 	erase_area_act = newToolAction("erasearea", tr("Erase area"), this, SLOT(eraseAreaClicked()), "tool-erase", QString{}, "toolbars.html#erase_area");
 	distribute_points_act = newAction("distributepoints", tr("Distribute points along path"), this, SLOT(distributePointsClicked()), "tool-distribute-points", QString{}, "toolbars.html#distribute_points"); // TODO: write documentation
 	
-	paint_feature = std::make_unique<PaintOnTemplateFeature>(*this);
+	sketch_feature = std::make_unique<SketchLayerFeature>(*this);
 	
 	touch_cursor_action = newCheckAction("touchcursor", tr("Enable touch cursor"), map_widget, SLOT(enableTouchCursor(bool)), "tool-touch-cursor", QString{}, "toolbars.html#touch_cursor"); // TODO: write documentation
 	gps_display_action = newCheckAction("gpsdisplay", tr("Show live GNSS position"), this, SLOT(enableGPSDisplay(bool)), "tool-gps-display", QString{}, "toolbars.html#gps_display"); // TODO: write documentation
@@ -1709,10 +1711,8 @@ void MapEditorController::createMenuAndToolbars()
 	toolbar_drawing->addAction(draw_text_act);
 	toolbar_drawing->addSeparator();
 	
-	auto* paint_action = paint_feature->paintAction();
-	toolbar_drawing->addAction(paint_action);
-	if (auto* button = qobject_cast<QToolButton*>(toolbar_drawing->widgetForAction(paint_action)))
-		button->setPopupMode(QToolButton::MenuButtonPopup);
+	auto* sketch_action = sketch_feature->sketchAction();
+	toolbar_drawing->addAction(sketch_action);
 	
 	// Editing toolbar
 	toolbar_editing = window->addToolBar(tr("Editing"));
@@ -1903,10 +1903,8 @@ void MapEditorController::createMobileGUI()
 	
 	bottom_action_bar->addAction(gps_temporary_point_act, 1, col++);
 
-	auto* paint_action = paint_feature->paintAction();
-	bottom_action_bar->addAction(paint_action, 0, col);
-	if (auto* button = bottom_action_bar->getButtonForAction(paint_action))
-		button->setPopupMode(QToolButton::DelayedPopup);
+	auto* sketch_action = sketch_feature->sketchAction();
+	bottom_action_bar->addAction(sketch_action, 0, col);
 	
 	// Right side
 	bottom_action_bar->addActionAtEnd(mobile_symbol_selector_action, 0, 1, 2, 2);
@@ -2029,7 +2027,7 @@ void MapEditorController::detach()
 	gps_marker_display = nullptr;
 	
 	find_feature.reset(nullptr);
-	paint_feature.reset(nullptr);
+	sketch_feature.reset(nullptr);
 	
 	window->setCentralWidget(nullptr);
 	delete map_widget;

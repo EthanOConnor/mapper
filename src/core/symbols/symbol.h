@@ -623,6 +623,14 @@ public:
 	
 protected:
 	/**
+	 * Writes optional attributes on the common root <symbol> element.
+	 *
+	 * Most symbols need none. Specialized symbols can use a stable kind marker
+	 * while retaining an existing object-compatible Symbol::Type.
+	 */
+	virtual void saveRootAttributes(QXmlStreamWriter& xml) const;
+
+	/**
 	 * Must be overridden to save type-specific symbol properties.
 	 * 
 	 * The map pointer can be used to get persistent indices to any pointers on map data.

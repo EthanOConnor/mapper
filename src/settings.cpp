@@ -155,7 +155,7 @@ Settings::Settings()
 	registerSetting(HomeScreen_TipsVisible, "HomeScreen/tipsVisible", true);
 	registerSetting(HomeScreen_CurrentTip, "HomeScreen/currentTip", -1);
 	
-	// Paint On Template tool settings
+	// Field sketch palette (legacy key retained for migration)
 	registerSetting(PaintOnTemplateTool_Colors, "PaintOnTemplateTool/colors", QLatin1String("FF0000,FFFF00,00FF00,DB00D9,0000FF,D15C00,000000"));
 
 	// Connected Map Hub. Bearer credentials deliberately do not live here.

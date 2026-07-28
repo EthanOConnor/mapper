@@ -59,6 +59,7 @@
 #include "core/symbols/combined_symbol.h"
 #include "core/symbols/line_symbol.h"
 #include "core/symbols/point_symbol.h"
+#include "core/symbols/sketch_symbol.h"
 #include "core/symbols/text_symbol.h"
 #include "fileformats/file_format.h"
 #include "fileformats/file_import_export.h"
@@ -269,6 +270,7 @@ void Symbol::save(QXmlStreamWriter& xml, const Map& map) const
 {
 	XmlElementWriter symbol_element(xml, QLatin1String("symbol"));
 	symbol_element.writeAttribute(QLatin1String("type"), int(type));
+	saveRootAttributes(xml);
 	symbol_element.writeAttribute(QLatin1String("uuid"), persistent_id);
 	auto id = map.findSymbolIndex(this);
 	if (id >= 0)
@@ -309,7 +311,13 @@ std::unique_ptr<Symbol> Symbol::load(QXmlStreamReader& xml, const Map& map, Symb
 	Q_ASSERT(xml.name() == QLatin1String("symbol"));
 	XmlElementReader symbol_element(xml);
 	auto symbol_type = symbol_element.attribute<int>(QLatin1String("type"));
-	auto symbol = Symbol::makeSymbolForType(static_cast<Symbol::Type>(symbol_type));
+	auto const symbol_kind =
+	    symbol_element.attribute<QString>(QLatin1String("kind"));
+	auto symbol =
+	    symbol_type == Symbol::Line
+	            && symbol_kind == QLatin1String("mapper-sketch-v1")
+	        ? std::unique_ptr<Symbol>{new SketchSymbol}
+	        : Symbol::makeSymbolForType(static_cast<Symbol::Type>(symbol_type));
 	if (!symbol)
 		throw FileFormatException(::OpenOrienteering::ImportExport::tr("Error while loading a symbol of type %1 at line %2 column %3.").arg(symbol_type).arg(xml.lineNumber()).arg(xml.columnNumber()));
 	const auto loaded_uuid = symbol_element.attribute<QString>(QLatin1String("uuid"));
@@ -418,6 +426,11 @@ std::unique_ptr<Symbol> Symbol::load(QXmlStreamReader& xml, const Map& map, Symb
 	}
 	
 	return symbol;
+}
+
+void Symbol::saveRootAttributes(QXmlStreamWriter& /*xml*/) const
+{
+	// Most symbols use only the common root attributes.
 }
 
 
