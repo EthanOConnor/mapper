@@ -97,8 +97,7 @@ NewMapDialog::NewMapDialog(QWidget *parent)
   setFont(mobile_font);
   setStyleSheet(QStringLiteral(
       "QDialog { background: palette(window); }"
-      "QFrame#newMapCard { background: palette(base); border: 1px solid "
-      "palette(midlight); border-radius: 14px; }"
+      "QFrame#newMapCard { background: transparent; border: 0; }"
       "QComboBox, QListWidget { background: palette(window); border: 1px "
       "solid palette(midlight); border-radius: 10px; padding: 7px 9px; }"
       "QListWidget::item { padding: 11px 7px; }"
@@ -112,8 +111,8 @@ NewMapDialog::NewMapDialog(QWidget *parent)
 
   auto *content = new QWidget(this);
   auto *content_layout = new QVBoxLayout(content);
-  content_layout->setContentsMargins(18, 18, 18, 20);
-  content_layout->setSpacing(12);
+  content_layout->setContentsMargins(18, 14, 18, 16);
+  content_layout->setSpacing(8);
 
   auto *title = new QLabel(tr("New local map"), content);
   auto title_font = title->font();
@@ -141,8 +140,8 @@ NewMapDialog::NewMapDialog(QWidget *parent)
   auto *scale_card = new QFrame(content);
   scale_card->setObjectName(QStringLiteral("newMapCard"));
   auto *scale_card_layout = new QVBoxLayout(scale_card);
-  scale_card_layout->setContentsMargins(14, 13, 14, 14);
-  scale_card_layout->setSpacing(8);
+  scale_card_layout->setContentsMargins(2, 6, 2, 6);
+  scale_card_layout->setSpacing(6);
   scale_card_layout->addWidget(
       make_step_title(tr("1  Map scale"), scale_card));
   auto *scale_row = new QHBoxLayout();
@@ -167,8 +166,8 @@ NewMapDialog::NewMapDialog(QWidget *parent)
   auto *symbols_card = new QFrame(content);
   symbols_card->setObjectName(QStringLiteral("newMapCard"));
   auto *symbols_card_layout = new QVBoxLayout(symbols_card);
-  symbols_card_layout->setContentsMargins(14, 13, 14, 14);
-  symbols_card_layout->setSpacing(8);
+  symbols_card_layout->setContentsMargins(2, 6, 2, 6);
+  symbols_card_layout->setSpacing(6);
   symbols_card_layout->addWidget(
       make_step_title(tr("2  Symbol standard"), symbols_card));
   auto *symbols_help =

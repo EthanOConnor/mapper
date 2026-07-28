@@ -17,11 +17,11 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QRegularExpression>
-#include <QStandardPaths>
 #include <QToolButton>
 
 #include "collaboration/map_hub_api_client.h"
 #include "collaboration/map_hub_credentials.h"
+#include "collaboration/map_hub_workspace.h"
 #include "core/document_path.h"
 #include "gui/util_gui.h"
 #include "imagery/tile_network_manager.h"
@@ -130,7 +130,8 @@ void MapHubSettingsPage::apply() {
                             "for localhost development."));
     return;
   }
-  auto workspace_root = workspace_root_edit->text().trimmed();
+  auto workspace_root =
+      normalizedMapHubWorkspaceRoot(workspace_root_edit->text());
   if (DocumentPath::isContentUri(workspace_root)) {
     emit applyFailed();
     QMessageBox::warning(
@@ -168,18 +169,9 @@ void MapHubSettingsPage::apply() {
 void MapHubSettingsPage::reset() {
   loaded_server = getSetting(Settings::MapHub_ServerUrl).toString();
   server_edit->setText(loaded_server);
-  auto root = getSetting(Settings::MapHub_WorkspaceRoot).toString();
-  if (root.isEmpty()) {
-#ifdef Q_OS_ANDROID
-    root =
-        QDir(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation))
-            .filePath(QStringLiteral("map-hub-workspaces"));
-#else
-    root = QDir(QStandardPaths::writableLocation(
-                    QStandardPaths::DocumentsLocation))
-               .filePath(tr("Mapper Workspaces"));
-#endif
-  }
+  auto root = normalizedMapHubWorkspaceRoot(
+      getSetting(Settings::MapHub_WorkspaceRoot).toString());
+  setSetting(Settings::MapHub_WorkspaceRoot, root);
   workspace_root_edit->setText(root);
   token_edit->clear();
   invite_edit->clear();

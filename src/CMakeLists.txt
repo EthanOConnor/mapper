@@ -122,6 +122,7 @@ set(Mapper_Common_SRCS
 	collaboration/map_hub_api_client.cpp
 	collaboration/map_hub_credentials.cpp
 	collaboration/map_hub_imagery_catalog.cpp
+	collaboration/map_hub_workspace.cpp
   
   core/autosave.cpp
   core/crs_template.cpp

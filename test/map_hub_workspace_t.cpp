@@ -16,6 +16,7 @@
 #include "collaboration/managed_map_workspace.h"
 #include "collaboration/map_hub_api_client.h"
 #include "collaboration/map_hub_imagery_catalog.h"
+#include "collaboration/map_hub_workspace.h"
 #include "imagery/oic_catalog.h"
 
 using namespace OpenOrienteering;
@@ -150,6 +151,29 @@ void MapHubWorkspaceTest::hashesArtifactsExactly() {
   QVERIFY(error.isEmpty());
 }
 
+void MapHubWorkspaceTest::relocatesStaleIosWorkspaceRoots() {
+  const auto current_documents =
+      QStringLiteral("/var/mobile/Containers/Data/Application/NEW/Documents");
+  QCOMPARE(
+      relocatedIosMapHubWorkspaceRoot(
+          QStringLiteral(
+              "/var/mobile/Containers/Data/Application/OLD/Documents/Mapper "
+              "Workspaces"),
+          current_documents),
+      current_documents + QStringLiteral("/Mapper Workspaces"));
+  QCOMPARE(
+      relocatedIosMapHubWorkspaceRoot(
+          QStringLiteral(
+              "/private/var/mobile/Containers/Data/Application/OLD/Documents/"
+              "Mapper Workspaces/Kelsey Creek"),
+          current_documents),
+      current_documents + QStringLiteral("/Mapper Workspaces/Kelsey Creek"));
+  QCOMPARE(relocatedIosMapHubWorkspaceRoot(
+               QStringLiteral("/Users/mapper/Documents/Mapper Workspaces"),
+               current_documents),
+           QStringLiteral("/Users/mapper/Documents/Mapper Workspaces"));
+}
+
 void MapHubWorkspaceTest::preservesPublishedTileMatrixLimits() {
   QJsonArray limits{
       QJsonObject{{QStringLiteral("tileMatrix"), QStringLiteral("12")},
@@ -169,7 +193,8 @@ void MapHubWorkspaceTest::preservesPublishedTileMatrixLimits() {
            {QStringLiteral("title"), QStringLiteral("All-return intensity")},
            {QStringLiteral("type"), QStringLiteral("raster")},
            {QStringLiteral("url_template"),
-            QStringLiteral("https://maps.example.test/api/v1/tiles/{z}/{x}/{y}.png")},
+            QStringLiteral(
+                "https://maps.example.test/api/v1/tiles/{z}/{x}/{y}.png")},
            {QStringLiteral("min_zoom"), 12},
            {QStringLiteral("max_zoom"), 18},
            {QStringLiteral("tile_matrix_limits"), limits},
@@ -179,17 +204,20 @@ void MapHubWorkspaceTest::preservesPublishedTileMatrixLimits() {
                 {QStringLiteral("crs"), QStringLiteral("EPSG:6596")},
                 {QStringLiteral("pixel_size"), 0.45720091440182875},
                 {QStringLiteral("download_url"),
-                 QStringLiteral("https://maps.example.test/api/v1/artifacts/artifact-id/download")},
+                 QStringLiteral("https://maps.example.test/api/v1/artifacts/"
+                                "artifact-id/download")},
             }},
        }}},
   };
   QString error;
   auto document = MapHubImageryCatalog::catalogDocument(
       manifest,
-      QStringLiteral("https://maps.example.test/api/v1/projects/project-id/manifest"),
+      QStringLiteral(
+          "https://maps.example.test/api/v1/projects/project-id/manifest"),
       &error);
   QVERIFY2(error.isEmpty(), qPrintable(error));
-  auto source = document.value(QStringLiteral("sources")).toArray().at(0).toObject();
+  auto source =
+      document.value(QStringLiteral("sources")).toArray().at(0).toObject();
   QCOMPARE(source.value(QStringLiteral("tileMatrixLimits")).toArray(), limits);
   auto source_raster = source.value(QStringLiteral("extensions"))
                            .toObject()
@@ -203,7 +231,8 @@ void MapHubWorkspaceTest::preservesPublishedTileMatrixLimits() {
       QJsonDocument(document).toJson(QJsonDocument::Compact));
   QVERIFY(result.accepted());
   QCOMPARE(result.supportedSourceCount(), qsizetype(1));
-  QCOMPARE(result.catalog.sources.at(0).tile_limit_definitions.size(), qsizetype(1));
+  QCOMPARE(result.catalog.sources.at(0).tile_limit_definitions.size(),
+           qsizetype(1));
   QCOMPARE(result.catalog.sources.at(0)
                .extensions.value(QStringLiteral("org.cascadeoc.maphub"))
                .toObject()

@@ -355,23 +355,23 @@ HomeScreenWidgetMobile::HomeScreenWidgetMobile(HomeScreenController *controller,
 
   auto *content = new QWidget(scroll_area);
   auto *content_layout = new QVBoxLayout(content);
-  content_layout->setContentsMargins(18, 18, 18, 24);
-  content_layout->setSpacing(8);
+  content_layout->setContentsMargins(18, 10, 18, 14);
+  content_layout->setSpacing(2);
 
   auto *title = new QLabel(tr("Mapper"), content);
   auto title_font = title->font();
-  title_font.setPointSizeF(title_font.pointSizeF() * 2.0);
+  title_font.setPointSizeF(title_font.pointSizeF() * 1.8);
   title_font.setWeight(QFont::Bold);
   title->setFont(title_font);
   content_layout->addWidget(title);
 
-  auto *subtitle = new QLabel(tr("Continue a map, open fieldwork from Map Hub, "
-                                 "or start something new."),
+  auto *subtitle = new QLabel(tr("Open recent work, start locally, or connect "
+                                 "to Map Hub."),
                               content);
   subtitle->setWordWrap(true);
   subtitle->setStyleSheet(QStringLiteral("color: palette(mid);"));
   content_layout->addWidget(subtitle);
-  content_layout->addSpacing(12);
+  content_layout->addSpacing(3);
 
   auto make_section_title = [content](const QString &text) {
     auto *label = new QLabel(text, content);
@@ -389,12 +389,12 @@ HomeScreenWidgetMobile::HomeScreenWidgetMobile(HomeScreenController *controller,
     action_font.setPointSizeF(16.0);
     button->setFont(action_font);
     button->setIcon(icon);
-    button->setIconSize(QSize(30, 30));
-    button->setMinimumHeight(88);
-    button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
+    button->setIconSize(QSize(26, 26));
+    button->setFixedHeight(74);
+    button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     button->setStyleSheet(QStringLiteral(
         "QCommandLinkButton { background: transparent; border: 0; "
-        "border-radius: 0; padding: 10px 12px; text-align: left; }"
+        "padding: 4px 2px; text-align: left; }"
         "QCommandLinkButton:pressed { background: palette(alternate-base); }"));
     return button;
   };
@@ -404,63 +404,45 @@ HomeScreenWidgetMobile::HomeScreenWidgetMobile(HomeScreenController *controller,
         auto *group = new QFrame(content);
         group->setObjectName(QStringLiteral("startupActionGroup"));
         group->setStyleSheet(QStringLiteral(
-            "QFrame#startupActionGroup { background: palette(base); "
-            "border: 1px solid palette(midlight); border-radius: 14px; }"));
+            "QFrame#startupActionGroup { background: transparent; border: 0; "
+            "}"));
         auto *group_layout = new QVBoxLayout(group);
         group_layout->setContentsMargins({});
-        group_layout->setSpacing(0);
-        for (int i = 0; i < actions.size(); ++i) {
-          group_layout->addWidget(actions.at(i));
-          if (i + 1 == actions.size())
-            continue;
-          auto *separator = new QFrame(group);
-          separator->setFrameShape(QFrame::NoFrame);
-          separator->setFixedHeight(1);
-          separator->setStyleSheet(
-              QStringLiteral("background: palette(midlight); border: 0;"));
-          group_layout->addWidget(separator);
-        }
+        group_layout->setSpacing(1);
+        for (auto *action : actions)
+          group_layout->addWidget(action);
         return group;
       };
 
-  content_layout->addWidget(make_section_title(tr("Continue")));
-  recent_files_empty_label = new QLabel(
-      tr("No recent maps yet. Open a map from Files or start a new one."),
-      content);
-  recent_files_empty_label->setWordWrap(true);
-  recent_files_empty_label->setStyleSheet(
-      QStringLiteral("padding: 14px; color: palette(mid); "
-                     "background: palette(base); border: 1px solid "
-                     "palette(midlight); border-radius: 14px;"));
-  content_layout->addWidget(recent_files_empty_label);
-
+  recent_files_title = make_section_title(tr("Recent maps"));
+  recent_files_title->hide();
+  content_layout->addWidget(recent_files_title);
   file_list_widget = makeFileListWidget();
   file_list_widget->setFrameShape(QFrame::NoFrame);
   file_list_widget->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
   file_list_widget->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
   file_list_widget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
   file_list_widget->setStyleSheet(QStringLiteral(
-      "QListWidget { background: palette(base); border: 1px solid "
-      "palette(midlight); border-radius: 14px; }"
+      "QListWidget { background: transparent; border: 0; }"
       "QListWidget::item { padding: 12px 8px; border-bottom: 1px solid "
       "palette(midlight); }"));
   connect(file_list_widget, &QListWidget::itemClicked, this,
           &HomeScreenWidgetMobile::itemClicked);
   content_layout->addWidget(file_list_widget);
 
-  content_layout->addSpacing(10);
+  content_layout->addSpacing(8);
   content_layout->addWidget(make_section_title(tr("Open or start")));
   auto *map_hub_button = make_action(
       tr("Map Hub"),
-      tr("Open an assignment, organization map, or event workspace."),
+      tr("Assignments, organization maps, and event workspaces."),
       ActionIcon::fromName(u"map-information"));
   auto *open_button =
       make_action(tr("Browse Files"),
-                  tr("Open an existing OMAP, OCD, or other supported map."),
+                  tr("Open an OMAP, OCD, or another supported map file."),
                   ActionIcon::fromName(u"open"));
   auto *new_button = make_action(
       tr("Create a local map"),
-      tr("Choose a map scale and symbol standard, then save it in Files."),
+      tr("Choose a scale and symbols, then save it in Files."),
       ActionIcon::fromName(u"new"));
   connect(map_hub_button, &QAbstractButton::clicked, controller->getWindow(),
           &MainWindow::showMapHub);
@@ -474,8 +456,8 @@ HomeScreenWidgetMobile::HomeScreenWidgetMobile(HomeScreenController *controller,
 #ifdef MAPPER_GNSS_AVAILABLE
   content_layout->addSpacing(10);
   content_layout->addWidget(make_section_title(tr("Ready for the field")));
-  auto gnss_description = tr("Use iPhone location, or configure a Bluetooth "
-                             "GNSS receiver and NTRIP corrections.");
+  auto gnss_description =
+      tr("iPhone location, Bluetooth GNSS, and NTRIP corrections.");
   const auto &settings = Settings::getInstance();
   if (!settings.gnssDeviceName().isEmpty())
     gnss_description =
@@ -490,11 +472,12 @@ HomeScreenWidgetMobile::HomeScreenWidgetMobile(HomeScreenController *controller,
   content_layout->addWidget(make_action_group({gnss_button}));
 #endif
 
+  content_layout->addStretch(1);
   content_layout->addSpacing(10);
   content_layout->addWidget(make_section_title(tr("Learn and configure")));
   auto *examples_button =
       make_action(tr("Example maps"),
-                  tr("Explore bundled maps without choosing a file provider."),
+                  tr("Open a bundled read-only map."),
                   ActionIcon::fromName(u"symbols"));
   connect(examples_button, &QAbstractButton::clicked, this,
           &HomeScreenWidgetMobile::showExamples);
@@ -503,10 +486,9 @@ HomeScreenWidgetMobile::HomeScreenWidgetMobile(HomeScreenController *controller,
   auto *utility_card = new QFrame(content);
   utility_card->setObjectName(QStringLiteral("startupUtilityCard"));
   utility_card->setStyleSheet(QStringLiteral(
-      "QFrame#startupUtilityCard { background: palette(base); border: 1px "
-      "solid palette(midlight); border-radius: 14px; }"
+      "QFrame#startupUtilityCard { background: transparent; border: 0; }"
       "QFrame#startupUtilityCard QPushButton { background: transparent; "
-      "border: 0; padding: 10px 6px; }"
+      "border: 0; padding: 7px 6px; }"
       "QFrame#startupUtilityCard QPushButton:pressed { background: "
       "palette(alternate-base); }"));
   auto *utility_buttons = new QHBoxLayout(utility_card);
@@ -528,7 +510,6 @@ HomeScreenWidgetMobile::HomeScreenWidgetMobile(HomeScreenController *controller,
   utility_buttons->addWidget(help_button);
   utility_buttons->addWidget(about_button);
   content_layout->addWidget(utility_card);
-  content_layout->addStretch();
 
   scroll_area->setWidget(content);
   auto *outer_layout = new QVBoxLayout(this);
@@ -633,8 +614,12 @@ void HomeScreenWidgetMobile::setRecentFiles(const QStringList &files) {
                               ? file_list_widget->sizeHintForRow(0)
                               : fontMetrics().height() + 24;
   file_list_widget->setFixedHeight(qMax(1, visible_rows) * row_height + 2);
-  file_list_widget->setVisible(file_list_widget->count() > 0);
-  recent_files_empty_label->setVisible(file_list_widget->count() == 0);
+  const auto has_recent_files = file_list_widget->count() > 0;
+  file_list_widget->setVisible(has_recent_files);
+  if (recent_files_title)
+    recent_files_title->setVisible(has_recent_files);
+  if (recent_files_empty_label)
+    recent_files_empty_label->hide();
 #else
   Q_UNUSED(files)
   if (history.empty())

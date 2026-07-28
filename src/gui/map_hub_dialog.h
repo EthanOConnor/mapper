@@ -18,6 +18,7 @@ class QLineEdit;
 class QPushButton;
 class QStackedWidget;
 class QTabWidget;
+class QTimer;
 class QTreeWidget;
 class QTreeWidgetItem;
 class QWidget;
@@ -41,6 +42,8 @@ private slots:
   void createConnectedMap();
   void updateActions();
   void browseFirstUseWorkspace();
+  void beginPasskeyConnection();
+  void pollPasskeyConnection();
   void connectExistingAccount();
   void openFirstUseInvitation();
 
@@ -52,6 +55,7 @@ private:
   bool saveFirstUseConnection(const QString &server,
                               const QString &workspace_root,
                               const QString &token, QString &error);
+  void clearPasskeyConnection();
   void showError(const QString &title, const MapHubApiClient::Error &error);
   void populate(const QJsonObject &response);
   void beginWorkspace(const QJsonObject &response, const QString &assignment_id,
@@ -76,6 +80,11 @@ private:
   QLineEdit *first_use_invite;
   QTabWidget *first_use_account_tabs;
   QStackedWidget *first_use_flow = nullptr;
+  QWidget *passkey_page = nullptr;
+  QLabel *passkey_code = nullptr;
+  QLabel *passkey_status = nullptr;
+  QPushButton *passkey_open_browser = nullptr;
+  QTimer *passkey_timer = nullptr;
   QLabel *first_use_connection_summary = nullptr;
   QPushButton *first_use_browse;
   QPushButton *connect_button;
@@ -92,6 +101,12 @@ private:
   QPushButton *new_button;
   QPushButton *refresh_button;
   QJsonObject library_response;
+  QString passkey_server;
+  QString passkey_workspace_root;
+  QString passkey_request_id;
+  QString passkey_device_secret;
+  QUrl passkey_verification_url;
+  bool passkey_poll_in_flight = false;
   bool busy = false;
 };
 

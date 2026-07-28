@@ -69,6 +69,7 @@
 #include "collaboration/managed_map_workspace.h"
 #include "collaboration/map_hub_api_client.h"
 #include "collaboration/map_hub_credentials.h"
+#include "collaboration/map_hub_workspace.h"
 #include "core/document_path.h"
 #include "core/georeferencing.h"
 #if defined(Q_OS_IOS)
@@ -1139,7 +1140,8 @@ void MainWindow::createConnectedMap(const ManagedMapWorkspace& workspace)
 		                     tr("The server created the project but did not return a complete workspace. The project remains in Map Hub; refresh it before creating a local map."));
 		return;
 	}
-	auto root = Settings::getInstance().getSetting(Settings::MapHub_WorkspaceRoot).toString();
+	auto root = normalizedMapHubWorkspaceRoot(
+	  Settings::getInstance().getSetting(Settings::MapHub_WorkspaceRoot).toString());
 	if (!root.isEmpty())
 	{
 		auto directory_name = workspace.project_title;

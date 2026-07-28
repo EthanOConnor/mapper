@@ -223,6 +223,7 @@ private:
   QPixmap title_pixmap;
   QLabel *title_label;
   QListWidget *file_list_widget;
+  QLabel *recent_files_title = nullptr;
   QLabel *recent_files_empty_label = nullptr;
   QCommandLinkButton *gnss_button = nullptr;
   std::vector<StorageLocation> history;

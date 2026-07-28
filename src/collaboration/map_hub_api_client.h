@@ -48,6 +48,10 @@ public:
   QString configurationError() const;
 
   void health(JsonHandler handler);
+  void beginMapperConnection(const QString &client_name, JsonHandler handler);
+  void exchangeMapperConnection(const QString &request_id,
+                                const QString &device_secret,
+                                JsonHandler handler);
   void library(JsonHandler handler);
   void projectManifest(const QString &project_id, JsonHandler handler);
   void createProject(const QJsonObject &project, const QString &idempotency_key,

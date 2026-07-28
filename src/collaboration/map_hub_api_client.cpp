@@ -290,6 +290,37 @@ void MapHubApiClient::health(JsonHandler handler) {
              std::move(handler));
 }
 
+void MapHubApiClient::beginMapperConnection(const QString &client_name,
+                                            JsonHandler handler) {
+  auto name = client_name.trimmed();
+  if (name.isEmpty() || name.size() > 80) {
+    handler({}, {0, QStringLiteral("invalid_client_name"),
+                 tr("Mapper could not create a valid name for this device.")});
+    return;
+  }
+  sendJson("POST", QStringLiteral("/api/v1/auth/mapper/connect"),
+           {{QStringLiteral("client_name"), name}}, false, std::move(handler));
+}
+
+void MapHubApiClient::exchangeMapperConnection(const QString &request_id,
+                                               const QString &device_secret,
+                                               JsonHandler handler) {
+  if (!validStableId(request_id)) {
+    handler({}, invalidIdentifierError());
+    return;
+  }
+  if (device_secret.isEmpty() || device_secret.size() > 200) {
+    handler({}, {0, QStringLiteral("invalid_connection_secret"),
+                 tr("The Map Hub connection request is invalid.")});
+    return;
+  }
+  sendJson(
+      "POST",
+      QStringLiteral("/api/v1/auth/mapper/connect/%1/exchange").arg(request_id),
+      {{QStringLiteral("device_secret"), device_secret}}, false,
+      std::move(handler));
+}
+
 void MapHubApiClient::library(JsonHandler handler) {
   if (!ensureReady(true, handler))
     return;
