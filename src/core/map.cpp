@@ -1424,6 +1424,10 @@ void Map::initStatic()
 
 void Map::addSymbol(Symbol* symbol, int pos)
 {
+	while (std::any_of(begin(symbols), end(symbols), [symbol](const auto* live) {
+		return live->persistentId() == symbol->persistentId();
+	}))
+		symbol->renewPersistentId();
 	symbols.insert(symbols.begin() + pos, symbol);
 	emit symbolAdded(pos, symbol);
 	setSymbolsDirty();
@@ -1431,11 +1435,13 @@ void Map::addSymbol(Symbol* symbol, int pos)
 
 void Map::moveSymbol(int from, int to)
 {
+	const auto original_from = from;
+	auto* moved = symbols[from];
 	symbols.insert(symbols.begin() + to, symbols[from]);
 	if (from > to)
 		++from;
 	symbols.erase(symbols.begin() + from);
-	// TODO: emit symbolChanged(pos, symbol); ?
+	emit symbolMoved(original_from, findSymbolIndex(moved), moved);
 	setSymbolsDirty();
 }
 
@@ -1929,13 +1935,35 @@ void Map::push(UndoStep *step)
 void Map::addPart(MapPart* part, std::size_t index)
 {
 	Q_ASSERT(index <= parts.size());
-	
+
+	while (std::any_of(begin(parts), end(parts), [part](const auto* live) {
+		return live->persistentId() == part->persistentId();
+	}))
+		part->renewPersistentId();
+
 	parts.insert(parts.begin() + index, part);
 	if (current_part_index >= index)
 		setCurrentPartIndex(current_part_index + 1);
 	
 	emit mapPartAdded(index, part);
 	
+	setOtherDirty();
+	requestRedraw();
+}
+
+void Map::movePart(std::size_t from, std::size_t to)
+{
+	Q_ASSERT(from < parts.size());
+	Q_ASSERT(to < parts.size());
+	if (from == to)
+		return;
+	auto* current = getCurrentPart();
+	auto* moved = parts[from];
+	parts.erase(parts.begin() + std::ptrdiff_t(from));
+	parts.insert(parts.begin() + std::ptrdiff_t(to), moved);
+	current_part_index = std::size_t(findPartIndex(current));
+	emit currentMapPartIndexChanged(current_part_index);
+	emit mapPartChanged(to, moved);
 	setOtherDirty();
 	requestRedraw();
 }

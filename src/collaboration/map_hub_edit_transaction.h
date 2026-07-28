@@ -15,18 +15,29 @@
 namespace OpenOrienteering {
 
 class Map;
+class Object;
+class Symbol;
 class UndoStep;
 
 struct MapHubEditOperation {
-  enum class Kind { PutObject, DeleteObject };
+  enum class Kind {
+    PutObject,
+    DeleteObject,
+    PutPart,
+    DeletePart,
+    PutSymbol,
+    DeleteSymbol,
+  };
 
   Kind kind = Kind::PutObject;
-  QString object_id;
-  QString part_id;
-  QString after_object_id;
+  QString entity_id;
+  QString parent_id;
+  QString after_id;
   qint64 expected_version = 0;
-  QString xml;
+  QString payload;
 
+  QString entityKind() const;
+  bool isDelete() const;
   QJsonObject toJson() const;
 };
 
@@ -56,6 +67,9 @@ struct MapHubEditTransaction {
       qint64 expected_stream_sequence, const QString &expected_stream_hash,
       const QString &expected_workspace_revision_id,
       const QString &expected_project_revision_id, QString *error = nullptr);
+
+  static QString objectFragment(const Object &object);
+  static QString symbolFragment(const Symbol &symbol, const Map &map);
 };
 
 struct MapHubCommittedTransaction {

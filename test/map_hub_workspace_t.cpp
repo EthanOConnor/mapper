@@ -135,6 +135,11 @@ void MapHubWorkspaceTest::recordRoundTripsWithoutSecrets() {
   QCOMPARE(loaded.project_id, original.project_id);
   QCOMPARE(loaded.base_sha256, original.base_sha256);
   QCOMPARE(loaded.exclusive_editing, true);
+  const auto found = ManagedMapWorkspace::findForWorkspace(
+      original.server_url, original.workspace_id, &error);
+  QVERIFY2(found.isValid(), qPrintable(error));
+  QCOMPARE(QFileInfo(found.local_map_path).canonicalFilePath(),
+           QFileInfo(original.local_map_path).canonicalFilePath());
 
   QFile record(ManagedMapWorkspace::recordPathForMap(map_path));
   QVERIFY(record.open(QIODevice::ReadOnly));
@@ -308,6 +313,131 @@ void MapHubWorkspaceTest::checkpointCarriesStreamProjectionDigest() {
   QVERIFY(request_bytes.contains("Field edits"));
 }
 
+void MapHubWorkspaceTest::snapshotCompressesEntityIndex() {
+  QTemporaryDir directory;
+  QVERIFY(directory.isValid());
+  const auto path = directory.filePath(QStringLiteral("snapshot.omap"));
+  QFile file(path);
+  QVERIFY(file.open(QIODevice::WriteOnly));
+  QCOMPARE(file.write("verified snapshot bytes"), qint64(23));
+  file.close();
+  const auto entity_index =
+      QByteArray("{\"padding\":\"") + QByteArray(4096, 'a') + QByteArray("\"}");
+
+  QTcpServer server;
+  if (!server.listen(QHostAddress::LocalHost))
+    QSKIP("The test sandbox does not permit a loopback listener");
+  QByteArray request_bytes;
+  QEventLoop loop;
+  bool completed = false;
+  MapHubApiClient::Error callback_error;
+  connect(&server, &QTcpServer::newConnection, this, [&] {
+    auto *socket = server.nextPendingConnection();
+    connect(socket, &QTcpSocket::readyRead, this, [&, socket] {
+      request_bytes.append(socket->readAll());
+      const auto header_end = request_bytes.indexOf("\r\n\r\n");
+      if (header_end < 0)
+        return;
+      const QRegularExpression length_pattern(
+          QStringLiteral("(?im)^Content-Length:\\s*(\\d+)\\s*$"));
+      const auto match = length_pattern.match(
+          QString::fromLatin1(request_bytes.left(header_end)));
+      if (!match.hasMatch())
+        return;
+      const auto expected = header_end + 4 + match.captured(1).toLongLong();
+      if (request_bytes.size() < expected)
+        return;
+      const QByteArray response_body = "{\"protocol\":\"oom-map-ops/1\"}";
+      socket->write(QByteArray("HTTP/1.1 201 Created\r\nContent-Type: "
+                               "application/json\r\nContent-Length: ") +
+                    QByteArray::number(response_body.size()) +
+                    QByteArray("\r\nConnection: close\r\n\r\n") +
+                    response_body);
+      socket->disconnectFromHost();
+    });
+  });
+
+  MapHubApiClient client(
+      QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort()),
+      QStringLiteral("test-token"));
+  client.uploadWorkspaceSnapshot(
+      QStringLiteral("60000000-0000-4000-8000-000000000061"), path,
+      entity_index, 0, QString(64, QLatin1Char('0')),
+      MapHubApiClient::sha256ForFile(path), 23,
+      QStringLiteral("50000000-0000-4000-8000-000000000061"),
+      QStringLiteral("50000000-0000-4000-8000-000000000062"),
+      QStringLiteral("40000000-0000-4000-8000-000000000061"),
+      QStringLiteral("lease"), QStringLiteral("snapshot-key"),
+      [&](const QJsonObject &, const MapHubApiClient::Error &error) {
+        callback_error = error;
+        completed = true;
+        loop.quit();
+      });
+  QTimer::singleShot(5000, &loop, &QEventLoop::quit);
+  loop.exec();
+  QVERIFY2(completed, "Snapshot request timed out");
+  QVERIFY2(!callback_error, qPrintable(callback_error.message));
+  QVERIFY(request_bytes.contains("name=\"entity_index_content_encoding\""));
+  QVERIFY(request_bytes.contains("\r\n\r\nzstd\r\n"));
+  QVERIFY(!request_bytes.contains(QByteArray(1024, 'a')));
+}
+
+void MapHubWorkspaceTest::transactionPostCompressesSemanticOperations() {
+  QTcpServer server;
+  if (!server.listen(QHostAddress::LocalHost))
+    QSKIP("The test sandbox does not permit a loopback listener");
+  QByteArray request_bytes;
+  QEventLoop loop;
+  bool completed = false;
+  MapHubApiClient::Error callback_error;
+  connect(&server, &QTcpServer::newConnection, this, [&] {
+    auto *socket = server.nextPendingConnection();
+    connect(socket, &QTcpSocket::readyRead, this, [&, socket] {
+      request_bytes.append(socket->readAll());
+      const auto header_end = request_bytes.indexOf("\r\n\r\n");
+      if (header_end < 0)
+        return;
+      const QRegularExpression length_pattern(
+          QStringLiteral("(?im)^Content-Length:\\s*(\\d+)\\s*$"));
+      const auto match = length_pattern.match(
+          QString::fromLatin1(request_bytes.left(header_end)));
+      if (!match.hasMatch())
+        return;
+      const auto expected = header_end + 4 + match.captured(1).toLongLong();
+      if (request_bytes.size() < expected)
+        return;
+      const QByteArray response_body = "{\"protocol\":\"oom-map-ops/1\"}";
+      socket->write(QByteArray("HTTP/1.1 201 Created\r\nContent-Type: "
+                               "application/json\r\nContent-Length: ") +
+                    QByteArray::number(response_body.size()) +
+                    QByteArray("\r\nConnection: close\r\n\r\n") +
+                    response_body);
+      socket->disconnectFromHost();
+    });
+  });
+
+  const auto canonical_json =
+      QByteArray("{\"xml\":\"") + QByteArray(4096, 'x') + QByteArray("\"}");
+  MapHubApiClient client(
+      QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort()),
+      QStringLiteral("test-token"));
+  client.postWorkspaceTransaction(
+      QStringLiteral("60000000-0000-4000-8000-000000000071"), canonical_json,
+      QStringLiteral("lease"),
+      [&](const QJsonObject &, const MapHubApiClient::Error &error) {
+        callback_error = error;
+        completed = true;
+        loop.quit();
+      });
+  QTimer::singleShot(5000, &loop, &QEventLoop::quit);
+  loop.exec();
+  QVERIFY2(completed, "Transaction request timed out");
+  QVERIFY2(!callback_error, qPrintable(callback_error.message));
+  QVERIFY(request_bytes.contains("Content-Encoding: zstd"));
+  QVERIFY(request_bytes.contains("X-Editing-Lease: lease"));
+  QVERIFY(!request_bytes.contains(QByteArray(1024, 'x')));
+}
+
 void MapHubWorkspaceTest::pendingDraftRoundTripsAndCoalesces() {
   auto workspace_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
   auto first_sha = QString(64, QLatin1Char('a'));
@@ -329,6 +459,14 @@ void MapHubWorkspaceTest::pendingDraftRoundTripsAndCoalesces() {
       QUuid::createUuid().toString(QUuid::WithoutBraces);
   draft.idempotency_key = MapHubSyncQueue::idempotencyKey(
       draft.workspace_id, draft.expected_workspace_revision_id, draft.sha256);
+  const auto published_key = MapHubSyncQueue::idempotencyKey(
+      draft.workspace_id, draft.expected_workspace_revision_id, draft.sha256,
+      41, QString(64, QLatin1Char('1')), QString(64, QLatin1Char('2')));
+  const auto later_published_key = MapHubSyncQueue::idempotencyKey(
+      draft.workspace_id, draft.expected_workspace_revision_id, draft.sha256,
+      42, QString(64, QLatin1Char('3')), QString(64, QLatin1Char('4')));
+  QVERIFY(published_key != draft.idempotency_key);
+  QVERIFY(later_published_key != published_key);
   draft.staged_at = QDateTime::currentDateTimeUtc();
   QString error;
   QVERIFY2(MapHubSyncQueue::save(draft, &error), qPrintable(error));

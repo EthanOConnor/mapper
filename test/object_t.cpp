@@ -31,7 +31,7 @@
 #include "core/symbols/point_symbol.h"
 #include "core/symbols/symbol.h"
 #include "core/symbols/text_symbol.h"
-
+#include "util/util.h"
 
 using namespace OpenOrienteering;
 
@@ -188,6 +188,9 @@ private slots:
 		auto* symbol = new PointSymbol();
 		const auto symbol_id = symbol->persistentId();
 		map.addSymbol(symbol, 0);
+		auto* copied_symbol = duplicate(*symbol).release();
+		map.addSymbol(copied_symbol, 1);
+		QVERIFY(copied_symbol->persistentId() != symbol_id);
 
 		auto* original = new PointObject(symbol);
 		const auto original_id = original->persistentId();

@@ -75,7 +75,10 @@ public:
 
   static QString idempotencyKey(const QString &workspace_id,
                                 const QString &expected_workspace_revision_id,
-                                const QString &sha256);
+                                const QString &sha256,
+                                qint64 base_stream_sequence = -1,
+                                const QString &base_stream_hash = {},
+                                const QString &entity_index_sha256 = {});
 };
 
 } // namespace OpenOrienteering

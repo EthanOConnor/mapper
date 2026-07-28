@@ -294,13 +294,16 @@ bool MapHubSyncQueue::pruneSnapshots(const QString &workspace_id,
   return true;
 }
 
-QString
-MapHubSyncQueue::idempotencyKey(const QString &workspace_id,
-                                const QString &expected_workspace_revision_id,
-                                const QString &sha256) {
+QString MapHubSyncQueue::idempotencyKey(
+    const QString &workspace_id, const QString &expected_workspace_revision_id,
+    const QString &sha256, qint64 base_stream_sequence,
+    const QString &base_stream_hash, const QString &entity_index_sha256) {
   auto material = workspace_id.toLower() + QLatin1Char('|') +
                   expected_workspace_revision_id.toLower() + QLatin1Char('|') +
-                  sha256.toLower();
+                  sha256.toLower() + QLatin1Char('|') +
+                  QString::number(base_stream_sequence) + QLatin1Char('|') +
+                  base_stream_hash.toLower() + QLatin1Char('|') +
+                  entity_index_sha256.toLower();
   auto digest =
       QCryptographicHash::hash(material.toUtf8(), QCryptographicHash::Sha256)
           .toHex()

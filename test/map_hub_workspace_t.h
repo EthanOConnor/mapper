@@ -20,6 +20,8 @@ private slots:
   void classifiesWorkspaceBaselines();
   void hashesArtifactsExactly();
   void checkpointCarriesStreamProjectionDigest();
+  void snapshotCompressesEntityIndex();
+  void transactionPostCompressesSemanticOperations();
   void canonicalizesOperationJsonExactly();
   void rejectsValuesOutsideOperationJsonProfile();
   void boundsZstdTransportFrames();

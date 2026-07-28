@@ -15,6 +15,10 @@ class MapHubProtocolFixtureTest : public QObject {
 private slots:
   void nativeBootstrapFixture();
   void rejectsMalformedEntityIndexes();
+  void supportsAllAddressableEntityOperations();
+  void journalsReplayAndRebasesCompactedPendingWork();
+  void controllerBootstrapsAndJournalsStructuralEdits();
+  void controllerReplaysDurableRemoteInbox();
 };
 
 #endif

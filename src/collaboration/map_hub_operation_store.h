@@ -44,12 +44,21 @@ public:
     QDateTime next_attempt_at;
     QString last_error_code;
     QString last_error_message;
+    MapHubEditTransaction transaction;
 
     bool isValid() const {
       return client_sequence > 0 && !transaction_id.isEmpty() &&
              !canonical_json.isEmpty() && payload_sha256.size() == 64 &&
              predicted_stream_sequence > 0 &&
-             predicted_stream_hash.size() == 64;
+             predicted_stream_hash.size() == 64 && transaction.isValid() &&
+             transaction.client_sequence == client_sequence &&
+             transaction.transaction_id == transaction_id &&
+             transaction.payloadSha256() == payload_sha256 &&
+             transaction.expected_stream_sequence + 1 ==
+                 predicted_stream_sequence &&
+             MapHubOperationStore::chainHash(transaction.expected_stream_hash,
+                                             payload_sha256) ==
+                 predicted_stream_hash;
     }
   };
 
@@ -74,6 +83,10 @@ public:
   Pending nextPending(QString *error = nullptr) const;
   QVector<MapHubEditTransaction>
   pendingTransactions(QString *error = nullptr) const;
+  QVector<MapHubCommittedTransaction>
+  unappliedTransactions(QString *error = nullptr) const;
+  bool markTransactionsApplied(qint64 through_sequence,
+                               QString *error = nullptr);
   bool acknowledge(qint64 client_sequence, qint64 stream_sequence,
                    const QString &stream_hash, QString *error = nullptr);
   bool recordFailure(qint64 client_sequence, const QString &code,
@@ -82,6 +95,10 @@ public:
   int pendingCount(QString *error = nullptr) const;
   bool rebaseOnto(const QVector<MapHubCommittedTransaction> &transactions,
                   QString *error = nullptr);
+  bool rebasePendingOntoSnapshot(const MapHubEntityIndex &index,
+                                 const QString &expected_workspace_revision_id,
+                                 const QString &expected_project_revision_id,
+                                 QString *error = nullptr);
 
   static QString databasePath(const QString &workspace_id);
   static QString chainHash(const QString &previous_hash,

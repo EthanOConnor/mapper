@@ -32,7 +32,15 @@ namespace {
 
 constexpr auto zero_hash =
     "0000000000000000000000000000000000000000000000000000000000000000";
-constexpr int schema_version = 1;
+constexpr int schema_version = 2;
+
+bool isObjectOperation(const MapHubEditOperation &operation) {
+  return operation.entityKind() == QLatin1String("object");
+}
+
+bool isSymbolOperation(const MapHubEditOperation &operation) {
+  return operation.entityKind() == QLatin1String("symbol");
+}
 
 QString sqliteError(sqlite3 *database, const QString &fallback) {
   if (!database)
@@ -75,6 +83,14 @@ void bindText(sqlite3_stmt *statement, int index, const QString &value) {
                     SQLITE_TRANSIENT);
 }
 
+void bindNullableText(sqlite3_stmt *statement, int index,
+                      const QString &value) {
+  if (value.isEmpty())
+    sqlite3_bind_null(statement, index);
+  else
+    bindText(statement, index, value);
+}
+
 QString columnText(sqlite3_stmt *statement, int index) {
   const auto *text = sqlite3_column_text(statement, index);
   return text ? QString::fromUtf8(reinterpret_cast<const char *>(text))
@@ -109,6 +125,194 @@ QString meta(sqlite3 *database, const QString &key, QString *error) {
   if (result != SQLITE_DONE && error)
     *error = sqliteError(database, QStringLiteral("SQLite read failed."));
   return {};
+}
+
+struct ProjectedEntity {
+  bool exists = false;
+  QString kind;
+  qint64 version = 0;
+  bool tombstone = false;
+  QString parent_id;
+  QString after_id;
+};
+
+ProjectedEntity projectedEntity(sqlite3 *database, const QString &id,
+                                QString *error) {
+  Statement statement(
+      database,
+      "SELECT kind,version,tombstone,parent_id,after_id FROM entities "
+      "WHERE id=?1",
+      error);
+  if (!statement)
+    return {};
+  bindText(statement.get(), 1, id);
+  const auto result = sqlite3_step(statement.get());
+  if (result == SQLITE_ROW)
+    return {true,
+            columnText(statement.get(), 0),
+            sqlite3_column_int64(statement.get(), 1),
+            sqlite3_column_int(statement.get(), 2) != 0,
+            columnText(statement.get(), 3),
+            columnText(statement.get(), 4)};
+  if (result != SQLITE_DONE && error)
+    *error = sqliteError(database, QStringLiteral("SQLite read failed."));
+  return {};
+}
+
+QString projectedSuccessor(sqlite3 *database, const QString &kind,
+                           const QString &parent_id, const QString &after_id,
+                           const QString &exclude_id, QString *error) {
+  Statement statement(
+      database,
+      "SELECT id FROM entities WHERE kind=?1 AND tombstone=0 "
+      "AND parent_id IS ?2 AND after_id IS ?3 AND id<>?4 LIMIT 2",
+      error);
+  if (!statement)
+    return {};
+  bindText(statement.get(), 1, kind);
+  bindNullableText(statement.get(), 2, parent_id);
+  bindNullableText(statement.get(), 3, after_id);
+  bindText(statement.get(), 4, exclude_id);
+  const auto first = sqlite3_step(statement.get());
+  if (first == SQLITE_DONE)
+    return {};
+  if (first != SQLITE_ROW) {
+    if (error)
+      *error = sqliteError(database, QStringLiteral("SQLite read failed."));
+    return {};
+  }
+  const auto id = columnText(statement.get(), 0);
+  const auto second = sqlite3_step(statement.get());
+  if (second == SQLITE_ROW) {
+    if (error)
+      *error = QStringLiteral(
+          "The Map Hub entity projection has multiple list successors.");
+    return {};
+  }
+  if (second != SQLITE_DONE) {
+    if (error)
+      *error = sqliteError(database, QStringLiteral("SQLite read failed."));
+    return {};
+  }
+  return id;
+}
+
+bool setProjectedAfter(sqlite3 *database, const QString &id,
+                       const QString &after_id, QString *error) {
+  if (id.isEmpty())
+    return true;
+  Statement statement(database, "UPDATE entities SET after_id=?2 WHERE id=?1",
+                      error);
+  if (!statement)
+    return false;
+  bindText(statement.get(), 1, id);
+  bindNullableText(statement.get(), 2, after_id);
+  if (sqlite3_step(statement.get()) == SQLITE_DONE &&
+      sqlite3_changes(database) == 1)
+    return true;
+  if (error)
+    *error = sqliteError(database, QStringLiteral("SQLite projection failed."));
+  return false;
+}
+
+bool applyProjectedOperation(sqlite3 *database,
+                             const MapHubEditOperation &operation,
+                             QString *error) {
+  const auto current = projectedEntity(database, operation.entity_id, error);
+  if (error && !error->isEmpty())
+    return false;
+  if ((current.exists && current.kind != operation.entityKind()) ||
+      current.version != operation.expected_version) {
+    if (error)
+      *error = QStringLiteral("The local Map Hub entity projection is stale.");
+    return false;
+  }
+  if (operation.isDelete()) {
+    if (!current.exists || current.tombstone) {
+      if (error)
+        *error = QStringLiteral("A projected delete target is unavailable.");
+      return false;
+    }
+    if (operation.kind == MapHubEditOperation::Kind::DeletePart) {
+      Statement children(
+          database,
+          "SELECT 1 FROM entities WHERE kind='object' AND tombstone=0 "
+          "AND parent_id=?1 LIMIT 1",
+          error);
+      if (!children)
+        return false;
+      bindText(children.get(), 1, operation.entity_id);
+      if (sqlite3_step(children.get()) == SQLITE_ROW) {
+        if (error)
+          *error =
+              QStringLiteral("A projected map part still contains objects.");
+        return false;
+      }
+    }
+  } else {
+    if (!operation.parent_id.isEmpty()) {
+      const auto parent = projectedEntity(database, operation.parent_id, error);
+      if (!parent.exists || parent.tombstone ||
+          parent.kind != QLatin1String("part")) {
+        if (error)
+          *error =
+              QStringLiteral("A projected target map part is unavailable.");
+        return false;
+      }
+    }
+    if (!operation.after_id.isEmpty()) {
+      const auto anchor = projectedEntity(database, operation.after_id, error);
+      if (!anchor.exists || anchor.tombstone ||
+          anchor.kind != operation.entityKind() ||
+          anchor.parent_id != operation.parent_id) {
+        if (error)
+          *error =
+              QStringLiteral("A projected ordering anchor is unavailable.");
+        return false;
+      }
+    }
+  }
+
+  if (current.exists && !current.tombstone) {
+    const auto successor =
+        projectedSuccessor(database, current.kind, current.parent_id,
+                           operation.entity_id, operation.entity_id, error);
+    if ((error && !error->isEmpty()) ||
+        !setProjectedAfter(database, successor, current.after_id, error))
+      return false;
+  }
+  if (!operation.isDelete()) {
+    const auto successor = projectedSuccessor(
+        database, operation.entityKind(), operation.parent_id,
+        operation.after_id, operation.entity_id, error);
+    if ((error && !error->isEmpty()) ||
+        !setProjectedAfter(database, successor, operation.entity_id, error))
+      return false;
+  }
+
+  Statement update(
+      database,
+      "INSERT INTO entities(id,kind,version,tombstone,parent_id,after_id)"
+      " VALUES(?1,?2,?3,?4,?5,?6)"
+      " ON CONFLICT(id) DO UPDATE SET kind=excluded.kind,"
+      " version=excluded.version,tombstone=excluded.tombstone,"
+      " parent_id=excluded.parent_id,after_id=excluded.after_id",
+      error);
+  if (!update)
+    return false;
+  bindText(update.get(), 1, operation.entity_id);
+  bindText(update.get(), 2, operation.entityKind());
+  sqlite3_bind_int64(update.get(), 3, operation.expected_version + 1);
+  sqlite3_bind_int(update.get(), 4, operation.isDelete());
+  bindNullableText(update.get(), 5,
+                   operation.isDelete() ? QString{} : operation.parent_id);
+  bindNullableText(update.get(), 6,
+                   operation.isDelete() ? QString{} : operation.after_id);
+  if (sqlite3_step(update.get()) == SQLITE_DONE)
+    return true;
+  if (error)
+    *error = sqliteError(database, QStringLiteral("SQLite projection failed."));
+  return false;
 }
 
 class Transaction {
@@ -211,7 +415,11 @@ bool MapHubOperationStore::open(const QString &workspace_id, QString *error) {
       " predicted_stream_hash TEXT NOT NULL,created_ms INTEGER NOT NULL,"
       " attempt_count INTEGER NOT NULL DEFAULT 0,next_attempt_ms INTEGER,"
       " last_error_code TEXT,last_error_message TEXT);"
-      "PRAGMA user_version=1;";
+      "CREATE TABLE IF NOT EXISTS inbox("
+      " stream_sequence INTEGER PRIMARY KEY,canonical_json BLOB NOT NULL,"
+      " payload_sha256 TEXT NOT NULL,stream_hash TEXT NOT NULL,"
+      " committed_at TEXT);"
+      "PRAGMA user_version=2;";
   if (!exec(database.get(), schema, error)) {
     close();
     return false;
@@ -310,7 +518,7 @@ MapHubOperationStore::entityVersions(QString *error) const {
       return {};
     }
     for (const auto &operation : transaction.operations)
-      result[operation.object_id] = operation.expected_version + 1;
+      result[operation.entity_id] = operation.expected_version + 1;
   }
   if (step != SQLITE_DONE && error)
     *error = sqliteError(database.get(), QStringLiteral("SQLite read failed."));
@@ -430,7 +638,8 @@ bool MapHubOperationStore::replaceProjection(const MapHubEntityIndex &index,
   if (!database || !index.isValid(error) || pendingCount(error) != 0)
     return false;
   Transaction transaction(database.get(), error);
-  if (!transaction || !exec(database.get(), "DELETE FROM entities", error))
+  if (!transaction || !exec(database.get(), "DELETE FROM entities", error) ||
+      !exec(database.get(), "DELETE FROM inbox", error))
     return false;
   Statement insert(
       database.get(),
@@ -500,7 +709,7 @@ bool MapHubOperationStore::enqueue(
   }
   const auto versions = entityVersions(error);
   for (const auto &operation : transaction_value.operations) {
-    if (versions.value(operation.object_id, 0) != operation.expected_version) {
+    if (versions.value(operation.entity_id, 0) != operation.expected_version) {
       if (error)
         *error = QStringLiteral(
             "A local Map Hub entity version changed while queueing.");
@@ -578,6 +787,21 @@ MapHubOperationStore::nextPending(QString *error) const {
         sqlite3_column_int64(statement.get(), 7), QTimeZone::UTC);
   result.last_error_code = columnText(statement.get(), 8);
   result.last_error_message = columnText(statement.get(), 9);
+  QJsonParseError parse_error;
+  const auto document =
+      QJsonDocument::fromJson(result.canonical_json, &parse_error);
+  QString transaction_error;
+  result.transaction = document.isObject()
+                           ? MapHubEditTransaction::fromJson(document.object(),
+                                                             &transaction_error)
+                           : MapHubEditTransaction{};
+  if (parse_error.error != QJsonParseError::NoError || !result.isValid()) {
+    if (error)
+      *error = transaction_error.isEmpty()
+                   ? QStringLiteral("The durable Map Hub outbox is corrupt.")
+                   : transaction_error;
+    return {};
+  }
   return result;
 }
 
@@ -622,6 +846,66 @@ MapHubOperationStore::pendingTransactions(QString *error) const {
   return result;
 }
 
+QVector<MapHubCommittedTransaction>
+MapHubOperationStore::unappliedTransactions(QString *error) const {
+  QVector<MapHubCommittedTransaction> result;
+  if (!database)
+    return result;
+  Statement statement(
+      database.get(),
+      "SELECT stream_sequence,canonical_json,payload_sha256,stream_hash,"
+      "committed_at FROM inbox ORDER BY stream_sequence",
+      error);
+  if (!statement)
+    return result;
+  int step;
+  while ((step = sqlite3_step(statement.get())) == SQLITE_ROW) {
+    const auto *blob = sqlite3_column_blob(statement.get(), 1);
+    const auto bytes = sqlite3_column_bytes(statement.get(), 1);
+    QJsonParseError parse_error;
+    const auto document = QJsonDocument::fromJson(
+        QByteArray(static_cast<const char *>(blob), bytes), &parse_error);
+    QString transaction_error;
+    MapHubCommittedTransaction committed;
+    committed.transaction = document.isObject()
+                                ? MapHubEditTransaction::fromJson(
+                                      document.object(), &transaction_error)
+                                : MapHubEditTransaction{};
+    committed.stream_sequence = sqlite3_column_int64(statement.get(), 0);
+    committed.payload_sha256 = columnText(statement.get(), 2);
+    committed.stream_hash = columnText(statement.get(), 3);
+    committed.committed_at = columnText(statement.get(), 4);
+    if (parse_error.error != QJsonParseError::NoError ||
+        !committed.isValid(&transaction_error)) {
+      if (error)
+        *error = transaction_error.isEmpty()
+                     ? QStringLiteral("The durable Map Hub inbox is corrupt.")
+                     : transaction_error;
+      return {};
+    }
+    result.push_back(std::move(committed));
+  }
+  if (step != SQLITE_DONE) {
+    if (error)
+      *error =
+          sqliteError(database.get(), QStringLiteral("SQLite read failed."));
+    return {};
+  }
+  return result;
+}
+
+bool MapHubOperationStore::markTransactionsApplied(qint64 through_sequence,
+                                                   QString *error) {
+  if (!database || through_sequence < 0)
+    return false;
+  Statement statement(database.get(),
+                      "DELETE FROM inbox WHERE stream_sequence<=?1", error);
+  if (!statement)
+    return false;
+  sqlite3_bind_int64(statement.get(), 1, through_sequence);
+  return sqlite3_step(statement.get()) == SQLITE_DONE;
+}
+
 bool MapHubOperationStore::acknowledge(qint64 client_sequence,
                                        qint64 stream_sequence,
                                        const QString &stream_hash,
@@ -654,30 +938,22 @@ bool MapHubOperationStore::acknowledge(qint64 client_sequence,
                    : transaction_error;
     return false;
   }
+  Statement inbox(
+      database.get(),
+      "INSERT INTO inbox(stream_sequence,canonical_json,payload_sha256,"
+      "stream_hash,committed_at) VALUES(?1,?2,?3,?4,'')",
+      error);
+  if (!inbox)
+    return false;
+  sqlite3_bind_int64(inbox.get(), 1, stream_sequence);
+  sqlite3_bind_blob(inbox.get(), 2, pending.canonical_json.constData(),
+                    pending.canonical_json.size(), SQLITE_TRANSIENT);
+  bindText(inbox.get(), 3, pending.payload_sha256);
+  bindText(inbox.get(), 4, stream_hash);
+  if (sqlite3_step(inbox.get()) != SQLITE_DONE)
+    return false;
   for (const auto &operation : accepted.operations) {
-    Statement update(
-        database.get(),
-        "INSERT INTO entities(id,kind,version,tombstone,parent_id,after_id)"
-        " VALUES(?1,'object',?2,?3,?4,?5)"
-        " ON CONFLICT(id) DO UPDATE SET version=excluded.version,"
-        " tombstone=excluded.tombstone,parent_id=excluded.parent_id,"
-        " after_id=excluded.after_id",
-        error);
-    if (!update)
-      return false;
-    bindText(update.get(), 1, operation.object_id);
-    sqlite3_bind_int64(update.get(), 2, operation.expected_version + 1);
-    sqlite3_bind_int(update.get(), 3,
-                     operation.kind == MapHubEditOperation::Kind::DeleteObject);
-    if (operation.part_id.isEmpty())
-      sqlite3_bind_null(update.get(), 4);
-    else
-      bindText(update.get(), 4, operation.part_id);
-    if (operation.after_object_id.isEmpty())
-      sqlite3_bind_null(update.get(), 5);
-    else
-      bindText(update.get(), 5, operation.after_object_id);
-    if (sqlite3_step(update.get()) != SQLITE_DONE)
+    if (!applyProjectedOperation(database.get(), operation, error))
       return false;
   }
   Statement remove(database.get(),
@@ -771,14 +1047,20 @@ bool MapHubOperationStore::rebaseOnto(
   }
 
   QSet<QString> locally_touched;
-  QSet<QString> local_dependencies;
+  QSet<QString> local_anchor_dependencies;
+  QSet<QString> local_parent_dependencies;
+  bool local_object_operation = false;
+  bool local_symbol_delete = false;
   for (const auto &pending : pending_transactions) {
     for (const auto &operation : pending.operations) {
-      locally_touched.insert(operation.object_id);
-      if (!operation.after_object_id.isEmpty())
-        local_dependencies.insert(operation.after_object_id);
-      if (!operation.part_id.isEmpty())
-        local_dependencies.insert(operation.part_id);
+      locally_touched.insert(operation.entity_id);
+      if (!operation.after_id.isEmpty())
+        local_anchor_dependencies.insert(operation.after_id);
+      if (!operation.parent_id.isEmpty())
+        local_parent_dependencies.insert(operation.parent_id);
+      local_object_operation |= isObjectOperation(operation);
+      local_symbol_delete |=
+          operation.kind == MapHubEditOperation::Kind::DeleteSymbol;
     }
   }
   for (const auto &committed : transactions) {
@@ -797,12 +1079,15 @@ bool MapHubOperationStore::rebaseOnto(
       return false;
     }
     for (const auto &operation : committed.transaction.operations) {
-      if (locally_touched.contains(operation.object_id) ||
-          (operation.kind == MapHubEditOperation::Kind::DeleteObject &&
-           local_dependencies.contains(operation.object_id))) {
+      if (locally_touched.contains(operation.entity_id) ||
+          local_anchor_dependencies.contains(operation.entity_id) ||
+          (operation.isDelete() &&
+           local_parent_dependencies.contains(operation.entity_id)) ||
+          (local_object_operation && isSymbolOperation(operation)) ||
+          (local_symbol_delete && isObjectOperation(operation))) {
         if (error)
           *error = QStringLiteral(
-              "An upstream edit touches the same map object as local work.");
+              "An upstream edit conflicts with locally saved map entities.");
         return false;
       }
     }
@@ -824,40 +1109,36 @@ bool MapHubOperationStore::rebaseOnto(
   if (!database_transaction)
     return false;
   for (const auto &committed : transactions) {
+    const auto canonical = committed.transaction.canonicalBytes(error);
+    if (canonical.isEmpty())
+      return false;
+    Statement inbox(
+        database.get(),
+        "INSERT INTO inbox(stream_sequence,canonical_json,payload_sha256,"
+        "stream_hash,committed_at) VALUES(?1,?2,?3,?4,?5)",
+        error);
+    if (!inbox)
+      return false;
+    sqlite3_bind_int64(inbox.get(), 1, committed.stream_sequence);
+    sqlite3_bind_blob(inbox.get(), 2, canonical.constData(), canonical.size(),
+                      SQLITE_TRANSIENT);
+    bindText(inbox.get(), 3, committed.payload_sha256);
+    bindText(inbox.get(), 4, committed.stream_hash);
+    bindText(inbox.get(), 5, committed.committed_at);
+    if (sqlite3_step(inbox.get()) != SQLITE_DONE)
+      return false;
+
     for (const auto &operation : committed.transaction.operations) {
-      if (projection.value(operation.object_id, 0) !=
+      if (projection.value(operation.entity_id, 0) !=
           operation.expected_version) {
         if (error)
           *error = QStringLiteral(
               "The local Map Hub projection does not match the server.");
         return false;
       }
-      Statement update(
-          database.get(),
-          "INSERT INTO entities(id,kind,version,tombstone,parent_id,after_id)"
-          " VALUES(?1,'object',?2,?3,?4,?5)"
-          " ON CONFLICT(id) DO UPDATE SET version=excluded.version,"
-          " tombstone=excluded.tombstone,parent_id=excluded.parent_id,"
-          " after_id=excluded.after_id",
-          error);
-      if (!update)
+      if (!applyProjectedOperation(database.get(), operation, error))
         return false;
-      bindText(update.get(), 1, operation.object_id);
-      sqlite3_bind_int64(update.get(), 2, operation.expected_version + 1);
-      sqlite3_bind_int(update.get(), 3,
-                       operation.kind ==
-                           MapHubEditOperation::Kind::DeleteObject);
-      if (operation.part_id.isEmpty())
-        sqlite3_bind_null(update.get(), 4);
-      else
-        bindText(update.get(), 4, operation.part_id);
-      if (operation.after_object_id.isEmpty())
-        sqlite3_bind_null(update.get(), 5);
-      else
-        bindText(update.get(), 5, operation.after_object_id);
-      if (sqlite3_step(update.get()) != SQLITE_DONE)
-        return false;
-      projection[operation.object_id] = operation.expected_version + 1;
+      projection[operation.entity_id] = operation.expected_version + 1;
     }
   }
   if (!setMeta(database.get(), QStringLiteral("published_stream_sequence"),
@@ -873,8 +1154,8 @@ bool MapHubOperationStore::rebaseOnto(
     pending.expected_stream_hash = optimistic_hash;
     pending.transaction_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     for (auto &operation : pending.operations) {
-      operation.expected_version = projection.value(operation.object_id, 0);
-      projection[operation.object_id] = operation.expected_version + 1;
+      operation.expected_version = projection.value(operation.entity_id, 0);
+      projection[operation.entity_id] = operation.expected_version + 1;
     }
     const auto canonical = pending.canonicalBytes(error);
     const auto digest = pending.payloadSha256(error);
@@ -910,6 +1191,256 @@ bool MapHubOperationStore::rebaseOnto(
                optimistic_hash, error))
     return false;
   return database_transaction.commit(error);
+}
+
+bool MapHubOperationStore::rebasePendingOntoSnapshot(
+    const MapHubEntityIndex &index,
+    const QString &expected_workspace_revision_id,
+    const QString &expected_project_revision_id, QString *error) {
+  if (!database || !index.isValid(error))
+    return false;
+  auto pending_transactions = pendingTransactions(error);
+  if (error && !error->isEmpty())
+    return false;
+  if (pending_transactions.isEmpty())
+    return replaceProjection(index, error);
+
+  struct EntityState {
+    QString kind;
+    qint64 version = 0;
+    bool tombstone = false;
+    QString parent_id;
+    QString after_id;
+  };
+  QHash<QString, EntityState> old_projection;
+  Statement old_entities(
+      database.get(),
+      "SELECT id,kind,version,tombstone,parent_id,after_id FROM entities",
+      error);
+  if (!old_entities)
+    return false;
+  int step;
+  while ((step = sqlite3_step(old_entities.get())) == SQLITE_ROW) {
+    old_projection.insert(columnText(old_entities.get(), 0),
+                          {columnText(old_entities.get(), 1),
+                           sqlite3_column_int64(old_entities.get(), 2),
+                           sqlite3_column_int(old_entities.get(), 3) != 0,
+                           columnText(old_entities.get(), 4),
+                           columnText(old_entities.get(), 5)});
+  }
+  if (step != SQLITE_DONE)
+    return false;
+
+  QHash<QString, EntityState> projected;
+  for (const auto &entity : index.entities) {
+    projected.insert(entity.id, {entity.kind, entity.version, entity.tombstone,
+                                 entity.parent_id, entity.after_id});
+  }
+
+  bool local_object_operation = false;
+  bool local_symbol_delete = false;
+  for (const auto &pending : pending_transactions) {
+    for (const auto &operation : pending.operations) {
+      local_object_operation |= isObjectOperation(operation);
+      local_symbol_delete |=
+          operation.kind == MapHubEditOperation::Kind::DeleteSymbol;
+    }
+  }
+  if (local_object_operation || local_symbol_delete) {
+    for (auto it = old_projection.cbegin(); it != old_projection.cend(); ++it) {
+      const auto remote = projected.constFind(it.key());
+      const auto changed = remote == projected.cend() ||
+                           it->kind != remote->kind ||
+                           it->version != remote->version ||
+                           it->tombstone != remote->tombstone ||
+                           it->parent_id != remote->parent_id ||
+                           it->after_id != remote->after_id;
+      if (changed && ((local_object_operation &&
+                       (it->kind == QLatin1String("symbol") ||
+                        (remote != projected.cend() &&
+                         remote->kind == QLatin1String("symbol")))) ||
+                      (local_symbol_delete &&
+                       (it->kind == QLatin1String("object") ||
+                        (remote != projected.cend() &&
+                         remote->kind == QLatin1String("object")))))) {
+        if (error)
+          *error = QStringLiteral(
+              "A compacted upstream snapshot changed symbol/object topology "
+              "needed by pending local work.");
+        return false;
+      }
+    }
+    for (auto it = projected.cbegin(); it != projected.cend(); ++it) {
+      if (old_projection.contains(it.key()))
+        continue;
+      if ((local_object_operation && it->kind == QLatin1String("symbol")) ||
+          (local_symbol_delete && it->kind == QLatin1String("object"))) {
+        if (error)
+          *error = QStringLiteral(
+              "A compacted upstream snapshot added symbol/object topology "
+              "needed by pending local work.");
+        return false;
+      }
+    }
+  }
+
+  QSet<QString> first_local_touch;
+  for (const auto &pending : pending_transactions) {
+    for (const auto &operation : pending.operations) {
+      if (!first_local_touch.contains(operation.entity_id)) {
+        const auto old = old_projection.constFind(operation.entity_id);
+        const auto remote = projected.constFind(operation.entity_id);
+        const auto old_exists = old != old_projection.cend();
+        const auto remote_exists = remote != projected.cend();
+        if (old_exists != remote_exists ||
+            (old_exists &&
+             (old->kind != remote->kind || old->version != remote->version ||
+              old->tombstone != remote->tombstone))) {
+          if (error)
+            *error = QStringLiteral(
+                "A compacted upstream snapshot changed an entity with "
+                "pending local work.");
+          return false;
+        }
+        first_local_touch.insert(operation.entity_id);
+      }
+
+      auto entity = projected.value(operation.entity_id);
+      if (entity.kind.isEmpty()) {
+        entity.kind = operation.entityKind();
+        entity.version = 0;
+      }
+      if (entity.kind != operation.entityKind() ||
+          entity.version != operation.expected_version) {
+        if (error)
+          *error = QStringLiteral(
+              "Pending Map Hub work no longer matches the restored "
+              "projection.");
+        return false;
+      }
+      if (operation.isDelete()) {
+        if (entity.tombstone || entity.version == 0) {
+          if (error)
+            *error = QStringLiteral("A pending delete target is unavailable.");
+          return false;
+        }
+        entity.tombstone = true;
+        entity.parent_id.clear();
+        entity.after_id.clear();
+      } else {
+        if (!operation.parent_id.isEmpty()) {
+          const auto parent = projected.constFind(operation.parent_id);
+          if (parent == projected.cend() || parent->tombstone ||
+              parent->kind != QLatin1String("part")) {
+            if (error)
+              *error = QStringLiteral("A pending target part is unavailable.");
+            return false;
+          }
+        }
+        if (!operation.after_id.isEmpty()) {
+          const auto anchor = projected.constFind(operation.after_id);
+          if (anchor == projected.cend() || anchor->tombstone ||
+              anchor->kind != operation.entityKind() ||
+              anchor->parent_id != operation.parent_id) {
+            if (error)
+              *error =
+                  QStringLiteral("A pending ordering anchor is unavailable.");
+            return false;
+          }
+        }
+        entity.tombstone = false;
+        entity.parent_id = operation.parent_id;
+        entity.after_id = operation.after_id;
+      }
+      ++entity.version;
+      projected.insert(operation.entity_id, entity);
+    }
+  }
+
+  Transaction transaction(database.get(), error);
+  if (!transaction || !exec(database.get(), "DELETE FROM entities", error) ||
+      !exec(database.get(), "DELETE FROM inbox", error))
+    return false;
+  Statement insert(
+      database.get(),
+      "INSERT INTO entities(id,kind,version,tombstone,parent_id,after_id)"
+      " VALUES(?1,?2,?3,?4,?5,?6)",
+      error);
+  if (!insert)
+    return false;
+  for (const auto &entity : index.entities) {
+    sqlite3_reset(insert.get());
+    sqlite3_clear_bindings(insert.get());
+    bindText(insert.get(), 1, entity.id);
+    bindText(insert.get(), 2, entity.kind);
+    sqlite3_bind_int64(insert.get(), 3, entity.version);
+    sqlite3_bind_int(insert.get(), 4, entity.tombstone);
+    if (entity.parent_id.isEmpty())
+      sqlite3_bind_null(insert.get(), 5);
+    else
+      bindText(insert.get(), 5, entity.parent_id);
+    if (entity.after_id.isEmpty())
+      sqlite3_bind_null(insert.get(), 6);
+    else
+      bindText(insert.get(), 6, entity.after_id);
+    if (sqlite3_step(insert.get()) != SQLITE_DONE)
+      return false;
+  }
+  if (!setMeta(database.get(), QStringLiteral("published_stream_sequence"),
+               QString::number(index.stream_sequence), error) ||
+      !setMeta(database.get(), QStringLiteral("published_stream_hash"),
+               index.stream_hash, error))
+    return false;
+
+  QHash<QString, qint64> versions;
+  for (const auto &entity : index.entities)
+    versions.insert(entity.id, entity.version);
+  auto optimistic_sequence = index.stream_sequence;
+  auto optimistic_hash = index.stream_hash;
+  for (auto &pending : pending_transactions) {
+    pending.expected_stream_sequence = optimistic_sequence;
+    pending.expected_stream_hash = optimistic_hash;
+    pending.expected_workspace_revision_id = expected_workspace_revision_id;
+    pending.expected_project_revision_id = expected_project_revision_id;
+    pending.transaction_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    for (auto &operation : pending.operations) {
+      operation.expected_version = versions.value(operation.entity_id, 0);
+      versions[operation.entity_id] = operation.expected_version + 1;
+    }
+    const auto canonical = pending.canonicalBytes(error);
+    const auto digest = pending.payloadSha256(error);
+    const auto predicted_hash = chainHash(optimistic_hash, digest);
+    if (canonical.isEmpty() || predicted_hash.isEmpty())
+      return false;
+    ++optimistic_sequence;
+    Statement rewrite(
+        database.get(),
+        "UPDATE outbox SET transaction_id=?2,canonical_json=?3,"
+        "payload_sha256=?4,predicted_stream_sequence=?5,"
+        "predicted_stream_hash=?6,attempt_count=0,next_attempt_ms=NULL,"
+        "last_error_code=NULL,last_error_message=NULL"
+        " WHERE client_sequence=?1",
+        error);
+    if (!rewrite)
+      return false;
+    sqlite3_bind_int64(rewrite.get(), 1, pending.client_sequence);
+    bindText(rewrite.get(), 2, pending.transaction_id);
+    sqlite3_bind_blob(rewrite.get(), 3, canonical.constData(), canonical.size(),
+                      SQLITE_TRANSIENT);
+    bindText(rewrite.get(), 4, digest);
+    sqlite3_bind_int64(rewrite.get(), 5, optimistic_sequence);
+    bindText(rewrite.get(), 6, predicted_hash);
+    if (sqlite3_step(rewrite.get()) != SQLITE_DONE ||
+        sqlite3_changes(database.get()) != 1)
+      return false;
+    optimistic_hash = predicted_hash;
+  }
+  if (!setMeta(database.get(), QStringLiteral("optimistic_stream_sequence"),
+               QString::number(optimistic_sequence), error) ||
+      !setMeta(database.get(), QStringLiteral("optimistic_stream_hash"),
+               optimistic_hash, error))
+    return false;
+  return transaction.commit(error);
 }
 
 } // namespace OpenOrienteering

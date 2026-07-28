@@ -318,4 +318,34 @@ QString MapHubEntityIndex::sha256(QString *error) const {
       QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex());
 }
 
+bool MapHubEntityIndex::matchesMapTopology(const Map &map,
+                                           QString *error) const {
+  if (!isValid(error))
+    return false;
+  const auto local = bootstrap(map);
+  QHash<QString, MapHubEntityIndexEntry> live;
+  for (const auto &entity : entities) {
+    if (!entity.tombstone)
+      live.insert(entity.id, entity);
+  }
+  if (local.entities.size() != live.size()) {
+    if (error)
+      *error = QStringLiteral(
+          "The map does not contain the synchronized entity set.");
+    return false;
+  }
+  for (const auto &entity : local.entities) {
+    const auto projected = live.constFind(entity.id);
+    if (projected == live.cend() || projected->kind != entity.kind ||
+        projected->parent_id != entity.parent_id ||
+        projected->after_id != entity.after_id) {
+      if (error)
+        *error =
+            QStringLiteral("The map does not match synchronized entity order.");
+      return false;
+    }
+  }
+  return true;
+}
+
 } // namespace OpenOrienteering

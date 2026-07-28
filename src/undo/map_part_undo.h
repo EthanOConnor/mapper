@@ -92,6 +92,8 @@ protected:
 	int index;
 	
 	QString name;
+
+	QString persistent_id;
 };
 
 

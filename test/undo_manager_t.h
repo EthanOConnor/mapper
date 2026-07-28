@@ -41,7 +41,8 @@ private slots:
 	void testOperationStreamRebase();
 	void testExternalObjectIndexAdjustment();
 	void testRejectsMalformedMapHubTransactions();
-	
+	void testMapPartIdentitySurvivesUndoRedo();
+
 private:
 	bool clean_changed;
 	bool clean;

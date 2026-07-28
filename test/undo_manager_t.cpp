@@ -28,6 +28,7 @@
 #include "core/map_coord.h"
 #include "core/objects/object.h"
 #include "core/symbols/line_symbol.h"
+#include "undo/map_part_undo.h"
 #include "undo/object_undo.h"
 #include "undo/undo.h"
 #include "undo/undo_manager.h"
@@ -59,17 +60,17 @@ void UndoManagerTest::testRejectsMalformedMapHubTransactions()
 	QVERIFY2(transaction.isValid(&error), qPrintable(error));
 
 	auto invalid = transaction;
-	invalid.operations.front().xml =
-	    QStringLiteral("<object uuid=\"20000000-0000-4000-8000-000000000002\"/>");
+	invalid.operations.front().payload = QStringLiteral(
+	    "<object uuid=\"20000000-0000-4000-8000-000000000002\"/>");
 	QVERIFY(!invalid.isValid(&error));
 	invalid = transaction;
-	invalid.operations.front().xml =
+	invalid.operations.front().payload =
 	    QStringLiteral("<?xml version=\"1.0\"?><object "
 	                   "uuid=\"20000000-0000-4000-8000-000000000001\"/>");
 	QVERIFY(!invalid.isValid(&error));
 	invalid = transaction;
-	invalid.operations.front().after_object_id =
-	    invalid.operations.front().object_id;
+	invalid.operations.front().after_id =
+	    invalid.operations.front().entity_id;
 	QVERIFY(!invalid.isValid(&error));
 	invalid = transaction;
 	invalid.expected_project_revision_id = QStringLiteral("not-a-uuid");
@@ -136,6 +137,20 @@ void UndoManagerTest::testOperationStreamRebase()
 	         qint64(2));
 	QCOMPARE(store.entityVersions(&error).value(second->persistentId()),
 	         qint64(2));
+}
+
+void UndoManagerTest::testMapPartIdentitySurvivesUndoRedo()
+{
+	Map map;
+	auto* part = new MapPart(QStringLiteral("Field sheet"), &map);
+	const auto persistent_id = part->persistentId();
+	map.addPart(part, 1);
+	map.push(new MapPartUndoStep(&map, MapPartUndoStep::RemoveMapPart, part));
+	QVERIFY(map.undoManager().undo());
+	QCOMPARE(map.getNumParts(), 1);
+	QVERIFY(map.undoManager().redo());
+	QCOMPARE(map.getNumParts(), 2);
+	QCOMPARE(map.getPart(1)->persistentId(), persistent_id);
 }
 
 void UndoManagerTest::testExternalObjectIndexAdjustment()
@@ -206,12 +221,12 @@ void UndoManagerTest::testCommittedEntityChanges()
 	QCOMPARE(put_transaction.operations.size(), 1);
 	QCOMPARE(put_transaction.operations.front().kind,
 	         MapHubEditOperation::Kind::PutObject);
-	QCOMPARE(put_transaction.operations.front().object_id, object_id);
-	QCOMPARE(put_transaction.operations.front().part_id,
+	QCOMPARE(put_transaction.operations.front().entity_id, object_id);
+	QCOMPARE(put_transaction.operations.front().parent_id,
 	         map.getPart(0)->persistentId());
-	QVERIFY(put_transaction.operations.front().xml.startsWith(
+	QVERIFY(put_transaction.operations.front().payload.startsWith(
 	    QStringLiteral("<object ")));
-	QVERIFY(put_transaction.operations.front().xml.contains(
+	QVERIFY(put_transaction.operations.front().payload.contains(
 	    QStringLiteral("uuid=\"%1\"").arg(object_id)));
 	QVERIFY(!put_transaction.payloadSha256(&transaction_error).isEmpty());
 

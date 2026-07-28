@@ -299,6 +299,44 @@ ManagedMapWorkspace::loadForMap(const QString &local_map_path, QString *error) {
   return workspace;
 }
 
+ManagedMapWorkspace ManagedMapWorkspace::findForWorkspace(
+    const QString &server_url, const QString &workspace_id, QString *error) {
+  auto root = qEnvironmentVariable("MAPPER_MANAGED_WORKSPACE_ROOT");
+  if (root.isEmpty())
+    root = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+  const QDir directory(
+      QDir(root).filePath(QStringLiteral("managed-workspaces")));
+  ManagedMapWorkspace best;
+  QDateTime best_time;
+  for (const auto &name :
+       directory.entryList({QStringLiteral("*.json")}, QDir::Files)) {
+    QFile file(directory.filePath(name));
+    if (!file.open(QIODevice::ReadOnly) || file.size() > 1024 * 1024)
+      continue;
+    QJsonParseError parse_error;
+    const auto document = QJsonDocument::fromJson(file.readAll(), &parse_error);
+    if (parse_error.error != QJsonParseError::NoError || !document.isObject())
+      continue;
+    QString record_error;
+    const auto candidate = fromJson(document.object(), &record_error);
+    if (!candidate.isValid() || candidate.server_url != server_url ||
+        candidate.workspace_id != workspace_id ||
+        !QFileInfo::exists(candidate.local_map_path))
+      continue;
+    const auto candidate_time =
+        candidate.last_synced_at.isValid()
+            ? candidate.last_synced_at
+            : QFileInfo(candidate.local_map_path).lastModified();
+    if (!best.isValid() || candidate_time > best_time) {
+      best = candidate;
+      best_time = candidate_time;
+    }
+  }
+  if (!best.isValid() && error)
+    *error = QStringLiteral("No existing local workspace was found.");
+  return best;
+}
+
 bool ManagedMapWorkspace::removeForMap(const QString &local_map_path,
                                        QString *error) {
   QFile file(recordPathForMap(local_map_path));

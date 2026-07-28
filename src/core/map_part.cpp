@@ -55,8 +55,10 @@ namespace literal
 
 namespace OpenOrienteering {
 
-MapPart::MapPart(const QString& name, Map* map)
-: persistent_id(QUuid::createUuid().toString(QUuid::WithoutBraces))
+MapPart::MapPart(const QString& name, Map* map, const QString& requested_id)
+: persistent_id(QUuid(requested_id).isNull()
+                ? QUuid::createUuid().toString(QUuid::WithoutBraces)
+                : QUuid(requested_id).toString(QUuid::WithoutBraces))
 , name(name)
 , map(map)
 {
@@ -67,6 +69,11 @@ MapPart::MapPart(const QString& name, Map* map)
 const QString& MapPart::persistentId() const
 {
 	return persistent_id;
+}
+
+void MapPart::renewPersistentId()
+{
+	persistent_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
 }
 
 MapPart::~MapPart()

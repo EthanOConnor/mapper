@@ -1360,8 +1360,7 @@ void MainWindow::renewMapHubLeaseIfNeeded()
 		return;
 	QString metadata_error;
 	auto managed = ManagedMapWorkspace::loadForMap(currentPath(), &metadata_error);
-	if (!managed.isValid() || !managed.exclusive_editing
-	    || managed.status == QLatin1String("submitted"))
+	if (!managed.isValid() || managed.status == QLatin1String("submitted"))
 		return;
 	auto now = QDateTime::currentDateTimeUtc();
 	if (managed.lease_expires_at.isValid()
@@ -1457,10 +1456,12 @@ void MainWindow::checkpointMapHub(bool submit_after)
 	}
 	auto lease_key = MapHubCredentials::workspaceLeaseKey(managed.server_url, managed.workspace_id);
 	auto lease = MapHubCredentials::readToken(lease_key);
-	if (managed.exclusive_editing && lease.token.isEmpty())
+	if (lease.token.isEmpty())
 	{
-		QMessageBox::warning(this, tr("Editing lease required"),
-		                     tr("Your local work is safe. Reopen this assignment from Map Hub to obtain a new lease before checkpointing."));
+		QMessageBox::warning(
+		    this, tr("Editing lease required"),
+		    tr("Your local work is safe. Reopen this assignment from Map Hub "
+		       "to obtain a new lease before checkpointing."));
 		return;
 	}
 	bool needs_checkpoint = managed.active_revision_id.isEmpty()

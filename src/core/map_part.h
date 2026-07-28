@@ -71,7 +71,8 @@ public:
 	/**
 	 * Creates a new map part with the given name for a map.
 	 */
-	MapPart(const QString& name, Map* map);
+	MapPart(const QString& name, Map* map,
+	        const QString& persistent_id = {});
 	
 	MapPart(const MapPart&) = delete;
 	
@@ -103,6 +104,9 @@ public:
 
 	/** Returns the stable identity used by durable collaboration operations. */
 	const QString& persistentId() const;
+
+	/** Assigns a fresh stable identity when a copy becomes a new entity. */
+	void renewPersistentId();
 	
 	/**
 	 * Sets the part's name.

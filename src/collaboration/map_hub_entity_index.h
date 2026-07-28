@@ -40,6 +40,7 @@ struct MapHubEntityIndex {
   QByteArray canonicalBytes(QString *error = nullptr) const;
   QString sha256(QString *error = nullptr) const;
   bool isValid(QString *error = nullptr) const;
+  bool matchesMapTopology(const Map &map, QString *error = nullptr) const;
 };
 
 } // namespace OpenOrienteering

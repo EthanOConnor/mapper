@@ -84,6 +84,9 @@ struct ManagedMapWorkspace {
                    QString *error = nullptr);
   static ManagedMapWorkspace loadForMap(const QString &local_map_path,
                                         QString *error = nullptr);
+  static ManagedMapWorkspace findForWorkspace(const QString &server_url,
+                                              const QString &workspace_id,
+                                              QString *error = nullptr);
   static bool removeForMap(const QString &local_map_path,
                            QString *error = nullptr);
 };

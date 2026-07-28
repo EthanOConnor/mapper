@@ -35,6 +35,7 @@ namespace literal
 	const QLatin1String type("type");
 	const QLatin1String part("part");
 	const QLatin1String name("name");
+	const QLatin1String uuid("uuid");
 }
 
 
@@ -46,6 +47,7 @@ MapPartUndoStep::MapPartUndoStep(Map* map, MapPartChange change, const MapPart* 
 , change(change)
 , index(map->findPartIndex(part))
 , name(part->getName())
+, persistent_id(part->persistentId())
 {
 	// nothing else
 }
@@ -55,6 +57,7 @@ MapPartUndoStep::MapPartUndoStep(Map* map, MapPartChange change, int index)
 , change(change)
 , index(index)
 , name(map->getPart(index)->getName())
+, persistent_id(map->getPart(index)->persistentId())
 {
 	// nothing else
 }
@@ -64,6 +67,7 @@ MapPartUndoStep::MapPartUndoStep(Map* map)
 , change(UndefinedChange)
 , index(0)
 , name()
+, persistent_id()
 {
 	// nothing else
 }
@@ -88,7 +92,7 @@ UndoStep* MapPartUndoStep::undo()
 	{
 	case AddMapPart:
 		Q_ASSERT(map->getNumParts()+1 > index);
-		map->addPart(new MapPart(name, map), index);
+		map->addPart(new MapPart(name, map, persistent_id), index);
 		redo_step = new MapPartUndoStep(map, RemoveMapPart, index);
 	    break;
 	case RemoveMapPart:
@@ -145,7 +149,8 @@ void MapPartUndoStep::saveImpl(QXmlStreamWriter &xml) const
 	XmlElementWriter change_element(xml, literal::change);
 	change_element.writeAttribute(literal::type, change);
 	change_element.writeAttribute(literal::part, index);
-	
+	change_element.writeAttribute(literal::uuid, persistent_id);
+
 	switch (change)
 	{
 	case AddMapPart:
@@ -170,6 +175,7 @@ void MapPartUndoStep::loadImpl(QXmlStreamReader &xml, SymbolDictionary &)
 			change = (MapPartChange)type;
 		index = change_element.attribute<int>(literal::part);
 		name  = change_element.attribute<QString>(literal::name);
+		persistent_id = change_element.attribute<QString>(literal::uuid);
 	}
 }
 

@@ -44,7 +44,8 @@ bool validHash(const QString &value) {
   return pattern.match(value).hasMatch();
 }
 
-bool validObjectFragment(const QString &fragment, const QString &expected_id) {
+bool validXmlFragment(const QString &fragment, const QString &root,
+                      const QString &expected_id) {
   const auto trimmed = fragment.trimmed();
   if (trimmed.isEmpty() ||
       trimmed.startsWith(QLatin1String("<?xml"), Qt::CaseInsensitive) ||
@@ -52,7 +53,7 @@ bool validObjectFragment(const QString &fragment, const QString &expected_id) {
       trimmed.contains(QLatin1String("<!ENTITY"), Qt::CaseInsensitive))
     return false;
   QXmlStreamReader xml(fragment);
-  if (!xml.readNextStartElement() || xml.name() != QLatin1String("object") ||
+  if (!xml.readNextStartElement() || xml.name() != root ||
       xml.attributes().value(QLatin1String("uuid")) != expected_id)
     return false;
   xml.skipCurrentElement();
@@ -61,7 +62,7 @@ bool validObjectFragment(const QString &fragment, const QString &expected_id) {
   return !xml.hasError();
 }
 
-QString objectXml(const Object &object) {
+QString serializeObject(const Object &object) {
   QByteArray bytes;
   QBuffer buffer(&bytes);
   if (!buffer.open(QIODevice::WriteOnly))
@@ -96,25 +97,71 @@ LocatedObject locate(const Map &map, const QString &id) {
 
 } // namespace
 
+QString MapHubEditOperation::entityKind() const {
+  switch (kind) {
+  case Kind::PutObject:
+  case Kind::DeleteObject:
+    return QStringLiteral("object");
+  case Kind::PutPart:
+  case Kind::DeletePart:
+    return QStringLiteral("part");
+  case Kind::PutSymbol:
+  case Kind::DeleteSymbol:
+    return QStringLiteral("symbol");
+  }
+  return {};
+}
+
+bool MapHubEditOperation::isDelete() const {
+  return kind == Kind::DeleteObject || kind == Kind::DeletePart ||
+         kind == Kind::DeleteSymbol;
+}
+
 QJsonObject MapHubEditOperation::toJson() const {
-  if (kind == Kind::DeleteObject) {
+  const auto entity_kind = entityKind();
+  if (isDelete()) {
+    QJsonObject object;
+    object.insert(QStringLiteral("op"),
+                  QString(entity_kind + QStringLiteral(".delete")));
+    object.insert(QStringLiteral("v"), 1);
+    object.insert(QStringLiteral("expected_version"), expected_version);
+    object.insert(entity_kind + QStringLiteral("_id"), entity_id);
+    return object;
+  }
+  if (kind == Kind::PutPart) {
     return {
-        {QStringLiteral("op"), QStringLiteral("object.delete")},
+        {QStringLiteral("op"), QStringLiteral("part.put")},
         {QStringLiteral("v"), 1},
-        {QStringLiteral("object_id"), object_id},
+        {QStringLiteral("part_id"), entity_id},
+        {QStringLiteral("after_part_id"), after_id.isEmpty()
+                                              ? QJsonValue(QJsonValue::Null)
+                                              : QJsonValue(after_id)},
         {QStringLiteral("expected_version"), expected_version},
+        {QStringLiteral("name"), payload},
+    };
+  }
+  if (kind == Kind::PutSymbol) {
+    return {
+        {QStringLiteral("op"), QStringLiteral("symbol.put")},
+        {QStringLiteral("v"), 1},
+        {QStringLiteral("symbol_id"), entity_id},
+        {QStringLiteral("after_symbol_id"), after_id.isEmpty()
+                                                ? QJsonValue(QJsonValue::Null)
+                                                : QJsonValue(after_id)},
+        {QStringLiteral("expected_version"), expected_version},
+        {QStringLiteral("xml"), payload},
     };
   }
   return {
       {QStringLiteral("op"), QStringLiteral("object.put")},
       {QStringLiteral("v"), 1},
-      {QStringLiteral("object_id"), object_id},
-      {QStringLiteral("part_id"), part_id},
-      {QStringLiteral("after_object_id"), after_object_id.isEmpty()
+      {QStringLiteral("object_id"), entity_id},
+      {QStringLiteral("part_id"), parent_id},
+      {QStringLiteral("after_object_id"), after_id.isEmpty()
                                               ? QJsonValue(QJsonValue::Null)
-                                              : QJsonValue(after_object_id)},
+                                              : QJsonValue(after_id)},
       {QStringLiteral("expected_version"), expected_version},
-      {QStringLiteral("xml"), xml},
+      {QStringLiteral("xml"), payload},
   };
 }
 
@@ -135,32 +182,55 @@ bool MapHubEditTransaction::isValid(QString *error) const {
   qsizetype aggregate_xml = 0;
   QSet<QString> touched;
   for (const auto &operation : operations) {
-    if (!canonicalUuid(operation.object_id) || operation.expected_version < 0 ||
-        touched.contains(operation.object_id)) {
+    if (!canonicalUuid(operation.entity_id) || operation.expected_version < 0 ||
+        touched.contains(operation.entity_id)) {
       if (error)
         *error = QStringLiteral(
-            "A Map Hub transaction contains an invalid or duplicate object.");
+            "A Map Hub transaction contains an invalid or duplicate entity.");
       return false;
     }
-    touched.insert(operation.object_id);
+    touched.insert(operation.entity_id);
     if (operation.kind == MapHubEditOperation::Kind::PutObject) {
-      if (!canonicalUuid(operation.part_id) ||
-          (!operation.after_object_id.isEmpty() &&
-           !canonicalUuid(operation.after_object_id)) ||
-          operation.after_object_id == operation.object_id ||
-          operation.xml.toUtf8().size() > maximum_fragment_bytes ||
-          !validObjectFragment(operation.xml, operation.object_id)) {
+      if (!canonicalUuid(operation.parent_id) ||
+          (!operation.after_id.isEmpty() &&
+           !canonicalUuid(operation.after_id)) ||
+          operation.after_id == operation.entity_id ||
+          operation.payload.toUtf8().size() > maximum_fragment_bytes ||
+          !validXmlFragment(operation.payload, QStringLiteral("object"),
+                            operation.entity_id)) {
         if (error)
           *error = QStringLiteral(
               "A Map Hub object fragment or ordering anchor is invalid.");
         return false;
       }
-      aggregate_xml += operation.xml.toUtf8().size();
+      aggregate_xml += operation.payload.toUtf8().size();
+    } else if (operation.kind == MapHubEditOperation::Kind::PutPart) {
+      if ((!operation.after_id.isEmpty() &&
+           !canonicalUuid(operation.after_id)) ||
+          operation.after_id == operation.entity_id ||
+          operation.payload.isEmpty() || operation.payload.size() > 512) {
+        if (error)
+          *error = QStringLiteral(
+              "A Map Hub part name or ordering anchor is invalid.");
+        return false;
+      }
+    } else if (operation.kind == MapHubEditOperation::Kind::PutSymbol) {
+      if ((!operation.after_id.isEmpty() &&
+           !canonicalUuid(operation.after_id)) ||
+          operation.after_id == operation.entity_id ||
+          operation.payload.toUtf8().size() > maximum_fragment_bytes ||
+          !validXmlFragment(operation.payload, QStringLiteral("symbol"),
+                            operation.entity_id)) {
+        if (error)
+          *error = QStringLiteral(
+              "A Map Hub symbol fragment or ordering anchor is invalid.");
+        return false;
+      }
+      aggregate_xml += operation.payload.toUtf8().size();
     } else if (operation.expected_version == 0) {
       if (error)
-        *error = QStringLiteral(
-            "An object must exist in the synchronized projection before it "
-            "can be deleted.");
+        *error = QStringLiteral("An entity must exist in the synchronized "
+                                "projection before it can be deleted.");
       return false;
     }
   }
@@ -245,22 +315,52 @@ MapHubEditTransaction MapHubEditTransaction::fromJson(const QJsonObject &object,
     const auto name = operation_object.value(QStringLiteral("op")).toString();
     if (name == QLatin1String("object.put")) {
       operation.kind = MapHubEditOperation::Kind::PutObject;
-      operation.part_id =
+      operation.parent_id =
           operation_object.value(QStringLiteral("part_id")).toString();
       if (!operation_object.value(QStringLiteral("after_object_id")).isNull())
-        operation.after_object_id =
+        operation.after_id =
             operation_object.value(QStringLiteral("after_object_id"))
                 .toString();
-      operation.xml = operation_object.value(QStringLiteral("xml")).toString();
+      operation.payload =
+          operation_object.value(QStringLiteral("xml")).toString();
+      operation.entity_id =
+          operation_object.value(QStringLiteral("object_id")).toString();
     } else if (name == QLatin1String("object.delete")) {
       operation.kind = MapHubEditOperation::Kind::DeleteObject;
+      operation.entity_id =
+          operation_object.value(QStringLiteral("object_id")).toString();
+    } else if (name == QLatin1String("part.put")) {
+      operation.kind = MapHubEditOperation::Kind::PutPart;
+      operation.entity_id =
+          operation_object.value(QStringLiteral("part_id")).toString();
+      if (!operation_object.value(QStringLiteral("after_part_id")).isNull())
+        operation.after_id =
+            operation_object.value(QStringLiteral("after_part_id")).toString();
+      operation.payload =
+          operation_object.value(QStringLiteral("name")).toString();
+    } else if (name == QLatin1String("part.delete")) {
+      operation.kind = MapHubEditOperation::Kind::DeletePart;
+      operation.entity_id =
+          operation_object.value(QStringLiteral("part_id")).toString();
+    } else if (name == QLatin1String("symbol.put")) {
+      operation.kind = MapHubEditOperation::Kind::PutSymbol;
+      operation.entity_id =
+          operation_object.value(QStringLiteral("symbol_id")).toString();
+      if (!operation_object.value(QStringLiteral("after_symbol_id")).isNull())
+        operation.after_id =
+            operation_object.value(QStringLiteral("after_symbol_id"))
+                .toString();
+      operation.payload =
+          operation_object.value(QStringLiteral("xml")).toString();
+    } else if (name == QLatin1String("symbol.delete")) {
+      operation.kind = MapHubEditOperation::Kind::DeleteSymbol;
+      operation.entity_id =
+          operation_object.value(QStringLiteral("symbol_id")).toString();
     } else {
       if (error)
         *error = QStringLiteral("A Map Hub operation is unsupported.");
       return {};
     }
-    operation.object_id =
-        operation_object.value(QStringLiteral("object_id")).toString();
     operation.expected_version =
         operation_object.value(QStringLiteral("expected_version"))
             .toInteger(-1);
@@ -344,7 +444,7 @@ MapHubEditTransaction MapHubEditTransaction::fromUndoStep(
         part->persistentId(),
         after,
         entity_versions.value(put.id, 0),
-        objectXml(*put.location.object),
+        serializeObject(*put.location.object),
     });
   }
   for (const auto &id : deletes) {
@@ -361,6 +461,25 @@ MapHubEditTransaction MapHubEditTransaction::fromUndoStep(
   if (!transaction.isValid(error))
     return {};
   return transaction;
+}
+
+QString MapHubEditTransaction::objectFragment(const Object &object) {
+  return serializeObject(object);
+}
+
+QString MapHubEditTransaction::symbolFragment(const Symbol &symbol,
+                                              const Map &map) {
+  QByteArray bytes;
+  QBuffer buffer(&bytes);
+  if (!buffer.open(QIODevice::WriteOnly))
+    return {};
+  QXmlStreamWriter xml(&buffer);
+  xml.setAutoFormatting(false);
+  QScopedValueRollback<int> format_version(XMLFileFormat::active_version,
+                                           XMLFileFormat::current_version);
+  symbol.save(xml, map);
+  buffer.close();
+  return QString::fromUtf8(bytes);
 }
 
 bool MapHubCommittedTransaction::isValid(QString *error) const {

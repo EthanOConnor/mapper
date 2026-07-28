@@ -231,7 +231,7 @@ void MapHubApiClient::finishJson(QNetworkReply *reply, JsonHandler handler) {
                        .toInt(),
                    QStringLiteral("response_too_large"),
                    MapHubApiClient::tr(
-                       "Map Hub returned more than 8 MiB of JSON; Mapper "
+                       "Map Hub returned more than 16 MiB of JSON; Mapper "
                        "discarded the response.")});
           reply->deleteLater();
           return;
@@ -330,7 +330,7 @@ void MapHubApiClient::postWorkspaceTransaction(
                 QStringLiteral("application/json"));
   req.setRawHeader("X-Editing-Lease", editing_lease.toUtf8());
   QByteArray payload = canonical_json;
-  if (canonical_json.size() >= 1024) {
+  if (canonical_json.size() >= 512) {
     auto compressed = ZstdCodec::compress(canonical_json);
     if (!compressed.isEmpty() &&
         compressed.size() + 32 < canonical_json.size()) {
@@ -395,6 +395,16 @@ void MapHubApiClient::uploadWorkspaceSnapshot(
       QCryptographicHash::hash(canonical_entity_index,
                                QCryptographicHash::Sha256)
           .toHex());
+  auto entity_index_payload = canonical_entity_index;
+  auto entity_index_encoding = QStringLiteral("identity");
+  if (canonical_entity_index.size() >= 512) {
+    auto compressed = ZstdCodec::compress(canonical_entity_index);
+    if (!compressed.isEmpty() &&
+        compressed.size() + 32 < canonical_entity_index.size()) {
+      entity_index_payload = std::move(compressed);
+      entity_index_encoding = QStringLiteral("zstd");
+    }
+  }
   auto req = request(
       QStringLiteral("/api/v1/workspaces/%1/snapshots").arg(workspace_id));
   req.setRawHeader("X-Editing-Lease", editing_lease.toUtf8());
@@ -410,7 +420,7 @@ void MapHubApiClient::uploadWorkspaceSnapshot(
   multi->append(textPart("client_instance_id", client_instance_id));
   multi->append(textPart("idempotency_key", idempotency_key));
   multi->append(
-      textPart("entity_index_content_encoding", QStringLiteral("identity")));
+      textPart("entity_index_content_encoding", entity_index_encoding));
   multi->append(textPart("entity_index_sha256", entity_index_sha256));
 
   QHttpPart map_part;
@@ -442,7 +452,7 @@ void MapHubApiClient::uploadWorkspaceSnapshot(
   index_part.setHeader(QNetworkRequest::ContentTypeHeader,
                        QStringLiteral("application/json"));
   auto *index_buffer = new QBuffer(multi);
-  index_buffer->setData(canonical_entity_index);
+  index_buffer->setData(entity_index_payload);
   index_buffer->open(QIODevice::ReadOnly);
   index_part.setBodyDevice(index_buffer);
   multi->append(index_part);

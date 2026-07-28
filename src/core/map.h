@@ -756,6 +756,9 @@ public:
 	 */
 	void addPart(MapPart* part, std::size_t index);
 
+	/** Moves a map part while preserving its stable identity and contents. */
+	void movePart(std::size_t from, std::size_t to);
+
 	/**
 	 * Removes the map part at position.
 	 */
@@ -1373,7 +1376,10 @@ signals:
 	
 	/** Emitted when a symbol in the map is changed. */
 	void symbolChanged(int pos, const OpenOrienteering::Symbol* new_symbol, const OpenOrienteering::Symbol* old_symbol);
-	
+
+	/** Emitted when a symbol is moved to another list position. */
+	void symbolMoved(int from, int to, const OpenOrienteering::Symbol* symbol);
+
 	/** Emitted when the icon of the symbol with the given index changes. */
 	void symbolIconChanged(int pos);
 	
