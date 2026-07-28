@@ -159,6 +159,9 @@ public:
       setPalette(parent->palette());
       resize(parent->size());
     }
+    auto mobile_font = font();
+    mobile_font.setPointSizeF(16.0);
+    setFont(mobile_font);
 #else
     resize(720, 780);
 #endif
@@ -508,6 +511,9 @@ MapHubDialog::MapHubDialog(MainWindow *window)
     setPalette(window->palette());
     resize(window->size());
   }
+  auto mobile_font = font();
+  mobile_font.setPointSizeF(16.0);
+  setFont(mobile_font);
 #else
   resize(880, 640);
 #endif
@@ -566,12 +572,12 @@ MapHubDialog::MapHubDialog(MainWindow *window)
       tr("Use an invitation"),
       tr("Create or join an account using a token from your map librarian."),
       landing_page);
-  invitation_choice->setMinimumHeight(82);
+  invitation_choice->setMinimumHeight(96);
   auto *token_choice = new QCommandLinkButton(
       tr("Connect an existing account"),
       tr("Paste the Mapper connection token from your Map Hub profile."),
       landing_page);
-  token_choice->setMinimumHeight(82);
+  token_choice->setMinimumHeight(96);
   landing_layout->addWidget(invitation_choice);
   landing_layout->addWidget(token_choice);
   landing_layout->addSpacing(10);

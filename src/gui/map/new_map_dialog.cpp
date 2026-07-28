@@ -92,6 +92,9 @@ NewMapDialog::NewMapDialog(QWidget *parent)
     setPalette(parent->palette());
     resize(parent->size());
   }
+  auto mobile_font = font();
+  mobile_font.setPointSizeF(16.0);
+  setFont(mobile_font);
 
   auto *content = new QWidget(this);
   auto *content_layout = new QVBoxLayout(content);

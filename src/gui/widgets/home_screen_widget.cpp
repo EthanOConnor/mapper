@@ -384,8 +384,11 @@ HomeScreenWidgetMobile::HomeScreenWidgetMobile(HomeScreenController *controller,
   auto make_action = [content](const QString &title_text,
                                const QString &description, const QIcon &icon) {
     auto *button = new QCommandLinkButton(title_text, description, content);
+    auto action_font = button->font();
+    action_font.setPointSizeF(16.0);
+    button->setFont(action_font);
     button->setIcon(icon);
-    button->setMinimumHeight(68);
+    button->setMinimumHeight(92);
     button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
     return button;
   };
