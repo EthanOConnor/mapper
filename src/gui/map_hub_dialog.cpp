@@ -38,6 +38,7 @@
 #include <QRegularExpression>
 #include <QScrollArea>
 #include <QScroller>
+#include <QScrollerProperties>
 #include <QSet>
 #include <QSettings>
 #include <QSize>
@@ -183,6 +184,37 @@ QString eventWebUrl(const QString &server, const QString &event_id) {
   url.setFragment(QString{});
   return url.toString(QUrl::FullyEncoded);
 }
+
+#if defined(MAPPER_MOBILE)
+void configureMobileLibraryTree(QTreeWidget *tree) {
+  tree->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+  tree->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
+  tree->viewport()->setAutoFillBackground(true);
+
+  QScroller::grabGesture(tree->viewport(), QScroller::TouchGesture);
+  auto *scroller = QScroller::scroller(tree->viewport());
+  auto properties = scroller->scrollerProperties();
+  properties.setScrollMetric(QScrollerProperties::MaximumVelocity, 0.18);
+  properties.setScrollMetric(QScrollerProperties::DecelerationFactor, 0.35);
+  properties.setScrollMetric(QScrollerProperties::DragVelocitySmoothingFactor,
+                             0.45);
+  properties.setScrollMetric(
+      QScrollerProperties::AcceleratingFlickMaximumTime, 0.0);
+  properties.setScrollMetric(
+      QScrollerProperties::AcceleratingFlickSpeedupFactor, 1.0);
+  properties.setScrollMetric(
+      QScrollerProperties::HorizontalOvershootPolicy,
+      QScrollerProperties::OvershootAlwaysOff);
+  scroller->setScrollerProperties(properties);
+}
+
+void refreshMobileLibraryTree(QTreeWidget *tree) {
+  tree->doItemsLayout();
+  tree->updateGeometry();
+  tree->viewport()->updateGeometry();
+  tree->viewport()->update();
+}
+#endif
 
 class EditAccessDialog final : public QDialog {
 public:
@@ -923,7 +955,7 @@ MapHubDialog::MapHubDialog(MainWindow *window)
       "border: 0; color: palette(mid); }"
       "QTabBar::tab:selected { color: palette(text); border-bottom: 3px "
       "solid palette(highlight); }"
-      "QTreeWidget { background: transparent; border: 0; }"
+      "QTreeWidget { background: palette(window); border: 0; }"
       "QPushButton#mapHubLibraryPrimary { background: palette(highlight); "
       "color: palette(highlighted-text); border: 0; border-radius: 12px; "
       "padding: 10px 14px; }"
@@ -1305,7 +1337,7 @@ MapHubDialog::MapHubDialog(MainWindow *window)
     tree->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     tree->setStyleSheet(
         QStringLiteral("QTreeView::item { padding: 10px 6px; }"));
-    QScroller::grabGesture(tree->viewport(), QScroller::TouchGesture);
+    configureMobileLibraryTree(tree);
     for (int column = 1; column < tree->columnCount(); ++column)
       tree->setColumnHidden(column, true);
   }
@@ -1396,6 +1428,13 @@ MapHubDialog::MapHubDialog(MainWindow *window)
           &MapHubDialog::updateActions);
   connect(tabs, &QTabWidget::currentChanged, this,
           &MapHubDialog::updateActions);
+#if defined(MAPPER_MOBILE)
+  connect(tabs, &QTabWidget::currentChanged, this, [this](int index) {
+    if (auto *tree = qobject_cast<QTreeWidget *>(tabs->widget(index))) {
+      QTimer::singleShot(0, tree, [tree] { refreshMobileLibraryTree(tree); });
+    }
+  });
+#endif
 #if defined(MAPPER_MOBILE)
   connect(
       project_list, &QTreeWidget::itemClicked, this, [](QTreeWidgetItem *item) {
@@ -1799,6 +1838,10 @@ void MapHubDialog::refresh() {
 }
 
 void MapHubDialog::populate(const QJsonObject &response) {
+#if defined(MAPPER_MOBILE)
+  for (auto *tree : {assignment_list, project_list, event_list})
+    tree->setUpdatesEnabled(false);
+#endif
   library_response = response;
   auto organization = response.value(QStringLiteral("organization")).toObject();
   connection_label->setText(
@@ -2032,6 +2075,14 @@ void MapHubDialog::populate(const QJsonObject &response) {
     }
   }
   updateActions();
+#if defined(MAPPER_MOBILE)
+  for (auto *tree : {assignment_list, project_list, event_list})
+    tree->setUpdatesEnabled(true);
+  QTimer::singleShot(0, this, [this] {
+    for (auto *tree : {assignment_list, project_list, event_list})
+      refreshMobileLibraryTree(tree);
+  });
+#endif
 }
 
 QString MapHubDialog::projectTitle(const QString &project_id) const {
