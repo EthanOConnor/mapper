@@ -39,80 +39,80 @@ namespace OpenOrienteering {
 
 class SettingsPage;
 
-
-/** 
+/**
  * A dialog for editing Mapper's settings.
- * 
- * This class is marked as final because its constructor calls virtual functions.
+ *
+ * This class is marked as final because its constructor calls virtual
+ * functions.
  */
-class SettingsDialog final : public QDialog
-{
-Q_OBJECT
+class SettingsDialog final : public QDialog {
+  Q_OBJECT
 public:
-	/** 
-	 * Constructs a new settings dialog.
-	 */
-	explicit SettingsDialog(QWidget* parent = nullptr);
-	
-	/** 
-	 * Destroys the settings dialog.
-	 */
-	~SettingsDialog() override;
-	
+  /**
+   * Constructs a new settings dialog.
+   */
+  explicit SettingsDialog(QWidget *parent = nullptr);
+
+  /**
+   * Destroys the settings dialog.
+   */
+  ~SettingsDialog() override;
+
+  /** Selects a settings page by its translated title. */
+  bool selectPage(const QString &title);
+
 protected:
-	/**
-	 * Adds all known pages to the dialog.
-	 * 
-	 * This function is called from the constructor.
-	 */
-	void addPages();
-	
-	/**
-	 * Adds a single page to the dialog.
-	 */
-	void addPage(SettingsPage* page);
-	
-	/**
-	 * Calls a SettingsPage member function on all pages.
-	 */
-	void callOnAllPages(void (SettingsPage::*member)());
-	
-	
-	void closeEvent(QCloseEvent* event) override;
-	
-	void keyPressEvent(QKeyEvent* event) override;
-	
-	void resizeEvent(QResizeEvent* event) override;
-	
-	void resizeToFit(QScrollArea& widget);
-	
+  /**
+   * Adds all known pages to the dialog.
+   *
+   * This function is called from the constructor.
+   */
+  void addPages();
+
+  /**
+   * Adds a single page to the dialog.
+   */
+  void addPage(SettingsPage *page);
+
+  /**
+   * Calls a SettingsPage member function on all pages.
+   */
+  void callOnAllPages(void (SettingsPage::*member)());
+
+  void closeEvent(QCloseEvent *event) override;
+
+  void keyPressEvent(QKeyEvent *event) override;
+
+  void resizeEvent(QResizeEvent *event) override;
+
+  void resizeToFit(QScrollArea &widget);
+
 private slots:
-	/**
-	 * Reacts to dialog buttons (OK, Cancel, Rest).
-	 */
-	void buttonPressed(QAbstractButton* button);
-	
+  /**
+   * Reacts to dialog buttons (OK, Cancel, Rest).
+   */
+  void buttonPressed(QAbstractButton *button);
+
 private:
-	/**
-	 * A tab widget which holds all pages in desktop mode.
-	 */
-	QTabWidget* tab_widget;
-	
-	/**
-	 * A stack widget which holds all pages in mobile mode.
-	 */
-	QStackedWidget* stack_widget;
-	
-	/** 
-	 * The box of standard dialog buttons.
-	 */
-	QDialogButtonBox* button_box;
-	bool apply_failed = false;
-	
-	int scrollbar_extent;
+  /**
+   * A tab widget which holds all pages in desktop mode.
+   */
+  QTabWidget *tab_widget;
+
+  /**
+   * A stack widget which holds all pages in mobile mode.
+   */
+  QStackedWidget *stack_widget;
+
+  /**
+   * The box of standard dialog buttons.
+   */
+  QDialogButtonBox *button_box;
+  bool apply_failed = false;
+
+  int scrollbar_extent;
 };
 
-
-}  // namespace OpenOrienteering
+} // namespace OpenOrienteering
 
 #endif

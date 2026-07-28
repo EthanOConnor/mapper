@@ -75,6 +75,8 @@ private:
   QLineEdit *first_use_token;
   QLineEdit *first_use_invite;
   QTabWidget *first_use_account_tabs;
+  QStackedWidget *first_use_flow = nullptr;
+  QLabel *first_use_connection_summary = nullptr;
   QPushButton *first_use_browse;
   QPushButton *connect_button;
   QPushButton *invitation_button;

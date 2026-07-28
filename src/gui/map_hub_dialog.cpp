@@ -9,6 +9,7 @@
 #include <QAbstractItemView>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QCommandLinkButton>
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDateTime>
@@ -21,20 +22,26 @@
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QHash>
+#include <QHeaderView>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMessageBox>
+#include <QPalette>
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QScrollArea>
+#include <QScroller>
 #include <QSettings>
+#include <QSizePolicy>
 #include <QSpinBox>
 #include <QStackedWidget>
 #include <QStandardPaths>
+#include <QTabBar>
 #include <QTabWidget>
+#include <QToolButton>
 #include <QTreeWidget>
 #include <QUuid>
 #include <QVBoxLayout>
@@ -58,6 +65,7 @@ constexpr int status_role = Qt::UserRole + 2;
 constexpr int package_type_role = Qt::UserRole + 3;
 constexpr int item_kind_role = Qt::UserRole + 4;
 constexpr int web_url_role = Qt::UserRole + 5;
+constexpr int title_role = Qt::UserRole + 6;
 
 bool assignmentCanStart(const QTreeWidgetItem *item) {
   if (!item)
@@ -145,9 +153,38 @@ public:
         source_crs(new QLineEdit(this)), source_resolution(new QLineEdit(this)),
         exclusive(new QCheckBox(tr("Use an exclusive editing lease"), this)) {
     setWindowTitle(tr("New connected map"));
+#if defined(MAPPER_MOBILE)
+    if (parent) {
+      setAttribute(Qt::WA_WindowPropagation);
+      setPalette(parent->palette());
+      resize(parent->size());
+    }
+#else
     resize(720, 780);
+#endif
     auto *form_widget = new QWidget(this);
     auto *form = new QFormLayout(form_widget);
+#if defined(MAPPER_MOBILE)
+    form->setRowWrapPolicy(QFormLayout::WrapAllRows);
+#endif
+    form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+#if defined(MAPPER_MOBILE)
+    auto add_section = [form](const QString &text) {
+      auto *heading = new QLabel(text);
+      auto font = heading->font();
+      font.setBold(true);
+      font.setPointSizeF(font.pointSizeF() * 1.2);
+      heading->setFont(font);
+      form->addRow(heading);
+    };
+    auto *intro = new QLabel(
+        tr("Create the Map Hub project, its first assignment, and the local "
+           "workspace as one guided setup."),
+        form_widget);
+    intro->setWordWrap(true);
+    form->addRow(intro);
+    add_section(tr("Map"));
+#endif
     form->addRow(tr("Map name:"), title);
     kind->addItem(tr("New map"), QStringLiteral("new_map"));
     kind->addItem(tr("Remap"), QStringLiteral("remap"));
@@ -170,6 +207,9 @@ public:
       venues->item(0)->setSelected(true);
     form->addRow(tr("Venue(s):"), venues);
 
+#if defined(MAPPER_MOBILE)
+    add_section(tr("Relationship to existing maps"));
+#endif
     predecessors->setSelectionMode(QAbstractItemView::ExtendedSelection);
     predecessors->setMaximumHeight(105);
     for (const auto value :
@@ -197,6 +237,9 @@ public:
     lineage->addItem(tr("Overlaps"), QStringLiteral("overlaps"));
     form->addRow(tr("Relationship to prior map(s):"), lineage);
 
+#if defined(MAPPER_MOBILE)
+    add_section(tr("First assignment"));
+#endif
     package_title->setText(tr("Prepare the basemap"));
     form->addRow(tr("First work package:"), package_title);
     work_type->addItem(tr("Basemap preparation"), QStringLiteral("basemap"));
@@ -224,6 +267,9 @@ public:
       }
     }
     form->addRow(tr("Assign first work to:"), assignee);
+#if defined(MAPPER_MOBILE)
+    add_section(tr("Technical target"));
+#endif
     crs->setPlaceholderText(QStringLiteral("EPSG:6596"));
     form->addRow(tr("Target CRS:"), crs);
     scale->setRange(100, 1000000);
@@ -232,6 +278,14 @@ public:
     form->addRow(tr("Map scale:"), scale);
     standard->setPlaceholderText(QStringLiteral("ISOM 2017-2"));
     form->addRow(tr("Symbol standard:"), standard);
+#if defined(MAPPER_MOBILE)
+    add_section(tr("Primary source dataset — optional"));
+    auto *source_help = new QLabel(
+        tr("Leave the dataset name empty when the source is not known yet."),
+        form_widget);
+    source_help->setWordWrap(true);
+    form->addRow(source_help);
+#endif
     source_title->setPlaceholderText(
         tr("Optional, e.g. 2025 King County LiDAR"));
     form->addRow(tr("Primary source dataset:"), source_title);
@@ -248,6 +302,25 @@ public:
     form->addRow(tr("Source horizontal CRS:"), source_crs);
     source_resolution->setPlaceholderText(tr("e.g. 3 ft or 1 m"));
     form->addRow(tr("Source resolution:"), source_resolution);
+#if defined(MAPPER_MOBILE)
+    for (auto *widget : {static_cast<QWidget *>(source_type),
+                         static_cast<QWidget *>(source_provider),
+                         static_cast<QWidget *>(source_crs),
+                         static_cast<QWidget *>(source_resolution)})
+      widget->setEnabled(false);
+    connect(source_title, &QLineEdit::textChanged, this,
+            [this](const QString &text) {
+              const auto enabled = !text.trimmed().isEmpty();
+              source_type->setEnabled(enabled);
+              source_provider->setEnabled(enabled);
+              source_crs->setEnabled(enabled);
+              source_resolution->setEnabled(enabled);
+            });
+    for (auto *widget : findChildren<QLineEdit *>())
+      widget->setMinimumHeight(42);
+    for (auto *widget : findChildren<QComboBox *>())
+      widget->setMinimumHeight(42);
+#endif
     exclusive->setChecked(true);
     form->addRow(exclusive);
     auto *note =
@@ -258,6 +331,10 @@ public:
     form->addRow(note);
     auto *buttons = new QDialogButtonBox(
         QDialogButtonBox::Cancel | QDialogButtonBox::Ok, this);
+#if defined(MAPPER_MOBILE)
+    buttons->button(QDialogButtonBox::Ok)->setText(tr("Create in Map Hub"));
+    buttons->button(QDialogButtonBox::Ok)->setMinimumHeight(44);
+#endif
     connect(buttons, &QDialogButtonBox::accepted, this, [this] {
       if (title->text().trimmed().isEmpty() ||
           venues->selectedItems().isEmpty() ||
@@ -291,6 +368,11 @@ public:
     auto *scroll = new QScrollArea(this);
     scroll->setWidgetResizable(true);
     scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+#if defined(MAPPER_MOBILE)
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+#endif
+    QScroller::grabGesture(scroll->viewport(), QScroller::TouchGesture);
     scroll->setWidget(form_widget);
     layout->addWidget(scroll, 1);
     layout->addWidget(buttons);
@@ -405,8 +487,8 @@ MapHubDialog::MapHubDialog(MainWindow *window)
       first_use_browse(new QPushButton(tr("Choose…"), first_use_page)),
       connect_button(
           new QPushButton(tr("Connect and open Map Hub"), first_use_page)),
-      invitation_button(new QPushButton(tr("Set up account in browser…"),
-                                        first_use_page)),
+      invitation_button(
+          new QPushButton(tr("Set up account in browser…"), first_use_page)),
       connection_label(new QLabel(this)), activity_label(new QLabel(this)),
       tabs(new QTabWidget(this)), assignment_list(new QTreeWidget(this)),
       project_list(new QTreeWidget(this)), event_list(new QTreeWidget(this)),
@@ -417,7 +499,20 @@ MapHubDialog::MapHubDialog(MainWindow *window)
       new_button(new QPushButton(tr("New connected map…"), this)),
       refresh_button(new QPushButton(tr("Refresh"), this)) {
   setWindowTitle(tr("Map Hub — library and assignments"));
+#if defined(MAPPER_MOBILE)
+  if (window) {
+    // A QDialog is a window, so Qt does not normally inherit its parent's
+    // palette.  iOS supplies the dark window surface independently; without
+    // explicit propagation, controls can retain light-theme (black) text.
+    setAttribute(Qt::WA_WindowPropagation);
+    setPalette(window->palette());
+    resize(window->size());
+  }
+#else
   resize(880, 640);
+#endif
+  pages->setMinimumSize({});
+  pages->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
 
   auto *first_use_title = new QLabel(tr("Connect to Map Hub"), first_use_page);
   auto title_font = first_use_title->font();
@@ -438,12 +533,161 @@ MapHubDialog::MapHubDialog(MainWindow *window)
   workspace_layout->setContentsMargins({});
   workspace_layout->addWidget(first_use_workspace, 1);
   workspace_layout->addWidget(first_use_browse);
+#if defined(MAPPER_MOBILE)
+  first_use_account_tabs->hide();
+  first_use_flow = new QStackedWidget(first_use_page);
+
+  auto make_back_button = [this](QWidget *parent) {
+    auto *back = new QToolButton(parent);
+    back->setText(tr("‹ Map Hub"));
+    back->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    back->setAutoRaise(true);
+    connect(back, &QToolButton::clicked, this,
+            [this] { first_use_flow->setCurrentIndex(0); });
+    return back;
+  };
+  auto make_flow_title = [](const QString &text, QWidget *parent) {
+    auto *label = new QLabel(text, parent);
+    auto font = label->font();
+    font.setPointSizeF(font.pointSizeF() * 1.55);
+    font.setBold(true);
+    label->setFont(font);
+    return label;
+  };
+
+  auto *landing_page = new QWidget(first_use_flow);
+  auto *landing_layout = new QVBoxLayout(landing_page);
+  landing_layout->setContentsMargins(20, 18, 20, 18);
+  landing_layout->setSpacing(12);
+  landing_layout->addWidget(first_use_title);
+  landing_layout->addWidget(first_use_intro);
+  landing_layout->addSpacing(10);
+  auto *invitation_choice = new QCommandLinkButton(
+      tr("Use an invitation"),
+      tr("Create or join an account using a token from your map librarian."),
+      landing_page);
+  invitation_choice->setMinimumHeight(82);
+  auto *token_choice = new QCommandLinkButton(
+      tr("Connect an existing account"),
+      tr("Paste the Mapper connection token from your Map Hub profile."),
+      landing_page);
+  token_choice->setMinimumHeight(82);
+  landing_layout->addWidget(invitation_choice);
+  landing_layout->addWidget(token_choice);
+  landing_layout->addSpacing(10);
+  auto *connection_heading = new QLabel(tr("Connection"), landing_page);
+  auto connection_heading_font = connection_heading->font();
+  connection_heading_font.setBold(true);
+  connection_heading->setFont(connection_heading_font);
+  landing_layout->addWidget(connection_heading);
+  first_use_connection_summary = new QLabel(landing_page);
+  first_use_connection_summary->setWordWrap(true);
+  first_use_connection_summary->setStyleSheet(
+      QStringLiteral("color: palette(mid);"));
+  landing_layout->addWidget(first_use_connection_summary);
+  auto *change_connection =
+      new QPushButton(tr("Change server or workspace"), landing_page);
+  landing_layout->addWidget(change_connection);
+  landing_layout->addStretch();
+  first_use_flow->addWidget(landing_page);
+
+  auto *invitation_page = new QWidget(first_use_flow);
+  auto *invitation_layout = new QVBoxLayout(invitation_page);
+  invitation_layout->setContentsMargins(20, 12, 20, 18);
+  invitation_layout->setSpacing(12);
+  invitation_layout->addWidget(make_back_button(invitation_page));
+  invitation_layout->addWidget(
+      make_flow_title(tr("Use an invitation"), invitation_page));
+  auto *invitation_help = new QLabel(
+      tr("Paste the invitation from your map librarian. Account setup opens "
+         "in Safari and offers a passkey first."),
+      invitation_page);
+  invitation_help->setWordWrap(true);
+  invitation_layout->addWidget(invitation_help);
+  auto *invitation_label = new QLabel(tr("Invitation token"), invitation_page);
+  invitation_layout->addWidget(invitation_label);
+  first_use_invite->setEchoMode(QLineEdit::Password);
+  first_use_invite->setMinimumHeight(44);
+  invitation_layout->addWidget(first_use_invite);
+  invitation_button->setText(tr("Continue in Safari"));
+  invitation_button->setMinimumHeight(48);
+  invitation_layout->addWidget(invitation_button);
+  invitation_layout->addStretch();
+  first_use_flow->addWidget(invitation_page);
+
+  auto *token_page = new QWidget(first_use_flow);
+  auto *token_layout = new QVBoxLayout(token_page);
+  token_layout->setContentsMargins(20, 12, 20, 18);
+  token_layout->setSpacing(12);
+  token_layout->addWidget(make_back_button(token_page));
+  token_layout->addWidget(make_flow_title(tr("Connect account"), token_page));
+  auto *token_help = new QLabel(
+      tr("Copy the Mapper connection token from your Map Hub profile and "
+         "paste it below. It is stored securely on this iPhone."),
+      token_page);
+  token_help->setWordWrap(true);
+  token_layout->addWidget(token_help);
+  token_layout->addWidget(new QLabel(tr("Connection token"), token_page));
+  first_use_token->setEchoMode(QLineEdit::Password);
+  first_use_token->setPlaceholderText(tr("Mapper API token"));
+  first_use_token->setMinimumHeight(44);
+  token_layout->addWidget(first_use_token);
+  connect_button->setText(tr("Connect to Map Hub"));
+  connect_button->setMinimumHeight(48);
+  token_layout->addWidget(connect_button);
+  token_layout->addStretch();
+  first_use_flow->addWidget(token_page);
+
+  auto *connection_page = new QWidget(first_use_flow);
+  auto *connection_layout = new QVBoxLayout(connection_page);
+  connection_layout->setContentsMargins(20, 12, 20, 18);
+  connection_layout->setSpacing(12);
+  connection_layout->addWidget(make_back_button(connection_page));
+  connection_layout->addWidget(
+      make_flow_title(tr("Connection details"), connection_page));
+  auto *connection_help = new QLabel(
+      tr("Most people can keep these defaults. Change them only for another "
+         "Map Hub server or workspace location."),
+      connection_page);
+  connection_help->setWordWrap(true);
+  connection_layout->addWidget(connection_help);
   auto *connection_form = new QFormLayout;
+  connection_form->setRowWrapPolicy(QFormLayout::WrapAllRows);
+  connection_form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+  connection_form->addRow(tr("Map Hub server"), first_use_server);
+  connection_form->addRow(tr("Local map workspaces"), workspace_row);
+  connection_layout->addLayout(connection_form);
+  auto *connection_done = new QPushButton(tr("Done"), connection_page);
+  connection_done->setMinimumHeight(48);
+  connection_layout->addWidget(connection_done);
+  connection_layout->addStretch();
+  first_use_flow->addWidget(connection_page);
+
+  connect(invitation_choice, &QCommandLinkButton::clicked, this, [this] {
+    first_use_flow->setCurrentIndex(1);
+    first_use_invite->setFocus();
+  });
+  connect(token_choice, &QCommandLinkButton::clicked, this, [this] {
+    first_use_flow->setCurrentIndex(2);
+    first_use_token->setFocus();
+  });
+  connect(change_connection, &QAbstractButton::clicked, this,
+          [this] { first_use_flow->setCurrentIndex(3); });
+  connect(connection_done, &QAbstractButton::clicked, this, [this] {
+    first_use_connection_summary->setText(
+        tr("%1\nMaps stay in %2")
+            .arg(first_use_server->text(), first_use_workspace->text()));
+    first_use_flow->setCurrentIndex(0);
+  });
+#else
+  auto *connection_form = new QFormLayout;
+  connection_form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
   connection_form->addRow(tr("Map Hub server:"), first_use_server);
   connection_form->addRow(tr("Local map workspaces:"), workspace_row);
 
   auto *invitation_page = new QWidget(first_use_account_tabs);
   auto *invitation_form = new QFormLayout(invitation_page);
+  invitation_form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
   first_use_invite->setEchoMode(QLineEdit::Password);
   auto *invitation_help = new QLabel(
       tr("Account setup opens in your browser. A passkey is offered first; "
@@ -457,6 +701,7 @@ MapHubDialog::MapHubDialog(MainWindow *window)
 
   auto *token_page = new QWidget(first_use_account_tabs);
   auto *token_form = new QFormLayout(token_page);
+  token_form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
   first_use_token->setEchoMode(QLineEdit::Password);
   first_use_token->setPlaceholderText(tr("Mapper API token"));
   auto *token_help = new QLabel(
@@ -469,12 +714,27 @@ MapHubDialog::MapHubDialog(MainWindow *window)
   token_form->addRow(connect_button);
   first_use_account_tabs->addTab(token_page,
                                  tr("Paste Mapper connection token"));
+#endif
 
   auto *first_use_close = new QPushButton(tr("Not now"), first_use_page);
+#if defined(MAPPER_MOBILE)
+  first_use_close->setMinimumHeight(44);
+  auto *first_use_page_layout = new QVBoxLayout(first_use_page);
+  first_use_page_layout->setContentsMargins({});
+  first_use_page_layout->setSpacing(0);
+  first_use_page_layout->addWidget(first_use_flow, 1);
+  auto *mobile_footer = new QWidget(first_use_page);
+  auto *mobile_footer_layout = new QVBoxLayout(mobile_footer);
+  mobile_footer_layout->setContentsMargins(20, 8, 20, 14);
+  mobile_footer_layout->addWidget(first_use_status);
+  mobile_footer_layout->addWidget(first_use_close);
+  first_use_page_layout->addWidget(mobile_footer);
+#else
   auto *first_use_buttons = new QHBoxLayout;
   first_use_buttons->addStretch();
   first_use_buttons->addWidget(first_use_close);
-  auto *first_use_layout = new QVBoxLayout(first_use_page);
+  auto *first_use_content = new QWidget(first_use_page);
+  auto *first_use_layout = new QVBoxLayout(first_use_content);
   first_use_layout->addStretch();
   first_use_layout->addWidget(first_use_title);
   first_use_layout->addWidget(first_use_intro);
@@ -484,6 +744,16 @@ MapHubDialog::MapHubDialog(MainWindow *window)
   first_use_layout->addWidget(first_use_status);
   first_use_layout->addLayout(first_use_buttons);
   first_use_layout->addStretch();
+  auto *first_use_scroll = new QScrollArea(first_use_page);
+  first_use_scroll->setWidgetResizable(true);
+  first_use_scroll->setFrameShape(QFrame::NoFrame);
+  first_use_scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+  QScroller::grabGesture(first_use_scroll, QScroller::TouchGesture);
+  first_use_scroll->setWidget(first_use_content);
+  auto *first_use_page_layout = new QVBoxLayout(first_use_page);
+  first_use_page_layout->setContentsMargins({});
+  first_use_page_layout->addWidget(first_use_scroll);
+#endif
 
   connection_label->setWordWrap(true);
   activity_label->setWordWrap(true);
@@ -496,19 +766,67 @@ MapHubDialog::MapHubDialog(MainWindow *window)
   event_list->setHeaderLabels({tr("Event"), tr("Date"), tr("Venue"), tr("Map"),
                                tr("Status"), tr("Series")});
   event_list->setRootIsDecorated(true);
+#if defined(MAPPER_MOBILE)
+  tabs->addTab(assignment_list, tr("My work"));
+  tabs->addTab(project_list, tr("Maps"));
+  tabs->addTab(event_list, tr("Events"));
+  tabs->tabBar()->setExpanding(true);
+  tabs->tabBar()->setUsesScrollButtons(false);
+  for (auto *tree : {assignment_list, project_list, event_list}) {
+    tree->setHeaderHidden(true);
+    tree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    tree->setWordWrap(true);
+    tree->setUniformRowHeights(false);
+    tree->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    tree->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    tree->setStyleSheet(
+        QStringLiteral("QTreeView::item { padding: 10px 6px; }"));
+    QScroller::grabGesture(tree->viewport(), QScroller::TouchGesture);
+    for (int column = 1; column < tree->columnCount(); ++column)
+      tree->setColumnHidden(column, true);
+  }
+#else
   tabs->addTab(project_list, tr("Venues & maps"));
   tabs->addTab(event_list, tr("Events"));
   tabs->addTab(assignment_list, tr("My work"));
-  auto *buttons = new QHBoxLayout;
+#endif
+  auto *buttons = new QVBoxLayout;
+#if defined(MAPPER_MOBILE)
+  start_button->setText(tr("Open selected assignment"));
+  open_project_button->setText(tr("View selected revision"));
+  open_event_button->setText(tr("Open selected event"));
+  new_button->setText(tr("Create connected map"));
+  for (auto *button :
+       {start_button, open_project_button, open_event_button, new_button})
+    button->setMinimumHeight(44);
+#endif
   buttons->addWidget(start_button);
   buttons->addWidget(open_project_button);
   buttons->addWidget(open_event_button);
   buttons->addWidget(new_button);
+#if defined(MAPPER_MOBILE)
+  auto *close = new QPushButton(tr("Close"), this);
+  auto *utility_buttons = new QHBoxLayout;
+  utility_buttons->addWidget(refresh_button);
+  utility_buttons->addWidget(close);
+  buttons->addLayout(utility_buttons);
+#else
   buttons->addStretch();
   buttons->addWidget(refresh_button);
   auto *close = new QPushButton(tr("Close"), this);
   buttons->addWidget(close);
+  buttons->setDirection(QBoxLayout::LeftToRight);
+#endif
   auto *library_layout = new QVBoxLayout(library_page);
+#if defined(MAPPER_MOBILE)
+  library_layout->setContentsMargins(12, 12, 12, 12);
+  auto *library_title = new QLabel(tr("Map Hub"), library_page);
+  auto library_title_font = library_title->font();
+  library_title_font.setPointSizeF(library_title_font.pointSizeF() * 1.6);
+  library_title_font.setBold(true);
+  library_title->setFont(library_title_font);
+  library_layout->addWidget(library_title);
+#endif
   library_layout->addWidget(connection_label);
   library_layout->addWidget(tabs, 1);
   library_layout->addWidget(activity_label);
@@ -542,6 +860,19 @@ MapHubDialog::MapHubDialog(MainWindow *window)
           &MapHubDialog::updateActions);
   connect(tabs, &QTabWidget::currentChanged, this,
           &MapHubDialog::updateActions);
+#if defined(MAPPER_MOBILE)
+  connect(
+      project_list, &QTreeWidget::itemClicked, this, [](QTreeWidgetItem *item) {
+        if (item->data(0, item_kind_role).toString() == QLatin1String("venue"))
+          item->setExpanded(!item->isExpanded());
+      });
+  connect(event_list, &QTreeWidget::itemClicked, this,
+          [](QTreeWidgetItem *item) {
+            if (item->data(0, item_kind_role).toString() ==
+                QLatin1String("event_group"))
+              item->setExpanded(!item->isExpanded());
+          });
+#endif
   connect(assignment_list, &QTreeWidget::itemDoubleClicked, this,
           [this] { startSelectedAssignment(); });
   connect(project_list, &QTreeWidget::itemDoubleClicked, this,
@@ -565,9 +896,17 @@ void MapHubDialog::showFirstUse(const QString &problem) {
   if (workspace_root.trimmed().isEmpty())
     workspace_root = defaultMapHubWorkspaceRoot();
   first_use_workspace->setText(workspace_root);
+  if (first_use_connection_summary) {
+    first_use_connection_summary->setText(
+        tr("%1\nMaps stay in %2").arg(server, workspace_root));
+  }
+  if (first_use_flow)
+    first_use_flow->setCurrentIndex(0);
   first_use_status->setText(problem);
   pages->setCurrentWidget(first_use_page);
+#if !defined(MAPPER_MOBILE)
   first_use_invite->setFocus();
+#endif
 }
 
 void MapHubDialog::showLibrary() { pages->setCurrentWidget(library_page); }
@@ -580,6 +919,8 @@ void MapHubDialog::setFirstUseBusy(bool value, const QString &message) {
   first_use_token->setEnabled(!value);
   first_use_invite->setEnabled(!value);
   first_use_account_tabs->setEnabled(!value);
+  if (first_use_flow)
+    first_use_flow->setEnabled(!value);
   connect_button->setEnabled(!value);
   invitation_button->setEnabled(!value);
 }
@@ -700,7 +1041,11 @@ void MapHubDialog::openFirstUseInvitation() {
                             "browser."));
     return;
   }
+#if defined(MAPPER_MOBILE)
+  first_use_flow->setCurrentIndex(2);
+#else
   first_use_account_tabs->setCurrentIndex(1);
+#endif
   first_use_status->setText(
       tr("Finish account setup in your browser, copy the Mapper connection "
          "token, then paste it here."));
@@ -799,6 +1144,20 @@ void MapHubDialog::populate(const QJsonObject &response) {
                   object.value(QStringLiteral("status")).toString());
     item->setData(0, package_type_role,
                   object.value(QStringLiteral("type")).toString());
+    item->setData(0, title_role,
+                  object.value(QStringLiteral("title")).toString());
+#if defined(MAPPER_MOBILE)
+    auto details =
+        projectTitle(object.value(QStringLiteral("project_id")).toString());
+    const auto status = object.value(QStringLiteral("status")).toString();
+    const auto due = object.value(QStringLiteral("due_on")).toString();
+    if (!status.isEmpty())
+      details += QStringLiteral("  •  ") + status;
+    if (!due.isEmpty())
+      details += tr("  •  due %1").arg(due);
+    item->setText(0, object.value(QStringLiteral("title")).toString() +
+                         QLatin1Char('\n') + details);
+#endif
     assignment_list->addTopLevelItem(item);
   }
   assignment_list->resizeColumnToContents(0);
@@ -834,6 +1193,16 @@ void MapHubDialog::populate(const QJsonObject &response) {
     item->setData(0, item_kind_role, QStringLiteral("venue"));
     item->setToolTip(
         0, tr("%n map project(s)", nullptr, project_counts.value(venue_id)));
+#if defined(MAPPER_MOBILE)
+    auto venue_details = venue.value(QStringLiteral("city")).toString();
+    const auto map_count =
+        tr("%n map(s)", nullptr, project_counts.value(venue_id));
+    if (!venue_details.isEmpty())
+      venue_details += QStringLiteral("  •  ");
+    venue_details += map_count;
+    item->setText(0, venue.value(QStringLiteral("name")).toString() +
+                         QLatin1Char('\n') + venue_details);
+#endif
     project_list->addTopLevelItem(item);
     venue_items.insert(venue_id, item);
   }
@@ -854,6 +1223,20 @@ void MapHubDialog::populate(const QJsonObject &response) {
       });
       item->setData(0, id_role, object.value(QStringLiteral("id")).toString());
       item->setData(0, item_kind_role, QStringLiteral("project"));
+      item->setData(0, title_role,
+                    object.value(QStringLiteral("title")).toString());
+#if defined(MAPPER_MOBILE)
+      QStringList details;
+      details.append(object.value(QStringLiteral("kind")).toString());
+      details.append(object.value(QStringLiteral("status")).toString());
+      if (!revision.isEmpty())
+        details.append(
+            tr("r%1").arg(revision.value(QStringLiteral("number")).toInt()));
+      details.removeAll(QString{});
+      item->setText(0, object.value(QStringLiteral("title")).toString() +
+                           QLatin1Char('\n') +
+                           details.join(QStringLiteral("  •  ")));
+#endif
       parent->addChild(item);
     };
     auto project_venues = object.value(QStringLiteral("venues")).toArray();
@@ -918,6 +1301,25 @@ void MapHubDialog::populate(const QJsonObject &response) {
     item->setData(
         0, web_url_role,
         eventWebUrl(server, object.value(QStringLiteral("id")).toString()));
+#if defined(MAPPER_MOBILE)
+    QStringList event_details;
+    event_details.append(date.isValid()
+                             ? QLocale().toString(date, QLocale::ShortFormat)
+                             : tr("Date not set"));
+    event_details.append(object.value(QStringLiteral("venue_name")).toString());
+    event_details.append(object.value(QStringLiteral("status")).toString());
+    event_details.removeAll(QString{});
+    QString text = object.value(QStringLiteral("title")).toString() +
+                   QLatin1Char('\n') +
+                   event_details.join(QStringLiteral("  •  "));
+    const auto map_title =
+        object.value(QStringLiteral("map_project_title")).toString();
+    if (!map_title.isEmpty()) {
+      text += QLatin1Char('\n');
+      text += map_title;
+    }
+    item->setText(0, text);
+#endif
     if (parent == earlier_events)
       parent->insertChild(0, item);
     else
@@ -1023,7 +1425,9 @@ void MapHubDialog::openSelectedProject() {
       item->data(0, item_kind_role).toString() != QLatin1String("project"))
     return;
   auto project_id = item->data(0, id_role).toString();
-  auto title = item->text(0);
+  auto title = item->data(0, title_role).toString();
+  if (title.isEmpty())
+    title = item->text(0);
   setBusy(true, tr("Loading current revision details for %1…").arg(title));
   client->projectManifest(
       project_id, [this, title](const QJsonObject &manifest,
@@ -1103,9 +1507,12 @@ void MapHubDialog::startSelectedAssignment() {
   auto server =
       Settings::getInstance().getSetting(Settings::MapHub_ServerUrl).toString();
   auto manifest_url = projectManifestUrl(server, project_id);
+  auto assignment_title = item->data(0, title_role).toString();
+  if (assignment_title.isEmpty())
+    assignment_title = item->text(0);
   setBusy(
       true,
-      tr("Starting %1 and obtaining its editing lease…").arg(item->text(0)));
+      tr("Starting %1 and obtaining its editing lease…").arg(assignment_title));
   client->startAssignment(
       assignment_id,
       [this, assignment_id, project_id, title, manifest_url](
