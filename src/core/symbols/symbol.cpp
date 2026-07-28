@@ -33,6 +33,7 @@
 #include <QChar>
 #include <QImageReader>
 #include <QImageWriter>
+#include <QUuid>
 #include <QLatin1Char>
 #include <QLatin1String>
 #include <QPainter>
@@ -70,7 +71,8 @@
 namespace OpenOrienteering {
 
 Symbol::Symbol(Type type) noexcept
-: number { { -1, -1, -1 } }
+: persistent_id { QUuid::createUuid().toString(QUuid::WithoutBraces) }
+, number { { -1, -1, -1 } }
 , type { type }
 , is_helper_symbol { false }
 , is_hidden { false }
@@ -83,6 +85,7 @@ Symbol::Symbol(Type type) noexcept
 Symbol::Symbol(const Symbol& proto)
 : icon { proto.icon }
 , custom_icon { proto.custom_icon }
+, persistent_id { proto.persistent_id }
 , name { proto.name }
 , description { proto.description }
 , number ( proto.number )  // Cannot use {} with Android gcc 4.9
@@ -97,6 +100,16 @@ Symbol::Symbol(const Symbol& proto)
 
 
 Symbol::~Symbol() = default;
+
+const QString& Symbol::persistentId() const
+{
+	return persistent_id;
+}
+
+void Symbol::renewPersistentId()
+{
+	persistent_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+}
 
 
 
@@ -256,6 +269,7 @@ void Symbol::save(QXmlStreamWriter& xml, const Map& map) const
 {
 	XmlElementWriter symbol_element(xml, QLatin1String("symbol"));
 	symbol_element.writeAttribute(QLatin1String("type"), int(type));
+	symbol_element.writeAttribute(QLatin1String("uuid"), persistent_id);
 	auto id = map.findSymbolIndex(this);
 	if (id >= 0)
 		symbol_element.writeAttribute(QLatin1String("id"), id); // unique if given
@@ -298,6 +312,10 @@ std::unique_ptr<Symbol> Symbol::load(QXmlStreamReader& xml, const Map& map, Symb
 	auto symbol = Symbol::makeSymbolForType(static_cast<Symbol::Type>(symbol_type));
 	if (!symbol)
 		throw FileFormatException(::OpenOrienteering::ImportExport::tr("Error while loading a symbol of type %1 at line %2 column %3.").arg(symbol_type).arg(xml.lineNumber()).arg(xml.columnNumber()));
+	const auto loaded_uuid = symbol_element.attribute<QString>(QLatin1String("uuid"));
+	const auto parsed_uuid = QUuid(loaded_uuid);
+	if (!parsed_uuid.isNull())
+		symbol->persistent_id = parsed_uuid.toString(QUuid::WithoutBraces);
 	
 	auto code = symbol_element.attribute<QString>(QLatin1String("code"));
 	if (symbol_element.hasAttribute(QLatin1String("id")))

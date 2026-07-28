@@ -114,6 +114,17 @@ void UndoStep::getModifiedObjects(int, ObjectSet&) const
 	; // nothing
 }
 
+void UndoStep::collectEntityChanges(std::vector<EntityChange>&) const
+{
+	; // nothing
+}
+
+void UndoStep::adjustForExternalObjectChange(
+    int, int, int, const QString&)
+{
+	; // nothing
+}
+
 // static
 UndoStep* UndoStep::load(QXmlStreamReader& xml, Map* map, SymbolDictionary& symbol_dict)
 {
@@ -197,6 +208,21 @@ void CombinedUndoStep::getModifiedObjects(int part_index, ObjectSet &out) const
 	}
 }
 
+void CombinedUndoStep::collectEntityChanges(std::vector<EntityChange>& out) const
+{
+	for (const auto* step : steps)
+		step->collectEntityChanges(out);
+}
+
+void CombinedUndoStep::adjustForExternalObjectChange(
+    int part_index, int object_index, int index_delta,
+    const QString& changed_entity_id)
+{
+	for (auto* step : steps)
+		step->adjustForExternalObjectChange(
+		    part_index, object_index, index_delta, changed_entity_id);
+}
+
 
 
 void CombinedUndoStep::saveImpl(QXmlStreamWriter& xml) const
@@ -276,4 +302,3 @@ UndoStep* NoOpUndoStep::undo()
 
 
 }  // namespace OpenOrienteering
-

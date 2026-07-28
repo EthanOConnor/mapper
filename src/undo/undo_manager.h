@@ -193,6 +193,10 @@ public:
 	 * Any existing redo steps will be deleted first, but undo steps are left untouched.
 	 */
 	void loadRedo(QXmlStreamReader& xml, SymbolDictionary& symbol_dict);
+
+	void adjustForExternalObjectChange(
+	    int part_index, int object_index, int index_delta,
+	    const QString& changed_entity_id);
 	
 	
 	/**
@@ -224,6 +228,14 @@ signals:
 	 * This signal is emitted whenever the value of isLoaded() changes.
 	 */
 	void loadedChanged(bool loaded);
+
+	/**
+	 * Emitted synchronously after an edit, undo, or redo commits.
+	 *
+	 * The step is the inverse of the resulting map state and remains owned by
+	 * this manager. Receivers must not retain the pointer.
+	 */
+	void editCommitted(const OpenOrienteering::UndoStep* inverse_step);
 	
 protected:
 	/**

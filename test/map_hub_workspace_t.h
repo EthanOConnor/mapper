@@ -19,6 +19,12 @@ private slots:
   void identifiesMapperWorkspacePackageTypes();
   void classifiesWorkspaceBaselines();
   void hashesArtifactsExactly();
+  void checkpointCarriesStreamProjectionDigest();
+  void canonicalizesOperationJsonExactly();
+  void rejectsValuesOutsideOperationJsonProfile();
+  void boundsZstdTransportFrames();
+  void pendingDraftRoundTripsAndCoalesces();
+  void pendingDraftRejectsMovedOrMissingSnapshots();
   void relocatesStaleIosWorkspaceRoots();
   void preservesPublishedTileMatrixLimits();
 };

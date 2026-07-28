@@ -69,6 +69,40 @@ QJsonObject ManagedMapWorkspace::toJson() const {
       {QStringLiteral("active_revision_id"), active_revision_id},
       {QStringLiteral("active_revision_number"), active_revision_number},
       {QStringLiteral("active_sha256"), active_sha256},
+      {QStringLiteral("project_revision_id"), project_revision_id},
+      {QStringLiteral("sync_etag"), sync_etag},
+      {QStringLiteral("sync_problem"), sync_problem},
+      {QStringLiteral("stream_protocol"), stream_protocol},
+      {QStringLiteral("initial_snapshot_required"),
+       initial_snapshot_required},
+      {QStringLiteral("uncompacted_operations"),
+       QString::number(uncompacted_operations)},
+      {QStringLiteral("compaction_recommended"),
+       compaction_recommended},
+      {QStringLiteral("compaction_required"), compaction_required},
+      {QStringLiteral("stream_head_sequence"),
+       QString::number(stream_head_sequence)},
+      {QStringLiteral("stream_head_hash"), stream_head_hash},
+      {QStringLiteral("minimum_available_sequence"),
+       QString::number(minimum_available_sequence)},
+      {QStringLiteral("applied_stream_sequence"),
+       QString::number(applied_stream_sequence)},
+      {QStringLiteral("client_instance_id"), client_instance_id},
+      {QStringLiteral("acknowledged_client_sequence"),
+       QString::number(acknowledged_client_sequence)},
+      {QStringLiteral("snapshot_stream_sequence"),
+       QString::number(snapshot_stream_sequence)},
+      {QStringLiteral("snapshot_stream_hash"), snapshot_stream_hash},
+      {QStringLiteral("snapshot_id"), snapshot_id},
+      {QStringLiteral("snapshot_sha256"), snapshot_sha256},
+      {QStringLiteral("snapshot_size_bytes"),
+       QString::number(snapshot_size_bytes)},
+      {QStringLiteral("snapshot_download_url"), snapshot_download_url},
+      {QStringLiteral("snapshot_entity_index_sha256"),
+       snapshot_entity_index_sha256},
+      {QStringLiteral("snapshot_entity_index_download_url"),
+       snapshot_entity_index_download_url},
+      {QStringLiteral("snapshot_revision_id"), snapshot_revision_id},
       {QStringLiteral("status"), status},
       {QStringLiteral("exclusive_editing"), exclusive_editing},
       {QStringLiteral("lease_expires_at"), dateString(lease_expires_at)},
@@ -121,6 +155,65 @@ ManagedMapWorkspace ManagedMapWorkspace::fromJson(const QJsonObject &object,
       object.value(QStringLiteral("active_revision_number")).toInt();
   workspace.active_sha256 =
       object.value(QStringLiteral("active_sha256")).toString();
+  workspace.project_revision_id =
+      object.value(QStringLiteral("project_revision_id")).toString();
+  workspace.sync_etag =
+      object.value(QStringLiteral("sync_etag")).toString();
+  workspace.sync_problem =
+      object.value(QStringLiteral("sync_problem")).toString();
+  workspace.stream_protocol =
+      object.value(QStringLiteral("stream_protocol")).toString();
+  workspace.initial_snapshot_required =
+      object.value(QStringLiteral("initial_snapshot_required")).toBool();
+  workspace.uncompacted_operations =
+      object.value(QStringLiteral("uncompacted_operations"))
+          .toString()
+          .toLongLong();
+  workspace.compaction_recommended =
+      object.value(QStringLiteral("compaction_recommended")).toBool();
+  workspace.compaction_required =
+      object.value(QStringLiteral("compaction_required")).toBool();
+  workspace.stream_head_sequence =
+      object.value(QStringLiteral("stream_head_sequence")).toString().toLongLong();
+  workspace.stream_head_hash =
+      object.value(QStringLiteral("stream_head_hash")).toString();
+  workspace.minimum_available_sequence =
+      object.value(QStringLiteral("minimum_available_sequence"))
+          .toString()
+          .toLongLong();
+  workspace.applied_stream_sequence =
+      object.value(QStringLiteral("applied_stream_sequence"))
+          .toString()
+          .toLongLong();
+  workspace.client_instance_id =
+      object.value(QStringLiteral("client_instance_id")).toString();
+  workspace.acknowledged_client_sequence =
+      object.value(QStringLiteral("acknowledged_client_sequence"))
+          .toString()
+          .toLongLong();
+  workspace.snapshot_stream_sequence =
+      object.value(QStringLiteral("snapshot_stream_sequence"))
+          .toString()
+          .toLongLong();
+  workspace.snapshot_stream_hash =
+      object.value(QStringLiteral("snapshot_stream_hash")).toString();
+  workspace.snapshot_id =
+      object.value(QStringLiteral("snapshot_id")).toString();
+  workspace.snapshot_sha256 =
+      object.value(QStringLiteral("snapshot_sha256")).toString();
+  workspace.snapshot_size_bytes =
+      object.value(QStringLiteral("snapshot_size_bytes"))
+          .toString()
+          .toLongLong();
+  workspace.snapshot_download_url =
+      object.value(QStringLiteral("snapshot_download_url")).toString();
+  workspace.snapshot_entity_index_sha256 =
+      object.value(QStringLiteral("snapshot_entity_index_sha256")).toString();
+  workspace.snapshot_entity_index_download_url =
+      object.value(QStringLiteral("snapshot_entity_index_download_url"))
+          .toString();
+  workspace.snapshot_revision_id =
+      object.value(QStringLiteral("snapshot_revision_id")).toString();
   workspace.status = object.value(QStringLiteral("status")).toString();
   workspace.exclusive_editing =
       object.value(QStringLiteral("exclusive_editing")).toBool();

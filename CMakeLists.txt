@@ -162,6 +162,8 @@ add_feature_info(Clipper2 ON "2.0.1")
 
 find_package(PROJ 9.8.1 CONFIG REQUIRED)
 find_package(ICU 78.3 REQUIRED COMPONENTS uc data)
+find_package(SQLite3 REQUIRED)
+find_package(zstd CONFIG REQUIRED)
 if(Mapper_USE_GDAL)
 	# Static GDAL exports its XZ dependency as an imported target. Resolve it
 	# and its other image/database primitives explicitly so cross-builds do not
@@ -169,7 +171,6 @@ if(Mapper_USE_GDAL)
 	find_package(LibLZMA REQUIRED)
 	find_package(JPEG REQUIRED)
 	find_package(TIFF REQUIRED)
-	find_package(SQLite3 REQUIRED)
 	find_package(GDAL 3.13.1 CONFIG REQUIRED)
 endif()
 

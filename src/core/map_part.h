@@ -100,6 +100,9 @@ public:
 	 * Returns the part's name.
 	 */
 	const QString& getName() const;
+
+	/** Returns the stable identity used by durable collaboration operations. */
+	const QString& persistentId() const;
 	
 	/**
 	 * Sets the part's name.
@@ -266,6 +269,7 @@ public:
 private:
 	typedef std::vector<Object*> ObjectList;
 
+	QString persistent_id;
 	QString name;
 	ObjectList objects;  ///< @todo This could be a spatial representation optimized for quick access
 	Map* const map;

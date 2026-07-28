@@ -3130,6 +3130,7 @@ void MapEditorController::duplicateClicked()
 	for (const auto* object : map->selectedObjects())
 	{
 		Object* duplicate = object->duplicate();
+		duplicate->renewPersistentId();
 		map->addObject(duplicate);
 		new_objects.push_back(duplicate);
 	}
@@ -3304,6 +3305,7 @@ void MapEditorController::fillBorderClicked()
 		else
 		{
 			Object* duplicate = object->duplicate();
+			duplicate->renewPersistentId();
 			duplicate->setSymbol(symbol, true);
 			if (close_paths && duplicate->getType() == Object::Path)
 			{

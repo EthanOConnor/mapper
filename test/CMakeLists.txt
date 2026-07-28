@@ -188,10 +188,13 @@ add_unit_test(map_hub_workspace_t
 	../src/collaboration/managed_map_workspace
 	../src/collaboration/map_hub_api_client
 	../src/collaboration/map_hub_imagery_catalog
+	../src/collaboration/map_hub_sync_queue
 	../src/collaboration/map_hub_workspace
+	../src/collaboration/oom_json
+	../src/collaboration/zstd_codec
 	../src/core/document_path
 )
-target_link_libraries(map_hub_workspace_t PRIVATE Mapper::ImageryCore Mapper::ImageryNetwork Qt6::Network)
+target_link_libraries(map_hub_workspace_t PRIVATE Mapper::ImageryCore Mapper::ImageryNetwork Qt6::Network zstd::libzstd)
 add_unit_test(map_color_t ../src/core/map_color)
 add_unit_test(ocd_t ../src/fileformats/ocd_types)
 add_unit_test(ocd_parameter_stream_reader_t ../src/fileformats/ocd_parameter_stream_reader)
@@ -237,6 +240,7 @@ if(Mapper_USE_GDAL)
 	target_link_libraries(gdal_tiled_t PRIVATE mapper-gdal GDAL::GDAL)
 endif()
 add_system_test(map_t)
+add_system_test(map_hub_protocol_fixture_t)
 add_system_test(map_printer_t)
 add_system_test(imagery_source_model_t)
 add_system_test(object_t)

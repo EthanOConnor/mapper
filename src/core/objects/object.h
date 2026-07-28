@@ -132,6 +132,15 @@ public:
 	
 	/** Returns the object type determined by the subclass */
 	inline Type getType() const;
+
+	/** Returns the stable identity used by durable collaboration operations. */
+	const QString& persistentId() const;
+
+	/**
+	 * Assigns a fresh identity when a duplicate becomes a distinct map entity.
+	 * Undo and replacement copies deliberately retain their identity.
+	 */
+	void renewPersistentId();
 	
 	/** Convenience cast to PointObject with type checking */
 	PointObject* asPoint();
@@ -323,6 +332,7 @@ protected:
 	virtual void createRenderables(ObjectRenderables& output, Symbol::RenderableOptions options) const;
 	
 	Type type;
+	QString persistent_id;
 	const Symbol* symbol = nullptr;
 	MapCoordVector coords;
 	Map* map = nullptr;

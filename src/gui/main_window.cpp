@@ -69,6 +69,7 @@
 #include "collaboration/managed_map_workspace.h"
 #include "collaboration/map_hub_api_client.h"
 #include "collaboration/map_hub_credentials.h"
+#include "collaboration/map_hub_sync_controller.h"
 #include "collaboration/map_hub_workspace.h"
 #include "core/document_path.h"
 #include "core/georeferencing.h"
@@ -134,6 +135,14 @@ MainWindow::MainWindow(bool as_main_window, QWidget* parent, Qt::WindowFlags fla
 	
 	status_label = new QLabel();
 	statusBar()->addWidget(status_label, 1);
+	map_hub_sync_label = new QLabel();
+	map_hub_sync_label->setVisible(false);
+	map_hub_sync_label->setContentsMargins(8, 0, 4, 0);
+	map_hub_sync_label->setTextFormat(Qt::RichText);
+	map_hub_sync_label->setOpenExternalLinks(false);
+	connect(map_hub_sync_label, &QLabel::linkActivated, this,
+	        [this] { showMapHub(); });
+	statusBar()->addPermanentWidget(map_hub_sync_label);
 	statusBar()->setSizeGripEnabled(as_main_window);
 	updateToastEnabled();
 	
@@ -157,6 +166,28 @@ MainWindow::MainWindow(bool as_main_window, QWidget* parent, Qt::WindowFlags fla
 	connect(map_hub_lease_timer, &QTimer::timeout, this,
 	        &MainWindow::renewMapHubLeaseIfNeeded);
 	map_hub_lease_timer->start();
+	map_hub_sync = new MapHubSyncController(this);
+	connect(
+		map_hub_sync, &MapHubSyncController::stateChanged, this,
+		[this](MapHubSyncController::State state, const QString& text) {
+			const auto visible =
+				state != MapHubSyncController::State::Disconnected;
+			map_hub_sync_label->setVisible(visible);
+			const auto needs_review =
+				state == MapHubSyncController::State::UpstreamChanged
+				|| state == MapHubSyncController::State::ActionRequired;
+			map_hub_sync_label->setText(
+				needs_review
+				? tr("%1 · <a href=\"map-hub\">Review</a>")
+				    .arg(text.toHtmlEscaped())
+				: text.toHtmlEscaped());
+			map_hub_sync_label->setToolTip(text);
+		});
+	connect(
+		map_hub_sync, &MapHubSyncController::upstreamChangeDetected, this,
+		[this](const QString& message) {
+			showStatusBarMessage(message, 15000);
+		});
 	static bool map_hub_credential_registered = false;
 	if (!map_hub_credential_registered)
 	{
@@ -212,7 +243,15 @@ void MainWindow::updateToastEnabled()
 void MainWindow::applicationStateChanged()
 {
 	if (QGuiApplication::applicationState() == Qt::ApplicationActive)
+	{
 		QTimer::singleShot(0, this, &MainWindow::renewMapHubLeaseIfNeeded);
+		if (map_hub_sync)
+			map_hub_sync->applicationBecameActive();
+	}
+	else if (map_hub_sync)
+	{
+		map_hub_sync->applicationWillResignActive();
+	}
 #ifdef Q_OS_ANDROID
 	// The Android app may be started or resumed when the user triggers a suitable "intent".
 	if (QGuiApplication::applicationState() == Qt::ApplicationActive)
@@ -634,6 +673,7 @@ void MainWindow::setCurrentFile(const QString& path, const FileFormat* format)
 		setWindowFilePath({});
 	}
 	updateMapHubActions();
+	configureMapHubSync();
 	QTimer::singleShot(0, this, &MainWindow::renewMapHubLeaseIfNeeded);
 }
 
@@ -1187,6 +1227,7 @@ void MainWindow::createConnectedMap(const ManagedMapWorkspace& workspace)
 		return;
 	}
 	new_window->updateMapHubActions();
+	new_window->configureMapHubSync();
 	new_window->showStatusBarMessage(tr("Connected to Map Hub project “%1”.").arg(managed.project_title), 8000);
 }
 
@@ -1229,6 +1270,7 @@ bool MainWindow::openConnectedWorkspace(const QString& source_path,
 		return false;
 	}
 	open_window->updateMapHubActions();
+	open_window->configureMapHubSync();
 	open_window->showStatusBarMessage(
 	  source_path == local_path
 	    ? tr("Verified Map Hub revision r%1 opened.")
@@ -1263,6 +1305,53 @@ void MainWindow::updateMapHubActions()
 		map_hub_checkpoint_act->setText(tr("Checkpoint to Map Hub"));
 		map_hub_submit_act->setText(tr("Submit to Map Hub for review…"));
 	}
+}
+
+void MainWindow::configureMapHubSync()
+{
+	if (!map_hub_sync)
+		return;
+	map_hub_sync->clear();
+	if (!controller || currentPath().isEmpty() || !currentFormat()
+	    || DocumentPath::suffix(currentPath()).compare(
+	         QLatin1String("omap"), Qt::CaseInsensitive) != 0)
+		return;
+	QString error;
+	auto managed = ManagedMapWorkspace::loadForMap(currentPath(), &error);
+	auto* map_editor = qobject_cast<MapEditorController*>(controller);
+	if (!managed.isValid() || !map_editor)
+		return;
+	map_hub_sync->configure(
+		managed,
+		map_editor->getMap(),
+		[this] {
+			return controller ? controller->saveRevision() : quint64{0};
+		},
+		[this](const QString& destination, quint64* staged_revision,
+		       QString* error) {
+			if (!controller || !currentFormat())
+			{
+				if (error)
+					*error = tr("The map editor is not ready to save.");
+				return false;
+			}
+			QSaveFile file(destination);
+			if (!file.open(QIODevice::WriteOnly))
+			{
+				if (error)
+					*error = file.errorString();
+				return false;
+			}
+			if (!controller->stageSaveTo(
+			      currentPath(), *currentFormat(), &file, staged_revision)
+			    || !file.commit())
+			{
+				if (error && error->isEmpty())
+					*error = file.errorString();
+				return false;
+			}
+			return true;
+		});
 }
 
 void MainWindow::renewMapHubLeaseIfNeeded()
@@ -1414,6 +1503,7 @@ void MainWindow::checkpointMapHub(bool submit_after)
 			MapHubCredentials::removeToken(lease_key);
 			clearStatusBarMessage();
 			updateMapHubActions();
+			configureMapHubSync();
 			QMessageBox::information(this, tr("Submitted to Map Hub"),
 			                         tr("Revision r%1 is ready for librarian or director review. Your local .omap file remains unchanged.")
 			                           .arg(updated.active_revision_number));
@@ -1441,12 +1531,35 @@ void MainWindow::checkpointMapHub(bool submit_after)
 		return;
 	}
 	auto revision_base = managed.active_revision_id.isEmpty() ? managed.base_revision_id : managed.active_revision_id;
-	auto key_material = managed.workspace_id + QLatin1Char('|') + revision_base + QLatin1Char('|') + local_sha;
+		qint64 stream_sequence = 0;
+		QString stream_hash;
+		QString entity_index_sha256;
+		if (!map_hub_sync
+		    || !map_hub_sync->checkpointStreamHead(
+		      &stream_sequence, &stream_hash,
+		      &entity_index_sha256))
+	{
+		QMessageBox::information(
+		  this, tr("Map Hub is still synchronizing"),
+		  tr("Your work is saved locally. Wait for “Synced to Map Hub,” "
+		     "then create the checkpoint."));
+		client->deleteLater();
+		return;
+	}
+		auto key_material = managed.workspace_id + QLatin1Char('|')
+		                  + revision_base + QLatin1Char('|')
+		                  + QString::number(stream_sequence) + QLatin1Char('|')
+		                  + stream_hash + QLatin1Char('|')
+		                  + entity_index_sha256 + QLatin1Char('|')
+		                  + local_sha;
 	auto idempotency_key = QStringLiteral("mapper-%1").arg(QString::fromLatin1(
 	  QCryptographicHash::hash(key_material.toUtf8(), QCryptographicHash::Sha256).toHex().left(48)));
 	showStatusBarMessageImmediately(tr("Uploading verified .omap checkpoint to Map Hub…"));
 	client->checkpoint(managed.workspace_id, currentPath(), revision_base, lease.token,
 	                   submit_after ? tr("Submission checkpoint") : tr("Mapper checkpoint"), summary, idempotency_key,
+		                   stream_sequence, stream_hash,
+		                   managed.project_revision_id,
+		                   entity_index_sha256,
 	                   [this, client, managed, local_sha, submit_after, submit_revision]
 	                   (const QJsonObject& response, const MapHubApiClient::Error& error) mutable {
 		if (error)
@@ -1501,6 +1614,7 @@ void MainWindow::checkpointMapHub(bool submit_after)
 			client->deleteLater();
 			return;
 		}
+		configureMapHubSync();
 		if (submit_after)
 			submit_revision(updated.active_revision_id, updated);
 		else
@@ -3041,6 +3155,8 @@ bool MainWindow::saveTo(const QString &path, const FileFormat& format)
 	removeAutosaveFile();
 	setHasUnsavedChanges(!fully_clean);
 #endif
+	if (fully_clean && map_hub_sync)
+		map_hub_sync->savedExplicitly();
 
 #if defined(Q_OS_IOS)
 	return fully_clean;

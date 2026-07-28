@@ -39,6 +39,9 @@ public:
 
   using JsonHandler = std::function<void(const QJsonObject &, const Error &)>;
   using DownloadHandler = std::function<void(const QString &, const Error &)>;
+  using SyncStateHandler =
+      std::function<void(const QJsonObject &, const QString &etag,
+                         bool not_modified, const Error &)>;
 
   explicit MapHubApiClient(QString server_url, QString bearer_token,
                            QObject *parent = nullptr);
@@ -60,11 +63,37 @@ public:
   void checkpoint(const QString &workspace_id, const QString &file_path,
                   const QString &base_revision_id, const QString &editing_lease,
                   const QString &label, const QString &change_summary,
-                  const QString &idempotency_key, JsonHandler handler);
+                  const QString &idempotency_key,
+                  qint64 stream_sequence, const QString &stream_hash,
+                  const QString &project_revision_id,
+                  const QString &entity_index_sha256,
+                  JsonHandler handler);
   void submitRevision(const QString &revision_id, const QString &editing_lease,
                       JsonHandler handler);
   void renewLease(const QString &workspace_id, const QString &editing_lease,
                   JsonHandler handler);
+  void workspaceSyncState(const QString &workspace_id, const QString &etag,
+                          SyncStateHandler handler);
+  void workspaceOperations(const QString &workspace_id, qint64 after_sequence,
+                           int limit, JsonHandler handler);
+  void workspaceEntityIndex(const QUrl &url, JsonHandler handler);
+  void postWorkspaceTransaction(const QString &workspace_id,
+                                const QByteArray &canonical_json,
+                                const QString &editing_lease,
+                                JsonHandler handler);
+  void acknowledgeWorkspaceOperations(const QString &workspace_id,
+                                      const QJsonObject &acknowledgement,
+                                      const QString &editing_lease,
+                                      JsonHandler handler);
+  void uploadWorkspaceSnapshot(
+      const QString &workspace_id, const QString &file_path,
+      const QByteArray &canonical_entity_index,
+      qint64 base_stream_sequence, const QString &base_stream_hash,
+      const QString &file_sha256, qint64 file_size,
+      const QString &workspace_revision_id,
+      const QString &project_revision_id,
+      const QString &client_instance_id, const QString &editing_lease,
+      const QString &idempotency_key, JsonHandler handler);
   void downloadArtifact(const QUrl &url, const QString &expected_sha256,
                         const QString &destination, DownloadHandler handler);
 

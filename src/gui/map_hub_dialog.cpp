@@ -1666,10 +1666,27 @@ void MapHubDialog::updateActions() {
             : tr("Open or resume the assignment's managed workspace."));
   }
   open_project_button->setVisible(showing_projects);
-  open_project_button->setEnabled(
-      showing_projects && !busy && project_list->currentItem() &&
-      project_list->currentItem()->data(0, item_kind_role).toString() ==
-          QLatin1String("project"));
+  auto *project = project_list->currentItem();
+  const auto project_selected =
+      project &&
+      project->data(0, item_kind_role).toString() == QLatin1String("project");
+  bool project_is_editable = false;
+  if (project_selected) {
+    const auto project_id = project->data(0, id_role).toString();
+    for (int i = 0; i < assignment_list->topLevelItemCount(); ++i) {
+      auto *candidate = assignment_list->topLevelItem(i);
+      if (candidate->data(0, project_id_role).toString() == project_id &&
+          assignmentCanStart(candidate)) {
+        project_is_editable = true;
+        break;
+      }
+    }
+  }
+  open_project_button->setText(project_is_editable
+                                    ? tr("Open selected map for editing")
+                                    : tr("View selected revision"));
+  open_project_button->setEnabled(showing_projects && !busy &&
+                                  project_selected);
   open_event_button->setVisible(showing_events);
   open_event_button->setEnabled(
       showing_events && !busy && event_list->currentItem() &&
@@ -1717,6 +1734,18 @@ void MapHubDialog::openSelectedProject() {
       item->data(0, item_kind_role).toString() != QLatin1String("project"))
     return;
   auto project_id = item->data(0, id_role).toString();
+  // The Maps tab is the user's primary library. If this account has an open
+  // Mapper assignment for the selected map, enter the same managed-workspace
+  // flow directly instead of making the user rediscover it under My work.
+  for (int i = 0; i < assignment_list->topLevelItemCount(); ++i) {
+    auto *assignment = assignment_list->topLevelItem(i);
+    if (assignment->data(0, project_id_role).toString() == project_id &&
+        assignmentCanStart(assignment)) {
+      assignment_list->setCurrentItem(assignment);
+      startSelectedAssignment();
+      return;
+    }
+  }
   auto title = item->data(0, title_role).toString();
   if (title.isEmpty())
     title = item->text(0);

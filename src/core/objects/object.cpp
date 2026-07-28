@@ -39,6 +39,7 @@
 #include <QPointF>
 #include <QStringView>
 #include <QTransform>
+#include <QUuid>
 #include <QXmlStreamReader>
 #include <QXmlStreamWriter>
 
@@ -64,6 +65,7 @@ class QRectF;
 namespace literal
 {
 	static const QLatin1String object("object");
+	static const QLatin1String uuid("uuid");
 	static const QLatin1String symbol("symbol");
 	static const QLatin1String type("type");
 	static const QLatin1String text("text");
@@ -84,6 +86,7 @@ namespace OpenOrienteering {
 
 Object::Object(Object::Type type, const Symbol* symbol)
 : type(type)
+, persistent_id(QUuid::createUuid().toString(QUuid::WithoutBraces))
 , symbol(symbol)
 , output(*this)
 {
@@ -92,6 +95,7 @@ Object::Object(Object::Type type, const Symbol* symbol)
 
 Object::Object(Object::Type type, const Symbol* symbol, MapCoordVector coords, Map* map)
 : type(type)
+, persistent_id(QUuid::createUuid().toString(QUuid::WithoutBraces))
 , symbol(symbol)
 , coords(std::move(coords))
 , map(map)
@@ -102,6 +106,7 @@ Object::Object(Object::Type type, const Symbol* symbol, MapCoordVector coords, M
 
 Object::Object(const Object& proto)
  : type(proto.type)
+ , persistent_id(proto.persistent_id)
  , symbol(proto.symbol)
  , coords(proto.coords)
  , object_tags(proto.object_tags)
@@ -122,6 +127,7 @@ void Object::copyFrom(const Object& other)
 	if (type != other.type)
 		throw std::invalid_argument(Q_FUNC_INFO);
 	
+	persistent_id = other.persistent_id;
 	symbol = other.symbol;
 	coords = other.coords;
 	rotation = other.rotation;
@@ -129,6 +135,16 @@ void Object::copyFrom(const Object& other)
 	object_tags = other.object_tags;
 	output_dirty = true;
 	extent = other.extent;
+}
+
+const QString& Object::persistentId() const
+{
+	return persistent_id;
+}
+
+void Object::renewPersistentId()
+{
+	persistent_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
 }
 
 bool Object::equals(const Object* other, bool compare_symbol) const
@@ -242,6 +258,7 @@ void Object::save(QXmlStreamWriter& xml) const
 {
 	XmlElementWriter object_element(xml, literal::object);
 	object_element.writeAttribute(literal::type, type);
+	object_element.writeAttribute(literal::uuid, persistent_id);
 	int symbol_index = -1;
 	if (map)
 		symbol_index = map->findSymbolIndex(symbol);
@@ -314,6 +331,10 @@ Object* Object::load(QXmlStreamReader& xml, Map* map, const SymbolDictionary& sy
 		throw FileFormatException(::OpenOrienteering::ImportExport::tr("Error while loading an object of type %1.").arg(object_type));
 	
 	object->map = map;
+	const auto loaded_uuid = object_element.attribute<QString>(literal::uuid);
+	const auto parsed_uuid = QUuid(loaded_uuid);
+	if (!parsed_uuid.isNull())
+		object->persistent_id = parsed_uuid.toString(QUuid::WithoutBraces);
 	
 	if (symbol)
 		object->symbol = symbol;

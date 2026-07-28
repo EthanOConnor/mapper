@@ -82,6 +82,8 @@ public:
 	 * Returns true if no objects are modified by this undo step.
 	 */
 	virtual bool isEmpty() const;
+
+	bool isValid() const override;
 	
 	/**
 	 * Adds an object (by index) to this step.
@@ -104,6 +106,11 @@ public:
 	 * Only adds objects when the given part_index matches this step's part index.
 	 */
 	void getModifiedObjects(int part_index, ObjectSet& out) const override;
+
+	void collectEntityChanges(std::vector<EntityChange>& out) const override;
+	void adjustForExternalObjectChange(
+	    int part_index, int object_index, int index_delta,
+	    const QString& changed_entity_id) override;
 	
 	
 protected:
@@ -155,6 +162,7 @@ protected:
 	 * Indices of the existing objects that are modified by this step.
 	 */
 	ObjectList modified_objects;
+	bool structurally_valid = true;
 };
 
 
@@ -301,6 +309,8 @@ public:
 	~AddObjectsUndoStep() override;
 	
 	UndoStep* undo() override;
+
+	void collectEntityChanges(std::vector<EntityChange>& out) const override;
 	
 	/**
 	 * Removes all contained objects from the map.

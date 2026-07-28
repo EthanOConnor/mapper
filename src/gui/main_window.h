@@ -54,6 +54,7 @@ namespace OpenOrienteering {
 
 class MainWindowController;
 class MapEditorController;
+class MapHubSyncController;
 class MapperServiceProxy;
 class Toast;
 /**
@@ -569,6 +570,7 @@ private:
 	void checkpointMapHub(bool submit_after);
 	void updateMapHubActions();
 	void renewMapHubLeaseIfNeeded();
+	void configureMapHubSync();
 
 	static MainWindow* findMainWindow(const QString& file_name);
 
@@ -613,6 +615,8 @@ private:
 	QAction* map_hub_submit_act = nullptr;
 	QTimer* map_hub_lease_timer = nullptr;
 	bool map_hub_lease_renewal_pending = false;
+	MapHubSyncController* map_hub_sync = nullptr;
+	QLabel* map_hub_sync_label = nullptr;
 	QLabel* status_label;
 	Toast* toast = nullptr;
 	

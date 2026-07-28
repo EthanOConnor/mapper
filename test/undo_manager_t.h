@@ -35,6 +35,12 @@ private slots:
 	 * Performs actions on an UndoManager and observes its behaviour.
 	 */
 	void testUndoRedo();
+
+	/** Verifies semantic entity changes for edits, undo, and redo. */
+	void testCommittedEntityChanges();
+	void testOperationStreamRebase();
+	void testExternalObjectIndexAdjustment();
+	void testRejectsMalformedMapHubTransactions();
 	
 private:
 	bool clean_changed;

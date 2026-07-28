@@ -101,6 +101,19 @@ void UndoManager::clear()
 	Q_ASSERT(undo_steps.empty());
 }
 
+void UndoManager::adjustForExternalObjectChange(
+    int part_index, int object_index, int index_delta,
+    const QString& changed_entity_id)
+{
+	UndoManager::State const old_state(this);
+	for (auto& step : undo_steps)
+		step->adjustForExternalObjectChange(
+		    part_index, object_index, index_delta, changed_entity_id);
+	validateUndoSteps();
+	validateRedoSteps();
+	emitChangedSignals(old_state);
+}
+
 
 
 void UndoManager::push(std::unique_ptr<UndoStep>&& step)
@@ -114,6 +127,7 @@ void UndoManager::push(std::unique_ptr<UndoStep>&& step)
 	++current_index;
 	validateUndoSteps();
 	emitChangedSignals(old_state);
+	emit editCommitted(nextUndoStep());
 }
 
 
@@ -157,6 +171,7 @@ bool UndoManager::undo(QWidget* dialog_parent)
 	undo_steps[StepList::size_type(current_index)].reset(redo_step);
 	
 	emitChangedSignals(old_state);
+	emit editCommitted(redo_step);
 	
 	return true;
 }
@@ -194,6 +209,7 @@ bool UndoManager::redo(QWidget* dialog_parent)
 	++current_index;
 	
 	emitChangedSignals(old_state);
+	emit editCommitted(undo_step);
 	
 	return true;
 }

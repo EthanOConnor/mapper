@@ -19,6 +19,7 @@
  */
 
 #include <QtTest>
+#include <QBuffer>
 #include <QObject>
 
 #include "core/map.h"
@@ -27,6 +28,7 @@
 #include "core/objects/text_object.h"
 #include "core/symbols/area_symbol.h"
 #include "core/symbols/line_symbol.h"
+#include "core/symbols/point_symbol.h"
 #include "core/symbols/symbol.h"
 #include "core/symbols/text_symbol.h"
 
@@ -178,6 +180,45 @@ private slots:
 		// Another point in the rotated text, and subject to rotation.
 		auto const anchor_text_2 = QPointF{10.0, 5.0};
 		QCOMPARE(to_text.map(to_map.map(anchor_text_2)), anchor_text_2);
+	}
+
+	void persistentIdentityTest()
+	{
+		Map map;
+		auto* symbol = new PointSymbol();
+		const auto symbol_id = symbol->persistentId();
+		map.addSymbol(symbol, 0);
+
+		auto* original = new PointObject(symbol);
+		const auto original_id = original->persistentId();
+		QVERIFY(!original_id.isEmpty());
+		map.addObject(original);
+
+		auto* undo_copy = original->duplicate();
+		QCOMPARE(undo_copy->persistentId(), original_id);
+		delete undo_copy;
+
+		auto* distinct_copy = original->duplicate();
+		map.addObject(distinct_copy);
+		QVERIFY(distinct_copy->persistentId() != original_id);
+
+		const auto part_id = map.getPart(0)->persistentId();
+		QVERIFY(!part_id.isEmpty());
+
+		QBuffer saved;
+		QVERIFY(map.exportToIODevice(saved));
+		auto saved_bytes = saved.data();
+		QVERIFY(saved_bytes.contains(original_id.toUtf8()));
+		QBuffer input(&saved_bytes);
+		QVERIFY(input.open(QIODevice::ReadOnly));
+
+		Map restored;
+		QVERIFY(restored.importFromIODevice(input));
+		QCOMPARE(restored.getSymbol(0)->persistentId(), symbol_id);
+		QCOMPARE(restored.getPart(0)->persistentId(), part_id);
+		QCOMPARE(restored.getPart(0)->getObject(0)->persistentId(), original_id);
+		QCOMPARE(restored.getPart(0)->getObject(1)->persistentId(),
+		         distinct_copy->persistentId());
 	}
 	
 };  // class ObjectTest

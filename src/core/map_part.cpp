@@ -29,6 +29,7 @@
 #include <QObject>
 #include <QStringView>
 #include <QTransform>
+#include <QUuid>
 #include <QXmlStreamReader>
 
 #include "core/map.h"
@@ -43,6 +44,7 @@
 namespace literal
 {
 	const QLatin1String part("part");
+	const QLatin1String uuid("uuid");
 	const QLatin1String name("name");
 	const QLatin1String objects("objects");
 	const QLatin1String object("object");
@@ -54,11 +56,17 @@ namespace literal
 namespace OpenOrienteering {
 
 MapPart::MapPart(const QString& name, Map* map)
-: name(name)
+: persistent_id(QUuid::createUuid().toString(QUuid::WithoutBraces))
+, name(name)
 , map(map)
 {
 	Q_ASSERT(map);
 	; // nothing else
+}
+
+const QString& MapPart::persistentId() const
+{
+	return persistent_id;
 }
 
 MapPart::~MapPart()
@@ -81,6 +89,7 @@ void MapPart::save(QXmlStreamWriter& xml) const
 {
 	XmlElementWriter part_element(xml, literal::part);
 	part_element.writeAttribute(literal::name, name);
+	part_element.writeAttribute(literal::uuid, persistent_id);
 	{
 		XmlElementWriter objects_element(xml, literal::objects);
 		objects_element.writeAttribute(literal::count, objects.size());
@@ -99,6 +108,10 @@ MapPart* MapPart::load(QXmlStreamReader& xml, Map& map, SymbolDictionary& symbol
 	
 	XmlElementReader part_element(xml);
 	auto part = new MapPart(part_element.attribute<QString>(literal::name), &map);
+	const auto loaded_uuid = part_element.attribute<QString>(literal::uuid);
+	const auto parsed_uuid = QUuid(loaded_uuid);
+	if (!parsed_uuid.isNull())
+		part->persistent_id = parsed_uuid.toString(QUuid::WithoutBraces);
 	
 	while (xml.readNextStartElement())
 	{
@@ -162,6 +175,21 @@ void MapPart::addObject(Object* object)
 
 void MapPart::addObject(Object* object, int pos)
 {
+	// A duplicate used as a new entity may still carry the source identity.
+	// Keep replacement/undo identity stable, but never admit two live objects
+	// with the same durable identity into a map.
+	bool identity_in_use;
+	do
+	{
+		identity_in_use = false;
+		map->applyOnAllObjects([&](const Object* existing) {
+			identity_in_use |= existing->persistentId() == object->persistentId();
+		});
+		if (identity_in_use)
+			object->renewPersistentId();
+	}
+	while (identity_in_use);
+
 	objects.insert(objects.begin() + pos, object);
 	object->setMap(map);
 	object->update();
@@ -222,6 +250,7 @@ std::unique_ptr<UndoStep> MapPart::importPart(const MapPart* other, const QHash<
 	for (const Object* object: other->objects)
 	{
 		Object* new_object = object->duplicate();
+		new_object->renewPersistentId();
 		if (symbol_map.contains(new_object->getSymbol()))
 			new_object->setSymbol(symbol_map.value(new_object->getSymbol()), true);
 		new_object->transform(transform);

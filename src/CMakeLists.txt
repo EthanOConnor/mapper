@@ -121,7 +121,14 @@ set(Mapper_Common_SRCS
 	collaboration/managed_map_workspace.cpp
 	collaboration/map_hub_api_client.cpp
 	collaboration/map_hub_credentials.cpp
+	collaboration/map_hub_edit_transaction.cpp
+	collaboration/map_hub_entity_index.cpp
 	collaboration/map_hub_imagery_catalog.cpp
+	collaboration/map_hub_operation_store.cpp
+	collaboration/map_hub_sync_controller.cpp
+	collaboration/map_hub_sync_queue.cpp
+	collaboration/oom_json.cpp
+	collaboration/zstd_codec.cpp
 	collaboration/map_hub_workspace.cpp
   
   core/autosave.cpp
@@ -400,6 +407,8 @@ target_link_libraries(Mapper_Common
   Mapper::VelloPresentation
   ICU::data
   ICU::uc
+  SQLite3::SQLite3
+  zstd::libzstd
 )
 foreach(lib
   cove

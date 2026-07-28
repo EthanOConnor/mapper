@@ -172,6 +172,12 @@ public:
 	 * Returns the type of the symbol.
 	 */
 	Type getType() const { return type; }
+
+	/** Returns the stable identity used by durable collaboration operations. */
+	const QString& persistentId() const;
+
+	/** Assigns a fresh identity when a duplicate becomes a distinct symbol. */
+	void renewPersistentId();
 	
 	// Convenience casts with type checking
 	/** Cast to PointSymbol with type checking */
@@ -642,6 +648,7 @@ protected:
 private:
 	mutable QImage icon;  ///< Cached symbol icon
 	QImage custom_icon;   ///< Custom symbol icon
+	QString persistent_id;
 	QString name;
 	QString description;
 	std::array<int, number_components> number;

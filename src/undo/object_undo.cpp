@@ -74,6 +74,11 @@ bool ObjectModifyingUndoStep::isEmpty() const
 	return modified_objects.empty();
 }
 
+bool ObjectModifyingUndoStep::isValid() const
+{
+	return structurally_valid && UndoStep::isValid();
+}
+
 void ObjectModifyingUndoStep::addObject(int index)
 {
 	modified_objects.push_back(index);
@@ -95,6 +100,46 @@ void ObjectModifyingUndoStep::getModifiedObjects(int part_index, ObjectSet& out)
 			Q_ASSERT(object_index >= 0 && object_index < map_part->getNumObjects());
 			out.insert(map_part->getObject(object_index));
 		}
+	}
+}
+
+void ObjectModifyingUndoStep::collectEntityChanges(std::vector<EntityChange>& out) const
+{
+	const auto* part = map->getPart(getPartIndex());
+	for (const auto index : modified_objects)
+	{
+		if (index < 0 || index >= part->getNumObjects())
+			continue;
+		const auto* object = part->getObject(index);
+		out.push_back({
+		    EntityChangeType::PutObject,
+		    getPartIndex(),
+		    index,
+		    object->persistentId(),
+		    object
+		});
+	}
+}
+
+void ObjectModifyingUndoStep::adjustForExternalObjectChange(
+    int changed_part_index, int object_index, int index_delta,
+    const QString& changed_entity_id)
+{
+	if (changed_part_index != getPartIndex())
+		return;
+	const auto* part = map->getPart(getPartIndex());
+	for (auto& index : modified_objects)
+	{
+		if (!changed_entity_id.isEmpty()
+		    && index >= 0 && index < part->getNumObjects()
+		    && part->getObject(index)->persistentId() == changed_entity_id)
+			structurally_valid = false;
+		if (index_delta > 0 && index >= object_index)
+			index += index_delta;
+		else if (index_delta < 0 && index > object_index)
+			index += index_delta;
+		else if (index_delta < 0 && index == object_index)
+			structurally_valid = false;
 	}
 }
 
@@ -180,7 +225,7 @@ ObjectCreatingUndoStep::~ObjectCreatingUndoStep()
 
 bool ObjectCreatingUndoStep::isValid() const
 {
-	return valid;
+	return valid && ObjectModifyingUndoStep::isValid();
 }
 
 void ObjectCreatingUndoStep::addObject(int)
@@ -392,6 +437,20 @@ UndoStep* AddObjectsUndoStep::undo()
 	
 	undone = true;
 	return undo_step;
+}
+
+void AddObjectsUndoStep::collectEntityChanges(std::vector<EntityChange>& out) const
+{
+	for (std::size_t i = 0; i < objects.size(); ++i)
+	{
+		out.push_back({
+		    EntityChangeType::DeleteObject,
+		    getPartIndex(),
+		    modified_objects[i],
+		    objects[i]->persistentId(),
+		    objects[i]
+		});
+	}
 }
 
 void AddObjectsUndoStep::removeContainedObjects(bool emit_selection_changed)

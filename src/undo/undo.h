@@ -48,6 +48,21 @@ class Object;
 class UndoStep
 {
 public:
+	enum class EntityChangeType
+	{
+		PutObject,
+		DeleteObject
+	};
+
+	struct EntityChange
+	{
+		EntityChangeType type;
+		int part_index;
+		int object_index;
+		QString object_id;
+		const Object* object;
+	};
+
 	/**
 	 * Types of undo steps for identification.
 	 * 
@@ -154,6 +169,16 @@ public:
 	 * The default implementation does nothing.
 	 */
 	virtual void getModifiedObjects(int part_index, ObjectSet& out) const;
+
+	/**
+	 * Describes the durable entity changes represented by the resulting map
+	 * state and this inverse step. Consumers must copy the result immediately.
+	 */
+	virtual void collectEntityChanges(std::vector<EntityChange>& out) const;
+
+	virtual void adjustForExternalObjectChange(
+	    int part_index, int object_index, int index_delta,
+	    const QString& changed_entity_id);
 	
 	
 	/**
@@ -242,6 +267,11 @@ public:
 	 * Adds the modified objects of all sub steps to the given set.
 	 */
 	void getModifiedObjects(int part_index, ObjectSet& out) const override;
+
+	void collectEntityChanges(std::vector<EntityChange>& out) const override;
+	void adjustForExternalObjectChange(
+	    int part_index, int object_index, int index_delta,
+	    const QString& changed_entity_id) override;
 	
 	
 	/** 
