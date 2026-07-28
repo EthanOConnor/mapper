@@ -98,7 +98,15 @@ void GnssController::connectExternal(QWidget* parent)
 	startDiscovery(parent);
 }
 
-void GnssController::startDiscovery(QWidget* parent)
+void GnssController::chooseExternalReceiver(QWidget* parent)
+{
+	ensureSession();
+	if (m_session->isActive())
+		m_session->stop();
+	startDiscovery(parent, true);
+}
+
+void GnssController::startDiscovery(QWidget* parent, bool force_picker)
 {
 	m_picker_parent = parent;
 	++m_discovery_generation;
@@ -111,7 +119,8 @@ void GnssController::startDiscovery(QWidget* parent)
 
 	auto generation = m_discovery_generation;
 	auto saved_address = Settings::getInstance().gnssDeviceAddress();
-	auto auto_connect = Settings::getInstance().gnssAutoConnect()
+	auto auto_connect = !force_picker
+	                 && Settings::getInstance().gnssAutoConnect()
 	                 && !saved_address.isEmpty();
 	connect(m_device_model, &QAbstractItemModel::rowsInserted,
 	        m_discovery, [this, generation, saved_address, auto_connect](
@@ -167,7 +176,7 @@ void GnssController::showDevicePicker(QWidget* parent)
 	connect(dialog, &GnssDeviceDialog::deviceSelected,
 	        this, &GnssController::connectDevice);
 	connect(dialog, &GnssDeviceDialog::refreshRequested,
-	        this, [this, parent] { startDiscovery(parent); });
+	        this, [this, parent] { startDiscovery(parent, true); });
 	connect(dialog, &GnssDeviceDialog::internalLocationRequested,
 	        this, [this, dialog] {
 			dialog->accept();
@@ -227,7 +236,7 @@ void GnssController::connectDevice(int row)
 	{
 		if (m_device_dialog)
 			m_device_dialog->showScanPage(
-			  tr("That receiver is no longer available. Refresh and try again."));
+			  tr("That receiver is no longer available. Scan again and try again."));
 		return;
 	}
 

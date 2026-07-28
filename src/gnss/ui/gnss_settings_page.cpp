@@ -40,6 +40,7 @@
 #include "settings.h"
 #include "gui/util_gui.h"
 #include "gui/widgets/settings_page.h"
+#include "gnss/gnss_controller.h"
 #include "gnss/ui/ntrip_settings_widget.h"
 
 
@@ -154,8 +155,16 @@ GnssSettingsPage::GnssSettingsPage(QWidget* parent)
 		updateDeviceSelector();
 		updateCorrectionControls();
 	});
-	connect(device_refresh_button, &QPushButton::clicked,
-	        this, &GnssSettingsPage::updateDeviceSelector);
+	connect(device_refresh_button, &QPushButton::clicked, this, [this]() {
+		auto source = normalizedReceiverSource(
+		  receiver_mode_box->currentData().toString());
+		if (source == receiver_ble_source)
+			GnssController::instance().chooseExternalReceiver(this);
+		else
+			updateDeviceSelector();
+	});
+	connect(&GnssController::instance(), &GnssController::sessionChanged,
+	        this, [this] { updateDeviceSelector(); });
 	connect(corrections_box, &QCheckBox::toggled,
 	        this, &GnssSettingsPage::updateCorrectionControls);
 
@@ -311,7 +320,12 @@ void GnssSettingsPage::updateDeviceSelector()
 
 	auto external = isExternalReceiverSource(source);
 	device_selector->setEnabled(external);
-	device_refresh_button->setEnabled(source == receiver_serial_source);
+	if (source == receiver_ble_source)
+		device_refresh_button->setText(tr("Scan"));
+	else
+		device_refresh_button->setText(tr("Refresh"));
+	device_refresh_button->setEnabled(
+	  source == receiver_ble_source || source == receiver_serial_source);
 	auto_connect_box->setEnabled(external && !device_selector->currentData().toString().isEmpty());
 }
 

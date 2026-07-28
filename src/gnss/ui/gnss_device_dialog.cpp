@@ -140,8 +140,8 @@ void GnssDeviceDialog::setupScanPage()
 	        this, &GnssDeviceDialog::internalLocationRequested);
 	layout->addWidget(internal_location_button);
 
-	// Refresh button
-	scan_button = new QPushButton(tr("Refresh"));
+	// Explicitly restart discovery.
+	scan_button = new QPushButton(tr("Scan Again"));
 	scan_button->setMinimumHeight(44);  // touch target
 	connect(scan_button, &QPushButton::clicked, this, [this]() {
 		scan_status_label->setText(tr("Scanning for devices..."));

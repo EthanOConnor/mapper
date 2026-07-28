@@ -42,6 +42,9 @@ public:
 	/// Start or resume the configured external receiver, presenting a native
 	/// BLE picker when no saved receiver can be connected automatically.
 	void connectExternal(QWidget* parent);
+	/// Stop any current receiver and present an interactive BLE scan so the
+	/// user can choose or replace the configured receiver.
+	void chooseExternalReceiver(QWidget* parent);
 	void disconnectExternal();
 	void useNtripProfile(const QString& name);
 
@@ -57,7 +60,7 @@ private:
 
 	void ensureSession();
 	void loadActiveNtripProfile();
-	void startDiscovery(QWidget* parent);
+	void startDiscovery(QWidget* parent, bool force_picker = false);
 	void showDevicePicker(QWidget* parent);
 	void connectDevice(int row);
 	void finishDiscovery();
