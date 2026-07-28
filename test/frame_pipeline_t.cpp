@@ -18,8 +18,10 @@
 #include <QPainter>
 #include <QPen>
 #include <QPlatformSurfaceEvent>
+#include <QPointingDevice>
 #include <QPixmap>
 #include <QResizeEvent>
+#include <QTouchEvent>
 #include <QTransform>
 #include <QVector>
 
@@ -101,6 +103,37 @@ private:
 	QRectF extent_;
 	bool ready_ = false;
 	mutable int collection_count_ = 0;
+};
+
+class MouseEventProbe final : public QObject
+{
+public:
+	int presses = 0;
+	int moves = 0;
+	int releases = 0;
+
+protected:
+	bool eventFilter(QObject*, QEvent* event) override
+	{
+		switch (event->type())
+		{
+		case QEvent::MouseButtonPress:
+			if (static_cast<QMouseEvent*>(event)->button() == Qt::LeftButton)
+				++presses;
+			break;
+		case QEvent::MouseMove:
+			if (static_cast<QMouseEvent*>(event)->buttons().testFlag(Qt::LeftButton))
+				++moves;
+			break;
+		case QEvent::MouseButtonRelease:
+			if (static_cast<QMouseEvent*>(event)->button() == Qt::LeftButton)
+				++releases;
+			break;
+		default:
+			break;
+		}
+		return false;
+	}
 };
 
 RasterTemplateTile rasterTile(QColor color, QRectF target)
@@ -536,6 +569,34 @@ void FramePipelineTest::mapWidgetUsesTheFrameContract()
 	QCOMPARE(view.panOffset(), QPoint());
 	QVERIFY(view.center() != center_before_drag);
 	QCOMPARE(canvas->presentationCursor().shape(), Qt::BitmapCursor);
+
+	MouseEventProbe touch_probe;
+	widget.installEventFilter(&touch_probe);
+	QPointingDevice touch_device(
+		QStringLiteral("frame-pipeline-touch"), 150,
+		QInputDevice::DeviceType::TouchScreen,
+		QPointingDevice::PointerType::Finger,
+		QInputDevice::Capability::Position, 2, 0);
+	QTouchEvent touch_begin(
+		QEvent::TouchBegin, &touch_device, Qt::NoModifier,
+		{ QEventPoint(0, QEventPoint::State::Pressed,
+		              drag_start, global_start) });
+	QCoreApplication::sendEvent(native_surface, &touch_begin);
+	QTouchEvent touch_update(
+		QEvent::TouchUpdate, &touch_device, Qt::NoModifier,
+		{ QEventPoint(0, QEventPoint::State::Updated,
+		              drag_end, global_end) });
+	QCoreApplication::sendEvent(native_surface, &touch_update);
+	QTouchEvent touch_end(
+		QEvent::TouchEnd, &touch_device, Qt::NoModifier,
+		{ QEventPoint(0, QEventPoint::State::Released,
+		              drag_end, global_end) });
+	QCoreApplication::sendEvent(native_surface, &touch_end);
+	QCOMPARE(touch_probe.presses, 1);
+	QCOMPARE(touch_probe.moves, 1);
+	QCOMPARE(touch_probe.releases, 1);
+	widget.removeEventFilter(&touch_probe);
+
 	auto const frame_is_current = [canvas] {
 		return canvas->currentFrame() && canvas->lastResult()
 		       && canvas->lastResult()->completion.frame_id == canvas->currentFrame()->id

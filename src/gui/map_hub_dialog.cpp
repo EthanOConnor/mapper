@@ -32,6 +32,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QMenu>
 #include <QMessageBox>
 #include <QPalette>
 #include <QPushButton>
@@ -194,14 +195,11 @@ void configureMobileLibraryTree(QTreeWidget *tree) {
   QScroller::grabGesture(tree->viewport(), QScroller::TouchGesture);
   auto *scroller = QScroller::scroller(tree->viewport());
   auto properties = scroller->scrollerProperties();
-  properties.setScrollMetric(QScrollerProperties::MaximumVelocity, 0.18);
-  properties.setScrollMetric(QScrollerProperties::DecelerationFactor, 0.35);
-  properties.setScrollMetric(QScrollerProperties::DragVelocitySmoothingFactor,
-                             0.45);
+  properties.setScrollMetric(QScrollerProperties::FrameRate,
+                             QScrollerProperties::Fps60);
+  properties.setScrollMetric(QScrollerProperties::MaximumVelocity, 0.22);
   properties.setScrollMetric(
       QScrollerProperties::AcceleratingFlickMaximumTime, 0.0);
-  properties.setScrollMetric(
-      QScrollerProperties::AcceleratingFlickSpeedupFactor, 1.0);
   properties.setScrollMetric(
       QScrollerProperties::HorizontalOvershootPolicy,
       QScrollerProperties::OvershootAlwaysOff);
@@ -956,6 +954,10 @@ MapHubDialog::MapHubDialog(MainWindow *window)
       "QTabBar::tab:selected { color: palette(text); border-bottom: 3px "
       "solid palette(highlight); }"
       "QTreeWidget { background: palette(window); border: 0; }"
+      "QToolButton#mapHubProjectMore { background: transparent; border: 0; "
+      "border-radius: 10px; padding: 8px; }"
+      "QToolButton#mapHubProjectMore:pressed { background: "
+      "palette(alternate-base); }"
       "QPushButton#mapHubLibraryPrimary { background: palette(highlight); "
       "color: palette(highlighted-text); border: 0; border-radius: 12px; "
       "padding: 10px 14px; }"
@@ -1341,6 +1343,10 @@ MapHubDialog::MapHubDialog(MainWindow *window)
     for (int column = 1; column < tree->columnCount(); ++column)
       tree->setColumnHidden(column, true);
   }
+  project_list->setRootIsDecorated(false);
+  project_list->setColumnHidden(4, false);
+  project_list->header()->setSectionResizeMode(4, QHeaderView::Fixed);
+  project_list->setColumnWidth(4, 52);
 #else
   tabs->addTab(project_list, tr("Venues & maps"));
   tabs->addTab(event_list, tr("Events"));
@@ -1436,11 +1442,6 @@ MapHubDialog::MapHubDialog(MainWindow *window)
   });
 #endif
 #if defined(MAPPER_MOBILE)
-  connect(
-      project_list, &QTreeWidget::itemClicked, this, [](QTreeWidgetItem *item) {
-        if (item->data(0, item_kind_role).toString() == QLatin1String("venue"))
-          item->setExpanded(!item->isExpanded());
-      });
   connect(event_list, &QTreeWidget::itemClicked, this,
           [](QTreeWidgetItem *item) {
             if (item->data(0, item_kind_role).toString() ==
@@ -1883,6 +1884,14 @@ void MapHubDialog::populate(const QJsonObject &response) {
   assignment_list->resizeColumnToContents(0);
   assignment_list->resizeColumnToContents(1);
   project_list->clear();
+#if defined(MAPPER_MOBILE)
+  QHash<QString, QString> venue_names;
+  for (const auto value : response.value(QStringLiteral("venues")).toArray()) {
+    const auto venue = value.toObject();
+    venue_names.insert(venue.value(QStringLiteral("id")).toString(),
+                       venue.value(QStringLiteral("name")).toString());
+  }
+#else
   QHash<QString, int> project_counts;
   QHash<QString, int> event_counts;
   for (const auto value :
@@ -1927,10 +1936,107 @@ void MapHubDialog::populate(const QJsonObject &response) {
     venue_items.insert(venue_id, item);
   }
   QTreeWidgetItem *unassigned = nullptr;
+#endif
   for (const auto value :
        response.value(QStringLiteral("projects")).toArray()) {
     auto object = value.toObject();
     auto revision = object.value(QStringLiteral("current_revision")).toObject();
+#if defined(MAPPER_MOBILE)
+    auto *item = new QTreeWidgetItem({
+        object.value(QStringLiteral("title")).toString(),
+        {},
+        {},
+        {},
+        {},
+    });
+    const auto project_id =
+        object.value(QStringLiteral("id")).toString();
+    const auto title =
+        object.value(QStringLiteral("title")).toString();
+    item->setData(0, id_role, project_id);
+    item->setData(0, item_kind_role, QStringLiteral("project"));
+    item->setData(0, title_role, title);
+
+    QStringList project_venue_names;
+    for (const auto value :
+         object.value(QStringLiteral("venues")).toArray()) {
+      const auto venue = value.toObject();
+      auto name = venue.value(QStringLiteral("name")).toString();
+      if (name.isEmpty())
+        name = venue_names.value(
+            venue.value(QStringLiteral("id")).toString());
+      if (!name.isEmpty() && !project_venue_names.contains(name))
+        project_venue_names.append(name);
+    }
+    QStringList details;
+    details.append(project_venue_names.isEmpty()
+                       ? tr("No venue assigned")
+                       : project_venue_names.join(QStringLiteral(", ")));
+    details.append(object.value(QStringLiteral("kind")).toString());
+    details.append(object.value(QStringLiteral("status")).toString());
+    if (!revision.isEmpty())
+      details.append(
+          tr("r%1").arg(revision.value(QStringLiteral("number")).toInt()));
+    details.removeAll(QString{});
+    item->setText(
+        0, title + QLatin1Char('\n') +
+               details.join(QStringLiteral("  •  ")));
+    project_list->addTopLevelItem(item);
+
+    auto *more = new QToolButton(project_list);
+    more->setObjectName(QStringLiteral("mapHubProjectMore"));
+    more->setAutoRaise(true);
+    more->setFocusPolicy(Qt::NoFocus);
+    more->setIcon(ActionIcon::fromName(u"three-dots"));
+    more->setIconSize(QSize(24, 24));
+    more->setMinimumSize(44, 44);
+    more->setToolTip(tr("Map and revision options"));
+    more->setAccessibleName(tr("More options for %1").arg(title));
+    more->setPopupMode(QToolButton::InstantPopup);
+    auto *menu = new QMenu(more);
+    auto revision_label = revision.isEmpty()
+                              ? tr("No current revision")
+                              : tr("Current revision: r%1")
+                                    .arg(revision
+                                             .value(QStringLiteral("number"))
+                                             .toInt());
+    const auto revision_state =
+        revision.value(QStringLiteral("state")).toString();
+    if (!revision_state.isEmpty())
+      revision_label += QStringLiteral("  •  ") + revision_state;
+    auto *revision_action = menu->addAction(revision_label);
+    revision_action->setEnabled(false);
+    menu->addSeparator();
+    auto *open_action = menu->addAction(tr("Open read-only"));
+    bool can_start_editing = false;
+    for (int i = 0; i < assignment_list->topLevelItemCount(); ++i) {
+      const auto *assignment = assignment_list->topLevelItem(i);
+      if (assignment->data(0, project_id_role).toString() == project_id &&
+          assignmentCanStart(assignment)) {
+        can_start_editing = true;
+        break;
+      }
+    }
+    auto *access_action = menu->addAction(
+        can_start_editing ? tr("Start editing…")
+                          : tr("Request editing access…"));
+    more->setMenu(menu);
+    connect(menu, &QMenu::aboutToShow, this, [this, item] {
+      project_list->setCurrentItem(item);
+      updateActions();
+    });
+    connect(open_action, &QAction::triggered, this,
+            [this, item] {
+              project_list->setCurrentItem(item);
+              openSelectedProject();
+            });
+    connect(access_action, &QAction::triggered, this,
+            [this, item] {
+              project_list->setCurrentItem(item);
+              requestSelectedProjectAccess();
+            });
+    project_list->setItemWidget(item, 4, more);
+#else
     auto add_project = [&](QTreeWidgetItem *parent) {
       auto *item = new QTreeWidgetItem({
           object.value(QStringLiteral("title")).toString(),
@@ -1976,9 +2082,14 @@ void MapHubDialog::populate(const QJsonObject &response) {
           add_project(parent);
       }
     }
+#endif
   }
+#if defined(MAPPER_MOBILE)
+  project_list->header()->resizeSection(4, 52);
+#else
   project_list->resizeColumnToContents(0);
   project_list->resizeColumnToContents(1);
+#endif
 
   event_list->clear();
   QTreeWidgetItem *upcoming_events = nullptr;

@@ -14,6 +14,7 @@
 #include <string>
 
 #include <QCursor>
+#include <QPointF>
 #include <QWidget>
 #include <QTimer>
 
@@ -63,6 +64,9 @@ private:
 	QTimer retry_timer_;
 	std::deque<render::VelloFrameResult> results_;
 	std::optional<render::VelloFrameResult> last_result_;
+	bool forwarding_single_touch_ = false;
+	QPointF single_touch_position_;
+	QPointF single_touch_global_position_;
 };
 
 }  // namespace OpenOrienteering::presentation

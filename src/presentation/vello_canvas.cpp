@@ -15,6 +15,7 @@
 #include <QMouseEvent>
 #include <QNativeGestureEvent>
 #include <QTabletEvent>
+#include <QTouchEvent>
 #include <QVBoxLayout>
 #include <QWheelEvent>
 
@@ -234,11 +235,78 @@ bool VelloCanvas::forwardInputEvent(QEvent* event)
 	case QEvent::TouchUpdate:
 	case QEvent::TouchEnd:
 	case QEvent::TouchCancel:
-		// The canvas covers its input authority exactly, so touch point local
-		// coordinates already match. Reusing the public event preserves every
-		// point's pressure, history, velocity, and device metadata.
+	{
+		auto const* touch = static_cast<QTouchEvent*>(event);
+		auto const& points = touch->points();
+		auto const has_point = !points.isEmpty();
+		if (has_point)
+		{
+			single_touch_position_ = map_to_target(points.front().position());
+			single_touch_global_position_ = points.front().globalPosition();
+		}
+
+		auto deliver_mouse = [&](QEvent::Type type, Qt::MouseButton button,
+		                         Qt::MouseButtons buttons) {
+			QMouseEvent forwarded(
+				type, single_touch_position_, single_touch_position_,
+				single_touch_global_position_, button, buttons,
+				touch->modifiers(), Qt::MouseEventSynthesizedByQt,
+				touch->pointingDevice()
+			);
+			forwarded.setTimestamp(touch->timestamp());
+			QCoreApplication::sendEvent(target, &forwarded);
+		};
+
+		// A second finger transfers input authority from the selected tool to
+		// MapWidget's gesture recognizer. End the synthetic single-finger
+		// sequence first so no pressed-button state leaks out of the handoff.
+		if (points.size() >= 2 && forwarding_single_touch_)
+		{
+			deliver_mouse(
+				QEvent::MouseButtonRelease, Qt::LeftButton, Qt::NoButton);
+			forwarding_single_touch_ = false;
+		}
+
+		// Preserve the original event for pinch/two-finger recognition.
 		QCoreApplication::sendEvent(target, event);
+
+		if (points.size() == 1)
+		{
+			switch (event->type())
+			{
+			case QEvent::TouchBegin:
+				forwarding_single_touch_ = true;
+				deliver_mouse(
+					QEvent::MouseButtonPress, Qt::LeftButton, Qt::LeftButton);
+				break;
+			case QEvent::TouchUpdate:
+				if (forwarding_single_touch_)
+					deliver_mouse(
+						QEvent::MouseMove, Qt::NoButton, Qt::LeftButton);
+				break;
+			case QEvent::TouchEnd:
+				if (forwarding_single_touch_)
+					deliver_mouse(
+						QEvent::MouseButtonRelease, Qt::LeftButton, Qt::NoButton);
+				forwarding_single_touch_ = false;
+				break;
+			case QEvent::TouchCancel:
+				break;
+			default:
+				break;
+			}
+		}
+		if (event->type() == QEvent::TouchCancel)
+		{
+			if (forwarding_single_touch_)
+				deliver_mouse(
+					QEvent::MouseButtonRelease, Qt::LeftButton, Qt::NoButton);
+			forwarding_single_touch_ = false;
+		}
+
+		event->accept();
 		return true;
+	}
 
 	default:
 		return false;

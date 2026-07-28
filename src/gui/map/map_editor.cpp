@@ -1990,6 +1990,11 @@ void MapEditorController::createMobileGUI()
 	bottom_action_bar->setToUseOverflowActionFrom(top_action_bar);
 	
 	top_action_bar->setParent(map_widget);
+	top_action_bar->setGeometry(
+	    0, 0, map_widget->width(), top_action_bar->sizeHint().height());
+	top_action_bar->show();
+	top_action_bar->raise();
+	show_top_bar_button->hide();
 	
 	auto* container_widget = new QWidget();
 	auto* layout = new QVBoxLayout();
