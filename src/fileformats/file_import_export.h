@@ -300,7 +300,7 @@ public:
 	 * available via device(), and commit the changes if exportImplementation()
 	 * returns successfully.
 	 */
-	bool doExport();
+	bool doExport(bool save_modified_templates = true);
 	
 	
 protected:

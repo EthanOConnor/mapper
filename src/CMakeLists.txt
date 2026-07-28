@@ -22,6 +22,13 @@ corrosion_import_crate(
   CRATES mapper-vello
   LOCKED
 )
+if(IOS)
+  # Corrosion cannot infer the Apple mobile target from CMake, and Cargo needs
+  # the same deployment floor as CMake/vcpkg to emit compatible load commands.
+  corrosion_set_env_vars(mapper_vello
+    "IPHONEOS_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}"
+  )
+endif()
 corrosion_add_cxxbridge(mapper-vello-cxx CRATE mapper_vello FILES lib.rs)
 target_compile_features(mapper-vello-cxx PRIVATE cxx_std_23)
 set_target_properties(mapper-vello-cxx PROPERTIES AUTOMOC OFF AUTOUIC OFF)
@@ -196,6 +203,8 @@ set(Mapper_Common_SRCS
   gui/print_widget.cpp
   gui/select_crs_dialog.cpp
   gui/settings_dialog.cpp
+  gnss/ui/gnss_settings_page.cpp
+  gnss/ui/ntrip_settings_widget.cpp
   gui/simple_course_dialog.cpp
   gui/task_dialog.cpp
   gui/text_browser_dialog.cpp
@@ -325,6 +334,15 @@ set(Mapper_Common_SRCS
   util/util.cpp
   util/xml_stream_util.cpp
 )
+if(IOS)
+  enable_language(OBJCXX)
+  list(APPEND Mapper_Common_SRCS
+    core/apple_document_access.mm
+  )
+  set_source_files_properties(core/apple_document_access.mm PROPERTIES
+    COMPILE_OPTIONS "-fobjc-arc"
+  )
+endif()
 
 # Extra header to be shown in the IDE or to be translated
 set(Mapper_Common_HEADERS
@@ -357,10 +375,17 @@ add_library(Mapper_Common STATIC
 mapper_target_defaults(Mapper_Common)
 target_include_directories(Mapper_Common PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 qt_add_resources(Mapper_Common "mapper-translations"
+	OUTPUT_TARGETS Mapper_translation_resource_targets
 	PREFIX "/translations"
 	BASE "${PROJECT_BINARY_DIR}/translations"
 	FILES ${translations_qm}
 )
+# Capture Qt's static-resource helper target and make it wait for lrelease.
+# Xcode does not infer the producer target from generated .qm input paths, so
+# a clean parallel archive can otherwise run rcc before those inputs exist.
+foreach(mapper_translation_resource_target IN LISTS Mapper_translation_resource_targets)
+	add_dependencies(${mapper_translation_resource_target} Mapper_translations)
+endforeach()
 target_link_libraries(Mapper_Common
   PUBLIC
   Clipper2::Clipper2
@@ -379,6 +404,7 @@ foreach(lib
   cove
   mapper-config
   mapper-gdal
+  mapper-gnss
   mapper-sensors
   Qt6::Network
   Qt6::PrintSupport
@@ -422,7 +448,7 @@ endif()
 
 qt_add_executable(Mapper WIN32 MACOSX_BUNDLE ${Mapper_SRCS})
 
-if(NOT ANDROID)
+if(NOT Mapper_MOBILE)
 	target_compile_definitions(Mapper PRIVATE MAPPER_USE_KDSINGLEAPPLICATION)
 	target_link_libraries(Mapper PRIVATE KDAB::kdsingleapplication)
 endif()
@@ -437,6 +463,103 @@ target_compile_definitions(Mapper PRIVATE
   QT_NO_CAST_TO_ASCII
   QT_USE_QSTRINGBUILDER
 )
+if(IOS)
+	set(mapper_ios_asset_catalog
+		"${PROJECT_SOURCE_DIR}/packaging/ios/Assets.xcassets")
+	set(mapper_ios_privacy_manifest
+		"${PROJECT_SOURCE_DIR}/packaging/ios/PrivacyInfo.xcprivacy")
+	set_source_files_properties("${mapper_ios_asset_catalog}" PROPERTIES
+		MACOSX_PACKAGE_LOCATION Resources
+	)
+	set_source_files_properties("${mapper_ios_privacy_manifest}" PROPERTIES
+		MACOSX_PACKAGE_LOCATION Resources
+	)
+	target_sources(Mapper PRIVATE
+		"${mapper_ios_asset_catalog}"
+		"${mapper_ios_privacy_manifest}"
+	)
+	foreach(localization_marker IN LISTS Mapper_native_localizations)
+		set_source_files_properties("${localization_marker}" PROPERTIES
+			# Xcode recognizes the source's .lproj parent and creates the
+			# localization directory itself. Including it here would produce a
+			# nested <lang>.lproj/<lang>.lproj directory in the bundle.
+			MACOSX_PACKAGE_LOCATION Resources)
+	endforeach()
+	set(mapper_ios_info_strings
+		"${PROJECT_SOURCE_DIR}/packaging/ios/en.lproj/InfoPlist.strings")
+	set_source_files_properties("${mapper_ios_info_strings}" PROPERTIES
+		MACOSX_PACKAGE_LOCATION Resources)
+	target_sources(Mapper PRIVATE
+		${Mapper_native_localizations}
+		"${mapper_ios_info_strings}")
+	set_target_properties(Mapper PROPERTIES
+		MACOSX_BUNDLE_BUNDLE_NAME "OpenOrienteering Mapper"
+		MACOSX_BUNDLE_BUNDLE_VERSION "${Mapper_IOS_BUILD_NUMBER}"
+		MACOSX_BUNDLE_COPYRIGHT "${Mapper_COPYRIGHT}"
+		MACOSX_BUNDLE_GUI_IDENTIFIER "org.openorienteering.mapper"
+		MACOSX_BUNDLE_INFO_PLIST "${PROJECT_SOURCE_DIR}/packaging/ios/Info.plist.in"
+		MACOSX_BUNDLE_SHORT_VERSION_STRING "${Mapper_VERSION}"
+		XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME AppIcon
+		XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "org.openorienteering.mapper"
+		XCODE_ATTRIBUTE_SKIP_INSTALL "NO"
+	)
+
+	function(mapper_attach_ios_resource_tree source_dir bundle_subdir)
+		set(resource_patterns ${ARGN})
+		if(NOT resource_patterns)
+			set(resource_patterns "*")
+		endif()
+		set(resource_files)
+		foreach(resource_pattern IN LISTS resource_patterns)
+			file(GLOB_RECURSE matching_files CONFIGURE_DEPENDS
+				LIST_DIRECTORIES FALSE "${source_dir}/${resource_pattern}")
+			list(APPEND resource_files ${matching_files})
+		endforeach()
+		list(REMOVE_DUPLICATES resource_files)
+		foreach(resource_file IN LISTS resource_files)
+			file(RELATIVE_PATH relative_file "${source_dir}" "${resource_file}")
+			get_filename_component(relative_dir "${relative_file}" DIRECTORY)
+			set(bundle_location "Resources/${bundle_subdir}")
+			if(relative_dir)
+				string(APPEND bundle_location "/${relative_dir}")
+			endif()
+			set_source_files_properties("${resource_file}" PROPERTIES
+				MACOSX_PACKAGE_LOCATION "${bundle_location}")
+		endforeach()
+		target_sources(Mapper PRIVATE ${resource_files})
+	endfunction()
+
+	# Keep C-library data on the real filesystem. Both PROJ and GDAL receive
+	# these paths through MapperResource and cannot consume Qt resource URLs.
+	mapper_attach_ios_resource_tree("${Mapper_PROJ_DATA_DIR}" "proj")
+	if(Mapper_USE_GDAL)
+		mapper_attach_ios_resource_tree("${Mapper_GDAL_DATA_DIR}" "gdal")
+		set_source_files_properties(
+			"${PROJECT_SOURCE_DIR}/src/gdal/mapper-osmconf.ini" PROPERTIES
+			MACOSX_PACKAGE_LOCATION "Resources/gdal")
+		target_sources(Mapper PRIVATE
+			"${PROJECT_SOURCE_DIR}/src/gdal/mapper-osmconf.ini")
+	endif()
+	mapper_attach_ios_resource_tree("${PROJECT_SOURCE_DIR}/examples" "examples"
+		"*.omap" "*.png")
+	mapper_attach_ios_resource_tree("${PROJECT_SOURCE_DIR}/symbol sets" "symbol sets"
+		"*.omap" "*.crt")
+	# Restrict the generated tree to runtime notices. Build-system files appear
+	# in this directory after generation and must not become app resources or
+	# invalidate CONFIGURE_DEPENDS during every Xcode ZERO_CHECK.
+	mapper_attach_ios_resource_tree("${PROJECT_BINARY_DIR}/doc/licensing" "doc"
+		"licensing.html" "common-licenses/*" "3rd-party/*")
+	if(TARGET Mapper-manual)
+		add_dependencies(Mapper Mapper-manual)
+		add_custom_command(TARGET Mapper POST_BUILD
+			COMMAND "${CMAKE_COMMAND}"
+				-Dmapper_manual_source=${PROJECT_BINARY_DIR}/doc/manual/html
+				-P "${PROJECT_SOURCE_DIR}/cmake/BundleIosManual.cmake"
+			COMMENT "Bundling the offline Mapper manual"
+			VERBATIM
+		)
+	endif()
+endif()
 if(ANDROID)
 	set(mapper_android_package_dir "${CMAKE_CURRENT_BINARY_DIR}/android-package")
 	file(COPY "${PROJECT_SOURCE_DIR}/packaging/android/"
@@ -501,7 +624,7 @@ install(TARGETS Mapper
 # Headless companion used by Map Hub to freeze the exact event revision into
 # a token-scoped public raster. It intentionally renders map objects only: no
 # authoring helpers, templates, or third-party basemap can leak into feedback.
-if(NOT ANDROID)
+if(NOT ANDROID AND NOT IOS)
 	qt_add_executable(MapperMapRenderer collaboration/map_hub_renderer.cpp)
 	mapper_target_defaults(MapperMapRenderer)
 	target_link_libraries(MapperMapRenderer PRIVATE Mapper_Common)

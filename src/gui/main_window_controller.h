@@ -26,6 +26,7 @@
 #include <QString>
 
 class QKeyEvent;
+class QIODevice;
 class QWidget;
 
 namespace OpenOrienteering {
@@ -69,6 +70,40 @@ public:
 	 *  @return true if saving was successful, false on errors
 	 */
 	virtual bool saveTo(const QString& path, const FileFormat& format);
+
+	/**
+	 * Marks a successfully staged and externally committed save as clean.
+	 * Platforms with coordinated document providers use this only after the
+	 * provider write has completed.
+	 */
+	virtual bool markSaveCommitted(
+		quint64 staged_revision,
+		bool retain_external_resource_dirtiness = true);
+
+	/**
+	 * Returns an opaque revision for the current saveable model state.
+	 *
+	 * A coordinated provider save captures this immediately after staging and
+	 * compares it again after the provider operation. Keeping the receipt in
+	 * the caller prevents an autosave from replacing the transaction's proof.
+	 */
+	virtual quint64 saveRevision() const;
+
+	/** Returns whether a resource referenced by the document needs its own save. */
+	virtual bool hasDirtyExternalResources() const;
+
+	/**
+	 * Serializes a save without mutating model or related external files.
+	 *
+	 * The logical path is still passed to the exporter when @p target_device
+	 * is used. This is essential for formats which encode paths relative to
+	 * the eventual document while writing bytes to a private provider staging
+	 * file.
+	 */
+	virtual bool stageSaveTo(const QString& logical_path,
+	                         const FileFormat& format,
+	                         QIODevice* target_device = nullptr,
+	                         quint64* staged_revision = nullptr);
 	
 	/** Export to a file, but don't change modified state
 	 *  with regard to the original file.
@@ -91,7 +126,10 @@ public:
 	 *      If nullptr, implementations should use MainWindowController::window.
 	 *  @return true if loading was successful, false on errors
 	 */
-	virtual bool loadFrom(const QString& path, const FileFormat& format, QWidget* dialog_parent = nullptr);
+	virtual bool loadFrom(const QString& path,
+	                      const FileFormat& format,
+	                      QWidget* dialog_parent = nullptr,
+	                      QIODevice* source_device = nullptr);
 	
 	/** Attach the controller to a main window. 
 	 *  The controller should create its user interface here.

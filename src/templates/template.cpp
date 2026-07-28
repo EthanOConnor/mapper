@@ -44,16 +44,24 @@
 #include <QMetaObject>
 #include <QMessageBox>
 #include <QRectF>
+#include <QScopeGuard>
+#include <QScopedValueRollback>
 #include <QSizeF>
 #include <QStringView>
 #include <QThread>
 #include <QTimer>
+#include <QTemporaryDir>
 #include <QTransform>
+#include <QUuid>
 #include <QXmlStreamAttributes>
 #include <QXmlStreamReader>
 #include <QXmlStreamWriter>
 
 #include "core/georeferencing.h"
+#if defined(Q_OS_IOS)
+#include "core/apple_document_access.h"
+#include "gui/main_window.h"
+#endif
 #include "core/map_view.h"
 #include "core/map.h"
 #include "core/objects/object.h"
@@ -368,6 +376,10 @@ Template::Template(const QString& path, not_null<Map*> map)
 	
 	auto canonical_path = file_info.canonicalFilePath();
 	template_path = canonical_path.isEmpty() ? path : canonical_path;
+
+#if defined(Q_OS_IOS)
+	resource_identity = QUuid::createUuid().toString(QUuid::WithoutBraces);
+#endif
 	
 	updateTransformationMatrices();
 }
@@ -378,9 +390,16 @@ Template::Template(const Template& proto)
 , template_file(proto.template_file)
 , template_path(proto.template_path)
 , template_relative_path(proto.template_relative_path)
+, resource_identity(
+	proto.resource_identity.isEmpty()
+	? QString{}
+	: QUuid::createUuid().toString(QUuid::WithoutBraces))
 , template_state(proto.template_state)
 , error_string(proto.error_string)
 , has_unsaved_changes(proto.has_unsaved_changes)
+#if defined(Q_OS_IOS)
+, auxiliary_document_fingerprint(proto.auxiliary_document_fingerprint)
+#endif
 , is_georeferenced(proto.is_georeferenced)
 , accounted_offset(proto.accounted_offset)
 , transform(proto.transform)
@@ -393,11 +412,17 @@ Template::Template(const Template& proto)
 , template_to_map(proto.template_to_map)
 , template_to_map_other(proto.template_to_map_other)
 {
-	// nothing else
+#if defined(Q_OS_IOS)
+	if (proto.auxiliary_document_access_active)
+		ensureAuxiliaryDocumentAccess();
+#endif
 }
 
 Template::~Template()
 {
+#if defined(Q_OS_IOS)
+	releaseAuxiliaryDocumentAccess();
+#endif
 	Q_ASSERT(template_state != Loaded);
 }
 
@@ -425,6 +450,11 @@ void Template::saveTemplateConfiguration(QXmlStreamWriter& xml, bool open, const
 		primary_path = relative_path;
 	xml.writeAttribute(QString::fromLatin1("path"), primary_path);
 	xml.writeAttribute(QString::fromLatin1("relpath"), relative_path);
+	if (!resource_identity.isEmpty())
+	{
+		xml.writeAttribute(
+			QString::fromLatin1("resource_id"), resource_identity);
+	}
 	
 	if (template_group)
 	{
@@ -482,6 +512,11 @@ std::unique_ptr<Template> Template::loadTemplateConfiguration(QXmlStreamReader& 
 		temp = std::make_unique<TemplatePlaceholder>(type.toUtf8(), path, &map);
 	
 	temp->setTemplateRelativePath(attributes.value(QLatin1String("relpath")).toString());
+	if (attributes.hasAttribute(QLatin1String("resource_id")))
+	{
+		temp->resource_identity =
+			attributes.value(QLatin1String("resource_id")).toString();
+	}
 	if (attributes.hasAttribute(QLatin1String("name")))
 		temp->template_file = attributes.value(QLatin1String("name")).toString();
 	temp->is_georeferenced = (attributes.value(QLatin1String("georef")) == QLatin1String("true"));
@@ -603,6 +638,15 @@ Q_ASSERT(temp->passpoints.size() == 0);
 
 bool Template::saveTemplateFile() const
 {
+	if (!writeTemplateFile(template_path))
+		return false;
+	const_cast<Template*>(this)->setHasUnsavedChanges(false);
+	return true;
+}
+
+bool Template::writeTemplateFile(const QString& path) const
+{
+	Q_UNUSED(path)
 	return false;
 }
 
@@ -613,6 +657,14 @@ void Template::switchTemplateFile(const QString& new_path, bool load_file)
 		setTemplateAreaDirty();
 		unloadTemplateFile();
 	}
+#if defined(Q_OS_IOS)
+	else
+	{
+		// Lookup retains security scope for Unloaded templates too. Always
+		// balance that lease under the old identity before changing the path.
+		releaseAuxiliaryDocumentAccess();
+	}
+#endif
 	
 	template_path          = new_path;
 	template_file          = QFileInfo(new_path).fileName();
@@ -625,11 +677,41 @@ void Template::switchTemplateFile(const QString& new_path, bool load_file)
 
 bool Template::execSwitchTemplateFileDialog(QWidget* dialog_parent)
 {
-	QString new_path = FileDialog::getOpenFileName(dialog_parent,
+	QString new_path;
+#if defined(Q_OS_IOS)
+	auto* interaction_owner =
+		MainWindow::nativeDocumentInteractionOwner(dialog_parent);
+	if (!interaction_owner
+	    || !interaction_owner->beginNativeDocumentInteraction(
+		    MainWindow::NativeDocumentCheckpoint::Required))
+	{
+		return false;
+	}
+	auto interaction_guard = qScopeGuard([interaction_owner] {
+		interaction_owner->endNativeDocumentInteraction();
+	});
+	QString picker_error;
+	if (!AppleDocumentAccess::chooseDocumentToOpen(
+			tr("Find the moved template file"), &new_path, &picker_error))
+	{
+		if (!picker_error.isEmpty())
+			QMessageBox::warning(dialog_parent, tr("Error"), picker_error);
+		return false;
+	}
+	new_path = QFileInfo(new_path).absoluteFilePath();
+	const bool temporary_access =
+		AppleDocumentAccess::beginAuxiliaryDocumentAccess(new_path);
+	auto temporary_access_guard = qScopeGuard([&new_path, temporary_access] {
+		if (temporary_access)
+			AppleDocumentAccess::endAuxiliaryDocumentAccess(new_path);
+	});
+#else
+	new_path = FileDialog::getOpenFileName(dialog_parent,
 	                                               tr("Find the moved template file"),
 	                                               QString(),
 	                                               tr("All files (*.*)") );
 	new_path = QFileInfo(new_path).canonicalFilePath();
+#endif
 	if (new_path.isEmpty())
 		return false;
 	
@@ -648,6 +730,10 @@ bool Template::execSwitchTemplateFileDialog(QWidget* dialog_parent)
 				auto self = map->setTemplate(pos, std::move(new_temp));
 				if (map->getTemplate(pos)->loadTemplateFile())
 				{
+#if defined(Q_OS_IOS)
+					interaction_owner->deferPrivateDraftCleanup(
+						old_path, resourceIdentity());
+#endif
 					// Loading succeeded. This object must be destroyed.
 					self.release()->deleteLater();
 					return true;
@@ -679,6 +765,11 @@ bool Template::execSwitchTemplateFileDialog(QWidget* dialog_parent)
 		return false;
 	}
 	
+	map->emitTemplateChanged(this);
+#if defined(Q_OS_IOS)
+	interaction_owner->deferPrivateDraftCleanup(
+		old_path, resourceIdentity());
+#endif
 	return true;
 }
 
@@ -687,9 +778,29 @@ bool Template::setupAndLoad(QWidget* dialog_parent, const MapView* view)
 	Q_ASSERT(getTemplateState() == Template::Configuring);
 	
 	bool center_in_view = true;
-	
+
+#if defined(Q_OS_IOS)
+	if (!prepareAuxiliaryDocumentSnapshot())
+		return false;
+	bool setup_ready = false;
+	{
+		// OGR georeferencing probes and the eventual import must observe the
+		// same immutable provider generation.
+		QScopedValueRollback<QString> path_guard{
+			template_path, auxiliary_document_snapshot_path};
+		setup_ready = preLoadSetup(dialog_parent);
+	}
+	if (!setup_ready)
+	{
+		auxiliary_document_fingerprint.clear();
+		auxiliary_document_snapshot_path.clear();
+		auxiliary_document_snapshot.reset();
+		return false;
+	}
+#else
 	if (!preLoadSetup(dialog_parent))
 		return false;
+#endif
 	if (!loadTemplateFile())
 		return false;
 	if (!postLoadSetup(dialog_parent, center_in_view))
@@ -715,6 +826,29 @@ bool Template::setupAndLoad(QWidget* dialog_parent, const MapView* view)
 
 Template::LookupResult Template::tryToFindTemplateFile(const QString& map_path)
 {
+#if defined(Q_OS_IOS)
+	// A bookmark follows a provider move even though the serialized POSIX path
+	// does not. Adopt the resolved identity before QFileInfo/GDAL probe it.
+	const auto resolved_path =
+		AppleDocumentAccess::resolvedAuxiliaryDocumentPath(template_path);
+	bool resolved_identity_adopted = false;
+	if (!resolved_path.isEmpty()
+	    && QFileInfo{resolved_path}.absoluteFilePath()
+	       != QFileInfo{template_path}.absoluteFilePath())
+	{
+		if (adoptTemplatePath(resolved_path))
+		{
+			map->emitTemplateChanged(this);
+			resolved_identity_adopted = true;
+		}
+	}
+	if (!resolved_identity_adopted)
+	{
+		// Hidden templates stay Unloaded, so the retained scope belongs to this
+		// Template rather than to a transient load call.
+		ensureAuxiliaryDocumentAccess();
+	}
+#endif
 	// This function normally sets the state either to Invalid or Unloaded.
 	// However, the Loaded state must not be changed here because this would
 	// cause inconsistencies with other data held by templates in this state.
@@ -770,6 +904,9 @@ Template::LookupResult Template::tryToFindTemplateFile(const QString& map_path)
 	
 	set_state(Invalid);
 	setErrorString(tr("No such file."));
+#if defined(Q_OS_IOS)
+	releaseAuxiliaryDocumentAccess();
+#endif
 	return NotFound;
 }
 
@@ -790,21 +927,99 @@ bool Template::preLoadSetup(QWidget* /*dialog_parent*/)
 	return true;
 }
 
+#if defined(Q_OS_IOS)
+bool Template::prepareAuxiliaryDocumentSnapshot()
+{
+	if (auxiliary_document_snapshot
+	    && !auxiliary_document_snapshot_path.isEmpty())
+	{
+		return true;
+	}
+
+	ensureAuxiliaryDocumentAccess();
+	auxiliary_document_snapshot = std::make_unique<QTemporaryDir>(
+		QDir::tempPath() + QLatin1String("/Mapper-template-XXXXXX"));
+	if (!auxiliary_document_snapshot->isValid())
+	{
+		auxiliary_document_snapshot.reset();
+		setErrorString(tr("Could not create private template storage."));
+		return false;
+	}
+	auto snapshot_name = QFileInfo{template_path}.fileName();
+	if (snapshot_name.isEmpty())
+		snapshot_name = QLatin1String("template-data");
+	const auto snapshot_path = QDir{auxiliary_document_snapshot->path()}
+	                           .filePath(snapshot_name);
+	QString coordination_error;
+	QString coordinated_identity;
+	QByteArray loaded_fingerprint;
+	if (!AppleDocumentAccess::snapshotAuxiliaryDocument(
+		    template_path,
+		    snapshot_path,
+		    &loaded_fingerprint,
+		    &coordinated_identity,
+		    &coordination_error))
+	{
+		auxiliary_document_snapshot.reset();
+		if (!coordination_error.isEmpty())
+			setErrorString(coordination_error);
+		else
+			setErrorString(tr("Could not make a stable copy of this template."));
+		return false;
+	}
+
+	const auto previous_identity = QFileInfo{template_path}.absoluteFilePath();
+	if (!coordinated_identity.isEmpty()
+	    && coordinated_identity != previous_identity
+	    && adoptTemplatePath(coordinated_identity))
+	{
+		map->emitTemplateChanged(this);
+	}
+	auxiliary_document_fingerprint = loaded_fingerprint;
+	auxiliary_document_snapshot_path = snapshot_path;
+	return true;
+}
+#endif
+
 bool Template::loadTemplateFile()
 {
 	Q_ASSERT(template_state != Loaded);
-	
+
 	const State old_state = template_state;
+	const auto load_file = [this]() {
+	#if defined(Q_OS_IOS)
+		bool loaded = false;
+		if (prepareAuxiliaryDocumentSnapshot())
+		{
+			QScopedValueRollback<QString> path_guard{
+				template_path, auxiliary_document_snapshot_path};
+			loaded = loadTemplateFileImpl();
+		}
+		if (!loaded)
+		{
+			auxiliary_document_fingerprint.clear();
+			auxiliary_document_snapshot_path.clear();
+			auxiliary_document_snapshot.reset();
+		}
+		return loaded;
+#else
+		return loadTemplateFileImpl();
+#endif
+	};
 	
 	setErrorString(QString());
 	try
 	{
-		if (!fileExists())
+		bool source_exists = true;
+#if !defined(Q_OS_IOS)
+		source_exists = fileExists();
+#endif
+		if (!source_exists)
 		{
 			template_state = Invalid;
 			setErrorString(tr("No such file."));
 		}
-		else if (!loadTemplateFileImpl())
+		else if (!load_file())
 		{
 			template_state = Invalid;
 			if (errorString().isEmpty())
@@ -834,6 +1049,11 @@ bool Template::loadTemplateFile()
 	
 	if (old_state != template_state)
 		emit templateStateChanged();
+
+#if defined(Q_OS_IOS)
+	if (template_state == Invalid && auxiliary_document_access_active)
+		releaseAuxiliaryDocumentAccess();
+#endif
 		
 	return template_state != Invalid;
 }
@@ -853,6 +1073,11 @@ void Template::unloadTemplateFile()
 	}
 	unloadTemplateFileImpl();
 	template_state = Unloaded;
+#if defined(Q_OS_IOS)
+	auxiliary_document_snapshot_path.clear();
+	auxiliary_document_snapshot.reset();
+	releaseAuxiliaryDocumentAccess();
+#endif
 	emit templateStateChanged();
 }
 
@@ -1021,16 +1246,110 @@ void Template::setOtherTransform(const TemplateTransform& transform)
 
 void Template::setTemplateFileInfo(const QFileInfo& file_info)
 {
+#if defined(Q_OS_IOS)
+	const bool restore_access = auxiliary_document_access_active;
+	if (restore_access)
+		releaseAuxiliaryDocumentAccess();
+#endif
 	template_path = file_info.canonicalFilePath();
 	if (template_path.isEmpty())
 		template_path = file_info.filePath();
 	template_file = file_info.fileName();
+#if defined(Q_OS_IOS)
+	auxiliary_document_fingerprint.clear();
+	if (restore_access)
+		ensureAuxiliaryDocumentAccess();
+#endif
 }
 
 void Template::setTemplatePath(const QString& value)
 {
 	setTemplateFileInfo(QFileInfo(value));
 }
+
+bool Template::adoptTemplatePath(const QString& value)
+{
+#if defined(Q_OS_IOS)
+	const auto old_path = template_path;
+	const auto old_relative_path = template_relative_path;
+	const auto old_fingerprint = auxiliary_document_fingerprint;
+	const bool old_access_active = auxiliary_document_access_active;
+	releaseAuxiliaryDocumentAccess();
+#endif
+	setTemplateFileInfo(QFileInfo(value));
+	setTemplateRelativePath({});
+#if defined(Q_OS_IOS)
+	if (!ensureAuxiliaryDocumentAccess())
+	{
+		setTemplateFileInfo(QFileInfo(old_path));
+		setTemplateRelativePath(old_relative_path);
+		auxiliary_document_fingerprint = old_fingerprint;
+		if (old_access_active)
+			ensureAuxiliaryDocumentAccess();
+		return false;
+	}
+#endif
+	return true;
+}
+
+#if defined(Q_OS_IOS)
+bool Template::recoverFromPrivateSnapshot(const QString& snapshot_path)
+{
+	if (snapshot_path.isEmpty() || !QFileInfo::exists(snapshot_path))
+		return false;
+	const auto original_path = template_path;
+	const auto original_relative_path = template_relative_path;
+	const auto original_fingerprint = auxiliary_document_fingerprint;
+	const auto original_state = template_state;
+
+	switchTemplateFile(snapshot_path, true);
+	if (template_state != Loaded)
+	{
+		switchTemplateFile(original_path, original_state == Loaded);
+		template_state = original_state;
+		template_relative_path = original_relative_path;
+		auxiliary_document_fingerprint = original_fingerprint;
+		return false;
+	}
+
+	if (adoptTemplatePath(original_path))
+	{
+		template_relative_path = original_relative_path;
+		auxiliary_document_fingerprint = original_fingerprint;
+	}
+	else
+	{
+		// The provider grant was revoked. Keep the recovered private draft as
+		// the live identity so Save Template can export it somewhere new.
+		template_relative_path.clear();
+	}
+	setHasUnsavedChanges(true);
+	map->emitTemplateChanged(this);
+	return true;
+}
+
+bool Template::ensureAuxiliaryDocumentAccess()
+{
+	// Mapper's own draft hierarchy is already inside the application sandbox.
+	// Do not manufacture a security-scope lease that cannot be balanced.
+	if (AppleDocumentAccess::isPrivateAuxiliaryDraft(template_path))
+		return true;
+	if (!auxiliary_document_access_active)
+	{
+		auxiliary_document_access_active =
+			AppleDocumentAccess::beginAuxiliaryDocumentAccess(template_path);
+	}
+	return auxiliary_document_access_active;
+}
+
+void Template::releaseAuxiliaryDocumentAccess()
+{
+	if (!auxiliary_document_access_active)
+		return;
+	AppleDocumentAccess::endAuxiliaryDocumentAccess(template_path);
+	auxiliary_document_access_active = false;
+}
+#endif
 
 QString Template::getTemplateRelativePath(const QDir* map_dir) const
 {

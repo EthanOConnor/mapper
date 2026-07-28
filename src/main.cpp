@@ -29,6 +29,8 @@
 #include <QtPlugin>  // IWYU pragma: keep
 #include <QApplication>
 #include <QCoreApplication>
+#include <QEvent>
+#include <QFileOpenEvent>
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QLatin1String>
@@ -43,6 +45,7 @@
 #include <QTimer>
 #include <QTranslator>
 #include <QWidget>
+#include <QUrl>
 
 #ifdef MAPPER_USE_KDSINGLEAPPLICATION
 #include <kdsingleapplication.h>
@@ -51,6 +54,7 @@
 #include "global.h"
 #include "mapper_config.h"
 #include "mapper_resource.h"
+#include "core/document_path.h"
 #include "gui/home_screen_controller.h"
 #include "gui/main_window.h"
 #include "gui/widgets/mapper_proxystyle.h"
@@ -60,6 +64,52 @@
 // IWYU pragma: no_forward_declare QTranslator
 
 using namespace OpenOrienteering;
+
+
+namespace {
+
+class MapperApplication final : public QApplication
+{
+public:
+	using QApplication::QApplication;
+
+	void setDocumentWindow(MainWindow* window)
+	{
+		document_window = window;
+		for (const auto& path : std::as_const(pending_document_paths))
+			document_window->openExternalPath(path);
+		pending_document_paths.clear();
+	}
+
+protected:
+	bool event(QEvent* event) override
+	{
+#if defined(Q_OS_IOS)
+		if (event->type() == QEvent::FileOpen)
+		{
+			auto* open_event = static_cast<QFileOpenEvent*>(event);
+			auto path = DocumentPath::fromUrl(open_event->url());
+			if (path.isEmpty())
+				path = open_event->file();
+			if (!path.isEmpty())
+			{
+				if (document_window)
+					document_window->openExternalPath(path);
+				else
+					pending_document_paths.append(path);
+			}
+			return true;
+		}
+#endif
+		return QApplication::event(event);
+	}
+
+private:
+	QPointer<MainWindow> document_window;
+	QStringList pending_document_paths;
+};
+
+}  // namespace
 
 
 #if defined(MAPPER_USE_FAKE_POSITION_PLUGIN)
@@ -124,7 +174,7 @@ void connectPrimaryInstance(KDSingleApplication& app)
 
 int main(int argc, char** argv)
 {
-	QApplication qapp(argc, argv);
+	MapperApplication qapp(argc, argv);
 
 #ifdef MAPPER_USE_KDSINGLEAPPLICATION
 	// Use a stable identifier so launches from different paths share an instance.
@@ -211,6 +261,8 @@ int main(int argc, char** argv)
 		auto const arguments = firstRemoved(QCoreApplication::arguments());
 		for (auto const& arg : arguments)
 			first_window->openPathLater(arg);
+
+		qapp.setDocumentWindow(first_window);
 		
 		first_window->applicationStateChanged();
 		
@@ -218,7 +270,15 @@ int main(int argc, char** argv)
 		connectPrimaryInstance(single_app);
 #endif
 		
+#if defined(Q_OS_IOS)
+		// A top-level QWidget otherwise keeps its compact size hint while UIKit
+		// presents the scene full-screen, leaving most of the iPhone surface
+		// uncovered. Let Qt request the scene's full geometry on first show;
+		// UIKit still owns subsequent rotation and scene-size changes.
+		first_window->showFullScreen();
+#else
 		first_window->setVisible(true);
+#endif
 		first_window->raise();
 	});
 	

@@ -52,6 +52,40 @@ bool MainWindowController::saveTo(const QString& /*path*/, const FileFormat& /*f
 	return false;
 }
 
+bool MainWindowController::markSaveCommitted(
+	quint64 staged_revision,
+	bool retain_external_resource_dirtiness)
+{
+	Q_UNUSED(staged_revision)
+	Q_UNUSED(retain_external_resource_dirtiness)
+	// Nothing to commit in the generic controller.
+	return true;
+}
+
+quint64 MainWindowController::saveRevision() const
+{
+	return 0;
+}
+
+bool MainWindowController::hasDirtyExternalResources() const
+{
+	return false;
+}
+
+bool MainWindowController::stageSaveTo(const QString& logical_path,
+	                                   const FileFormat& format,
+	                                   QIODevice* target_device,
+	                                   quint64* staged_revision)
+{
+	if (target_device)
+		return false;
+	if (!exportTo(logical_path, format))
+		return false;
+	if (staged_revision)
+		*staged_revision = saveRevision();
+	return true;
+}
+
 bool MainWindowController::exportTo(const QString& path)
 {
 	auto format = FileFormats.findFormatForFilename(path, &FileFormat::supportsWriting);
@@ -83,7 +117,10 @@ bool MainWindowController::exportTo(const QString& /*path*/, const FileFormat& /
 	return false;
 }
 
-bool MainWindowController::loadFrom(const QString& /*path*/, const FileFormat& /*format*/, QWidget* /*dialog_parent*/)
+bool MainWindowController::loadFrom(const QString& /*path*/,
+	                                const FileFormat& /*format*/,
+	                                QWidget* /*dialog_parent*/,
+	                                QIODevice* /*source_device*/)
 {
 	return false;
 }

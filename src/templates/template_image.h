@@ -157,7 +157,7 @@ public:
 	const char* getTemplateType() const override {return "TemplateImage";}
 	bool isRasterGraphics() const override {return true;}
 
-	bool saveTemplateFile() const override;
+	bool writeTemplateFile(const QString& path) const override;
 	void saveTypeSpecificTemplateConfiguration(QXmlStreamWriter& xml) const override;
 	bool loadTypeSpecificTemplateConfiguration(QXmlStreamReader& xml) override;
 

@@ -57,8 +57,10 @@
 #include <QModelIndex>
 #include <QPainter>
 #include <QPixmap>
+#include <QPushButton>
 #include <QRect>
 #include <QScroller>
+#include <QScopeGuard>
 #include <QSettings>
 #include <QSize>
 #include <QSlider>
@@ -68,6 +70,7 @@
 #include <QStyleOptionButton>
 #include <QStyleOptionViewItem>
 #include <QTableView>
+#include <QTemporaryDir>
 #include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
@@ -79,6 +82,9 @@
 #endif /* WITH_COVE */
 
 #include "settings.h"
+#if defined(Q_OS_IOS)
+#include "core/apple_document_access.h"
+#endif
 #include "core/georeferencing.h"
 #include "core/map.h"
 #include "fileformats/file_format_registry.h"
@@ -237,18 +243,13 @@ TemplateListWidget::TemplateListWidget(Map& map, MapView& main_view, MapEditorCo
 	all_templates_layout->addWidget(template_table, 1);
 	
 	auto* new_button_menu = new QMenu(this);
+	new_button_menu->addAction(ActionIcon::fromName(u"open"), tr("Open..."), this, &TemplateListWidget::openTemplate);
+	new_button_menu->addAction(
+		controller.getAction("openonlineimagery"));
 	if (!mobile_mode)
 	{
-		new_button_menu->addAction(
-			controller.getAction("openonlineimagery"));
 		new_button_menu->addSeparator();
-		new_button_menu->addAction(ActionIcon::fromName(u"open"), tr("Open..."), this, &TemplateListWidget::openTemplate);
 		new_button_menu->addAction(controller.getAction("reopentemplate"));
-	}
-	else
-	{
-		new_button_menu->addAction(
-			controller.getAction("openonlineimagery"));
 	}
 	duplicate_action = new_button_menu->addAction(ActionIcon::fromName(u"tool-duplicate"), tr("Duplicate"), this, &TemplateListWidget::duplicateTemplate);
 #if 0
@@ -263,10 +264,19 @@ TemplateListWidget::TemplateListWidget(Map& map, MapView& main_view, MapEditorCo
 	new_button->setMenu(new_button_menu);
 	
 	delete_button = createToolButton(ActionIcon::fromName(u"minus"), tr("Remove"));
+	save_template_action = new QAction(
+		ActionIcon::fromName(u"save"), tr("Save template"), this);
+	connect(save_template_action, &QAction::triggered,
+	        this, &TemplateListWidget::saveTemplate);
+	auto* save_template_button = createToolButton(
+		save_template_action->icon(), save_template_action->text());
+	save_template_button->setDefaultAction(save_template_action);
+	save_template_button->setVisible(mobile_mode);
 	
 	auto* add_remove_layout = new SegmentedButtonLayout();
 	add_remove_layout->addWidget(new_button);
 	add_remove_layout->addWidget(delete_button);
+	add_remove_layout->addWidget(save_template_button);
 	
 	move_up_button = createToolButton(ActionIcon::fromName(u"arrow-up"), tr("Move Up"));
 	move_up_button->setAutoRepeat(true);
@@ -476,6 +486,7 @@ void TemplateListWidget::updateButtons()
 	
 	auto* temp = currentTemplate();
 	duplicate_action->setEnabled(bool(temp));
+	save_template_action->setEnabled(temp && temp->hasUnsavedChanges());
 	delete_button->setEnabled(bool(temp));	/// \todo Make it possible to delete multiple templates at once
 	
 	if (!mobile_mode)
@@ -577,8 +588,7 @@ void TemplateListWidget::itemDoubleClicked(const QModelIndex& index)
 		// Invalid template:
 		Q_FALLTHROUGH();
 	case TemplateTableModel::nameColumn():
-		if (!mobile_mode
-		    && row >= 0 && pos >= 0)
+		if (row >= 0 && pos >= 0)
 		{
 			changeTemplateFile(pos);
 		}
@@ -610,7 +620,7 @@ bool TemplateListWidget::eventFilter(QObject* watched, QEvent* event)
 				return true;
 			break;
 			
-#ifdef Q_OS_ANDROID
+#ifdef MAPPER_MOBILE
 		case QEvent::Show:
 			{
 				auto map_row = rowFromPos(map.getFirstFrontTemplate()) + 1;
@@ -632,6 +642,19 @@ bool TemplateListWidget::eventFilter(QObject* watched, QEvent* event)
 
 std::unique_ptr<Template> TemplateListWidget::showOpenTemplateDialog(QWidget* dialog_parent, MapEditorController& controller)
 {
+#if defined(Q_OS_IOS)
+	auto* interaction_owner =
+		MainWindow::nativeDocumentInteractionOwner(dialog_parent);
+	if (!interaction_owner
+	    || !interaction_owner->beginNativeDocumentInteraction(
+		    MainWindow::NativeDocumentCheckpoint::Required))
+	{
+		return {};
+	}
+	auto interaction_guard = qScopeGuard([interaction_owner] {
+		interaction_owner->endNativeDocumentInteraction();
+	});
+#endif
 	QSettings settings;
 	QString template_directory = settings.value(QString::fromLatin1("templateFileDirectory"), QDir::homePath()).toString();
 	
@@ -642,13 +665,38 @@ std::unique_ptr<Template> TemplateListWidget::showOpenTemplateDialog(QWidget* di
 		pattern.append(QLatin1String(extension));
 	}
 	pattern.remove(0, 1);
-	QString path = FileDialog::getOpenFileName(dialog_parent,
+	QString path;
+#if defined(Q_OS_IOS)
+	QString picker_error;
+	if (!AppleDocumentAccess::chooseDocumentToOpen(
+			QCoreApplication::translate(
+				"OpenOrienteering::MapEditorController", "Open template..."),
+			&path,
+			&picker_error))
+	{
+		if (!picker_error.isEmpty())
+			QMessageBox::warning(dialog_parent, tr("Error"), picker_error);
+		return {};
+	}
+	const bool temporary_access =
+		AppleDocumentAccess::beginAuxiliaryDocumentAccess(path);
+	auto temporary_access_guard = qScopeGuard([&path, temporary_access] {
+		if (temporary_access)
+			AppleDocumentAccess::endAuxiliaryDocumentAccess(path);
+	});
+#else
+	path = FileDialog::getOpenFileName(dialog_parent,
 	                                           QCoreApplication::translate("OpenOrienteering::MapEditorController",
 	                                                                       "Open template..."),
 	                                           template_directory,
 	                                           QString::fromLatin1("%1 (%2);;%3 (*.*)").arg(
 	                                               tr("Template files"), pattern, tr("All files")));
+#endif
+	#if defined(Q_OS_IOS)
+	auto canonical_path = QFileInfo(path).absoluteFilePath();
+	#else
 	auto canonical_path = QFileInfo(path).canonicalFilePath();
+	#endif
 	if (!canonical_path.isEmpty())
 	{
 		path = canonical_path;
@@ -711,15 +759,233 @@ void TemplateListWidget::openTemplate()
 	}
 }
 
+void TemplateListWidget::saveTemplate()
+{
+	auto* temp = currentTemplate();
+	if (!temp || !temp->hasUnsavedChanges())
+		return;
+
+#if defined(Q_OS_IOS)
+	auto* main_window = controller.getWindow();
+	if (!main_window || !main_window->beginNativeDocumentInteraction())
+		return;
+	auto interaction_guard = qScopeGuard(
+		[main_window] { main_window->endNativeDocumentInteraction(); });
+
+	QTemporaryDir staging_directory{
+		QDir::tempPath() + QLatin1String("/Mapper-template-XXXXXX")};
+	if (!staging_directory.isValid())
+	{
+		QMessageBox::warning(
+			this, tr("Error"), tr("Could not create a private template snapshot."));
+		return;
+	}
+	QString filename = QFileInfo{temp->getTemplatePath()}.fileName();
+	if (filename.isEmpty())
+		filename = QLatin1String("Mapper template.dat");
+	const auto snapshot_path =
+		QDir{staging_directory.path()}.filePath(filename);
+	if (!temp->writeTemplateFile(snapshot_path))
+	{
+		const auto detail = temp->errorString().isEmpty()
+		                    ? tr("The template format could not be serialized.")
+		                    : temp->errorString();
+		QMessageBox::warning(this, tr("Error"), detail);
+		return;
+	}
+	QByteArray snapshot_fingerprint;
+	QString snapshot_error;
+	if (!AppleDocumentAccess::fingerprintAuxiliaryDocument(
+			snapshot_path, &snapshot_fingerprint, &snapshot_error))
+	{
+		QMessageBox::warning(
+			this,
+			tr("Error"),
+			snapshot_error.isEmpty()
+				? tr("Mapper could not verify the private template snapshot.")
+				: snapshot_error);
+		return;
+	}
+	const auto staged_revision = map.modificationRevision();
+	const auto original_path = temp->getTemplatePath();
+	QString committed_path = original_path;
+	QString provider_error;
+	QByteArray committed_fingerprint;
+	bool saved = false;
+	bool save_copy = !AppleDocumentAccess::hasPersistedDocumentAccess(
+		original_path);
+	if (!save_copy)
+	{
+		saved = AppleDocumentAccess::writeAuxiliaryDocument(
+			original_path,
+			snapshot_path,
+			temp->auxiliaryDocumentFingerprint(),
+			&committed_fingerprint,
+			&provider_error);
+		if (!saved)
+		{
+			QMessageBox fallback{
+				QMessageBox::Warning,
+				tr("Template changed or unavailable"),
+				provider_error.isEmpty()
+					? tr("Mapper could not safely replace this template.")
+					: provider_error,
+				QMessageBox::NoButton,
+				this};
+			auto* save_copy_button = fallback.addButton(
+				tr("Save a Copy"), QMessageBox::AcceptRole);
+			fallback.addButton(QMessageBox::Cancel);
+			fallback.exec();
+			if (fallback.clickedButton() != save_copy_button)
+				return;
+			save_copy = true;
+			provider_error.clear();
+		}
+	}
+	if (save_copy)
+	{
+		saved = AppleDocumentAccess::exportAuxiliaryDocument(
+			snapshot_path, &committed_path, &provider_error);
+		if (saved
+		    && QFileInfo{committed_path}.suffix().compare(
+			    QFileInfo{snapshot_path}.suffix(), Qt::CaseInsensitive) != 0)
+		{
+			provider_error = tr(
+				"Files saved the copy with an incompatible extension. The copy was "
+				"left untouched, and this template remains linked to its previous file.");
+			saved = false;
+		}
+	}
+	if (!saved)
+	{
+		QMessageBox::warning(
+			this,
+			tr("Template not saved"),
+			provider_error.isEmpty()
+				? tr("The provider could not save the template.")
+				: provider_error);
+		return;
+	}
+
+	const bool snapshot_is_current =
+		map.modificationRevision() == staged_revision;
+	if (committed_path != original_path)
+	{
+		if (!temp->adoptTemplatePath(committed_path))
+		{
+			QMessageBox::warning(
+				this,
+				tr("Exported copy needs attention"),
+				tr("Files saved the template copy, but Mapper could not retain "
+				   "access to it. The template remains linked to its previous file "
+				   "and marked as modified."));
+			return;
+		}
+		map.emitTemplateChanged(temp);
+		if (AppleDocumentAccess::isPrivateAuxiliaryDraft(original_path))
+		{
+			if (auto* window = controller.getWindow())
+			{
+				window->deferPrivateDraftCleanup(
+					original_path, temp->resourceIdentity());
+			}
+		}
+	}
+	if (save_copy
+	    && !AppleDocumentAccess::fingerprintAuxiliaryDocument(
+		    committed_path, &committed_fingerprint, &provider_error))
+	{
+		QMessageBox::warning(
+			this,
+			tr("Saved copy needs attention"),
+			provider_error.isEmpty()
+				? tr("Files saved the template, but Mapper could not verify the copy. "
+				     "It remains marked as modified.")
+				: provider_error);
+		return;
+	}
+	if (save_copy && committed_fingerprint != snapshot_fingerprint)
+	{
+		QMessageBox::warning(
+			this,
+			tr("Saved copy changed"),
+			tr("The provider changed the exported template before Mapper could "
+			   "verify it. The copy was left untouched and the template remains "
+			   "marked as modified."));
+		return;
+	}
+	temp->setAuxiliaryDocumentFingerprint(committed_fingerprint);
+	if (snapshot_is_current)
+	{
+		temp->setHasUnsavedChanges(false);
+		if (auto* window = controller.getWindow())
+		{
+			AppleDocumentAccess::discardPrivateAuxiliaryRecovery(
+				window->currentPath(), temp->resourceIdentity(), original_path);
+		}
+	}
+	else
+	{
+		QMessageBox::warning(
+			this,
+			tr("Template changed during save"),
+			tr("Files received a complete snapshot, but the template changed while "
+			   "the picker was open. The newer template remains marked as modified."));
+	}
+	if (auto* window = controller.getWindow())
+		window->setHasUnsavedChanges(map.hasUnsavedChanges());
+	setButtonsDirty();
+#else
+	if (!temp->saveTemplateFile())
+		QMessageBox::warning(this, tr("Error"), temp->errorString());
+#endif
+}
+
 void TemplateListWidget::deleteTemplate()
 {
 	int pos = posFromRow(currentRow());
 	Q_ASSERT(pos >= 0);
+#if defined(Q_OS_IOS)
+	auto* temp = map.getTemplate(pos);
+	if (temp->hasUnsavedChanges())
+	{
+		const auto choice = QMessageBox::warning(
+			this,
+			tr("Discard template changes?"),
+			tr("Save this template before removing it, or discard its unsaved "
+			   "changes now."),
+			QMessageBox::Discard | QMessageBox::Cancel,
+			QMessageBox::Cancel);
+		if (choice != QMessageBox::Discard)
+			return;
+		if (auto* window = controller.getWindow())
+		{
+			AppleDocumentAccess::discardPrivateAuxiliaryRecovery(
+				window->currentPath(),
+				temp->resourceIdentity(),
+				temp->getTemplatePath());
+		}
+		temp->setHasUnsavedChanges(false);
+	}
+#endif
 	
 	if (Settings::getInstance().getSettingCached(Settings::Templates_KeepSettingsOfClosed).toBool())
 		map.closeTemplate(pos);
 	else
+	{
+#if defined(Q_OS_IOS)
+		if (auto* window = controller.getWindow())
+		{
+			window->deferPrivateDraftCleanup(
+				temp->getTemplatePath(), temp->resourceIdentity());
+			AppleDocumentAccess::discardPrivateAuxiliaryRecovery(
+				window->currentPath(),
+				temp->resourceIdentity(),
+				temp->getTemplatePath());
+		}
+#endif
 		map.deleteTemplate(pos);
+	}
 }
 
 void TemplateListWidget::duplicateTemplate()

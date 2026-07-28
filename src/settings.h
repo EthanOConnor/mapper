@@ -124,7 +124,7 @@ public:
 	int getStartDragDistancePx();
 	
 	
-#ifdef Q_OS_ANDROID
+#ifdef MAPPER_MOBILE
 	constexpr bool touchModeEnabled() const noexcept { return true; }
 	void setTouchModeEnabled(bool /* ignored */) {};
 	constexpr static bool mobileModeEnforced() noexcept { return true; }
@@ -142,7 +142,7 @@ public:
 	 * current setting at construction time, and to tear down accordingly on
 	 * destruction.
 	 * 
-	 * On Android, or with enforced mobile mode, touch mode is always active
+	 * On mobile platforms, or with enforced mobile mode, touch mode is always active
 	 * (constexpr true) and cannot be disabled.
 	 */
 	bool touchModeEnabled() const noexcept { return touch_mode_enabled; }
@@ -150,7 +150,7 @@ public:
 	/**
 	 * Enables or disables touch mode on PCs.
 	 * 
-	 * On Android, or with enforced mobile mode, this function does nothing.
+	 * On mobile platforms, or with enforced mobile mode, this function does nothing.
 	 */
 	void setTouchModeEnabled(bool enabled);
 	
@@ -159,7 +159,7 @@ public:
 	 * mobile devices.
 	 * 
 	 * This is intended as a utility for developers wanting to test or to debug
-	 * Android features without taking the slow deployment path to a real device.
+	 * mobile features without taking the slow deployment path to a real device.
 	 * 
 	 * The property does not change during execution. On Android, it is constexpr
 	 * true, giving the compile the chance for extra optimizations. On PCs, it
@@ -211,6 +211,20 @@ public:
 	 * behaviour.
 	 */
 	void setNmeaSerialPort(const QString& name);
+
+	QString gnssDeviceAddress() const { return sensors.gnss_device_address; }
+	QString gnssDeviceName() const { return sensors.gnss_device_name; }
+	bool gnssAutoConnect() const { return sensors.gnss_auto_connect; }
+	bool gnssAutoStartNtrip() const { return sensors.gnss_auto_start_ntrip; }
+	bool gnssRawLogging() const { return sensors.gnss_raw_logging; }
+	QString gnssNtripActiveProfile() const { return sensors.gnss_ntrip_active_profile; }
+
+	void setGnssDeviceAddress(const QString& address);
+	void setGnssDeviceName(const QString& name);
+	void setGnssAutoConnect(bool enabled);
+	void setGnssAutoStartNtrip(bool enabled);
+	void setGnssRawLogging(bool enabled);
+	void setGnssNtripActiveProfile(const QString& profile);
 	
 	/// Returns a vector of colors for paint on template tool.
 	std::vector<QColor> paintOnTemplateColors() const;
@@ -244,9 +258,15 @@ private:
 	struct {
 		QString position_source = {};
 		QString nmea_serialport = {};
+		QString gnss_device_address = {};
+		QString gnss_device_name = {};
+		bool gnss_auto_connect = true;
+		bool gnss_auto_start_ntrip = false;
+		bool gnss_raw_logging = false;
+		QString gnss_ntrip_active_profile = {};
 	} sensors;
 	
-#ifndef Q_OS_ANDROID
+#ifndef MAPPER_MOBILE
 	bool touch_mode_enabled = false;
 #endif
 };

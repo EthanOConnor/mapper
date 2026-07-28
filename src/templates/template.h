@@ -27,6 +27,7 @@
 #include <vector>
 
 #include <QtGlobal>
+#include <QByteArray>
 #include <QFlags>
 #include <QMetaType>
 #include <QObject>
@@ -46,6 +47,7 @@ class QFileInfo;
 class QPointF;
 class QRectF;
 class QTransform;
+class QTemporaryDir;
 class QWidget;
 class QXmlStreamReader;
 class QXmlStreamWriter;
@@ -289,6 +291,9 @@ public:
 	 * is true. After successful saving, hasUnsavedChanges() shall return false.
 	 */
 	virtual bool saveTemplateFile() const;
+
+	/** Serializes the template to @p path without changing its dirty state. */
+	virtual bool writeTemplateFile(const QString& path) const;
 	
 	/**
 	 * Changes a template's file without changing the parameters.
@@ -599,8 +604,27 @@ public:
 	void setTemplateFileInfo(const QFileInfo& file_info);
 	
 	inline const QString& getTemplatePath() const {return template_path;}
+	/** Stable identity for recovery and provider-independent resource receipts. */
+	inline const QString& resourceIdentity() const {return resource_identity;}
 	/// Changes the path and filename only. Does not do any reloading etc.
 	void setTemplatePath(const QString& value);
+
+	/** Changes a loaded template's identity without unloading its contents. */
+	bool adoptTemplatePath(const QString& value);
+
+#if defined(Q_OS_IOS)
+	/** Restores private recovery bytes while preserving the provider identity. */
+	bool recoverFromPrivateSnapshot(const QString& snapshot_path);
+
+	const QByteArray& auxiliaryDocumentFingerprint() const
+	{
+		return auxiliary_document_fingerprint;
+	}
+	void setAuxiliaryDocumentFingerprint(const QByteArray& value)
+	{
+		auxiliary_document_fingerprint = value;
+	}
+#endif
 	
 	/**
 	 * Returns an updated relative path.
@@ -740,6 +764,14 @@ signals:
 	
 	
 protected:
+#if defined(Q_OS_IOS)
+	/** Retains/releases the exact security-scoped template URL when available. */
+	bool ensureAuxiliaryDocumentAccess();
+	void releaseAuxiliaryDocumentAccess();
+	/** Makes the immutable provider snapshot shared by setup and actual loading. */
+	bool prepareAuxiliaryDocumentSnapshot();
+#endif
+
 	/**
 	 * Sets the error description which will be returned by errorString().
 	 */
@@ -841,6 +873,9 @@ protected:
 	/// The template path relative to the map file (e.g. "../me/map.bmp").
 	/// Can be empty as long as the map file has not been saved yet.
 	QString template_relative_path;
+
+	/// Stable template-instance identity, persisted when assigned by a platform.
+	QString resource_identity;
 	
 	/// The template lifetime state
 	State template_state = Configuring;
@@ -850,6 +885,13 @@ protected:
 	
 	/// Does the template itself (not its transformation) have unsaved changes (e.g. GPS track has changed, image has been painted on)
 	bool has_unsaved_changes = false;
+
+#if defined(Q_OS_IOS)
+	bool auxiliary_document_access_active = false;
+	QByteArray auxiliary_document_fingerprint;
+	std::unique_ptr<QTemporaryDir> auxiliary_document_snapshot;
+	QString auxiliary_document_snapshot_path;
+#endif
 	
 	/// Is the template in georeferenced mode?
 	bool is_georeferenced = false;

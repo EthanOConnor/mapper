@@ -308,6 +308,11 @@ if(TARGET mapper-sensors)
 	endforeach()
 endif()
 
+if(TARGET mapper-gnss)
+	add_system_test(gnss_protocol_t)
+	target_link_libraries(gnss_protocol_t PRIVATE mapper-gnss)
+endif()
+
 set(IOF_3_XSD_FILE "" CACHE FILEPATH "Path of the IOF Data Standard 3 XSD file")
 if(IOF_3_XSD_FILE)
 	find_program(XMLLINT NAMES xmllint)

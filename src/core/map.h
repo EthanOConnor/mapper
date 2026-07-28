@@ -1267,6 +1267,9 @@ public:
 	 * result in no changed flag.
 	 */
 	bool hasUnsavedChanges() const;
+
+	/** Monotonic revision for rejecting a save snapshot made stale in flight. */
+	quint64 modificationRevision() const noexcept;
 	
 	/** Do not use this in usual cases, see hasUnsavedChanges(). */
 	void setHasUnsavedChanges(bool has_unsaved_changes);
@@ -1576,6 +1579,7 @@ private:
 	bool other_dirty;				//    ... for any other settings?
 	bool unsaved_changes;			// are there unsaved changes for any component?
 	bool unsaved_changes_signaled = false; // state of unsaved_changes before signals were blocked
+	quint64 modification_revision = 0;
 	
 	std::set<Object*> irregular_objects;
 	
@@ -1779,6 +1783,12 @@ inline
 bool Map::hasUnsavedChanges() const
 {
 	return unsaved_changes;
+}
+
+inline
+quint64 Map::modificationRevision() const noexcept
+{
+	return modification_revision;
 }
 
 inline

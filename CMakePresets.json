@@ -72,6 +72,64 @@
       }
     },
     {
+      "name": "ios",
+      "hidden": true,
+      "inherits": "base",
+      "generator": "Xcode",
+      "toolchainFile": "$env{QT_ROOT_DIR}/lib/cmake/Qt6/qt.toolchain.cmake",
+      "cacheVariables": {
+        "BUILD_TESTING": "OFF",
+        "CMAKE_OSX_ARCHITECTURES": "arm64",
+        "CMAKE_OSX_DEPLOYMENT_TARGET": "18.0",
+        "CMAKE_XCODE_ATTRIBUTE_DEAD_CODE_STRIPPING": "YES",
+        "CMAKE_XCODE_ATTRIBUTE_SUPPORTS_MACCATALYST": "NO",
+        "CMAKE_XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY": "1,2",
+        "Mapper_BUILD_API_DOCS": "OFF",
+        "Mapper_BUILD_MANUAL": "OFF",
+        "Mapper_DEVELOPMENT_BUILD": "OFF",
+        "Mapper_PACKAGE_BUILD": "OFF",
+        "QT_HOST_PATH": "$env{QT_HOST_PATH}",
+        "QT_USE_VCPKG": "ON",
+        "VCPKG_HOST_TRIPLET": "arm64-osx-release",
+        "VCPKG_OVERLAY_PORTS": "${sourceDir}/cmake/vcpkg/ports",
+        "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/cmake/vcpkg/triplets"
+      }
+    },
+    {
+      "name": "ios-device",
+      "displayName": "iOS device (arm64)",
+      "inherits": "ios",
+      "cacheVariables": {
+        "CMAKE_OSX_SYSROOT": "iphoneos",
+        "Rust_CARGO_TARGET": "aarch64-apple-ios",
+        "VCPKG_TARGET_TRIPLET": "arm64-ios-release"
+      }
+    },
+    {
+      "name": "ios-simulator",
+      "displayName": "iOS Simulator (x86_64)",
+      "inherits": "ios",
+      "cacheVariables": {
+        "CMAKE_OSX_ARCHITECTURES": "x86_64",
+        "CMAKE_OSX_SYSROOT": "iphonesimulator",
+        "CMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED": "NO",
+        "MANUAL_SECTIONS": "IOS",
+        "Mapper_BUILD_MANUAL": "ON",
+        "Rust_CARGO_TARGET": "x86_64-apple-ios",
+        "VCPKG_TARGET_TRIPLET": "x64-ios-simulator-release"
+      }
+    },
+    {
+      "name": "ios-release",
+      "displayName": "iOS signed release archive",
+      "inherits": "ios-device",
+      "cacheVariables": {
+        "MANUAL_SECTIONS": "IOS",
+        "Mapper_BUILD_MANUAL": "ON",
+        "Mapper_PACKAGE_BUILD": "ON"
+      }
+    },
+    {
       "name": "dev-linux",
       "displayName": "Linux development",
       "inherits": "base",
@@ -163,6 +221,9 @@
   "buildPresets": [
     { "name": "dev-macos", "configurePreset": "dev-macos" },
     { "name": "release-macos", "configurePreset": "release-macos" },
+    { "name": "ios-device", "configurePreset": "ios-device", "configuration": "Release" },
+    { "name": "ios-simulator", "configurePreset": "ios-simulator", "configuration": "Release" },
+    { "name": "ios-release", "configurePreset": "ios-release", "configuration": "Release" },
     { "name": "dev-macos-sanitize", "configurePreset": "dev-macos-sanitize" },
     { "name": "dev-linux", "configurePreset": "dev-linux" },
     { "name": "dev-windows", "configurePreset": "dev-windows", "configuration": "Debug" },

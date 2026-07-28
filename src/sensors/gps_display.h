@@ -23,19 +23,21 @@
 #define OPENORIENTEERING_GPS_DISPLAY_H
 
 #include <QtGlobal>
+#include <QGeoPositionInfo>
 #include <QObject>
 #include <QString>
 
 #include "core/map_coord.h"
 #include "render/overlay_scene.h"
 
-class QGeoPositionInfo;
 class QGeoPositionInfoSource;
 class QTimerEvent;
 
 namespace OpenOrienteering {
 
 class Georeferencing;
+struct GnssPosition;
+class GnssSession;
 class MapWidget;
 
 
@@ -69,6 +71,10 @@ public:
 	void startUpdates();
 	/// Stops regular position updates.
 	void stopUpdates();
+
+	/// Selects an external native GNSS session. Passing nullptr restores the
+	/// system location source without rebuilding the editor.
+	void setGnssSession(GnssSession* session);
 	
 	/// Sets GPS marker visibility (true by default)
 	void setVisible(bool visible);
@@ -120,6 +126,7 @@ signals:
 	
 private slots:
 	void positionUpdated(const QGeoPositionInfo& info);
+	void externalPositionUpdated(const OpenOrienteering::GnssPosition& position);
 	void error();
 	
 private:
@@ -159,6 +166,8 @@ private:
 	MapWidget* widget;
 	const Georeferencing& georeferencing;
 	QGeoPositionInfoSource* source = nullptr;
+	GnssSession* external_session = nullptr;
+	QGeoPositionInfo latest_position_info;
 	MapCoordF latest_gps_coord;
 	float latest_gps_coord_accuracy = 0;
 	PulsatingOpacity pulsating_opacity;

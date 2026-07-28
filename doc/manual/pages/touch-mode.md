@@ -42,7 +42,12 @@ Attention: the compass is very sensitive to magnetic materials. Android tries th
 
 If the currently active map work has valid georeferencing, this control will be enabled and will show a dot at your current position as obtained from Global Navigation Satellite Systems (GNSS, e.g. GPS) or other positioning services. In addition, in case an accuracy estimate (HDOP) is available, this shows a circle around the dot which indicates the positioning accuracy. The chance of your real position being in the circle is approximately 70%.
 
-While this is active, your track is automatically recorded into a GPX file in the directory of your map, named "<map> - GPS-<YYYY-MM-DD>.gpx". This file is included as a template in the map. You can simply show it using the template visibility control button to view your track.
+While this is active, your track is automatically recorded into a GPX template
+named "<map> - GPS-<YYYY-MM-DD>.gpx". On iPhone and iPad, Mapper first keeps
+that track as a recoverable private draft because a Files grant for the map
+does not authorize sibling files. Use **Save template** in the Templates view
+to choose its permanent Files location. Other platforms normally create the
+GPX beside the map. You can show it using the template visibility control.
 
 Note that track recording might be interrupted while the screen is off or the app is in the background to save battery. Keep the app active if you want to ensure continuous track recording.
 

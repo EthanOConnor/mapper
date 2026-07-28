@@ -21,6 +21,12 @@ namespace OpenOrienteering::DocumentPath {
 /** Returns true for an Android Storage Access Framework document URI. */
 bool isContentUri(QStringView path);
 
+/**
+ * Returns true when an exporter cannot create a sibling QSaveFile and must
+ * stage bytes before writing the specifically granted document.
+ */
+bool requiresDirectWrite(QStringView path);
+
 /** Converts a file or document URL to the identifier accepted by QFile. */
 QString fromUrl(const QUrl& url);
 

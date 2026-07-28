@@ -72,7 +72,9 @@ An Android version is available. It already has a special user interface, but it
 
 ### Will Mapper be available for iPhone / iPad?
 
-Probably not, due to distribution issues. Technically, a build should be feasible.
+Yes. Mapper maintains an iOS/iPadOS 18 or newer application for both iPhone and
+iPad. See [Mapper on iPhone and iPad](ios-app.md) for the Files, save, location,
+and platform-specific workflow.
 
 ### How do I hide/protect a symbol in the mobile UI?
 

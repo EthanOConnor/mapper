@@ -116,7 +116,14 @@ TemplateMap* TemplateMap::duplicate() const
 {
 	auto* copy = new TemplateMap(*this);
 	if (template_state == Loaded)
+	{
+	#if defined(Q_OS_IOS)
+		copy->setTemplateState(Unloaded);
+		copy->loadTemplateFile();
+	#else
 		copy->loadTemplateFileImpl();
+	#endif
+	}
 	return copy;
 }
 

@@ -2352,6 +2352,8 @@ void Map::resetPrinterConfig()
 
 void Map::setHasUnsavedChanges(bool has_unsaved_changes)
 {
+	if (has_unsaved_changes)
+		++modification_revision;
 	if (!has_unsaved_changes)
 	{
 		colors_dirty = false;

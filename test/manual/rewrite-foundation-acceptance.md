@@ -13,7 +13,7 @@ temporary historical oracle; its known defects were not copied.
 | Native Android documents | `344dda35` adopted Storage Access Framework `content://` identities throughout open, import, save, autosave, recent documents, and display names; `cbee73c7` completed save/reopen round trips. `document_path_t` passes and an arm64 API 36 emulator completed create, edit, save-as, close, reopen, and relaunch through the system document UI. | Implementation pass; repeat the surface/document smoke test on a physical release-candidate device |
 | Scalable action icons | `98118851` selects 97 project-native classic SVGs through the bounded icon loader; the alternative Material drawings remain inactive for future evaluation. `style_t` verifies the resources at DPR 2 and bounded requested sizes. | Pass |
 | Windows print precision | `f85b0f4e` replaced the private Qt print-engine dependency with a public-Qt full-page image composed at the configured printer resolution for native Windows GDI. `map_printer_t` verifies one raster spool, exact 600-DPI target geometry, rendered ink, no accidental vector calls, and less than 0.022 mm half-pixel placement quantization. | Modern tested equivalent pass; physical printer acceptance remains a release-candidate gate |
-| iOS decision | `SUPPORT.md` declares iOS unsupported until there is a maintained preset, package, runtime-surface acceptance, and release owner. No historical cross-build is carried as a support promise. | Pass |
+| Native iOS foundation | The maintained iOS 18+ target uses the official Qt 6.11.1 arm64 device and x86_64 simulator slices, checked-in Xcode/vcpkg/Rust presets, a UIKit/Metal Vello surface, and native open-in-place document handling. CI compiles the simulator application and an unsigned device application; signing/export and the physical gate remain external release-owner work. | Implementation pass; no physical-device pass is claimed |
 | Renderer comparison | `test/manual/render-parity.md` records the repeatable three-map comparison and the live verdict on `98118851`. Complete Map, Fishtrap, and Kelsey all passed; the rewrite was accepted as notably smoother than classic Mapper. | Pass |
 
 ## 2026-07-15 native interaction correction
@@ -358,6 +358,11 @@ These are deliberately small product checks, not missing automation machinery:
    precision spool.
 2. Before accepting the Android package as a release candidate, repeat the
    surface and document-access smoke test on a physical supported device.
+3. Before accepting a signed iOS package as a release candidate, complete
+   `ios-release-acceptance.md` on a physical iPhone and iPad running supported
+   iOS/iPadOS versions. Retain the native Metal interaction, lifecycle, local
+   Files, and cloud-provider document evidence. An unsigned arm64 compile or
+   simulator launch does not satisfy this gate.
 
 These physical checks do not block the modernized foundation tag. They do
 block accepting the corresponding platform package as a release candidate.
@@ -370,3 +375,53 @@ Public tag `modernization-foundation-final` points to
 passed macOS, Linux, Android, and Windows and produced the four supported
 platform artifacts. The closeout plan and this acceptance record are now
 historical context; the feature freeze ended when the tag became public.
+
+## 2026-07-16 native iOS foundation extension
+
+The iOS port is a descendant of the completed modernized foundation, not
+retroactive evidence for the four-platform `modernization-foundation-final`
+tag. It adds iOS/iPadOS 18.0 as a maintained target without importing the
+historical exploratory iOS branch or adding a parallel application layer.
+
+The build boundary is explicit:
+
+- `ios-simulator` uses CMake's Xcode generator, the official Qt 6.11.1
+  x86_64 simulator slice, `x86_64-apple-ios`, and the owned
+  `x64-ios-simulator-release` vcpkg triplet.
+- `ios-device` is the fast local arm64 compile surface. Hosted archive
+  validation uses `ios-release`, the official device slice,
+  `aarch64-apple-ios`, and `arm64-ios-release`, with code signing disabled.
+  The resulting `.xcarchive` is bundle evidence rather than an installable
+  release.
+- `ios-release` turns on the iOS manual, dependency notices, and complete
+  runtime resources. CI creates an unsigned archive as bundle evidence; Apple
+  signing identities, team selection, provisioning, signed archive creation,
+  and export policy remain outside the repository.
+
+The application boundary is native but deliberately narrow. Mapper presents a
+UIKit `UIDocumentPickerViewController` for main-document open and export, uses
+a native format action sheet before Save As, and handles documents opened from
+Files through `QFileOpenEvent`. Mapper is
+not a `UIDocumentBrowserViewController` application and does not declare a
+second document-browser lifecycle. Mapper retains security-scoped access with
+Apple's public bookmark APIs and owns the active document through a
+`UIDocument` subclass, which supplies coordinated provider I/O and presentation
+callbacks. External changes can be reloaded with an unsaved-change
+guard, moves update the active identity, deletion preserves the in-memory map
+for Save As, and dirty provider-initiated saves are refused until Mapper's GUI
+save path can serialize the QWidget-owned model on the main thread.
+
+The renderer remains the modern foundation renderer. A public Qt UIKit window
+handle becomes Vello/wgpu's `UiKitWindowHandle`, which selects Metal rather
+than introducing an iOS-only software or QPainter screen backend. iPhone and
+iPad share the mobile interaction policy while UIKit owns safe-area,
+orientation, suspension, and window geometry behavior.
+
+The workflow keeps a minimum-runtime simulator/archive lane and a separate
+current-hosted-Xcode archive lane. These unsigned builds establish toolchain,
+linkage, architecture, minimum-OS, and resource-bundle evidence; the simulator
+launch adds a startup check. None of them can establish touch feel, hardware
+Metal presentation, background suspension, Apple signing/export, or real
+Files-provider behavior. Those remain the bounded physical release-candidate
+gate in `ios-release-acceptance.md`; it has not been marked complete by this
+source implementation.

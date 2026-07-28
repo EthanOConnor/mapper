@@ -30,6 +30,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QDoubleSpinBox>
+#include <QDesktopServices>
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QIcon>
@@ -41,8 +42,10 @@
 #include <QPainter>
 #include <QPen>
 #include <QPointF>
-#include <QProcess>
-#include <QProcessEnvironment>
+#if !defined(MAPPER_MOBILE)
+#  include <QProcess>
+#  include <QProcessEnvironment>
+#endif
 #include <QSpacerItem>
 #include <QSpinBox>
 #include <QStandardPaths>
@@ -50,7 +53,7 @@
 #include <QStyle>
 #include <QTextDocumentFragment>
 #include <QToolButton>
-#if defined(Q_OS_ANDROID)
+#if defined(MAPPER_MOBILE)
 #include <QUrl>
 #endif
 #include <QVariant>
@@ -107,11 +110,20 @@ namespace Util {
 	
 	void showHelp(QWidget* dialog_parent, const QString& file_and_anchor)
 	{
-	#if defined(Q_OS_ANDROID)
+	#if defined(MAPPER_MOBILE)
 		const QString manual_path = QLatin1String("doc:/manual/") + file_and_anchor;
-		const QUrl help_url = QUrl::fromLocalFile(manual_path);
-		TextBrowserDialog help_dialog(help_url, dialog_parent);
-		help_dialog.exec();
+		if (QFileInfo::exists(manual_path))
+		{
+			const QUrl help_url = QUrl::fromLocalFile(manual_path);
+			TextBrowserDialog help_dialog(help_url, dialog_parent);
+			help_dialog.exec();
+		}
+		else
+		{
+			const QUrl online_manual{QString::fromLatin1(
+				"https://www.openorienteering.org/mapper-manual/pages/")};
+			QDesktopServices::openUrl(online_manual.resolved(QUrl{file_and_anchor}));
+		}
 		return;
 	#else
 		const auto base_url = QLatin1String("qthelp://" MAPPER_HELP_NAMESPACE "/manual/");

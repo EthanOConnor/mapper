@@ -29,6 +29,9 @@
 #include "core/map.h"
 #include "template.h"
 #include "gui/util_gui.h"
+#if defined(Q_OS_IOS)
+#include "gui/main_window.h"
+#endif
 
 
 namespace OpenOrienteering {
@@ -101,6 +104,17 @@ void ReopenTemplateDialog::updateClosedTemplateList()
 
 void ReopenTemplateDialog::clearClicked()
 {
+#if defined(Q_OS_IOS)
+	if (auto* window = MainWindow::nativeDocumentInteractionOwner(this))
+	{
+		for (int index = 0; index < map->getNumClosedTemplates(); ++index)
+		{
+			auto* temp = map->getClosedTemplate(index);
+			window->deferPrivateDraftCleanup(
+				temp->getTemplatePath(), temp->resourceIdentity());
+		}
+	}
+#endif
 	closed_template_list->clear();
 	map->clearClosedTemplates();
 	clear_button->setEnabled(false);

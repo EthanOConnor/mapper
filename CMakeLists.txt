@@ -25,6 +25,16 @@ set(Mapper_COPYRIGHT "(C) 2026 The OpenOrienteering developers")
 math(EXPR Mapper_VERSION_CODE
 	"${Mapper_VERSION_MAJOR} * 1000000 + ${Mapper_VERSION_MINOR} * 10000 + ${Mapper_VERSION_PATCH} * 100 + 1")
 
+if(IOS)
+	set(Mapper_IOS_BUILD_NUMBER "${Mapper_VERSION_CODE}" CACHE STRING
+		"Monotonically increasing iOS CFBundleVersion")
+	if(NOT Mapper_IOS_BUILD_NUMBER MATCHES
+	   "^[1-9][0-9]*(\\.[0-9]+(\\.[0-9]+)?)?$")
+		message(FATAL_ERROR
+			"Mapper_IOS_BUILD_NUMBER must contain one to three numeric components")
+	endif()
+endif()
+
 if(Mapper_VERSION_DISPLAY)
 	message(STATUS "Custom version display string: \"${Mapper_VERSION_DISPLAY}\"")
 elseif(CMAKE_BUILD_TYPE AND NOT CMAKE_BUILD_TYPE MATCHES "Release|MinSizeRel|RelWithDebInfo")
@@ -48,6 +58,12 @@ option(Mapper_DEBUG_TRANSLATIONS "Debug missing translations" OFF)
 option(Mapper_USE_GDAL "Enable GDAL raster and vector format support" ON)
 option(Mapper_WITH_COVE "Build contour line vectorization" ON)
 option(Mapper_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+
+if(ANDROID OR IOS)
+	set(Mapper_MOBILE ON)
+else()
+	set(Mapper_MOBILE OFF)
+endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
 	set(mapper_development_default ON)
@@ -75,7 +91,15 @@ option(Mapper_PACKAGE_BUILD
 
 set(Mapper_PACKAGE_NAME "openorienteering-mapper")
 
-if(WIN32)
+if(IOS)
+	# UIKit application bundles have a flat resource layout. Resources which
+	# must be present in a runnable Xcode build are attached to Mapper below;
+	# these destinations keep generated configuration and install rules aligned.
+	set(MAPPER_RUNTIME_DESTINATION .)
+	set(MAPPER_LIBRARY_DESTINATION .)
+	set(MAPPER_DATA_DESTINATION .)
+	set(MAPPER_ABOUT_DESTINATION doc)
+elseif(WIN32)
 	# Qt snapshots this standard deployment directory when Core is found.
 	# Keep runtime DLLs beside Mapper.exe so the ZIP launches independently
 	# of build-machine PATH entries.
@@ -173,23 +197,30 @@ set(mapper_qt_components
 	Network
 	Positioning
 	Sensors
-	SerialPort
 	Svg
 	Widgets
 )
+if(NOT IOS)
+	list(APPEND mapper_qt_components SerialPort)
+endif()
 if(Mapper_WITH_COVE)
 	list(APPEND mapper_qt_components Concurrent)
 endif()
 if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
 	list(APPEND mapper_qt_components Test)
 endif()
-if(NOT ANDROID)
+if(NOT Mapper_MOBILE)
 	list(APPEND mapper_qt_components PrintSupport)
 endif()
 find_package(Qt6 6.10.3 REQUIRED COMPONENTS ${mapper_qt_components})
+if(IOS AND Qt6_VERSION VERSION_LESS 6.11.1)
+	message(FATAL_ERROR
+		"The validated iOS foundation requires the official Qt 6.11.1 kit "
+		"or newer.")
+endif()
 qt_standard_project_setup(REQUIRES 6.10.3)
 
-if(NOT ANDROID)
+if(NOT Mapper_MOBILE)
 	set(KDSingleApplication_QT6 ON CACHE BOOL "" FORCE)
 	set(KDSingleApplication_STATIC ON CACHE BOOL "" FORCE)
 	set(KDSingleApplication_TESTS OFF CACHE BOOL "" FORCE)
@@ -220,9 +251,10 @@ add_subdirectory(src/imagery)
 if(Mapper_USE_GDAL)
 	add_subdirectory(src/gdal)
 endif()
+add_subdirectory(src/gnss)
 add_subdirectory(src/sensors)
-add_subdirectory(src)
 add_subdirectory(doc/licensing)
+add_subdirectory(src)
 # Keep deployment last: its install script signs the complete application bundle.
 add_subdirectory(packaging)
 

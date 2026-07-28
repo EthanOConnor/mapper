@@ -121,6 +121,7 @@ protected:
 #endif
 	
 	void openTemplate();
+	void saveTemplate();
 	void deleteTemplate();
 	void duplicateTemplate();
 	void moveTemplateUp();
@@ -157,6 +158,7 @@ private:
 	QBoxLayout* all_templates_layout;
 	
 	QAction* duplicate_action;
+	QAction* save_template_action;
 	QAction* move_by_hand_action;
 	QAction* position_action;
 	QAction* import_action;

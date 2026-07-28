@@ -10,6 +10,9 @@ function(mapper_define_build_options)
 		UNICODE
 		QT_ENABLE_STRICT_MODE_UP_TO=0x060b00
 	)
+	if(Mapper_MOBILE)
+		target_compile_definitions(mapper-build-options INTERFACE MAPPER_MOBILE)
+	endif()
 	target_compile_options(mapper-build-options INTERFACE
 		"$<$<COMPILE_LANG_AND_ID:CXX,AppleClang,Clang,GNU>:-Wall;-Wextra;-Wpedantic>"
 		"$<$<COMPILE_LANG_AND_ID:C,AppleClang,Clang,GNU>:-Wall;-Wextra;-Wpedantic>"

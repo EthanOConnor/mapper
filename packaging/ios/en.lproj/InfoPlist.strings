@@ -1,0 +1,4 @@
+/* Native permission text. Other localizations fall back to the development language. */
+"NSLocationWhenInUseUsageDescription" = "Mapper uses your location to show your position and heading on the map.";
+"NSBluetoothAlwaysUsageDescription" = "Mapper connects to your external GNSS receiver over Bluetooth to display precise positions and forward RTK corrections.";
+"NSMotionUsageDescription" = "Mapper uses device motion sensors to orient the compass and map to your heading.";

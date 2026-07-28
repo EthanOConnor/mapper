@@ -801,10 +801,565 @@ jobs:
           path: build/ci-android/tools/cargo-about/bin
           key: ${{ steps.cargo_about.outputs.cache-primary-key }}
 
+  ios:
+    name: iOS (${{ matrix.lane }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: minimum-runtime
+            runner: macos-15-intel
+            developer_dir: /Applications/Xcode_26.3.app/Contents/Developer
+            host_triplet: x64-osx-release
+            sdk_version: "26.2"
+            xcode_version: "26.3"
+            simulator: true
+          - lane: current-sdk
+            runner: macos-26
+            developer_dir: /Applications/Xcode_26.6.app/Contents/Developer
+            host_triplet: arm64-osx-release
+            sdk_version: "26.5"
+            xcode_version: "26.6"
+            simulator: false
+    env:
+      DEVELOPER_DIR: ${{ matrix.developer_dir }}
+      IOS_BUILD_NUMBER: "${{ github.run_number }}.${{ github.run_attempt }}"
+      IOS_NATIVE_LPROJ_MIN: "30"
+      IOS_QT_VERSION: "6.11.1"
+      IOS_SDK_VERSION: ${{ matrix.sdk_version }}
+      IOS_SIMULATOR_LANE: ${{ matrix.simulator }}
+      IOS_XCODE_VERSION: ${{ matrix.xcode_version }}
+      VCPKG_HOST_TRIPLET: ${{ matrix.host_triplet }}
+
+    steps:
+      - name: Check out Mapper
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Read vcpkg baseline
+        id: vcpkg_baseline
+        shell: bash
+        run: python -c 'import json; print("sha=" + json.load(open("vcpkg.json", encoding="utf-8"))["builtin-baseline"])' >> "$GITHUB_OUTPUT"
+
+      - name: Check out vcpkg
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: microsoft/vcpkg
+          ref: ${{ steps.vcpkg_baseline.outputs.sha }}
+          path: .vcpkg
+
+      - name: Select and verify Xcode
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d "$DEVELOPER_DIR"
+          xcodebuild -version | tee "$RUNNER_TEMP/xcode-version.txt"
+          grep -Fx "Xcode $IOS_XCODE_VERSION" "$RUNNER_TEMP/xcode-version.txt"
+          test "$(xcrun --sdk iphoneos --show-sdk-version)" = "$IOS_SDK_VERSION"
+          if [[ "$IOS_SIMULATOR_LANE" == true ]]; then
+            xcrun simctl list runtimes
+            xcrun simctl list runtimes | grep -F 'iOS 18.6'
+          fi
+
+      - name: Reclaim unselected hosted Xcode installations
+        shell: bash
+        run: |
+          set -euo pipefail
+          selected_xcode="${DEVELOPER_DIR%/Contents/Developer}"
+          test -d "$selected_xcode"
+          shopt -s nullglob
+          for candidate in /Applications/Xcode_*.app; do
+            if [[ "$candidate" != "$selected_xcode" ]]; then
+              sudo rm -rf -- "$candidate"
+            fi
+          done
+          test -d "$selected_xcode"
+          xcodebuild -version
+          df -h "$GITHUB_WORKSPACE"
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt
+          rustup target add aarch64-apple-ios x86_64-apple-ios
+
+      - name: Resolve cache identity
+        id: cache_identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          rust_release="$(rustc -vV | sed -n 's/^release: //p')"
+          rust_commit="$(rustc -vV | sed -n 's/^commit-hash: //p')"
+          xcode_hash="$(xcodebuild -version | shasum -a 256 | cut -c1-16)"
+          echo "rust=${rust_release}-${rust_commit:0:12}" >> "$GITHUB_OUTPUT"
+          echo "xcode=xcode-${IOS_SDK_VERSION}-${xcode_hash}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore vcpkg downloads
+        id: vcpkg_downloads
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .vcpkg/downloads
+          key: mapper-${{ env.CACHE_SCHEMA }}-vcpkg-downloads-${{ matrix.lane }}-${{ runner.arch }}-ios-${{ steps.vcpkg_baseline.outputs.sha }}-${{ hashFiles('vcpkg.json', 'cmake/vcpkg/**') }}
+          restore-keys: |
+            mapper-${{ env.CACHE_SCHEMA }}-vcpkg-downloads-${{ matrix.lane }}-${{ runner.arch }}-ios-${{ steps.vcpkg_baseline.outputs.sha }}-
+
+      - name: Restore vcpkg binary cache
+        id: vcpkg_binary
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .vcpkg-cache
+          key: mapper-${{ env.CACHE_SCHEMA }}-vcpkg-binary-${{ matrix.lane }}-${{ runner.arch }}-ios-${{ env.VCPKG_HOST_TRIPLET }}-${{ steps.cache_identity.outputs.xcode }}-${{ steps.vcpkg_baseline.outputs.sha }}-${{ hashFiles('requirements-build.txt', 'vcpkg.json', 'cmake/vcpkg/**') }}
+
+      - name: Restore Cargo sources
+        id: cargo_sources
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: mapper-${{ env.CACHE_SCHEMA }}-cargo-sources-${{ matrix.lane }}-${{ runner.arch }}-ios-${{ steps.cache_identity.outputs.rust }}-${{ hashFiles('rust-toolchain.toml', 'src/render/vello/Cargo.toml', 'src/render/vello/Cargo.lock') }}
+          restore-keys: |
+            mapper-${{ env.CACHE_SCHEMA }}-cargo-sources-${{ matrix.lane }}-${{ runner.arch }}-ios-${{ steps.cache_identity.outputs.rust }}-
+
+      - name: Restore Rust target cache
+        id: rust_target
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            build/ios-rust-checks
+            build/ios-simulator/Release/cargo
+            build/ios-release/Release/cargo
+          key: mapper-${{ env.CACHE_SCHEMA }}-rust-target-${{ matrix.lane }}-${{ runner.arch }}-ios-${{ steps.cache_identity.outputs.rust }}-${{ steps.cache_identity.outputs.xcode }}-${{ hashFiles('requirements-build.txt', 'rust-toolchain.toml', 'CMakePresets.json', 'CMakeLists.txt', 'src/CMakeLists.txt', 'src/render/vello/Cargo.toml', 'src/render/vello/Cargo.lock', 'src/render/vello/build.rs', 'src/render/vello/src/**', 'cmake/**') }}
+
+      - name: Restore cargo-about
+        id: cargo_about
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/ios-tools/cargo-about/bin
+          key: mapper-${{ env.CACHE_SCHEMA }}-cargo-about-${{ matrix.lane }}-${{ runner.arch }}-ios-${{ env.CARGO_ABOUT_VERSION }}-${{ steps.cache_identity.outputs.rust }}
+
+      - name: Set up Python for Qt installation
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13.3"
+
+      - name: Install host Qt tools
+        uses: jurplel/install-qt-action/action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4.3.1
+        with:
+          version: ${{ env.IOS_QT_VERSION }}
+          host: mac
+          target: desktop
+          arch: clang_64
+          archives: qtbase qttools
+          cache: false
+          install-deps: true
+
+      - name: Export Qt host path
+        shell: bash
+        run: echo "QT_HOST_PATH=$QT_ROOT_DIR" >> "$GITHUB_ENV"
+
+      - name: Install Qt for iOS
+        uses: jurplel/install-qt-action/action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4.3.1
+        with:
+          version: ${{ env.IOS_QT_VERSION }}
+          host: mac
+          target: ios
+          arch: ios
+          archives: qtbase qtsvg qttools qttranslations
+          modules: qtimageformats qtpositioning qtsensors
+          cache: false
+          install-deps: true
+
+      - name: Prune unused iOS Qt debug payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Official iOS Qt kits contain both static Release and Debug slices;
+          # the Debug binaries are roughly 10 GiB and this job is Release-only.
+          find "$QT_ROOT_DIR" -type f -name '*_debug*' -delete
+          find "$QT_ROOT_DIR/lib/cmake" \
+            -type f -name '*Targets-debug.cmake' -delete
+          test -f "$QT_ROOT_DIR/lib/QtCore.framework/QtCore"
+          test ! -e "$QT_ROOT_DIR/lib/QtCore.framework/QtCore_debug"
+
+      - name: Install iOS build tools
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check --requirement requirements-build.txt
+          brew install doxygen
+          cmake -E make_directory .vcpkg-cache
+          test -f "$QT_ROOT_DIR/lib/cmake/Qt6/Qt6Config.cmake"
+          test -x "$QT_HOST_PATH/bin/qtpaths"
+
+      - name: Verify iOS build disk budget
+        shell: bash
+        run: |
+          set -euo pipefail
+          df -h "$GITHUB_WORKSPACE"
+          du -sh "$QT_HOST_PATH" "$QT_ROOT_DIR" \
+            .vcpkg/downloads .vcpkg-cache 2>/dev/null || true
+
+          available_kib="$(df -Pk "$GITHUB_WORKSPACE" | awk 'END { print $4 }')"
+          minimum_kib=$((6 * 1024 * 1024))
+          if (( available_kib < minimum_kib )); then
+            echo "Only $((available_kib / 1024)) MiB is free; the dual iOS build requires at least 6144 MiB before compilation" >&2
+            exit 1
+          fi
+
+      - name: Install cargo-about
+        shell: bash
+        run: |
+          cargo_about_root="$GITHUB_WORKSPACE/build/ios-tools/cargo-about"
+          echo "$cargo_about_root/bin" >> "$GITHUB_PATH"
+          export PATH="$cargo_about_root/bin:$PATH"
+          if ! cargo-about --version 2>/dev/null | grep -qx "cargo-about $CARGO_ABOUT_VERSION"; then
+            cargo install cargo-about --root "$cargo_about_root" --version "$CARGO_ABOUT_VERSION" --locked --features cli
+          fi
+
+      - name: Check Rust renderer for iOS
+        shell: bash
+        env:
+          CARGO_TARGET_DIR: build/ios-rust-checks
+        run: |
+          cargo fmt --manifest-path src/render/vello/Cargo.toml -- --check
+          cargo check --manifest-path src/render/vello/Cargo.toml --locked --target aarch64-apple-ios
+          cargo check --manifest-path src/render/vello/Cargo.toml --locked --target x86_64-apple-ios
+
+      - name: Bootstrap vcpkg
+        run: .vcpkg/bootstrap-vcpkg.sh -disableMetrics
+
+      - name: Configure and build iOS Simulator app
+        if: matrix.simulator
+        shell: bash
+        run: |
+          cmake --preset ios-simulator \
+            -DVCPKG_HOST_TRIPLET="$VCPKG_HOST_TRIPLET" \
+            -DMapper_IOS_BUILD_NUMBER="$IOS_BUILD_NUMBER"
+          cmake --build --preset ios-simulator --target Mapper
+
+      - name: Inspect iOS Simulator app
+        if: matrix.simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          app=build/ios-simulator/src/Release-iphonesimulator/Mapper.app
+          test -x "$app/Mapper"
+          test -s "$app/proj/proj.db"
+          test -s "$app/PrivacyInfo.xcprivacy"
+          test -s "$app/Assets.car"
+          test -s "$app/doc/manual/index.html"
+          plutil -lint "$app/Info.plist" "$app/PrivacyInfo.xcprivacy"
+          test -n "$(plutil -extract NSMotionUsageDescription raw "$app/Info.plist")"
+          test "$(plutil -extract UIApplicationSceneManifest.UIApplicationSupportsMultipleScenes raw "$app/Info.plist")" = false
+          test "$(plutil -type UIApplicationSceneManifest.UISceneConfigurations "$app/Info.plist")" = dictionary
+          test "$(plutil -extract CFBundleVersion raw "$app/Info.plist")" = "$IOS_BUILD_NUMBER"
+          test -s "$app/en.lproj/locversion.plist"
+          shopt -s nullglob
+          lproj_directories=("$app"/*.lproj)
+          lproj_count="${#lproj_directories[@]}"
+          echo "Native localization bundles: $lproj_count"
+          if (( lproj_count < IOS_NATIVE_LPROJ_MIN )); then
+            echo "Expected at least $IOS_NATIVE_LPROJ_MIN native localization bundles" >&2
+            exit 1
+          fi
+          test "$(lipo -archs "$app/Mapper")" = x86_64
+          xcrun vtool -show-build "$app/Mapper" | tee build/ios-simulator/mapper-build-version.txt
+          grep -Eq 'platform IOSSIMULATOR' build/ios-simulator/mapper-build-version.txt
+          grep -Eq 'minos 18(\.0)?' build/ios-simulator/mapper-build-version.txt
+
+      - name: Launch iOS 18.6 Simulator app
+        if: matrix.simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          app=build/ios-simulator/src/Release-iphonesimulator/Mapper.app
+          runtime=com.apple.CoreSimulator.SimRuntime.iOS-18-6
+          device_type=com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro
+          sim_log=build/ios-simulator/mapper-simulator.log
+
+          xcrun simctl list -j runtimes | python -c \
+            'import json,sys; wanted=sys.argv[1]; runtimes=json.load(sys.stdin)["runtimes"]; assert any(r["identifier"] == wanted and r["isAvailable"] for r in runtimes), f"Unavailable runtime: {wanted}"' \
+            "$runtime"
+          udid="$(xcrun simctl create "Mapper CI $GITHUB_RUN_ID" "$device_type" "$runtime")"
+          cleanup() {
+            xcrun simctl shutdown "$udid" >/dev/null 2>&1 || true
+            xcrun simctl delete "$udid" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          xcrun simctl boot "$udid"
+          xcrun simctl bootstatus "$udid" -b
+          xcrun simctl install "$udid" "$app"
+          launch_output="$(xcrun simctl launch "$udid" org.openorienteering.mapper)"
+          echo "$launch_output"
+          pid="${launch_output##*: }"
+          [[ "$pid" =~ ^[0-9]+$ ]]
+          sleep 10
+          if ! kill -0 "$pid"; then
+            xcrun simctl spawn "$udid" log show --style compact --last 2m \
+              --predicate 'process == "Mapper"' > "$sim_log" 2>&1 || true
+            cat "$sim_log" >&2
+            echo "Mapper exited during the iOS Simulator startup smoke" >&2
+            exit 1
+          fi
+          xcrun simctl spawn "$udid" log show --style compact --last 2m \
+            --predicate 'process == "Mapper"' > "$sim_log" 2>&1 || true
+          echo "Mapper remained alive for the 10-second iOS Simulator startup smoke"
+
+      - name: Verify device archive disk budget
+        shell: bash
+        run: |
+          set -euo pipefail
+          df -h "$GITHUB_WORKSPACE"
+          du -sh build/ios-simulator .vcpkg/buildtrees \
+            .vcpkg/downloads .vcpkg-cache 2>/dev/null || true
+
+          available_kib="$(df -Pk "$GITHUB_WORKSPACE" | awk 'END { print $4 }')"
+          minimum_kib=$((4 * 1024 * 1024))
+          if (( available_kib < minimum_kib )); then
+            echo "Only $((available_kib / 1024)) MiB is free; the device archive requires at least 4096 MiB" >&2
+            exit 1
+          fi
+
+      - name: Archive unsigned iOS device app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --preset ios-release \
+            -DVCPKG_HOST_TRIPLET="$VCPKG_HOST_TRIPLET" \
+            -DMapper_IOS_BUILD_NUMBER="$IOS_BUILD_NUMBER" \
+            -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO \
+            -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED=NO
+          xcodebuild \
+            -project build/ios-release/Mapper.xcodeproj \
+            -scheme Mapper \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$GITHUB_WORKSPACE/build/ios-release/Mapper-unsigned.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            DWARF_DSYM_FILE_SHOULD_ACCOMPANY_PRODUCT=YES \
+            archive
+
+          # With signing disabled, Xcode leaves the generated app dSYM beside
+          # the product instead of collecting it in the archive's dSYMs root.
+          # Normalize the unsigned evidence archive to the standard layout.
+          archive=build/ios-release/Mapper-unsigned.xcarchive
+          product_dsym="$archive/Products/Applications/Mapper.app.dSYM"
+          test -d "$product_dsym"
+          cmake -E make_directory "$archive/dSYMs"
+          cmake -E rename "$product_dsym" "$archive/dSYMs/Mapper.app.dSYM"
+
+      - name: Inspect unsigned iOS device archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive=build/ios-release/Mapper-unsigned.xcarchive
+          app="$archive/Products/Applications/Mapper.app"
+          executable="$app/Mapper"
+
+          test -x "$executable"
+          test "$(lipo -archs "$executable")" = arm64
+          test "$(plutil -extract CFBundleIdentifier raw "$app/Info.plist")" = org.openorienteering.mapper
+          test "$(plutil -extract CFBundleVersion raw "$app/Info.plist")" = "$IOS_BUILD_NUMBER"
+          test "$(plutil -extract MinimumOSVersion raw "$app/Info.plist")" = 18.0
+          test "$(plutil -extract UIDeviceFamily.0 raw "$app/Info.plist")" = 1
+          test "$(plutil -extract UIDeviceFamily.1 raw "$app/Info.plist")" = 2
+          test -n "$(plutil -extract NSMotionUsageDescription raw "$app/Info.plist")"
+          test "$(plutil -extract UIApplicationSceneManifest.UIApplicationSupportsMultipleScenes raw "$app/Info.plist")" = false
+          test "$(plutil -type UIApplicationSceneManifest.UISceneConfigurations "$app/Info.plist")" = dictionary
+          for document_key in \
+            LSSupportsOpeningDocumentsInPlace \
+            UIFileSharingEnabled
+          do
+            test "$(plutil -extract "$document_key" raw "$app/Info.plist")" = true
+          done
+          plutil -p "$app/Info.plist" | grep -F 'org.openorienteering.map'
+          plutil -p "$app/Info.plist" | grep -F 'com.ocad.ocd'
+          plutil -lint "$archive/Info.plist" "$app/Info.plist" "$app/PrivacyInfo.xcprivacy"
+          test -s "$app/en.lproj/locversion.plist"
+          shopt -s nullglob
+          lproj_directories=("$app"/*.lproj)
+          lproj_count="${#lproj_directories[@]}"
+          echo "Native localization bundles: $lproj_count"
+          if (( lproj_count < IOS_NATIVE_LPROJ_MIN )); then
+            echo "Expected at least $IOS_NATIVE_LPROJ_MIN native localization bundles" >&2
+            exit 1
+          fi
+
+          python - "$app/PrivacyInfo.xcprivacy" <<'PY'
+          import plistlib
+          import sys
+
+          expected = {
+              "NSPrivacyAccessedAPICategoryFileTimestamp": {"C617.1", "3B52.1"},
+              "NSPrivacyAccessedAPICategoryDiskSpace": {"85F4.1", "E174.1"},
+              "NSPrivacyAccessedAPICategorySystemBootTime": {"35F9.1"},
+              "NSPrivacyAccessedAPICategoryUserDefaults": {"CA92.1"},
+          }
+          with open(sys.argv[1], "rb") as manifest_file:
+              manifest = plistlib.load(manifest_file)
+
+          actual = {}
+          for entry in manifest.get("NSPrivacyAccessedAPITypes", []):
+              category = entry.get("NSPrivacyAccessedAPIType")
+              reasons = entry.get("NSPrivacyAccessedAPITypeReasons", [])
+              actual.setdefault(category, set()).update(reasons)
+
+          missing = {
+              category: sorted(reasons - actual.get(category, set()))
+              for category, reasons in expected.items()
+              if not reasons.issubset(actual.get(category, set()))
+          }
+          if missing:
+              raise SystemExit(f"Privacy manifest is missing required reasons: {missing}")
+          for category in sorted(expected):
+              print(f"{category}: {', '.join(sorted(actual[category]))}")
+          PY
+          test ! -e "$app/_CodeSignature/CodeResources"
+          if codesign --verify "$app" >/dev/null 2>&1; then
+            echo "Expected the CI device archive to remain unsigned" >&2
+            exit 1
+          fi
+
+          for required in \
+            "$app/Assets.car" \
+            "$app/PrivacyInfo.xcprivacy" \
+            "$app/proj/proj.db" \
+            "$app/gdal/mapper-osmconf.ini" \
+            "$app/doc/manual/index.html" \
+            "$app/doc/licensing.html" \
+            "$app/doc/common-licenses/GPL-3.txt" \
+            "$app/doc/3rd-party/rust/licenses.html"
+          do
+            test -s "$required" || {
+              echo "Required archived file is missing: $required" >&2
+              exit 1
+            }
+          done
+          compgen -G "$app/doc/3rd-party/qt/*.spdx.json" >/dev/null
+
+          if xcrun nm -u "$executable" | awk '{ print $NF }' | grep -Eq '^_(statfs|fstatfs)(\$.*)?$'; then
+            echo "The device binary imports a forbidden undeclared statfs API" >&2
+            exit 1
+          fi
+
+          dsym="$archive/dSYMs/Mapper.app.dSYM"
+          dwarf="$dsym/Contents/Resources/DWARF/Mapper"
+          test -s "$dwarf"
+          executable_uuids="$(xcrun dwarfdump --uuid "$executable" | awk '{ print $2 }' | sort)"
+          dsym_uuids="$(xcrun dwarfdump --uuid "$dwarf" | awk '{ print $2 }' | sort)"
+          test -n "$executable_uuids"
+          test "$executable_uuids" = "$dsym_uuids"
+
+          xcrun vtool -show-build "$executable" | tee build/ios-release/mapper-build-version.txt
+          grep -Eq 'platform IOS' build/ios-release/mapper-build-version.txt
+          grep -Eq 'minos 18(\.0)?' build/ios-release/mapper-build-version.txt
+          {
+            xcodebuild -version
+            echo "iPhoneOS SDK $(xcrun --sdk iphoneos --show-sdk-version)"
+          } > build/ios-release/mapper-xcode-sdk-version.txt
+
+          ditto -c -k --sequesterRsrc --keepParent \
+            "$archive" build/ios-release/Mapper-unsigned.xcarchive.zip
+          (cd build/ios-release && \
+            shasum -a 256 Mapper-unsigned.xcarchive.zip > Mapper-unsigned.xcarchive.zip.sha256)
+
+      - name: Package iOS Simulator evidence
+        if: matrix.simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          ditto -c -k --sequesterRsrc --keepParent \
+            build/ios-simulator/src/Release-iphonesimulator/Mapper.app \
+            build/ios-simulator/Mapper-simulator.app.zip
+          (cd build/ios-simulator && \
+            shasum -a 256 Mapper-simulator.app.zip > Mapper-simulator.app.zip.sha256)
+
+      - name: Upload unsigned iOS device archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: iOS-${{ matrix.lane }}-Device-Archive
+          path: |
+            build/ios-release/Mapper-unsigned.xcarchive.zip
+            build/ios-release/Mapper-unsigned.xcarchive.zip.sha256
+            build/ios-release/mapper-build-version.txt
+            build/ios-release/mapper-xcode-sdk-version.txt
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Upload iOS Simulator evidence
+        if: matrix.simulator
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: iOS-minimum-runtime-Simulator-App
+          path: |
+            build/ios-simulator/Mapper-simulator.app.zip
+            build/ios-simulator/Mapper-simulator.app.zip.sha256
+            build/ios-simulator/mapper-build-version.txt
+            build/ios-simulator/mapper-simulator.log
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Save vcpkg downloads
+        if: >-
+          success() &&
+          steps.vcpkg_downloads.outputs.cache-hit != 'true' &&
+          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .vcpkg/downloads
+          key: ${{ steps.vcpkg_downloads.outputs.cache-primary-key }}
+
+      - name: Save vcpkg binary cache
+        if: >-
+          success() &&
+          steps.vcpkg_binary.outputs.cache-hit != 'true' &&
+          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .vcpkg-cache
+          key: ${{ steps.vcpkg_binary.outputs.cache-primary-key }}
+
+      - name: Save Cargo sources
+        if: >-
+          success() &&
+          steps.cargo_sources.outputs.cache-hit != 'true' &&
+          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ steps.cargo_sources.outputs.cache-primary-key }}
+
+      - name: Save Rust target cache
+        if: >-
+          success() &&
+          steps.rust_target.outputs.cache-hit != 'true' &&
+          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            build/ios-rust-checks
+            build/ios-simulator/Release/cargo
+            build/ios-release/Release/cargo
+          key: ${{ steps.rust_target.outputs.cache-primary-key }}
+
+      - name: Save cargo-about
+        if: >-
+          success() &&
+          steps.cargo_about.outputs.cache-hit != 'true' &&
+          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/ios-tools/cargo-about/bin
+          key: ${{ steps.cargo_about.outputs.cache-primary-key }}
+
   release-draft:
     name: Draft release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [desktop, android]
+    needs: [desktop, android, ios]
     runs-on: ubuntu-24.04
     permissions:
       attestations: write
@@ -816,6 +1371,7 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: release-assets
+          pattern: Mapper-*
           merge-multiple: true
 
       - name: Attest packages

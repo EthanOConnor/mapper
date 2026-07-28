@@ -507,7 +507,7 @@ int MapperProxyStyle::styleHint(QStyle::StyleHint hint, const QStyleOption* opti
 		if (touch_mode)
 			return true;
 		break;
-#ifdef Q_OS_ANDROID
+#ifdef MAPPER_MOBILE
 	case QStyle::SH_FormLayoutWrapPolicy:
 		return QFormLayout::WrapLongRows;
 #endif

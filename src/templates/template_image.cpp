@@ -132,9 +132,9 @@ TemplateImage* TemplateImage::duplicate() const
 }
 
 
-bool TemplateImage::saveTemplateFile() const
+bool TemplateImage::writeTemplateFile(const QString& path) const
 {
-	auto const format = findExportFormat(template_path);
+	auto const format = findExportFormat(path);
 	if (format.isEmpty())
 	{
 		const_cast<TemplateImage*>(this)->setErrorString(tr("Format not supported"));
@@ -142,7 +142,7 @@ bool TemplateImage::saveTemplateFile() const
 	}
 	
 	{
-		QSaveFile file{template_path};
+		QSaveFile file{path};
 		QImageWriter writer{&file, format};
 		if (!writer.write(image))
 		{
@@ -156,7 +156,6 @@ bool TemplateImage::saveTemplateFile() const
 		}
 	}
 
-	const_cast<TemplateImage*>(this)->setHasUnsavedChanges(false);
 	return true;
 }
 

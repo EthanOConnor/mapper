@@ -23,6 +23,7 @@
 #include "gui/action_icon.h"
 
 #include <chrono>
+#include <utility>
 
 #include <QApplication>
 #include <QCloseEvent>
@@ -30,6 +31,7 @@
 #include <QDialogButtonBox>
 #include <QDesktopServices>
 #include <QDir>
+#include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QInputDialog>
@@ -37,12 +39,18 @@
 #include <QLabel>
 #include <QMessageBox>
 #include <QMenuBar>
+#include <QMetaObject>
+#include <QPointer>
 #include <QPushButton>
 #include <QRegularExpression>
+#include <QSaveFile>
+#include <QScopeGuard>
 #include <QScopedValueRollback>
 #include <QSettings>
 #include <QStackedWidget>
 #include <QStatusBar>
+#include <QTemporaryFile>
+#include <QTemporaryDir>
 #include <QToolBar>
 #include <QTimer>
 #include <QUrl>
@@ -54,7 +62,6 @@
 #  include <QCoreApplication>
 #  include <QJniObject>
 #  include <QScreen>
-#  include <QTimer>
 #endif
 
 #include "mapper_config.h"
@@ -64,6 +71,9 @@
 #include "collaboration/map_hub_credentials.h"
 #include "core/document_path.h"
 #include "core/georeferencing.h"
+#if defined(Q_OS_IOS)
+#  include "core/apple_document_access.h"
+#endif
 #include "core/map.h"
 #include "core/map_view.h"
 #include "core/symbols/symbol.h"
@@ -81,6 +91,7 @@
 #include "gui/map/new_map_dialog.h"
 #include "gui/widgets/toast.h"
 #include "imagery/tile_network_manager.h"
+#include "templates/template.h"
 #include "undo/undo_manager.h"
 #include "util/util.h"
 #include "util/mapper_service_proxy.h"
@@ -131,7 +142,7 @@ MainWindow::MainWindow(bool as_main_window, QWidget* parent, Qt::WindowFlags fla
 	if (as_main_window)
 		loadWindowSettings();
 	
-#if defined(Q_OS_ANDROID)
+#if defined(MAPPER_MOBILE)
 	// Needed to catch Qt::Key_Back, cf. MainWindow::eventFilter()
 	qApp->installEventFilter(this);
 #else
@@ -161,6 +172,13 @@ MainWindow::MainWindow(bool as_main_window, QWidget* parent, Qt::WindowFlags fla
 
 MainWindow::~MainWindow()
 {
+#if defined(Q_OS_IOS)
+	if (presents_document)
+	{
+		presented_document_token = 0;
+		AppleDocumentAccess::stopPresenting();
+	}
+#endif
 	if (controller)
 	{
 		controller->detach();
@@ -203,16 +221,27 @@ void MainWindow::applicationStateChanged()
 		if (!intent_uri.isEmpty())
 		{
 			const auto selected_file = DocumentPath::fromUrl(QUrl{intent_uri});
-			if (!hasOpenedFile())
-			{
-				openPathLater(selected_file);
-			}
-			else if (currentPath() != selected_file)
-			{
-				showStatusBarMessage(tr("You must close the current file before you can open another one."));
-			}
+			openExternalPath(selected_file);
 			return;
 		}
+	}
+#endif
+
+#if defined(Q_OS_IOS)
+	if (QGuiApplication::applicationState() == Qt::ApplicationActive)
+	{
+		if (external_change_pending)
+			QTimer::singleShot(0, this, &MainWindow::processPresentedDocumentChange);
+	}
+	else
+	{
+		// iOS can suspend the process immediately after this transition. Flush
+		// both preferences and the existing crash-recovery document while the
+		// application still has execution time; never request background location.
+		QSettings().sync();
+		if (has_opened_file && has_unsaved_changes
+		    && canAdvancePrivateRecovery())
+			autosave();
 	}
 #endif
 	
@@ -507,7 +536,9 @@ void MainWindow::createFileMenu()
 	file_menu->addAction(settings_act);
 	file_menu->addSeparator();
 	file_menu->addAction(close_act);
+#if !defined(Q_OS_IOS)
 	file_menu->addAction(exit_act);
+#endif
 	
 	general_toolbar = new QToolBar(tr("General"));
 	general_toolbar->setObjectName(QString::fromLatin1("General toolbar"));
@@ -632,8 +663,25 @@ void MainWindow::setMostRecentlyUsedFile(const QString& path)
 
 void MainWindow::setHasUnsavedChanges(bool value)
 {
+#if defined(Q_OS_IOS)
+	presented_document_content_dirty = value;
+	external_resources_dirty =
+		controller && controller->hasDirtyExternalResources();
+	has_unsaved_changes =
+		presented_document_content_dirty || external_resources_dirty;
+	if (presents_document)
+		AppleDocumentAccess::setPresentedDocumentModified(
+			presented_document_content_dirty);
+#endif
+#if !defined(Q_OS_IOS)
 	has_unsaved_changes = value;
+#endif
+#if defined(Q_OS_IOS)
+	setAutosaveNeeded(has_unsaved_changes
+	                  && hasOpenedFile() && canAdvancePrivateRecovery());
+#else
 	setAutosaveNeeded(has_unsaved_changes && hasOpenedFile() && !has_autosave_conflict);
+#endif
 	setWindowModified(has_unsaved_changes);
 	
 #ifdef Q_OS_ANDROID
@@ -642,6 +690,20 @@ void MainWindow::setHasUnsavedChanges(bool value)
 	service_proxy->setActiveWindow(has_unsaved_changes ? this : nullptr);
 #endif
 }
+
+#if defined(Q_OS_IOS)
+void MainWindow::setUnsavedStateAfterDocumentCommit(bool external_resources_dirty)
+{
+	presented_document_content_dirty = false;
+	this->external_resources_dirty = external_resources_dirty;
+	has_unsaved_changes = this->external_resources_dirty;
+	if (presents_document)
+		AppleDocumentAccess::setPresentedDocumentModified(false);
+	setAutosaveNeeded(has_unsaved_changes
+	                  && hasOpenedFile() && canAdvancePrivateRecovery());
+	setWindowModified(has_unsaved_changes);
+}
+#endif
 
 void MainWindow::setStatusBarText(const QString& text)
 {
@@ -681,11 +743,21 @@ void MainWindow::setShortcutsBlocked(bool blocked)
 
 bool MainWindow::closeFile()
 {
+#if defined(Q_OS_IOS)
+	if (provider_document_transaction_active || close_in_progress)
+		return false;
+	close_in_progress = true;
+	auto close_guard = qScopeGuard([this] { close_in_progress = false; });
+#endif
 	bool closed = !has_opened_file || showSaveOnCloseDialog();
 	if (closed)
 	{
 		if (has_opened_file)
 		{
+#if defined(Q_OS_IOS)
+			if (!stopPresentingForClose())
+				return false;
+#endif
 			num_open_files--;
 			has_opened_file = false;
 		}
@@ -723,24 +795,49 @@ bool MainWindow::event(QEvent* event)
 
 void MainWindow::closeEvent(QCloseEvent* event)
 {
+#if defined(Q_OS_IOS)
+	if (provider_document_transaction_active)
+	{
+		event->ignore();
+	}
+	else
+#endif
 	if (!has_opened_file)
 	{
 		saveWindowSettings();
 		event->accept();
 	}
-	else if (showSaveOnCloseDialog())
+#if defined(Q_OS_IOS)
+	else if (close_in_progress)
 	{
+		event->ignore();
+	}
+#endif
+	else
+	{
+#if defined(Q_OS_IOS)
+		close_in_progress = true;
+		auto close_guard = qScopeGuard([this] { close_in_progress = false; });
+#endif
+		if (!showSaveOnCloseDialog())
+		{
+			event->ignore();
+			return;
+		}
 		if (has_opened_file)
 		{
+#if defined(Q_OS_IOS)
+			if (!stopPresentingForClose())
+			{
+				event->ignore();
+				return;
+			}
+#endif
 			num_open_files--;
 			has_opened_file = false;
 		}
 		saveWindowSettings();
 		event->accept();
-	}
-	else
-	{
-		event->ignore();
 	}
 }
 
@@ -768,6 +865,12 @@ void MainWindow::keyReleaseEvent(QKeyEvent* event)
 
 bool MainWindow::showSaveOnCloseDialog()
 {
+#if defined(Q_OS_IOS)
+	external_resources_dirty =
+		controller && controller->hasDirtyExternalResources();
+	has_unsaved_changes =
+		presented_document_content_dirty || external_resources_dirty;
+#endif
 	if (has_opened_file && (has_unsaved_changes || has_autosave_conflict))
 	{
 		// Show the window in case it is minimized
@@ -796,10 +899,15 @@ bool MainWindow::showSaveOnCloseDialog()
 			return false;
 			
 		case QMessageBox::Discard:
+#if defined(Q_OS_IOS)
+			discardAuxiliaryDraftRecovery();
+			// Deferred deletion is only valid after this in-memory map revision
+			// commits. Discarding restores the provider's older references.
+			clearDeferredPrivateDraftCleanup();
+#endif
 			if (has_autosave_conflict)
 				setHasAutosaveConflict(false);
-			else
-				removeAutosaveFile();
+			removeAutosaveFile();
 			break;
 			
 		case QMessageBox::Save:
@@ -828,7 +936,7 @@ bool MainWindow::showSaveOnCloseDialog()
 
 void MainWindow::saveWindowSettings()
 {
-#if !defined(Q_OS_ANDROID)
+#if !defined(MAPPER_MOBILE)
 	QSettings settings;
 	
 	settings.beginGroup(QString::fromLatin1("MainWindow"));
@@ -845,6 +953,9 @@ void MainWindow::loadWindowSettings()
 	// Always show the window on the whole available area on Android.
 	if (auto* screen = qApp->screenAt(geometry().center()))
 		resize(screen->availableGeometry().size());
+#elif defined(MAPPER_MOBILE)
+	// UIKit owns scene geometry, safe areas, Split View, and Stage Manager.
+	// Avoid restoring desktop coordinates or forcing a full-screen size.
 #else
 	QSettings settings;
 	
@@ -966,6 +1077,16 @@ MainWindow* MainWindow::createNewMapWithWizard(
 	}
 	if (!required_symbol_standard.isEmpty())
 		new_map->setSymbolSetId(required_symbol_standard);
+
+#ifdef MAPPER_MOBILE
+	// Stage the complete replacement first. Only after symbol import and map
+	// construction succeed do we ask to save/close the current document.
+	if (hasOpenedFile() && !closeFile())
+	{
+		delete new_map;
+		return nullptr;
+	}
+#endif
 	
 	auto map_view = new MapView { new_map };
 	map_view->setGridVisible(tmp_view.isGridVisible());
@@ -983,6 +1104,22 @@ MainWindow* MainWindow::createNewMapWithWizard(
 	new_window->raise();
 	new_window->activateWindow();
 	num_open_files++;
+
+#if defined(Q_OS_IOS)
+	// An untitled map has no durable provider identity, so it cannot satisfy
+	// iOS's suspend-at-any-time recovery contract. Place the complete document
+	// in Files before editing begins; cancelling abandons the new draft.
+	if (!new_window->showSaveAsDialog()
+	    && new_window->currentPath().isEmpty())
+	{
+		--num_open_files;
+		new_window->setController(new HomeScreenController());
+		new_window->showStatusBarMessage(
+			tr("The new map was not created because no Files location was chosen."),
+			5000);
+	}
+#endif
+
 	return new_window;
 }
 
@@ -1375,8 +1512,14 @@ void MainWindow::checkpointMapHub(bool submit_after)
 
 void MainWindow::showOpenDialog()
 {
-	if (auto selected = getOpenFileName(this, tr("Open file"), FileFormat::AllFiles))
+	const auto selected = getOpenFileName(
+		this, tr("Open file"), FileFormat::AllFiles);
+	if (selected)
 	{
+#ifdef MAPPER_MOBILE
+		if (hasOpenedFile() && !closeFile())
+			return;
+#endif
 		openPath(selected.filePath(), selected.fileFormat());
 	}
 }
@@ -1384,8 +1527,10 @@ void MainWindow::showOpenDialog()
 bool MainWindow::openPath(const QString &path)
 {
 	auto format = FileFormats.findFormatForFilename(path, &FileFormat::supportsFileOpen);
+#if !defined(Q_OS_IOS)
 	if (!format)
 		format = FileFormats.findFormatForData(path, FileFormat::AllFiles);
+#endif
 	return openPath(path, format);
 }
 
@@ -1394,8 +1539,34 @@ bool MainWindow::openPath(const QString& path, const FileFormat* format)
 	// Empty path does nothing. This also helps with the single instance application code.
 	if (path.isEmpty())
 		return true;
+
+#if defined(Q_OS_IOS)
+	if (!beginNativeDocumentInteraction())
+	{
+		openPathLater(path);
+		return false;
+	}
+	auto provider_guard = qScopeGuard(
+		[this] { endNativeDocumentInteraction(); });
+#endif
 	
-#ifdef Q_OS_ANDROID
+#ifdef MAPPER_MOBILE
+	if (hasOpenedFile())
+	{
+		const auto requested_path = DocumentPath::canonical(path);
+		if (!requested_path.isEmpty() && requested_path == currentPath())
+		{
+			show();
+			raise();
+			activateWindow();
+			return true;
+		}
+
+		showStatusBarMessage(
+			tr("Close the current file before opening another document."), 5000);
+		return false;
+	}
+
 	showStatusBarMessageImmediately(tr("Opening %1").arg(DocumentPath::displayName(path)));
 #else
 	MainWindow* const existing = findMainWindow(path);
@@ -1407,12 +1578,96 @@ bool MainWindow::openPath(const QString& path, const FileFormat* format)
 		return true;
 	}
 #endif
-	
-	if (!format || !format->supportsReading())
+
+	QString document_path = path;
+	const FileFormat* document_format = format;
+#if defined(Q_OS_IOS)
+	const auto requested_document_path = DocumentPath::canonical(path);
+	document_path = requested_document_path;
+	auto provider_snapshot = std::make_unique<QTemporaryFile>(
+		QDir::tempPath() + QLatin1String("/Mapper-open-XXXXXX"));
+	if (!provider_snapshot->open())
+	{
+		QMessageBox::warning(this, tr("Error"),
+		                     tr("Could not create a private document snapshot: %1")
+		                     .arg(provider_snapshot->errorString()));
+		return false;
+	}
+	provider_snapshot->close();
+
+	QString coordination_error;
+	QString coordinated_path;
+	quint64 opening_token = 0;
+	if (!AppleDocumentAccess::openDocument(
+			document_path,
+			provider_snapshot->fileName(),
+			makePresentedDocumentChangeHandler(),
+			&opening_token,
+			&coordinated_path,
+			&coordination_error))
+	{
+		if (!coordination_error.isEmpty())
+			QMessageBox::warning(this, tr("Error"), coordination_error);
+		return false;
+	}
+	presented_document_token = opening_token;
+	presents_document = true;
+	presented_document_deleted = false;
+	presented_document_change_generation = 0;
+	presented_document_content_dirty = false;
+	external_resources_dirty = false;
+	if (!coordinated_path.isEmpty())
+	{
+		const auto coordinated_document_path =
+			DocumentPath::canonical(coordinated_path);
+		if (!requested_document_path.isEmpty()
+		    && coordinated_document_path != requested_document_path)
+		{
+			if (!migrateRecoveryForDocumentMove(
+				    requested_document_path, coordinated_document_path))
+			{
+				QMessageBox::warning(
+					this,
+					tr("Document not opened"),
+					tr("Files moved this document while Mapper was closed, but Mapper "
+					   "could not move every private recovery receipt to its new identity. "
+					   "Mapper left the old recovery untouched and did not open the provider "
+					   "version. Free storage if necessary, then retry."));
+				presented_document_token = 0;
+				presents_document = false;
+				AppleDocumentAccess::stopPresenting();
+				pending_presented_document_events.clear();
+				return false;
+			}
+			auto recent_files = Settings::getInstance()
+			                    .getSettingCached(Settings::General_RecentFilesList)
+			                    .toStringList();
+			recent_files.removeAll(requested_document_path);
+			Settings::getInstance().setSetting(
+				Settings::General_RecentFilesList, recent_files);
+		}
+		document_path = coordinated_document_path;
+	}
+
+	if (!document_format)
+		document_format = FileFormats.findFormatForFilename(
+			document_path, &FileFormat::supportsFileOpen);
+	if (!document_format)
+		document_format = FileFormats.findFormatForData(
+			provider_snapshot->fileName(), FileFormat::AllFiles);
+#endif
+
+	if (!document_format || !document_format->supportsReading())
 	{
 		QMessageBox::warning(this, tr("Error"),
 		                     tr("Cannot open file:\n%1\n\n%2").
-		                     arg(path, tr("Invalid file type.")));
+		                     arg(document_path, tr("Invalid file type.")));
+#if defined(Q_OS_IOS)
+		presented_document_token = 0;
+		presents_document = false;
+		AppleDocumentAccess::stopPresenting();
+		pending_presented_document_events.clear();
+#endif
 		return false;
 	}
 	
@@ -1421,42 +1676,59 @@ bool MainWindow::openPath(const QString& path, const FileFormat* format)
 	static const QString reopen_blocker = QString::fromLatin1("open_in_progress");
 	QSettings settings;
 	const QString open_in_progress(settings.value(reopen_blocker).toString());
-	if (open_in_progress == path)
+	if (open_in_progress == document_path)
 	{
 		int result = QMessageBox::warning(this, tr("Crash warning"), 
 		  tr("It seems that %1 crashed the last time this file was opened:<br />"
 		     "<tt>%2</tt><br /><br />"
 		     "Really retry to open it?")
-		  .arg(appName(), path),
+		  .arg(appName(), document_path),
 		  QMessageBox::Yes | QMessageBox::No);
 		settings.remove(reopen_blocker);
 		if (result == QMessageBox::No)
+		{
+#if defined(Q_OS_IOS)
+			presented_document_token = 0;
+			presents_document = false;
+			AppleDocumentAccess::stopPresenting();
+			pending_presented_document_events.clear();
+#endif
 			return false;
+		}
 	}
 	
-	settings.setValue(reopen_blocker, path);
+	settings.setValue(reopen_blocker, document_path);
 	settings.sync();
 	
-	MainWindowController* const new_controller = MainWindowController::controllerForFile(path, format);
+	MainWindowController* const new_controller = MainWindowController::controllerForFile(
+		document_path, document_format);
 	if (!new_controller)
 	{
-		QMessageBox::warning(this, tr("Error"), tr("Cannot open file:\n%1\n\nFile format not recognized.").arg(path));
+		QMessageBox::warning(this, tr("Error"), tr("Cannot open file:\n%1\n\nFile format not recognized.").arg(document_path));
 		settings.remove(reopen_blocker);
+#if defined(Q_OS_IOS)
+		presented_document_token = 0;
+		presents_document = false;
+		AppleDocumentAccess::stopPresenting();
+		pending_presented_document_events.clear();
+#endif
 		return false;
 	}
 	
-	QString new_actual_path = path;
-	const FileFormat* new_actual_format = format;
-	QString autosave_path = Autosave::autosavePath(path);
+	QString new_actual_path = document_path;
+	const FileFormat* new_actual_format = document_format;
+	QString autosave_path = Autosave::autosavePath(document_path);
 	bool new_autosave_conflict = QFileInfo::exists(autosave_path);
 	if (new_autosave_conflict)
 	{
-#if defined(Q_OS_ANDROID)
+#if defined(MAPPER_MOBILE)
 		// Assuming small screen, showing dialog before opening the file
-		AutosaveDialog* autosave_dialog = new AutosaveDialog(path, autosave_path, autosave_path, this);
+		AutosaveDialog* autosave_dialog = new AutosaveDialog(document_path, autosave_path, autosave_path, this);
 		int result = autosave_dialog->exec();
 		new_actual_path = (result == QDialog::Accepted) ? autosave_dialog->selectedPath() : QString();
-		new_actual_format = (new_actual_path == path) ? format : FileFormats.findFormat(FileFormats.defaultFormat());
+		new_actual_format = (new_actual_path == document_path)
+		                    ? document_format
+		                    : FileFormats.findFormat(FileFormats.defaultFormat());
 		delete autosave_dialog;
 #else
 		// Assuming large screen, dialog will be shown while the autosaved file is open
@@ -1465,15 +1737,64 @@ bool MainWindow::openPath(const QString& path, const FileFormat* format)
 #endif
 	}
 	
-	if (new_actual_path.isEmpty() || !new_controller->loadFrom(new_actual_path, *new_actual_format, this))
+#if defined(Q_OS_IOS)
+	bool loaded = false;
+	const bool loading_provider_snapshot =
+		DocumentPath::canonical(new_actual_path) == document_path;
+	const bool loading_private_recovery =
+		!new_actual_path.isEmpty() && !loading_provider_snapshot;
+	if (loading_provider_snapshot)
+	{
+		QFile snapshot_source{provider_snapshot->fileName()};
+		loaded = snapshot_source.open(QIODevice::ReadOnly)
+		         && new_controller->loadFrom(
+			         document_path, *new_actual_format, this, &snapshot_source);
+	}
+	else if (loading_private_recovery)
+	{
+		// The autosave is a private byte source, not the document identity.
+		// Keep the provider path as the importer's logical base so relative
+		// template references resolve exactly as they did in the original map.
+		QFile recovery_source{new_actual_path};
+		loaded = recovery_source.open(QIODevice::ReadOnly)
+		         && new_controller->loadFrom(
+			         document_path, *new_actual_format, this, &recovery_source);
+	}
+#else
+	const bool loaded = !new_actual_path.isEmpty()
+	                    && new_controller->loadFrom(
+		                    new_actual_path, *new_actual_format, this);
+#endif
+	if (!loaded)
 	{
 		delete new_controller;
 		settings.remove(reopen_blocker);
+#if defined(Q_OS_IOS)
+		presented_document_token = 0;
+		presents_document = false;
+		AppleDocumentAccess::stopPresenting();
+		pending_presented_document_events.clear();
+#endif
 		return false;
 	}
+
+#if defined(Q_OS_IOS)
+	if (loading_provider_snapshot && new_autosave_conflict)
+	{
+		// The mobile recovery chooser is the user's resolution decision. Once
+		// the provider version has loaded successfully, retire the rejected
+		// recovery generation so new edits can immediately establish a fresh one.
+		if (QFileInfo::exists(autosave_path) && !QFile::remove(autosave_path))
+		{
+			qWarning("Could not remove the rejected iOS recovery document: %s",
+			         qUtf8Printable(autosave_path));
+		}
+		new_autosave_conflict = false;
+	}
+#endif
 	
 	MainWindow* open_window = this;
-#if !defined(Q_OS_ANDROID)
+#if !defined(MAPPER_MOBILE)
 	if (has_opened_file)
 		open_window = new MainWindow();
 #endif
@@ -1481,22 +1802,36 @@ bool MainWindow::openPath(const QString& path, const FileFormat* format)
 	auto const ignore_touch = Settings::getInstance().getSetting(Settings::MapEditor_IgnoreTouchInput).toBool();
 	open_window->warnAndSetIgnoreTouch(ignore_touch);
 	
-	open_window->setController(new_controller, path, format);
+	open_window->setController(new_controller, document_path, document_format);
 	open_window->actual_path = new_actual_path;
 	open_window->setHasAutosaveConflict(new_autosave_conflict);
-	open_window->setHasUnsavedChanges(false);
+#if defined(Q_OS_IOS)
+	open_window->restoreAuxiliaryDraftRecovery();
+#endif
+	open_window->setHasUnsavedChanges(
+#if defined(Q_OS_IOS)
+		loading_private_recovery
+#else
+		false
+#endif
+	);
+#if defined(Q_OS_IOS)
+	open_window->external_change_pending = false;
+	open_window->presented_document_deleted = false;
+	open_window->presented_document_snapshot = std::move(provider_snapshot);
+#endif
 	
 	open_window->setVisible(true); // Respect the window flags set by new_controller.
 	open_window->raise();
 	num_open_files++;
 	settings.remove(reopen_blocker);
-	setMostRecentlyUsedFile(path);
+	setMostRecentlyUsedFile(document_path);
 	
-#if !defined(Q_OS_ANDROID)
+#if !defined(MAPPER_MOBILE)
 	// Assuming large screen. Android handled above.
 	if (new_autosave_conflict)
 	{
-		auto autosave_dialog = new AutosaveDialog(path, autosave_path, new_actual_path, open_window, Qt::WindowTitleHint | Qt::CustomizeWindowHint);
+		auto autosave_dialog = new AutosaveDialog(document_path, autosave_path, new_actual_path, open_window, Qt::WindowTitleHint | Qt::CustomizeWindowHint);
 		autosave_dialog->move(open_window->rect().right() - autosave_dialog->width(), open_window->rect().top());
 		autosave_dialog->show();
 		autosave_dialog->raise();
@@ -1508,7 +1843,7 @@ bool MainWindow::openPath(const QString& path, const FileFormat* format)
 #endif
 	
 	open_window->activateWindow();
-	
+
 	return true;
 }
 
@@ -1551,11 +1886,785 @@ void MainWindow::openPathLater(const QString& path)
 	QTimer::singleShot(10, this, &MainWindow::openPathBacklog);
 }
 
+void MainWindow::openExternalPath(const QString& path)
+{
+	if (path.isEmpty())
+		return;
+
+#if defined(MAPPER_MOBILE)
+	if (!hasOpenedFile())
+	{
+		openPathLater(path);
+		return;
+	}
+
+#if defined(Q_OS_IOS)
+	if (DocumentPath::canonical(currentPath()) != DocumentPath::canonical(path))
+	{
+		QPointer<MainWindow> window{this};
+		QTimer::singleShot(0, this, [window, path] {
+			if (!window)
+				return;
+			if (window->provider_document_transaction_active
+			    || window->close_in_progress
+			    || QApplication::activeModalWidget())
+			{
+				QTimer::singleShot(50, window, [window, path] {
+					if (window)
+						window->openExternalPath(path);
+				});
+				return;
+			}
+			if (window->hasOpenedFile() && !window->closeFile())
+				return;
+			window->openPathLater(path);
+		});
+	}
+	else
+	{
+		show();
+		raise();
+		activateWindow();
+	}
+#else
+	if (DocumentPath::canonical(currentPath()) != DocumentPath::canonical(path))
+	{
+		showStatusBarMessage(
+			tr("Close the current file before opening another document."), 5000);
+	}
+	else
+	{
+		show();
+		raise();
+		activateWindow();
+	}
+#endif
+#else
+	openPathLater(path);
+#endif
+}
+
+#if defined(Q_OS_IOS)
+MainWindow* MainWindow::nativeDocumentInteractionOwner(QWidget* widget)
+{
+	for (auto* candidate = widget; candidate; candidate = candidate->parentWidget())
+	{
+		auto* window = qobject_cast<MainWindow*>(candidate);
+		if (window && window->create_menu)
+			return window;
+	}
+	return nullptr;
+}
+
+void MainWindow::deferPrivateDraftCleanup(
+	const QString& path, const QString& resource_identity)
+{
+	if (!AppleDocumentAccess::isPrivateAuxiliaryDraft(path))
+		return;
+	const auto identity = QFileInfo{path}.absoluteFilePath();
+	const auto already_deferred = std::any_of(
+		deferred_private_draft_cleanup.cbegin(),
+		deferred_private_draft_cleanup.cend(),
+		[&](const DeferredPrivateDraftCleanup& item) {
+			return item.path == identity
+			       && item.resource_identity == resource_identity;
+		});
+	if (!already_deferred)
+	{
+		deferred_private_draft_cleanup.push_back(
+			{identity, resource_identity});
+	}
+}
+
+bool MainWindow::beginNativeDocumentInteraction(
+	NativeDocumentCheckpoint checkpoint)
+{
+	if (provider_document_transaction_active)
+		return false;
+	provider_document_transaction_active = true;
+	native_interaction_gps_controller.clear();
+	resume_gps_after_native_interaction = false;
+	if (checkpoint != NativeDocumentCheckpoint::Skip)
+	{
+		native_interaction_gps_controller =
+			qobject_cast<MapEditorController*>(controller);
+		resume_gps_after_native_interaction =
+			native_interaction_gps_controller
+			&& native_interaction_gps_controller->isGPSDisplayEnabled();
+		if (native_interaction_gps_controller)
+			native_interaction_gps_controller->enableGPSDisplay(false);
+	}
+	if (checkpoint != NativeDocumentCheckpoint::Skip
+	    && has_opened_file
+	    && has_unsaved_changes)
+	{
+		const bool checkpoint_ready = canAdvancePrivateRecovery()
+		                              && persistRecoverySnapshot();
+		if (!checkpoint_ready)
+		{
+			showStatusBarMessage(
+				tr("Mapper could not make a current recovery checkpoint before "
+				   "opening Files. Save before leaving the app."),
+				6000);
+			if (checkpoint == NativeDocumentCheckpoint::Required)
+			{
+				endNativeDocumentInteraction();
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
+void MainWindow::endNativeDocumentInteraction()
+{
+	Q_ASSERT(provider_document_transaction_active);
+	replayPendingPresentedDocumentEvents();
+	provider_document_transaction_active = false;
+	if (native_interaction_gps_controller
+	    && native_interaction_gps_controller == controller
+	    && resume_gps_after_native_interaction)
+	{
+		native_interaction_gps_controller->enableGPSDisplay(true);
+	}
+	native_interaction_gps_controller.clear();
+	resume_gps_after_native_interaction = false;
+	if (!path_backlog.empty())
+		QTimer::singleShot(0, this, &MainWindow::openPathBacklog);
+}
+
+bool MainWindow::stopPresentingForClose()
+{
+	if (provider_document_transaction_active)
+		return false;
+	QPointer<MapEditorController> editor{
+		qobject_cast<MapEditorController*>(controller)};
+	const bool gps_was_enabled = editor && editor->isGPSDisplayEnabled();
+	if (editor)
+		editor->enableGPSDisplay(false);
+	auto gps_restore_guard = qScopeGuard([editor, gps_was_enabled] {
+		if (editor && gps_was_enabled)
+			editor->enableGPSDisplay(true);
+	});
+	const auto closing_revision = controller ? controller->saveRevision() : 0;
+	const bool closing_external_dirty =
+		controller && controller->hasDirtyExternalResources();
+
+	provider_document_transaction_active = true;
+	if (presents_document)
+	{
+		presented_document_token = 0;
+		AppleDocumentAccess::stopPresenting();
+	}
+	provider_document_transaction_active = false;
+	presents_document = false;
+	external_change_pending = false;
+	presented_document_deleted = false;
+	presented_document_change_generation = 0;
+	pending_presented_document_events.clear();
+
+	const bool changed_during_close =
+		controller
+		&& (controller->saveRevision() != closing_revision
+		    || controller->hasDirtyExternalResources()
+		       != closing_external_dirty);
+	if (changed_during_close
+	    && !persistRecoverySnapshot())
+	{
+		presented_document_content_dirty = true;
+		setHasUnsavedChanges(true);
+		QMessageBox::warning(
+			this,
+			tr("Close postponed"),
+			tr("The map changed while its provider document was closing, and "
+			   "Mapper could not finish a private recovery copy. Use Save As "
+			   "before closing."));
+		return false;
+	}
+
+	gps_restore_guard.dismiss();
+	presented_document_content_dirty = false;
+	external_resources_dirty = false;
+	presented_document_snapshot.reset();
+	return true;
+}
+
+AppleDocumentAccess::ChangeHandler MainWindow::makePresentedDocumentChangeHandler()
+{
+	QPointer<MainWindow> window{this};
+	return [window](const AppleDocumentAccess::PresentedDocumentEvent& event) {
+		// NSFilePresenter callbacks run on a private operation queue. The event
+		// value is copied before crossing to Qt's GUI thread; QPointer is only
+		// dereferenced by the context-bound queued invocation.
+		QMetaObject::invokeMethod(
+			qApp,
+			[window, event] {
+				if (window)
+					window->handlePresentedDocumentChange(event);
+			},
+			Qt::QueuedConnection);
+	};
+}
+
+void MainWindow::handlePresentedDocumentChange(
+	const AppleDocumentAccess::PresentedDocumentEvent& event)
+{
+	// A replacement UIDocument may become active inside a native transaction
+	// before the GUI installs its new presentation token. Preserve every event
+	// until the transaction finishes, then apply the normal token/path filters.
+	if (provider_document_transaction_active
+	    && !replaying_presented_document_events)
+	{
+		pending_presented_document_events.push_back(event);
+		return;
+	}
+	if (!event.presentation_token
+	    || event.presentation_token != presented_document_token)
+		return;
+	if (!hasOpenedFile())
+	{
+		pending_presented_document_events.push_back(event);
+		return;
+	}
+
+	const auto previous_path = DocumentPath::canonical(event.previous_path);
+	if (!previous_path.isEmpty() && previous_path != currentPath())
+		return;
+
+	switch (event.change)
+	{
+	case AppleDocumentAccess::PresentedDocumentChange::Changed:
+	{
+		if (DocumentPath::canonical(event.path) != currentPath())
+			return;
+		++presented_document_change_generation;
+		if (!event.error.isEmpty())
+			showStatusBarMessage(event.error, 0);
+		const bool already_pending = external_change_pending;
+		external_change_pending = true;
+		if (!already_pending
+		    && QGuiApplication::applicationState() == Qt::ApplicationActive)
+			QTimer::singleShot(0, this, &MainWindow::processPresentedDocumentChange);
+		break;
+	}
+
+	case AppleDocumentAccess::PresentedDocumentChange::Moved:
+		{
+			++presented_document_change_generation;
+			const auto old_path = currentPath();
+			const auto new_path = DocumentPath::canonical(event.path);
+			if (new_path.isEmpty())
+				return;
+			const auto* format = currentFormat();
+			const bool using_private_recovery =
+				DocumentPath::canonical(actual_path)
+				== DocumentPath::canonical(autosavePath(old_path));
+			if (actual_path == old_path)
+				actual_path = new_path;
+			bool recovery_migrated =
+				migrateRecoveryForDocumentMove(old_path, new_path);
+			setCurrentFile(new_path, format);
+			if (using_private_recovery)
+			{
+				if (!recovery_migrated)
+					recovery_migrated = persistRecoverySnapshot();
+				if (recovery_migrated)
+					actual_path = autosavePath(new_path);
+			}
+			auto recent_files = Settings::getInstance()
+				.getSettingCached(Settings::General_RecentFilesList)
+				.toStringList();
+			recent_files.removeAll(old_path);
+			Settings::getInstance().setSetting(
+				Settings::General_RecentFilesList, recent_files);
+			setMostRecentlyUsedFile(new_path);
+			if (!event.error.isEmpty())
+			{
+				const auto detail = event.error;
+				QTimer::singleShot(0, this, [this, detail] {
+					QMessageBox::warning(
+						this, tr("Document access changed"), detail);
+				});
+			}
+			showStatusBarMessage(tr("The document moved to %1.")
+			                     .arg(DocumentPath::displayName(new_path)), 5000);
+			if (!recovery_migrated)
+			{
+				showStatusBarMessage(
+					tr("The document moved, but Mapper could not move every private "
+					   "template recovery copy. Save the template or map before closing."),
+					0);
+			}
+		}
+		break;
+
+	case AppleDocumentAccess::PresentedDocumentChange::Deleted:
+	{
+		QScopedValueRollback<bool> transaction_guard{
+			provider_document_transaction_active, true};
+		++presented_document_change_generation;
+		presented_document_token = 0;
+		AppleDocumentAccess::stopPresenting();
+		presents_document = false;
+		external_change_pending = false;
+		pending_presented_document_events.clear();
+		presented_document_deleted = true;
+		setHasUnsavedChanges(true);
+		// Preserve the logical identity so private autosave remains available.
+		// save() forces Save As while this tombstone state is active.
+		const auto recovery_result = persistRecoverySnapshot()
+		                             ? Autosave::Success
+		                             : Autosave::PermanentFailure;
+		QString recovery_detail;
+		switch (recovery_result)
+		{
+		case Autosave::Success:
+			recovery_detail = tr("Mapper kept a current private recovery copy; use Save As to keep it.");
+			break;
+		case Autosave::TemporaryFailure:
+			recovery_detail = tr("Mapper could not update its recovery copy while an edit is in progress. "
+			                     "Finish the edit and use Save As immediately.");
+			break;
+		case Autosave::PermanentFailure:
+		default:
+			recovery_detail = QFileInfo::exists(autosavePath(currentPath()))
+			                  ? tr("Mapper could not update the existing recovery copy; it may be stale. "
+			                       "Use Save As immediately.")
+			                  : tr("Mapper could not create a recovery copy. Keep this screen open and "
+			                       "use Save As immediately.");
+			break;
+		}
+		QTimer::singleShot(0, this, [this, recovery_detail] {
+			QMessageBox::warning(
+				this,
+				tr("Document removed"),
+				tr("The open document was removed by its file provider. ")
+				+ recovery_detail);
+		});
+		break;
+	}
+	}
+}
+
+void MainWindow::replayPendingPresentedDocumentEvents()
+{
+	if (replaying_presented_document_events)
+		return;
+	QScopedValueRollback<bool> replay_guard{
+		replaying_presented_document_events, true};
+	while (!pending_presented_document_events.empty())
+	{
+		const auto pending_events =
+			std::exchange(pending_presented_document_events, {});
+		for (const auto& event : pending_events)
+			handlePresentedDocumentChange(event);
+	}
+}
+
+bool MainWindow::migrateRecoveryForDocumentMove(
+	const QString& old_path, const QString& new_path)
+{
+	if (old_path.isEmpty() || new_path.isEmpty() || old_path == new_path)
+		return true;
+	QString auxiliary_error;
+	const bool auxiliary_migrated =
+		AppleDocumentAccess::migratePrivateAuxiliaryRecovery(
+			old_path, new_path, &auxiliary_error);
+	if (!auxiliary_migrated && !auxiliary_error.isEmpty())
+	{
+		qWarning("Could not migrate private iOS template recovery: %s",
+		         qUtf8Printable(auxiliary_error));
+	}
+	const auto old_autosave = Autosave::autosavePath(old_path);
+	const auto new_autosave = Autosave::autosavePath(new_path);
+	if (old_autosave == new_autosave || !QFileInfo::exists(old_autosave))
+		return auxiliary_migrated;
+
+	QDir{}.mkpath(QFileInfo(new_autosave).absolutePath());
+	QFile source{old_autosave};
+	QSaveFile destination{new_autosave};
+	bool autosave_migrated = source.open(QIODevice::ReadOnly)
+	                         && destination.open(QIODevice::WriteOnly);
+	QByteArray buffer(64 * 1024, Qt::Uninitialized);
+	while (autosave_migrated && !source.atEnd())
+	{
+		const auto bytes_read = source.read(buffer.data(), buffer.size());
+		autosave_migrated = bytes_read >= 0
+		                    && destination.write(buffer.constData(), bytes_read)
+		                       == bytes_read;
+	}
+	if (autosave_migrated)
+		autosave_migrated = destination.commit();
+	else
+		destination.cancelWriting();
+	if (autosave_migrated)
+		QFile::remove(old_autosave);
+	return auxiliary_migrated && autosave_migrated;
+}
+
+void MainWindow::processPresentedDocumentChange()
+{
+	if (provider_document_transaction_active
+	    || close_in_progress
+	    || QApplication::activeModalWidget())
+	{
+		QTimer::singleShot(
+			50, this, &MainWindow::processPresentedDocumentChange);
+		return;
+	}
+	if (!external_change_pending || !hasOpenedFile()
+	    || QGuiApplication::applicationState() != Qt::ApplicationActive)
+	{
+		return;
+	}
+
+	const bool protected_local_state = hasUnsavedChanges()
+	                                   || has_autosave_conflict
+	                                   || DocumentPath::canonical(actual_path)
+	                                      != currentPath();
+	auto* const decision_controller = controller;
+	const auto decision_token = presented_document_token;
+	const auto decision_path = currentPath();
+	const auto decision_generation = presented_document_change_generation;
+	if (protected_local_state)
+	{
+		const auto choice = QMessageBox::warning(
+			this,
+			tr("Document changed"),
+			tr("This document changed in another app. Reloading it will discard "
+			   "your unsaved Mapper changes or selected recovery copy."),
+			QMessageBox::Discard | QMessageBox::Cancel,
+			QMessageBox::Cancel);
+		if (choice != QMessageBox::Discard)
+		{
+			showStatusBarMessage(
+				tr("The open document has newer external changes."), 0);
+			return;
+		}
+		if (controller != decision_controller
+		    || presented_document_token != decision_token
+		    || currentPath() != decision_path
+		    || presented_document_change_generation != decision_generation)
+		{
+			return;
+		}
+	}
+
+	reloadPresentedDocument(protected_local_state);
+}
+
+bool MainWindow::reloadPresentedDocument(bool discard_local_recovery)
+{
+	if (!beginNativeDocumentInteraction(NativeDocumentCheckpoint::Required))
+		return false;
+	bool interaction_active = true;
+	auto interaction_guard = qScopeGuard(
+		[this, &interaction_active] {
+			if (interaction_active)
+				endNativeDocumentInteraction();
+		});
+	const auto path = currentPath();
+	const auto* format = currentFormat();
+	if (path.isEmpty() || !format)
+		return false;
+	auto* const source_controller = controller;
+	const auto source_revision = source_controller->saveRevision();
+	const bool source_external_dirty =
+		source_controller->hasDirtyExternalResources();
+	const auto transaction_token = presented_document_token;
+	const auto transaction_generation = presented_document_change_generation;
+
+	std::unique_ptr<MainWindowController> new_controller{
+		MainWindowController::controllerForFile(path, format)};
+	if (!new_controller)
+		return false;
+
+	auto snapshot = std::make_unique<QTemporaryFile>(
+		QDir::tempPath() + QLatin1String("/Mapper-reload-XXXXXX"));
+	if (!snapshot->open())
+	{
+		QMessageBox::warning(this, tr("Error"), snapshot->errorString());
+		return false;
+	}
+	snapshot->close();
+
+	QString coordination_error;
+	QString coordinated_path;
+	bool loaded = false;
+	const bool copied = AppleDocumentAccess::readPresentedDocument(
+		path, snapshot->fileName(), &coordinated_path, &coordination_error);
+	QFile snapshot_source{snapshot->fileName()};
+	loaded = copied
+	         && snapshot_source.open(QIODevice::ReadOnly)
+	         && new_controller->loadFrom(
+		         path, *format, this, &snapshot_source);
+	replayPendingPresentedDocumentEvents();
+	if (controller != source_controller
+	    || source_controller->saveRevision() != source_revision
+	    || source_controller->hasDirtyExternalResources()
+	       != source_external_dirty)
+	{
+		const bool recovery_current =
+			controller == source_controller && persistRecoverySnapshot();
+		QMessageBox::warning(
+			this,
+			tr("Reload postponed"),
+			recovery_current
+				? tr("The map changed while Mapper was reading the provider's version. "
+				     "Mapper kept the current map and updated its private recovery copy.")
+				: tr("The map changed while Mapper was reading the provider's version. "
+				     "Mapper kept the current map, but its recovery copy could not be "
+				     "updated; save it before leaving the app."));
+		return false;
+	}
+	if (!loaded)
+	{
+		if (!coordination_error.isEmpty())
+			QMessageBox::warning(this, tr("Error"), coordination_error);
+		return false;
+	}
+
+	const auto effective_path = coordinated_path.isEmpty()
+	                            ? path
+	                            : DocumentPath::canonical(coordinated_path);
+	if (presented_document_token != transaction_token
+	    || !presents_document
+	    || presented_document_deleted
+	    || presented_document_change_generation != transaction_generation
+	    || currentPath() != path)
+	{
+		showStatusBarMessage(
+			tr("The provider changed the document again while it was reloading. "
+			   "Review the new change before retrying."), 0);
+		return false;
+	}
+	if (discard_local_recovery)
+	{
+		discardAuxiliaryDraftRecovery();
+		clearDeferredPrivateDraftCleanup();
+	}
+	if (effective_path != path)
+		migrateRecoveryForDocumentMove(path, effective_path);
+	setController(new_controller.release(), effective_path, format);
+	actual_path = effective_path;
+	presented_document_snapshot = std::move(snapshot);
+	setHasAutosaveConflict(false);
+	setHasUnsavedChanges(false);
+	removeAutosaveFile();
+	external_change_pending =
+		AppleDocumentAccess::hasPresentedDocumentConflict();
+	showStatusBarMessage(
+		external_change_pending
+		? tr("Reloaded the provider's current version. Conflicting alternatives remain; save to keep this version.")
+		: tr("Reloaded external document changes."),
+		external_change_pending ? 0 : 3000);
+	return true;
+}
+
+bool MainWindow::persistAuxiliaryDraftRecovery()
+{
+	auto* editor = qobject_cast<MapEditorController*>(controller);
+	if (!editor || currentPath().isEmpty())
+		return true;
+	auto* map = editor->getMap();
+	bool complete = true;
+	for (int index = 0; index < map->getNumTemplates(); ++index)
+	{
+		auto* temp = map->getTemplate(index);
+		const auto template_path = temp->getTemplatePath();
+		if (template_path.isEmpty())
+			continue;
+		if (!temp->hasUnsavedChanges())
+			continue;
+		const auto recovery_path =
+			AppleDocumentAccess::privateAuxiliaryRecoveryPath(
+				currentPath(), temp->resourceIdentity(), template_path);
+		if (recovery_path.isEmpty() || !temp->writeTemplateFile(recovery_path))
+		{
+			complete = false;
+			qWarning("Could not persist private iOS template recovery for %s",
+			         qUtf8Printable(temp->getTemplateFilename()));
+		}
+	}
+	return complete;
+}
+
+bool MainWindow::persistRecoverySnapshot()
+{
+	if (!controller || currentPath().isEmpty()
+	    || controller->isEditingInProgress())
+	{
+		return false;
+	}
+	const bool auxiliary_saved = persistAuxiliaryDraftRecovery();
+	const bool map_saved = persistMapRecoverySnapshot();
+	return auxiliary_saved && map_saved;
+}
+
+void MainWindow::discardAuxiliaryDraftRecovery()
+{
+	auto* editor = qobject_cast<MapEditorController*>(controller);
+	if (!editor || currentPath().isEmpty())
+		return;
+	auto* map = editor->getMap();
+	for (int index = 0; index < map->getNumTemplates(); ++index)
+	{
+		auto* temp = map->getTemplate(index);
+		AppleDocumentAccess::discardPrivateAuxiliaryRecovery(
+			currentPath(),
+			temp->resourceIdentity(),
+			temp->getTemplatePath());
+	}
+}
+
+void MainWindow::commitDeferredPrivateDraftCleanup()
+{
+	auto* editor = qobject_cast<MapEditorController*>(controller);
+	auto* map = editor ? editor->getMap() : nullptr;
+	const auto is_still_referenced = [map](const QString& path) {
+		if (!map)
+			return true;
+		const auto identity = QFileInfo{path}.absoluteFilePath();
+		for (int index = 0; index < map->getNumTemplates(); ++index)
+		{
+			if (QFileInfo{map->getTemplate(index)->getTemplatePath()}
+			        .absoluteFilePath() == identity)
+			{
+				return true;
+			}
+		}
+		for (int index = 0; index < map->getNumClosedTemplates(); ++index)
+		{
+			if (QFileInfo{map->getClosedTemplate(index)->getTemplatePath()}
+			        .absoluteFilePath() == identity)
+			{
+				return true;
+			}
+		}
+		return false;
+	};
+	const auto is_resource_still_referenced =
+		[map](const QString& resource_identity) {
+			if (!map || resource_identity.isEmpty())
+				return false;
+			for (int index = 0; index < map->getNumTemplates(); ++index)
+			{
+				if (map->getTemplate(index)->resourceIdentity()
+				    == resource_identity)
+				{
+					return true;
+				}
+			}
+			for (int index = 0; index < map->getNumClosedTemplates(); ++index)
+			{
+				if (map->getClosedTemplate(index)->resourceIdentity()
+				    == resource_identity)
+				{
+					return true;
+				}
+			}
+			return false;
+		};
+	for (const auto& item : std::as_const(deferred_private_draft_cleanup))
+	{
+		if (!is_still_referenced(item.path))
+		{
+			if (!is_resource_still_referenced(item.resource_identity))
+			{
+				AppleDocumentAccess::discardPrivateAuxiliaryRecovery(
+					currentPath(), item.resource_identity, item.path);
+			}
+			QFile::remove(item.path);
+		}
+	}
+	deferred_private_draft_cleanup.clear();
+}
+
+void MainWindow::clearDeferredPrivateDraftCleanup()
+{
+	deferred_private_draft_cleanup.clear();
+}
+
+bool MainWindow::persistMapRecoverySnapshot()
+{
+	const auto* format = FileFormats.findFormat(FileFormats.defaultFormat());
+	if (!controller || !format || currentPath().isEmpty())
+		return false;
+	const auto recovery_path = autosavePath(currentPath());
+	if (!QDir{}.mkpath(QFileInfo{recovery_path}.absolutePath()))
+		return false;
+	QSaveFile recovery_file{recovery_path};
+	quint64 staged_revision = 0;
+	const auto logical_path = format->fixupExtension(currentPath());
+	return recovery_file.open(QIODevice::WriteOnly)
+	       && controller->stageSaveTo(
+		       logical_path, *format, &recovery_file, &staged_revision)
+	       && recovery_file.commit()
+	       && controller->saveRevision() == staged_revision;
+}
+
+void MainWindow::restoreAuxiliaryDraftRecovery()
+{
+	auto* editor = qobject_cast<MapEditorController*>(controller);
+	if (!editor || currentPath().isEmpty())
+		return;
+	auto* map = editor->getMap();
+	for (int index = 0; index < map->getNumTemplates(); ++index)
+	{
+		auto* temp = map->getTemplate(index);
+		const auto template_path = temp->getTemplatePath();
+		const auto recovery_path =
+			AppleDocumentAccess::privateAuxiliaryRecoveryPath(
+				currentPath(), temp->resourceIdentity(), template_path);
+		if (recovery_path.isEmpty() || !QFileInfo::exists(recovery_path))
+			continue;
+
+		QMessageBox prompt{
+			QMessageBox::Warning,
+			tr("Recover template changes?"),
+			tr("Mapper found private unsaved changes for template “%1”.")
+				.arg(temp->getTemplateFilename()),
+			QMessageBox::NoButton,
+			this};
+		auto* restore_button = prompt.addButton(
+			tr("Restore Draft"), QMessageBox::AcceptRole);
+		auto* discard_button = prompt.addButton(
+			tr("Discard Draft"), QMessageBox::DestructiveRole);
+		prompt.addButton(QMessageBox::Cancel);
+		prompt.exec();
+		if (prompt.clickedButton() == restore_button)
+		{
+			if (!temp->recoverFromPrivateSnapshot(recovery_path))
+			{
+				QMessageBox::warning(
+					this,
+					tr("Template recovery failed"),
+					tr("Mapper could not load the private template recovery copy."));
+			}
+		}
+		else if (prompt.clickedButton() == discard_button)
+		{
+			AppleDocumentAccess::discardPrivateAuxiliaryRecovery(
+				currentPath(), temp->resourceIdentity(), template_path);
+		}
+	}
+}
+#endif
+
 void MainWindow::openPathBacklog()
 {
 	if (path_backlog.empty() || path_backlog_busy)
 		return;
-	
+#if defined(Q_OS_IOS)
+	if (provider_document_transaction_active
+	    || close_in_progress
+	    || QApplication::activeModalWidget())
+	{
+		QTimer::singleShot(10, this, &MainWindow::openPathBacklog);
+		return;
+	}
+#endif
+
 	QScopedValueRollback<bool> rollback{path_backlog_busy, true};
 	openPath(path_backlog.takeFirst());
 	QTimer::singleShot(10, this, &MainWindow::openPathBacklog);
@@ -1564,18 +2673,24 @@ void MainWindow::openPathBacklog()
 void MainWindow::openRecentFile()
 {
 	if (auto action = qobject_cast<QAction*>(sender()))
+	{
+#ifdef MAPPER_MOBILE
+		if (hasOpenedFile() && !closeFile())
+			return;
+#endif
 		openPath(action->data().toString());
+	}
 }
 
 void MainWindow::updateRecentFileActions()
 {
 	if (! create_menu)
 		return;
-	
+
 	QStringList files = Settings::getInstance().getSettingCached(Settings::General_RecentFilesList).toStringList();
-	
+
 	int num_recent_files = qMin(files.size(), max_recent_files);
-	
+
 	open_recent_menu->clear();
 	for (int i = 0; i < num_recent_files; ++i) {
 		QString text = tr("&%1 %2").arg(i + 1).arg(DocumentPath::displayName(files[i]));
@@ -1583,7 +2698,7 @@ void MainWindow::updateRecentFileActions()
 		recent_file_act[i]->setData(files[i]);
 		open_recent_menu->addAction(recent_file_act[i]);
 	}
-	
+
 	if (num_recent_files > 0 && !open_recent_menu_inserted)
 		file_menu->insertMenu(save_act, open_recent_menu);
 	else if (!(num_recent_files > 0) && open_recent_menu_inserted)
@@ -1596,11 +2711,26 @@ void MainWindow::setHasAutosaveConflict(bool value)
 	if (has_autosave_conflict != value)
 	{
 		has_autosave_conflict = value;
+#if defined(Q_OS_IOS)
+		setAutosaveNeeded(has_unsaved_changes
+		                  && canAdvancePrivateRecovery());
+#else
 		setAutosaveNeeded(has_unsaved_changes && !has_autosave_conflict);
+#endif
 		if (!has_autosave_conflict)
 			emit autosaveConflictResolved();
 	}
 }
+
+#if defined(Q_OS_IOS)
+bool MainWindow::canAdvancePrivateRecovery() const
+{
+	return !has_autosave_conflict
+	       || (!currentPath().isEmpty()
+	           && DocumentPath::canonical(actual_path)
+	              == DocumentPath::canonical(autosavePath(currentPath())));
+}
+#endif
 
 bool MainWindow::removeAutosaveFile() const
 {
@@ -1620,14 +2750,35 @@ Autosave::AutosaveResult MainWindow::autosave()
 	{
 		return Autosave::PermanentFailure;
 	}
+#if defined(Q_OS_IOS)
+	else if (provider_document_transaction_active)
+	{
+		// Native document pickers and coordinated provider operations keep the
+		// Qt event dispatcher alive. Do not enter a second serialization while
+		// one of those transactions owns an immutable save receipt.
+		return Autosave::TemporaryFailure;
+	}
+#endif
 	else if (controller->isEditingInProgress())
 	{
 		return Autosave::TemporaryFailure;
 	}
 	else
 	{
+#if defined(Q_OS_IOS)
+		if (!beginNativeDocumentInteraction(NativeDocumentCheckpoint::Skip))
+			return Autosave::TemporaryFailure;
+		auto interaction_guard = qScopeGuard(
+			[this] { endNativeDocumentInteraction(); });
+#endif
 		showStatusBarMessageImmediately(tr("Autosaving..."), 0);
-		if (controller->exportTo(autosavePath(currentPath()), *autosave_format))
+#if defined(Q_OS_IOS)
+		const bool saved = persistRecoverySnapshot();
+#else
+		const bool saved = controller->exportTo(
+			autosavePath(currentPath()), *autosave_format);
+#endif
+		if (saved)
 		{
 			// Success
 			clearStatusBarMessage();
@@ -1648,11 +2799,15 @@ bool MainWindow::save()
 	auto format = currentFormat();
 	if (path.isEmpty()
 	    || !format
-	    || !format->supportsFileSave())
+	    || !format->supportsFileSave()
+#if defined(Q_OS_IOS)
+	    || presented_document_deleted
+#endif
+	   )
 	{
 		return showSaveAsDialog();
 	}
-	
+
 	return saveTo(path, *currentFormat());
 }
 
@@ -1666,7 +2821,7 @@ bool MainWindow::saveTo(const QString &path, const FileFormat& format)
 
 	if (format.isWritingLossy())
 	{
-		auto message = 
+		auto message =
 		        tr("This map is being saved as a \"%1\" file. "
 		           "Information may be lost.\n\n"
 		           "Press Yes to save in this format.\n"
@@ -1676,24 +2831,220 @@ bool MainWindow::saveTo(const QString &path, const FileFormat& format)
 		if (result != QMessageBox::Yes)
 			return showSaveAsDialog();
 	}
-	
-	if (!controller->saveTo(path, format))
+
+#if defined(Q_OS_IOS)
+	const auto destination_path = DocumentPath::canonical(path);
+	if (!presents_document || presented_document_deleted
+	    || destination_path != currentPath())
+	{
+		return showSaveAsDialog();
+	}
+	if (!beginNativeDocumentInteraction())
 		return false;
-	
-	setMostRecentlyUsedFile(path);
-	
+	bool interaction_active = true;
+	auto interaction_guard = qScopeGuard(
+		[this, &interaction_active] {
+			if (interaction_active)
+				endNativeDocumentInteraction();
+		});
+	const auto conflict_resolution_token =
+		AppleDocumentAccess::capturePresentedDocumentConflicts();
+	const bool provider_conflict = conflict_resolution_token != 0;
+	auto conflict_snapshot_guard = qScopeGuard([conflict_resolution_token] {
+		AppleDocumentAccess::discardPresentedDocumentConflicts(
+			conflict_resolution_token);
+	});
+	const auto transaction_token = presented_document_token;
+	const auto transaction_path = currentPath();
+	const auto transaction_generation = presented_document_change_generation;
+	QByteArray provider_write_receipt;
+	QString receipt_error;
+	if (!AppleDocumentAccess::capturePresentedDocumentWriteReceipt(
+		    destination_path,
+		    external_change_pending || provider_conflict,
+		    &provider_write_receipt,
+		    &receipt_error))
+	{
+		QMessageBox::warning(
+			this,
+			tr("Document changed"),
+			receipt_error.isEmpty()
+			? tr("Mapper could not verify the provider version before saving.")
+			: receipt_error);
+		return false;
+	}
+	if (external_change_pending || provider_conflict)
+	{
+		const auto choice = QMessageBox::warning(
+			this,
+			tr("Overwrite external changes?"),
+			provider_conflict
+			? tr("This document has conflicting provider versions. Saving keeps "
+			     "Mapper's version and resolves the alternatives.")
+			: tr("This document changed in another app after Mapper loaded it. "
+			     "Saving now will overwrite those external changes."),
+			QMessageBox::Save | QMessageBox::Cancel,
+			QMessageBox::Cancel);
+		if (choice != QMessageBox::Save)
+			return false;
+	}
+#endif
+
+	bool saved = false;
+#if defined(Q_OS_IOS)
+	auto staged_document = std::make_unique<QTemporaryFile>(
+		QDir::tempPath() + QLatin1String("/Mapper-save-XXXXXX.")
+		+ format.primaryExtension());
+	if (!staged_document->open())
+	{
+		QMessageBox::warning(
+			this, tr("Error"),
+			tr("Could not create a private save snapshot: %1")
+			.arg(staged_document->errorString()));
+		return false;
+	}
+
+	// Serializing a map may touch QWidget-owned controller state. Keep that on
+	// Qt's GUI thread and leave the map dirty until the provider commit succeeds.
+	quint64 staged_revision = 0;
+	if (!controller->stageSaveTo(
+			destination_path, format, staged_document.get(), &staged_revision)
+	    || !staged_document->flush())
+	{
+		return false;
+	}
+	staged_document->close();
+	replayPendingPresentedDocumentEvents();
+	if (presented_document_token != transaction_token
+	    || currentPath() != transaction_path
+	    || presented_document_change_generation != transaction_generation)
+	{
+		QMessageBox::warning(
+			this,
+			tr("Document changed"),
+			tr("The document changed while Mapper was preparing the save. "
+			   "Review the provider change and save again."));
+		return false;
+	}
+
+	QString coordination_error;
+	QString coordinated_path;
+	{
+		QScopedValueRollback<bool> transaction_guard{
+			provider_document_transaction_active, true};
+		saved = AppleDocumentAccess::writePresentedDocument(
+			destination_path,
+			staged_document->fileName(),
+			provider_write_receipt,
+			conflict_resolution_token,
+			&coordinated_path,
+			&coordination_error);
+	}
+	replayPendingPresentedDocumentEvents();
+	if (!coordination_error.isEmpty())
+		QMessageBox::warning(this, tr("Error"), coordination_error);
+#else
+	saved = controller->saveTo(path, format);
+#endif
+	if (!saved)
+		return false;
+
+#if defined(Q_OS_IOS)
+	const auto committed_path = coordinated_path.isEmpty()
+	                            ? DocumentPath::canonical(path)
+	                            : DocumentPath::canonical(coordinated_path);
+	const bool provider_stable =
+		presented_document_token == transaction_token
+		&& presents_document
+		&& !presented_document_deleted
+		&& presented_document_change_generation == transaction_generation
+		&& currentPath() == transaction_path
+		&& committed_path == transaction_path;
+	if (!provider_stable)
+	{
+		if (!presented_document_deleted && !committed_path.isEmpty()
+		    && committed_path != currentPath())
+		{
+			const auto old_path = currentPath();
+			migrateRecoveryForDocumentMove(old_path, committed_path);
+			setCurrentFile(committed_path, &format);
+			actual_path = committed_path;
+		}
+		const bool recovery_current = persistRecoverySnapshot();
+		QMessageBox::warning(
+			this,
+			tr("Document changed during save"),
+			recovery_current
+				? tr("The provider changed, moved, or removed the document while the "
+				     "save was completing. Mapper kept the map marked as modified and "
+				     "updated its recovery copy.")
+				: tr("The provider changed, moved, or removed the document while the "
+				     "save was completing. Mapper kept the map marked as modified, but "
+				     "could not update its recovery copy."));
+		return false;
+	}
+	if (controller->saveRevision() != staged_revision)
+	{
+		const bool recovery_current = persistRecoverySnapshot();
+		QMessageBox::warning(
+			this,
+			tr("Map changed during save"),
+			recovery_current
+				? tr("The provider safely received the staged version, but the map was "
+				     "edited while that save was completing. Mapper kept the newer map "
+				     "marked as modified and updated its recovery copy.")
+				: tr("The provider safely received the staged version, but the map was "
+				     "edited while that save was completing. Mapper kept the newer map "
+				     "marked as modified, but could not update its recovery copy."));
+		return false;
+	}
+#else
+	const auto committed_path = path;
+#endif
+	setMostRecentlyUsedFile(committed_path);
+
+	if (committed_path != currentPath())
+	{
+		setCurrentFile(committed_path, &format);
+	}
+
+#if defined(Q_OS_IOS)
+	const bool fully_clean = controller->markSaveCommitted(staged_revision, false);
+#else
+	const bool fully_clean = true;
+#endif
+#if defined(Q_OS_IOS)
+	commitDeferredPrivateDraftCleanup();
+	setUnsavedStateAfterDocumentCommit(!fully_clean);
+	setHasAutosaveConflict(false);
+	const bool external_recovery_current =
+		fully_clean ? removeAutosaveFile() : persistRecoverySnapshot();
+	external_change_pending = false;
+	if (!fully_clean)
+	{
+		QMessageBox::warning(
+			this,
+			tr("External template not saved"),
+			external_recovery_current
+			? tr("The map was saved safely, but an edited external template still "
+			     "needs its own authorized save or relink. Mapper kept the document "
+			     "marked as modified and preserved a private recovery map.")
+			: tr("The map was saved safely, but an edited external template still "
+			     "needs its own authorized save or relink. Mapper kept the document "
+			     "marked as modified, but could not update its private recovery map; "
+			     "keep Mapper open and retry."));
+	}
+#else
 	setHasAutosaveConflict(false);
 	removeAutosaveFile();
-	
-	if (path != currentPath())
-	{
-		setCurrentFile(path, &format);
-		removeAutosaveFile();
-	}
-	
-	setHasUnsavedChanges(false);
-	
+	setHasUnsavedChanges(!fully_clean);
+#endif
+
+#if defined(Q_OS_IOS)
+	return fully_clean;
+#else
 	return true;
+#endif
 }
 
 // static
@@ -1702,10 +3053,10 @@ MainWindow::FileInfo MainWindow::getOpenFileName(QWidget* parent, const QString&
 	// Get the saved directory to start in, defaulting to the user's home directory.
 	QSettings settings;
 	QString open_directory = settings.value(QString::fromLatin1("openFileDirectory"), QDir::homePath()).toString();
-	
+
 	// Build the list of supported file filters based on the file format registry
 	QString filters, extensions;
-	
+
 	if (types.testFlag(FileFormat::MapFile) || types.testFlag(FileFormat::OgrFile))
 	{
 		for (auto format : FileFormats.formats())
@@ -1732,7 +3083,29 @@ MainWindow::FileInfo MainWindow::getOpenFileName(QWidget* parent, const QString&
 	filters += tr("All files") + QLatin1String(" (*.*)");
 	
 	QString filter; // will be set to the selected filter by QFileDialog
-	QString path = FileDialog::getOpenFileName(parent, title, open_directory, filters, &filter);
+	QString path;
+#if defined(Q_OS_IOS)
+	auto* interaction_owner = nativeDocumentInteractionOwner(parent);
+	if (!interaction_owner
+	    || !interaction_owner->beginNativeDocumentInteraction(
+		    NativeDocumentCheckpoint::Required))
+	{
+		return {QString{}, nullptr};
+	}
+	auto interaction_guard = qScopeGuard([interaction_owner] {
+		interaction_owner->endNativeDocumentInteraction();
+	});
+	QString picker_error;
+	const bool selected = AppleDocumentAccess::chooseDocumentToOpen(
+		title, &path, &picker_error);
+	if (!picker_error.isEmpty())
+		QMessageBox::warning(parent, tr("Document access"), picker_error);
+	if (!selected)
+		path.clear();
+#else
+	path = FileDialog::getOpenFileName(
+		parent, title, open_directory, filters, &filter);
+#endif
 	
 	const FileFormat* format = nullptr;
 	if (!path.isEmpty())
@@ -1740,9 +3113,11 @@ MainWindow::FileInfo MainWindow::getOpenFileName(QWidget* parent, const QString&
 		path = DocumentPath::canonical(path);
 		format = FileFormats.findFormatByFilter(filter, &FileFormat::supportsFileOpen);
 		if (!format)
-			format = FileFormats.findFormatForFilename(path, &FileFormat::supportsFileOpen);
+		format = FileFormats.findFormatForFilename(path, &FileFormat::supportsFileOpen);
+#if !defined(Q_OS_IOS)
 		if (!format)
 			format = FileFormats.findFormatForData(path, types);
+#endif
 	}
 	return { path, format };
 }
@@ -1768,6 +3143,392 @@ void MainWindow::showMessageBox(QWidget* parent, const QString& title, const QSt
 
 
 
+#if defined(Q_OS_IOS)
+bool MainWindow::exportPresentedDocument(
+	const FileFormat& format, const QString& suggested_name)
+{
+	if (!controller || !format.supportsFileSaveAs())
+		return false;
+	if (!beginNativeDocumentInteraction())
+		return false;
+	bool interaction_active = true;
+	auto interaction_guard = qScopeGuard(
+		[this, &interaction_active] {
+			if (interaction_active)
+				endNativeDocumentInteraction();
+		});
+	if (format.isWritingLossy())
+	{
+		const auto choice = QMessageBox::warning(
+			this,
+			tr("Warning"),
+			tr("This map is being exported as a “%1” file. Information may be lost.")
+				.arg(format.description()),
+			QMessageBox::Save | QMessageBox::Cancel,
+			QMessageBox::Cancel);
+		if (choice != QMessageBox::Save)
+			return false;
+	}
+
+	QTemporaryDir staging_directory{
+		QDir::tempPath() + QLatin1String("/Mapper-export-XXXXXX")};
+	if (!staging_directory.isValid())
+	{
+		QMessageBox::warning(
+			this, tr("Error"), tr("Could not create a private export directory."));
+		return false;
+	}
+	QString export_name = QFileInfo{suggested_name}.fileName();
+	if (export_name.isEmpty())
+		export_name = tr("Untitled map");
+	export_name = format.fixupExtension(export_name);
+	const auto provisional_path =
+		QDir{staging_directory.path()}.filePath(export_name);
+	const auto provisional_logical_path = currentPath().isEmpty()
+	                                      ? provisional_path
+	                                      : currentPath();
+	QSaveFile provisional_file{provisional_path};
+	quint64 provisional_revision = 0;
+	if (!provisional_file.open(QIODevice::WriteOnly)
+	    || !controller->stageSaveTo(
+		    provisional_logical_path,
+		    format,
+		    &provisional_file,
+		    &provisional_revision)
+	    || !provisional_file.commit())
+	{
+		QMessageBox::warning(
+			this,
+			tr("Error"),
+			tr("Mapper could not prepare a complete document for the Files exporter."));
+		return false;
+	}
+
+	const auto transaction_generation = presented_document_change_generation;
+	QString exported_path;
+	QByteArray exported_fingerprint;
+	QString coordinated_path;
+	QString provider_error;
+	quint64 replacement_token = 0;
+	bool exported = false;
+	bool corrected_snapshot_ready = false;
+	bool adopted = false;
+	quint64 staged_revision = 0;
+	QString committed_path;
+	bool recovery_identity_ready = true;
+	bool failed_export_removed = false;
+	struct PrivateDraftRebinding
+	{
+		Template* temp = nullptr;
+		QString old_path;
+		QString old_relative_path;
+		QByteArray old_fingerprint;
+		QString new_path;
+	};
+	std::vector<PrivateDraftRebinding> private_draft_rebindings;
+	std::unique_ptr<QTemporaryDir> private_draft_fork;
+	bool keep_private_draft_fork = false;
+	const auto rollback_private_draft_fork = [&] {
+		for (auto it = private_draft_rebindings.rbegin();
+		     it != private_draft_rebindings.rend(); ++it)
+		{
+			it->temp->setTemplatePath(it->old_path);
+			it->temp->setTemplateRelativePath(it->old_relative_path);
+			it->temp->setAuxiliaryDocumentFingerprint(it->old_fingerprint);
+		}
+		private_draft_rebindings.clear();
+		private_draft_fork.reset();
+	};
+	auto private_draft_rollback = qScopeGuard([&] {
+		if (!keep_private_draft_fork)
+			rollback_private_draft_fork();
+	});
+	showStatusBarMessageImmediately(tr("Waiting for the Files provider…"), 0);
+	{
+		QScopedValueRollback<bool> transaction_guard{
+			provider_document_transaction_active, true};
+		exported = AppleDocumentAccess::exportDocument(
+			provisional_path,
+			&exported_path,
+			&exported_fingerprint,
+			&provider_error);
+		if (exported)
+		{
+			exported_path = DocumentPath::canonical(exported_path);
+			const auto exported_extension = QFileInfo{exported_path}.suffix();
+			if (!format.fileExtensions().contains(
+				    exported_extension, Qt::CaseInsensitive))
+			{
+					AppleDocumentAccess::abandonExportedDocument();
+					provider_error = tr(
+						"Files created a copy whose .%1 extension does not match the selected %2 format. Mapper will remove that incomplete copy; retry with one of these extensions: .%3")
+					.arg(
+						exported_extension,
+						format.description(),
+						format.fileExtensions().join(QLatin1String(", .")));
+				exported = false;
+			}
+			else
+			{
+				auto* editor = qobject_cast<MapEditorController*>(controller);
+				auto* map = editor ? editor->getMap() : nullptr;
+				int clone_index = 0;
+				auto clone_private_draft = [&](Template* temp) {
+					const auto source_path = QFileInfo{temp->getTemplatePath()}
+					                         .absoluteFilePath();
+					if (!AppleDocumentAccess::isPrivateAuxiliaryDraft(source_path))
+						return true;
+					if (!private_draft_fork)
+					{
+						const auto destination_root =
+							AppleDocumentAccess::privateAuxiliaryDraftDirectory(
+								exported_path);
+						private_draft_fork = std::make_unique<QTemporaryDir>(
+							QDir{destination_root}.filePath(
+								QLatin1String("SaveAs-XXXXXX")));
+						if (destination_root.isEmpty()
+						    || !private_draft_fork->isValid())
+						{
+							provider_error = tr(
+								"Mapper could not create independent template storage for the exported document.");
+							return false;
+						}
+					}
+					const auto instance_directory =
+						QDir{private_draft_fork->path()}.filePath(
+							QString::number(++clone_index));
+					if (!QDir{}.mkpath(instance_directory))
+					{
+						provider_error = tr(
+							"Mapper could not create independent storage for template “%1”.")
+							.arg(temp->getTemplateFilename());
+						return false;
+					}
+					auto leaf_name = QFileInfo{source_path}.fileName();
+					if (leaf_name.isEmpty())
+						leaf_name = QLatin1String("template-data");
+					const auto destination_path =
+						QDir{instance_directory}.filePath(leaf_name);
+					const bool copied =
+						temp->getTemplateState() == Template::Loaded
+						&& temp->hasUnsavedChanges()
+						? temp->writeTemplateFile(destination_path)
+						: QFile::copy(source_path, destination_path);
+					if (!copied)
+					{
+						provider_error = tr(
+							"Mapper could not clone the private template “%1” for the exported document.")
+							.arg(temp->getTemplateFilename());
+						return false;
+					}
+					private_draft_rebindings.push_back({
+						temp,
+						temp->getTemplatePath(),
+						temp->getTemplateRelativePath(),
+						temp->auxiliaryDocumentFingerprint(),
+						destination_path});
+					temp->setTemplatePath(destination_path);
+					temp->setTemplateRelativePath({});
+					return true;
+				};
+				bool private_drafts_ready = map != nullptr;
+				for (int index = 0;
+				     private_drafts_ready && index < map->getNumTemplates();
+				     ++index)
+				{
+					private_drafts_ready = clone_private_draft(
+						map->getTemplate(index));
+				}
+				for (int index = 0;
+				     private_drafts_ready && index < map->getNumClosedTemplates();
+				     ++index)
+				{
+					private_drafts_ready = clone_private_draft(
+						map->getClosedTemplate(index));
+				}
+				const auto corrected_path = QDir{staging_directory.path()}.filePath(
+					QLatin1String("destination-") + export_name);
+				QSaveFile corrected_file{corrected_path};
+				corrected_snapshot_ready = private_drafts_ready
+				                           && corrected_file.open(QIODevice::WriteOnly)
+				                           && controller->stageSaveTo(
+					                           exported_path,
+					                           format,
+					                           &corrected_file,
+					                           &staged_revision)
+				                           && corrected_file.commit();
+				if (corrected_snapshot_ready)
+				{
+					adopted = AppleDocumentAccess::adoptExportedDocument(
+						exported_path,
+						corrected_path,
+						exported_fingerprint,
+						makePresentedDocumentChangeHandler(),
+						&replacement_token,
+						&coordinated_path,
+						&provider_error);
+				}
+				else
+				{
+					AppleDocumentAccess::abandonExportedDocument();
+				}
+			}
+		}
+		if (adopted)
+		{
+			if (private_draft_fork)
+				private_draft_fork->setAutoRemove(false);
+			keep_private_draft_fork = true;
+			// Save As forks the source document. Any pending source-side cleanup
+			// must remain available to the unchanged source provider document.
+			clearDeferredPrivateDraftCleanup();
+			presented_document_token = replacement_token;
+			presents_document = true;
+			presented_document_deleted = false;
+			committed_path = coordinated_path.isEmpty()
+			                 ? exported_path
+			                 : DocumentPath::canonical(coordinated_path);
+			const auto old_path = currentPath();
+			if (old_path != committed_path)
+			{
+				recovery_identity_ready = migrateRecoveryForDocumentMove(
+					old_path, committed_path);
+				setCurrentFile(committed_path, &format);
+			}
+			// Re-keying a receipt is not enough: the recovery map must serialize
+			// the freshly forked private-resource paths under the new identity.
+			if (has_unsaved_changes || has_autosave_conflict)
+			{
+				const bool recovery_snapshot_saved = persistRecoverySnapshot();
+				recovery_identity_ready =
+					recovery_identity_ready && recovery_snapshot_saved;
+			}
+			actual_path = committed_path;
+			presented_document_snapshot.reset();
+		}
+	}
+	clearStatusBarMessage();
+	if (!adopted)
+	{
+		// Provider callbacks must observe source identities after a failed
+		// adoption, not temporary paths that are about to disappear.
+		rollback_private_draft_fork();
+		private_draft_rollback.dismiss();
+		if (!exported_path.isEmpty())
+		{
+			QString cleanup_error;
+			failed_export_removed = AppleDocumentAccess::removeExportedDocument(
+				exported_path, exported_fingerprint, &cleanup_error);
+			if (!failed_export_removed && !cleanup_error.isEmpty())
+			{
+				if (!provider_error.isEmpty())
+					provider_error += QLatin1String("\n\n");
+				provider_error += cleanup_error;
+			}
+		}
+	}
+	replayPendingPresentedDocumentEvents();
+
+	if (!exported)
+	{
+		if (!provider_error.isEmpty())
+			QMessageBox::warning(this, tr("Export failed"), provider_error);
+		return false;
+	}
+	if (!corrected_snapshot_ready || !adopted)
+	{
+		QString detail = provider_error;
+		if (detail.isEmpty())
+		{
+			detail = tr("Mapper could not prepare or reopen the provider-relative version.");
+		}
+		QMessageBox::warning(
+			this,
+			tr("Exported copy needs attention"),
+			failed_export_removed
+			? tr("Mapper could not safely rewrite and adopt the exported document, "
+			     "so it removed the incomplete copy. Retry Save As.\n\n%1")
+				.arg(detail)
+			: tr("Files exported a provisional copy to %1, but Mapper could not "
+			     "safely rewrite and adopt it or remove it afterward. It may still "
+			     "reference private template drafts owned by the source document. "
+			     "Delete that copy and retry Save As.\n\n%2")
+				.arg(DocumentPath::displayName(exported_path), detail));
+		return false;
+	}
+
+	const bool provider_stable = replacement_token != 0
+	                             && presented_document_token == replacement_token
+	                             && presents_document
+	                             && !presented_document_deleted
+	                             && currentPath() == committed_path
+	                             && presented_document_change_generation
+	                                == transaction_generation;
+	if (!provider_stable)
+	{
+		const bool recovery_current = persistRecoverySnapshot();
+		QMessageBox::warning(
+			this,
+			tr("Export changed during completion"),
+			recovery_current
+				? tr("The provider changed the exported document while Mapper was "
+				     "adopting it. The map remains marked as modified and its recovery "
+				     "copy was updated.")
+				: tr("The provider changed the exported document while Mapper was "
+				     "adopting it. The map remains marked as modified, but Mapper could "
+				     "not update its recovery copy."));
+		return false;
+	}
+	if (!recovery_identity_ready)
+	{
+		QMessageBox::warning(
+			this,
+			tr("Recovery copy needs attention"),
+			tr("The exported document is open, but Mapper could not establish a "
+			   "current private recovery copy under its new identity. Keep Mapper "
+			   "open and save again before leaving the app."));
+		return false;
+	}
+	if (controller->saveRevision() != staged_revision)
+	{
+		const bool recovery_current = persistRecoverySnapshot();
+		QMessageBox::warning(
+			this,
+			tr("Map changed during export"),
+			recovery_current
+				? tr("Files received the staged version, but the map was edited while "
+				     "the export was completing. Mapper kept the newer map marked as "
+				     "modified and updated its recovery copy.")
+				: tr("Files received the staged version, but the map was edited while "
+				     "the export was completing. Mapper kept the newer map marked as "
+				     "modified, but could not update its recovery copy."));
+		return false;
+	}
+
+	setMostRecentlyUsedFile(committed_path);
+	const bool fully_clean = controller->markSaveCommitted(staged_revision, false);
+	setUnsavedStateAfterDocumentCommit(!fully_clean);
+	setHasAutosaveConflict(false);
+	const bool external_recovery_current =
+		fully_clean ? removeAutosaveFile() : persistRecoverySnapshot();
+	external_change_pending = false;
+	if (!fully_clean)
+	{
+		QMessageBox::warning(
+			this,
+			tr("External template not saved"),
+			external_recovery_current
+			? tr("The map was exported safely, but an edited external template still "
+			     "needs its own authorized save or relink. Mapper preserved a private "
+			     "recovery map with stable resource identities.")
+			: tr("The map was exported safely, but an edited external template still "
+			     "needs its own authorized save or relink. Mapper could not update its "
+			     "private recovery map; keep Mapper open and retry."));
+	}
+	return fully_clean;
+}
+#endif
+
 bool MainWindow::showSaveAsDialog()
 {
 	if (!controller)
@@ -1786,19 +3547,75 @@ bool MainWindow::showSaveAsDialog()
 	
 	// Build the list of supported file filters based on the file format registry
 	QString filters;
+	std::vector<const FileFormat*> writable_formats;
 	for (auto format : FileFormats.formats())
 	{
 		if (format->supportsFileSaveAs())
 		{
+			writable_formats.push_back(format);
 			if (filters.isEmpty()) 
 				filters = format->filter();
 			else
 				filters = filters + QLatin1String(";;") + format->filter();
 		}
 	}
-	
+
+	const FileFormat* suggested_format = current_format;
+	if (!suggested_format || !suggested_format->supportsFileSaveAs())
+		suggested_format = FileFormats.findFormat(FileFormats.defaultFormat());
+	if (!suggested_format)
+		return false;
+
+	QString dialog_location = save_directory;
 	QString filter; // will be set to the selected filter by QFileDialog
-	QString path = FileDialog::getSaveFileName(this, tr("Save file"), save_directory, filters, &filter);
+#if defined(Q_OS_IOS)
+	QStringList format_options;
+	int preferred_index = 0;
+	for (int index = 0; index < int(writable_formats.size()); ++index)
+	{
+		const auto* format = writable_formats.at(index);
+		format_options.push_back(
+			tr("%1 (.%2)").arg(
+				format->description(),
+				format->fileExtensions().join(QLatin1String(", ."))));
+		if (format == suggested_format)
+			preferred_index = index;
+	}
+	if (format_options.isEmpty())
+		return false;
+	int selected_index = 0;
+	if (format_options.size() > 1)
+	{
+		if (!beginNativeDocumentInteraction())
+			return false;
+		auto interaction_guard = qScopeGuard(
+			[this] { endNativeDocumentInteraction(); });
+		selected_index = AppleDocumentAccess::chooseDocumentFormat(
+			tr("Choose file format"),
+			format_options,
+			preferred_index,
+			tr("Cancel"));
+	}
+	if (selected_index < 0 || selected_index >= int(writable_formats.size()))
+		return false;
+	suggested_format = writable_formats.at(selected_index);
+
+	// UIDocumentPicker derives the exported document's type and suggested name
+	// from the input URL. Establish both before presenting it; never mutate the
+	// security-scoped URL returned by the provider afterwards.
+	QString suggested_name = DocumentPath::displayName(currentPath());
+	if (suggested_name.isEmpty())
+		suggested_name = tr("Untitled map");
+	if (suggested_format)
+	{
+		suggested_name = suggested_format->fixupExtension(suggested_name);
+		filter = suggested_format->filter();
+	}
+	dialog_location = QDir(save_directory).filePath(suggested_name);
+	return exportPresentedDocument(*suggested_format, suggested_name);
+#endif
+	QString path = FileDialog::getSaveFileName(
+		this, tr("Save file"), dialog_location, filters, &filter);
 	
 	// On Windows, when the user enters "sample", we get "sample.omap *.xmap".
 	// (Fixed in upstream qtbase/src/plugins/platforms/windows/qwindowsdialoghelpers.cpp
@@ -1818,6 +3635,8 @@ bool MainWindow::showSaveAsDialog()
 	const FileFormat *format = FileFormats.findFormatByFilter(filter, &FileFormat::supportsFileSaveAs);
 	if (!format)
 		format = FileFormats.findFormatForFilename(path, &FileFormat::supportsFileSaveAs);
+	if (!format && suggested_format && suggested_format->supportsFileSaveAs())
+		format = suggested_format;
 	if (!format && current_format && current_format->supportsFileSaveAs())
 		format = current_format;
 	if (!format)
@@ -1835,8 +3654,10 @@ bool MainWindow::showSaveAsDialog()
 		return false;
 	}
 	
+#if !defined(Q_OS_IOS)
 	if (!DocumentPath::isContentUri(path))
 		path = format->fixupExtension(path);
+#endif
 	return saveTo(path, *format);
 }
 

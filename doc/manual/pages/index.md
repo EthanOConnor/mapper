@@ -1,6 +1,6 @@
 ---
 title: User Manual
-last_modified_date: 31 January 2021
+last_modified_date: 16 July 2026
 redirect_from:
   - /
   - /Home
@@ -24,6 +24,10 @@ Using the Mapper app in "Touch Mode".
 
 [The Mapper app for Android](android-app.md){: .subpage}
 Working with the Android version of Mapper.
+
+[The Mapper app for iOS and iPadOS](ios-app.md){: .subpage}
+Opening, editing, and saving maps with the native Files workflow on iPhone and
+iPad.
 
 [Starting a new map](new_map.md){: .subpage}
 First steps.

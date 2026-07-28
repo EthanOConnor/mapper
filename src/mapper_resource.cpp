@@ -49,7 +49,13 @@ void setSeachPaths()
 	doc_paths.append(build_dir + QLatin1String("/doc/manual"));
 #endif
 	
-#if defined(Q_OS_MACOS)
+#if defined(Q_OS_IOS)
+	// iOS application bundles are flat: applicationDirPath() is the resource
+	// root as well as the directory containing the executable.
+	auto app_dir = QDir(QCoreApplication::applicationDirPath()).absolutePath();
+	data_paths.append(app_dir);
+	doc_paths.append(app_dir + QLatin1String("/doc"));
+#elif defined(Q_OS_MACOS)
 	// Mac OS X: load resources from the Resources directory of the bundle
 	auto app_dir = QDir { QCoreApplication::applicationDirPath() };
 	auto resources_dir = app_dir.absoluteFilePath(QLatin1String("../Resources"));

@@ -73,7 +73,7 @@ public:
 	const char* getTemplateType() const override {return "TemplateTrack";}
 	bool isRasterGraphics() const override {return false;}
 	
-	bool saveTemplateFile() const override;
+	bool writeTemplateFile(const QString& path) const override;
 	
 	bool loadTemplateFileImpl() override;
 	bool postLoadSetup(QWidget* dialog_parent, bool& out_center_in_view) override;

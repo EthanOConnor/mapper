@@ -13,7 +13,8 @@
 
 OpenOrienteering Mapper is an orienteering mapmaking program and provides
 a free and open source alternative to existing commercial software.
-OpenOrienteering Mapper runs on Android, Windows, macOS and Linux.
+The forward product runs on iPhone and iPad with iOS/iPadOS 18 or newer, as
+well as Android, Windows, macOS and Linux.
 
  - [Mapper Homepage](https://www.openorienteering.org/apps/mapper/)
  - [Manual](https://www.openorienteering.org/mapper-manual/)

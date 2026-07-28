@@ -89,7 +89,10 @@ NativeSurfaceDescriptor describeNativeSurface(QWindow& window)
 	auto const platform = QGuiApplication::platformName().toLower();
 	descriptor.window = static_cast<std::uintptr_t>(window.winId());
 
-#if defined(Q_OS_MACOS)
+#if defined(Q_OS_IOS)
+	if (platform == QLatin1String("ios"))
+		descriptor.platform = NativePlatform::UiKit;
+#elif defined(Q_OS_MACOS)
 	if (platform == QLatin1String("cocoa"))
 		descriptor.platform = NativePlatform::AppKit;
 #elif defined(Q_OS_WIN)
@@ -128,7 +131,7 @@ NativeSurfaceWindow::NativeSurfaceWindow(QWindow* parent)
  : QWindow(parent)
  , suspended_(appIsSuspended(QGuiApplication::applicationState()))
 {
-#if defined(Q_OS_MACOS)
+#if defined(Q_OS_IOS) || defined(Q_OS_MACOS)
 	setSurfaceType(QSurface::MetalSurface);
 #elif defined(Q_OS_WIN)
 	setSurfaceType(QSurface::Direct3DSurface);

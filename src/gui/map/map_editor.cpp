@@ -78,6 +78,7 @@
 #include <QRect>
 #include <QRectF>
 #include <QSettings>
+#include <QScopeGuard>
 #include <QSignalBlocker>
 #include <QSize>
 #include <QSizeGrip> // IWYU pragma: keep
@@ -97,6 +98,9 @@
 
 #include "settings.h"
 #include "core/document_path.h"
+#if defined(Q_OS_IOS)
+#include "core/apple_document_access.h"
+#endif
 #include "core/georeferencing.h"
 #include "core/map.h"
 #include "core/map_coord.h"
@@ -139,6 +143,10 @@
 #include "gui/widgets/symbol_widget.h"
 #include "gui/widgets/tags_widget.h"
 #include "gui/widgets/template_list_widget.h"
+#include "gnss/gnss_controller.h"
+#include "gnss/gnss_session.h"
+#include "gnss/ui/gnss_detail_panel.h"
+#include "gnss/ui/gnss_status_overlay.h"
 #include "sensors/compass.h"
 #include "sensors/gps_display.h"
 #include "sensors/gps_temporary_markers.h"
@@ -304,6 +312,7 @@ MapEditorController::MapEditorController(OperatingMode mode, Map* map, MapView* 
 	
 	gps_display = nullptr;
 	gps_track_recorder = nullptr;
+	gnss_status_overlay = nullptr;
 	compass_display = nullptr;
 	gps_marker_display = nullptr;
 	
@@ -339,6 +348,7 @@ MapEditorController::~MapEditorController()
 		delete mappart_selector_box;
 	delete gps_display;
 	delete gps_track_recorder;
+	delete gnss_status_overlay;
 	delete compass_display;
 	delete gps_marker_display;
 	delete map;
@@ -595,50 +605,112 @@ bool MapEditorController::saveTo(const QString& path, const FileFormat& format)
 		return false;
 	}
 	
-	if (!exportTo(path, format))
+	quint64 staged_revision = 0;
+	if (!exportToImplementation(path, format, true, nullptr, &staged_revision))
 		return false;
-	
-	map->setHasUnsavedChanges(false);
-	map->undoManager().setClean();
-	window->showStatusBarMessage(tr("Map saved"), 1000);
-	return true;
+
+	return markSaveCommitted(staged_revision);
 }
 
+bool MapEditorController::markSaveCommitted(
+	quint64 staged_revision,
+	bool retain_external_resource_dirtiness)
+{
+	if (!map || saveRevision() != staged_revision)
+		return false;
+	const bool external_templates_dirty = hasDirtyExternalResources();
+	map->setHasUnsavedChanges(false);
+	map->undoManager().setClean();
+	if (external_templates_dirty && retain_external_resource_dirtiness)
+		map->setTemplatesDirty();
+	window->showStatusBarMessage(tr("Map saved"), 1000);
+	return !external_templates_dirty;
+}
+
+quint64 MapEditorController::saveRevision() const
+{
+	return map ? map->modificationRevision() : 0;
+}
+
+bool MapEditorController::hasDirtyExternalResources() const
+{
+	if (!map)
+		return false;
+	for (int i = 0; i < map->getNumTemplates(); ++i)
+	{
+		if (map->getTemplate(i)->hasUnsavedChanges())
+			return true;
+	}
+	return false;
+}
 
 bool MapEditorController::exportTo(const QString& path, const FileFormat& format)
+{
+	return exportToImplementation(path, format, true);
+}
+
+bool MapEditorController::stageSaveTo(const QString& logical_path,
+	                                  const FileFormat& format,
+	                                  QIODevice* target_device,
+	                                  quint64* staged_revision)
+{
+	return exportToImplementation(
+		logical_path, format, false, target_device, staged_revision);
+}
+
+bool MapEditorController::exportToImplementation(
+	const QString& logical_path,
+	const FileFormat& format,
+	bool save_modified_templates,
+	QIODevice* target_device,
+	quint64* staged_revision)
 {
 	if (!map || editing_in_progress)
 		return false;
 	
-	auto exporter = format.makeExporter(path, map, main_view);
+	auto exporter = format.makeExporter(logical_path, map, main_view);
 	if (!exporter)
 	{
 		auto message =
 		        tr("Cannot export the map as\n"
 		           "\"%1\"\n"
 		           "because saving as %2 (.%3) is not supported.").
-		        arg(path,
+		        arg(logical_path,
 		            format.description(),
 		            format.fileExtensions().join(QLatin1String(", ")) );
 		QMessageBox::warning(nullptr, tr("Error"), message);
 		return false;
 	}
-	if (DocumentPath::isContentUri(path) && !exporter->supportsQIODevice())
+	if ((target_device || DocumentPath::isContentUri(logical_path))
+	    && !exporter->supportsQIODevice())
 	{
 		QMessageBox::warning(window, tr("Error"),
-		                     tr("This export format cannot write directly to an Android document. "
-		                        "Choose a local folder or another format."));
+		                     tr("This export format cannot write through a mobile document provider. "
+		                        "Choose another format."));
 		return false;
 	}
+	if (target_device)
+		exporter->setDevice(target_device);
+	const auto export_revision = map->modificationRevision();
 	
-	if (!exporter->doExport())
+	if (!exporter->doExport(save_modified_templates))
 	{
 		auto message = tr("Cannot save file\n%1:\n%2")
-		               .arg(path, exporter->warnings().back());
+		               .arg(logical_path, exporter->warnings().back());
 		QMessageBox::warning(nullptr, tr("Error"), message);
 		return false;
 	}
-	
+	if (map->modificationRevision() != export_revision)
+	{
+		QMessageBox::warning(
+			window,
+			tr("Map changed during export"),
+			tr("The map changed while its save snapshot was being generated. "
+			   "Mapper discarded that snapshot; save again to include the latest changes."));
+		return false;
+	}
+	if (staged_revision)
+		*staged_revision = export_revision;
 	if (!exporter->warnings().empty())
 	{
 		MainWindow::showMessageBox(nullptr,
@@ -651,7 +723,10 @@ bool MapEditorController::exportTo(const QString& path, const FileFormat& format
 }
 
 
-bool MapEditorController::loadFrom(const QString& path, const FileFormat& format, QWidget* dialog_parent)
+bool MapEditorController::loadFrom(const QString& path,
+	                               const FileFormat& format,
+	                               QWidget* dialog_parent,
+	                               QIODevice* source_device)
 {
 	if (!dialog_parent)
 		dialog_parent = window;
@@ -674,6 +749,18 @@ bool MapEditorController::loadFrom(const QString& path, const FileFormat& format
 		                     ::OpenOrienteering::MainWindow::tr("Cannot open file:\n%1\n\n%2")
 		                     .arg(path, ::OpenOrienteering::MainWindow::tr("Invalid file type.")));
 		return false;
+	}
+	if (source_device)
+	{
+		if (!importer->supportsQIODevice())
+		{
+			QMessageBox::warning(
+				dialog_parent,
+				tr("Error"),
+				tr("This file format cannot be opened from an iOS document provider."));
+			return false;
+		}
+		importer->setDevice(source_device);
 	}
 	
 	if (!importer->doImport())
@@ -736,7 +823,9 @@ void MapEditorController::attach(MainWindow* window)
 #endif
 	if (mobile_mode)
 	{
+#if !defined(Q_OS_IOS)
 		window->setWindowState(window->windowState() | Qt::WindowFullScreen);
+#endif
 		zoom_display_function = [window](const QString& text) {
 			window->showStatusBarMessage(text, 1000);
 		};
@@ -798,11 +887,98 @@ void MapEditorController::attach(MainWindow* window)
 		gps_marker_display = new GPSTemporaryMarkers(map_widget, gps_display);
 		
 		createActions();
+		auto& gnss_controller = GnssController::instance();
+		connect(&gnss_controller, &GnssController::sessionChanged, this,
+		        [this](GnssSession* session) {
+			if (!gps_display || !gps_display_action
+			    || !gps_display_action->isChecked()
+			    || !Settings::getInstance().positionSource()
+			          .startsWith(QLatin1String("external_")))
+				return;
+			gps_display->setGnssSession(session);
+			if (gnss_status_overlay && session)
+			{
+				connect(session, &GnssSession::stateChanged,
+				        gnss_status_overlay,
+				        &GnssStatusOverlay::updateState,
+				        Qt::UniqueConnection);
+				gnss_status_overlay->updateState(session->currentState());
+				gnss_status_overlay->show();
+				positionGnssStatusOverlay();
+			}
+		});
+		connect(&gnss_controller, &GnssController::internalLocationRequested,
+		        this, [this] {
+			if (!gps_display || !gps_display_action
+			    || !gps_display_action->isChecked())
+				return;
+			gps_display->setGnssSession(nullptr);
+			if (gnss_status_overlay)
+				gnss_status_overlay->hide();
+			gps_display->startUpdates();
+		});
+		connect(&gnss_controller, &GnssController::connectionCancelled,
+		        this, [this] {
+			if (gps_display && gps_display_action
+			    && gps_display_action->isChecked())
+				enableGPSDisplay(false);
+		});
+		connect(&gnss_controller, &GnssController::errorOccurred,
+		        this, [this](const QString& source, const QString& message) {
+			if (getWindow())
+				getWindow()->showStatusBarMessage(
+				  tr("%1: %2").arg(source, message), 12000);
+		});
 		if (mobile_mode)
 		{
 			createMobileGUI();
 			compass_display = new CompassDisplay(map_widget->parentWidget());
 			compass_display->setVisible(false);
+			gnss_status_overlay =
+			  new GnssStatusOverlay(map_widget->parentWidget());
+			gnss_status_overlay->setVisible(false);
+			connect(gnss_status_overlay, &GnssStatusOverlay::clicked,
+			        this, [this] {
+				auto* session = GnssController::instance().session();
+				if (!session)
+					return;
+				auto* panel = new GnssDetailPanel();
+				panel->updateState(session->currentState());
+				panel->setRawCaptureActive(session->rawCaptureEnabled());
+				connect(session, &GnssSession::stateChanged,
+				        panel, &GnssDetailPanel::updateState);
+				connect(panel,
+				        &GnssDetailPanel::ntripProfileChangeRequested,
+				        &GnssController::instance(),
+				        &GnssController::useNtripProfile);
+				connect(panel, &GnssDetailPanel::disconnectRequested,
+				        &GnssController::instance(),
+				        &GnssController::disconnectExternal);
+				connect(panel, &GnssDetailPanel::connectRequested,
+				        this, [this] {
+					GnssController::instance().connectExternal(getWindow());
+				});
+				connect(panel,
+				        &GnssDetailPanel::rawCaptureActionRequested,
+				        this, [session, panel] {
+					if (!session->rawCaptureEnabled())
+					{
+						session->setRawCaptureEnabled(true);
+						panel->setRawCaptureActive(true);
+						panel->setDumpStatus(
+						  tr("Capturing recent GNSS traffic."));
+						return;
+					}
+					auto path = session->dumpRawBuffer();
+					session->setRawCaptureEnabled(false);
+					panel->setRawCaptureActive(false);
+					panel->setDumpStatus(
+					  path.isEmpty()
+					    ? tr("No GNSS traffic was captured.")
+					    : path);
+				});
+				showPopupWidget(panel, tr("GNSS details"));
+			});
 		}
 		else
 		{
@@ -1137,17 +1313,17 @@ void MapEditorController::createActions()
 	paint_feature = std::make_unique<PaintOnTemplateFeature>(*this);
 	
 	touch_cursor_action = newCheckAction("touchcursor", tr("Enable touch cursor"), map_widget, SLOT(enableTouchCursor(bool)), "tool-touch-cursor", QString{}, "toolbars.html#touch_cursor"); // TODO: write documentation
-	gps_display_action = newCheckAction("gpsdisplay", tr("Enable GPS display"), this, SLOT(enableGPSDisplay(bool)), "tool-gps-display", QString{}, "toolbars.html#gps_display"); // TODO: write documentation
+	gps_display_action = newCheckAction("gpsdisplay", tr("Show live GNSS position"), this, SLOT(enableGPSDisplay(bool)), "tool-gps-display", QString{}, "toolbars.html#gps_display"); // TODO: write documentation
 	gps_display_action->setEnabled(map->getGeoreferencing().getState() == Georeferencing::Geospatial);
-	gps_distance_rings_action = newCheckAction("gpsdistancerings", tr("Enable GPS distance rings"), this, SLOT(enableGPSDistanceRings(bool)), "gps-distance-rings", QString{}, "toolbars.html#gps_distance_rings"); // TODO: write documentation
+	gps_distance_rings_action = newCheckAction("gpsdistancerings", tr("Show GNSS distance rings"), this, SLOT(enableGPSDistanceRings(bool)), "gps-distance-rings", QString{}, "toolbars.html#gps_distance_rings"); // TODO: write documentation
 	gps_distance_rings_action->setEnabled(false);
-	draw_point_gps_act = newToolAction("drawpointgps", tr("Set point object at GPS position"), this, SLOT(drawPointGPSClicked()), "draw-point-gps", QString{}, "toolbars.html#tool_draw_point_gps"); // TODO: write documentation
+	draw_point_gps_act = newToolAction("drawpointgps", tr("Set point object at GNSS position"), this, SLOT(drawPointGPSClicked()), "draw-point-gps", QString{}, "toolbars.html#tool_draw_point_gps"); // TODO: write documentation
 	draw_point_gps_act->setEnabled(false);
-	gps_temporary_point_act = newAction("gpstemporarypoint", tr("Set temporary marker at GPS position"), this, SLOT(gpsTemporaryPointClicked()), "gps-temporary-point", QString{}, "toolbars.html#gps_temporary_point"); // TODO: write documentation
+	gps_temporary_point_act = newAction("gpstemporarypoint", tr("Set temporary marker at GNSS position"), this, SLOT(gpsTemporaryPointClicked()), "gps-temporary-point", QString{}, "toolbars.html#gps_temporary_point"); // TODO: write documentation
 	gps_temporary_point_act->setEnabled(false);
-	gps_temporary_path_act = newCheckAction("gpstemporarypath", tr("Create temporary path at GPS position"), this, SLOT(gpsTemporaryPathClicked(bool)), "gps-temporary-path", QString{}, "toolbars.html#gps_temporary_path"); // TODO: write documentation
+	gps_temporary_path_act = newCheckAction("gpstemporarypath", tr("Create temporary path at GNSS position"), this, SLOT(gpsTemporaryPathClicked(bool)), "gps-temporary-path", QString{}, "toolbars.html#gps_temporary_path"); // TODO: write documentation
 	gps_temporary_path_act->setEnabled(false);
-	gps_temporary_clear_act = newAction("gpstemporaryclear", tr("Clear temporary GPS markers"), this, SLOT(gpsTemporaryClearClicked()), "gps-temporary-clear", QString{}, "toolbars.html#gps_temporary_clear"); // TODO: write documentation
+	gps_temporary_clear_act = newAction("gpstemporaryclear", tr("Clear temporary GNSS markers"), this, SLOT(gpsTemporaryClearClicked()), "gps-temporary-clear", QString{}, "toolbars.html#gps_temporary_clear"); // TODO: write documentation
 	gps_temporary_clear_act->setEnabled(false);
 	
 	compass_action = newCheckAction("compassdisplay", tr("Enable compass display"), this, SLOT(enableCompassDisplay(bool)), "compass", QString{}, "toolbars.html#compass_display"); // TODO: write documentation
@@ -1725,6 +1901,8 @@ void MapEditorController::detach()
 	gps_display = nullptr;
 	delete gps_track_recorder;
 	gps_track_recorder = nullptr;
+	delete gnss_status_overlay;
+	gnss_status_overlay = nullptr;
 	delete compass_display;
 	compass_display = nullptr;
 	delete gps_marker_display;
@@ -1745,8 +1923,12 @@ void MapEditorController::detach()
                                        "()V");
 #endif
 	
+	// UIKit owns the scene size and safe-area geometry. Android retains the
+	// legacy full-screen transition when the editor controller detaches.
+#if !defined(Q_OS_IOS)
 	if (mobile_mode)
 		window->setWindowState(window->windowState() & ~Qt::WindowFullScreen);
+#endif
 }
 
 
@@ -3709,22 +3891,67 @@ void MapEditorController::addFloatingDockWidget(QDockWidget* dock_widget)
 
 void MapEditorController::enableGPSDisplay(bool enable)
 {
+	gps_display_action->setChecked(enable);
 	if (enable)
 	{
-		gps_display->startUpdates();
+		auto external = Settings::getInstance().positionSource()
+		                  .startsWith(QLatin1String("external_"));
+		if (external)
+		{
+			auto& controller = GnssController::instance();
+			controller.connectExternal(window);
+			gps_display->setGnssSession(controller.session());
+			if (gnss_status_overlay && controller.session())
+			{
+				connect(controller.session(), &GnssSession::stateChanged,
+				        gnss_status_overlay,
+				        &GnssStatusOverlay::updateState,
+				        Qt::UniqueConnection);
+				gnss_status_overlay->updateState(
+				  controller.session()->currentState());
+				gnss_status_overlay->show();
+				positionGnssStatusOverlay();
+			}
+		}
+		else
+		{
+			gps_display->setGnssSession(nullptr);
+			gps_display->startUpdates();
+		}
 		
 		// Create gps_track_recorder if we can determine a template track filename
 		constexpr int gps_track_draw_update_interval = 10 * 1000; // in milliseconds
 		if (! window->currentPath().isEmpty())
 		{
 			// Find or create a template for the track with a specific name
-			QString gpx_file_path =
-				QFileInfo(window->currentPath()).absoluteDir().canonicalPath()
-				+ QLatin1Char('/')
-				+ QFileInfo(window->currentPath()).completeBaseName()
-				+ QLatin1String(" - GPS-")
+			const auto gps_filename_suffix =
+				QLatin1String(" - GPS-")
 				+ QDate::currentDate().toString(Qt::ISODate)
 				+ QLatin1String(".gpx");
+			const auto gpx_filename =
+				QFileInfo(window->currentPath()).completeBaseName()
+				+ gps_filename_suffix;
+			QString gpx_file_path;
+#if defined(Q_OS_IOS)
+			const auto draft_directory =
+				AppleDocumentAccess::privateAuxiliaryDraftDirectory(
+					window->currentPath());
+			if (draft_directory.isEmpty())
+			{
+				QMessageBox::warning(
+					window,
+					tr("GPS track not created"),
+					tr("Mapper could not create a private GPS track draft."));
+				gps_display->stopUpdates();
+				gps_display_action->setChecked(false);
+				return;
+			}
+			gpx_file_path = QDir{draft_directory}.filePath(gpx_filename);
+#else
+			gpx_file_path =
+				QFileInfo(window->currentPath()).absoluteDir().canonicalPath()
+				+ QLatin1Char('/') + gpx_filename;
+#endif
 			
 			bool new_template = true;  // Indicates that we really add a new template.
 			TemplateTrack* track = nullptr;
@@ -3732,11 +3959,20 @@ void MapEditorController::enableGPSDisplay(bool enable)
 			for ( ; template_index < map->getNumTemplates(); ++template_index)
 			{
 				auto* temp = map->getTemplate(template_index);
-				if (temp->getTemplatePath() == gpx_file_path)
+				if (temp->getTemplatePath() == gpx_file_path
+#if defined(Q_OS_IOS)
+				    || (qobject_cast<TemplateTrack*>(temp)
+				        && AppleDocumentAccess::isPrivateAuxiliaryDraft(
+					    temp->getTemplatePath())
+				        && QFileInfo{temp->getTemplatePath()}.fileName()
+				           .endsWith(gps_filename_suffix))
+#endif
+				   )
 				{
 					// There is a template for this track.
 					new_template = false;
 					track = qobject_cast<TemplateTrack*>(temp);
+					gpx_file_path = temp->getTemplatePath();
 					break;
 				}
 			}
@@ -3776,6 +4012,10 @@ void MapEditorController::enableGPSDisplay(bool enable)
 	else
 	{
 		gps_display->stopUpdates();
+		gps_display->setGnssSession(nullptr);
+		GnssController::instance().disconnectExternal();
+		if (gnss_status_overlay)
+			gnss_status_overlay->hide();
 		
 		delete gps_track_recorder;
 		gps_track_recorder = nullptr;
@@ -3792,6 +4032,11 @@ void MapEditorController::enableGPSDisplay(bool enable)
 	gps_temporary_point_act->setEnabled(enable);
 	gps_temporary_path_act->setEnabled(enable);
 	updateDrawPointGPSAvailability();
+}
+
+bool MapEditorController::isGPSDisplayEnabled() const
+{
+	return gps_display->isVisible();
 }
 
 void MapEditorController::enableGPSDistanceRings(bool enable)
@@ -3830,7 +4075,7 @@ void MapEditorController::gpsTemporaryPathClicked(bool enable)
 
 void MapEditorController::gpsTemporaryClearClicked()
 {
-	if (QMessageBox::question(window, tr("Clear temporary markers"), tr("Are you sure you want to delete all temporary GPS markers? This cannot be undone."), QMessageBox::Yes | QMessageBox::No) == QMessageBox::No)
+	if (QMessageBox::question(window, tr("Clear temporary markers"), tr("Are you sure you want to delete all temporary GNSS markers? This cannot be undone."), QMessageBox::Yes | QMessageBox::No) == QMessageBox::No)
 		return;
 	
 	gps_marker_display->stopPath();
@@ -3860,6 +4105,19 @@ void MapEditorController::enableCompassDisplay(bool enable)
 		disconnect(&Compass::getInstance(), &Compass::azimuthChanged, compass_display, &CompassDisplay::setAzimuth);
 		compass_display->hide();
 	}
+}
+
+void MapEditorController::positionGnssStatusOverlay()
+{
+	if (!gnss_status_overlay || !map_widget)
+		return;
+	auto size = gnss_status_overlay->sizeHint();
+	auto top = top_action_bar && top_action_bar->isVisible()
+	         ? top_action_bar->height() : 0;
+	auto left = std::max(0, map_widget->width() - size.width());
+	gnss_status_overlay->setGeometry(
+	  left, top, size.width(), size.height());
+	gnss_status_overlay->raise();
 }
 
 void MapEditorController::alignMapWithNorth(bool enable)
@@ -3906,6 +4164,7 @@ void MapEditorController::hideTopActionBar()
 	show_top_bar_button->raise();
 	
 	compass_display->move(show_top_bar_button->size().width(), 0);
+	positionGnssStatusOverlay();
 }
 
 void MapEditorController::showTopActionBar()
@@ -3915,6 +4174,7 @@ void MapEditorController::showTopActionBar()
 	top_action_bar->raise();
 	
 	compass_display->move(0, top_action_bar->size().height());
+	positionGnssStatusOverlay();
 }
 
 void MapEditorController::mobileSymbolSelectorClicked()
@@ -4503,7 +4763,7 @@ EditorDockWidget::EditorDockWidget(const QString& title, QAction* action, MapEdi
 		connect(toggleViewAction(), &QAction::toggled, action, &QAction::setChecked);
 	}
 	
-#ifdef Q_OS_ANDROID
+#ifdef MAPPER_MOBILE
 	size_grip = new QSizeGrip(this);
 	size_grip->resize(size_grip->sizeHint());
 	size_grip->setVisible(isFloating());
@@ -4533,7 +4793,7 @@ bool EditorDockWidget::event(QEvent* event)
 
 void EditorDockWidget::resizeEvent(QResizeEvent* event)
 {
-#ifdef Q_OS_ANDROID
+#ifdef MAPPER_MOBILE
 	int fw = style()->pixelMetric(QStyle::PM_DockWidgetFrameWidth, 0, this);
 	size_grip->move(rect().bottomRight() - size_grip->rect().bottomRight() - QPoint{fw, fw});
 	size_grip->raise();

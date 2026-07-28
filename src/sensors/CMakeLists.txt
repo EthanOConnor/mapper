@@ -27,7 +27,7 @@ set(FAKE_POSITION_DEFINITIONS
 )
 set(FAKE_POSITION_SOURCES )
 set(FAKE_POSITION_LINK_LIBRARIES )
-if(TARGET Qt6::Positioning)
+if(TARGET Qt6::Positioning AND NOT IOS)
 	list(APPEND FAKE_POSITION_DEFINITIONS
 	  PUBLIC MAPPER_USE_FAKE_POSITION_PLUGIN
 	)
@@ -62,7 +62,7 @@ set(NMEA_POSITION_DEFINITIONS
 )
 set(NMEA_POSITION_SOURCES )
 set(NMEA_POSITION_LINK_LIBRARIES )
-if(TARGET Qt6::Positioning)
+if(TARGET Qt6::Positioning AND NOT IOS)
 	list(APPEND NMEA_POSITION_DEFINITIONS
 	  PUBLIC MAPPER_USE_NMEA_POSITION_PLUGIN
 	)
@@ -101,7 +101,7 @@ set(POWERSHELL_POSITION_DEFINITIONS
 )
 set(POWERSHELL_POSITION_SOURCES )
 set(POWERSHELL_POSITION_LINK_LIBRARIES )
-if(TARGET Qt6::Positioning)
+if(TARGET Qt6::Positioning AND NOT IOS)
 	list(APPEND POWERSHELL_POSITION_DEFINITIONS
 	  PUBLIC MAPPER_USE_POWERSHELL_POSITION_PLUGIN
 	)
@@ -157,7 +157,14 @@ target_link_libraries(mapper-sensors
     Qt6::Gui
     Qt6::Widgets
 )
-foreach(lib Qt6::Positioning Qt6::Sensors Qt6::SerialPort)
+if(TARGET mapper-gnss)
+	target_link_libraries(mapper-sensors PRIVATE mapper-gnss)
+endif()
+if(TARGET Qt6::Positioning)
+	# GPSDisplay's public header stores QGeoPositionInfo by value.
+	target_link_libraries(mapper-sensors PUBLIC Qt6::Positioning)
+endif()
+foreach(lib Qt6::Sensors Qt6::SerialPort)
 	if(TARGET ${lib})
 		target_link_libraries(mapper-sensors  PRIVATE ${lib})
 	endif()

@@ -5,8 +5,9 @@ use std::thread;
 use flume::{Receiver, Sender, TryRecvError, TrySendError};
 use raw_window_handle::{
     AndroidDisplayHandle, AndroidNdkWindowHandle, AppKitDisplayHandle, AppKitWindowHandle,
-    RawDisplayHandle, RawWindowHandle, WaylandDisplayHandle, WaylandWindowHandle,
-    Win32WindowHandle, WindowsDisplayHandle, XcbDisplayHandle, XcbWindowHandle,
+    RawDisplayHandle, RawWindowHandle, UiKitDisplayHandle, UiKitWindowHandle, WaylandDisplayHandle,
+    WaylandWindowHandle, Win32WindowHandle, WindowsDisplayHandle, XcbDisplayHandle,
+    XcbWindowHandle,
 };
 use vello::kurbo::{Affine, BezPath, Cap, Ellipse, Join, Rect, Stroke};
 use vello::peniko::{
@@ -190,6 +191,7 @@ const PLATFORM_WIN32: u8 = 2;
 const PLATFORM_ANDROID_NDK: u8 = 3;
 const PLATFORM_WAYLAND: u8 = 4;
 const PLATFORM_XCB: u8 = 5;
+const PLATFORM_UIKIT: u8 = 6;
 
 const FRAME_NONE: u8 = 0;
 const FRAME_PRESENTED: u8 = 1;
@@ -786,6 +788,13 @@ fn surface_handles(
                 AndroidNdkWindowHandle::new(window).into(),
             ))
         }
+        PLATFORM_UIKIT => {
+            let view = raw_handle(state.window).ok_or("UIKit surface has no UIView")?;
+            Ok((
+                Some(UiKitDisplayHandle::new().into()),
+                UiKitWindowHandle::new(view).into(),
+            ))
+        }
         PLATFORM_WAYLAND => {
             let display = raw_handle(state.display).ok_or("Wayland surface has no wl_display")?;
             let surface = raw_handle(state.window).ok_or("Wayland surface has no wl_surface")?;
@@ -809,7 +818,7 @@ fn surface_handles(
 
 fn platform_backends(platform: u8) -> wgpu::Backends {
     match platform {
-        PLATFORM_APPKIT => wgpu::Backends::METAL,
+        PLATFORM_APPKIT | PLATFORM_UIKIT => wgpu::Backends::METAL,
         PLATFORM_WIN32 => wgpu::Backends::DX12,
         PLATFORM_ANDROID_NDK | PLATFORM_WAYLAND | PLATFORM_XCB => wgpu::Backends::VULKAN,
         _ => wgpu::Backends::PRIMARY,

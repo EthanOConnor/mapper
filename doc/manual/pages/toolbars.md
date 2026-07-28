@@ -217,7 +217,13 @@ When text is edited, a small window with horizontal and vertical alignment optio
 #### ![ ](../mapper-images/pencil.png) Paint on template {#draw_on_template}
 This tool enables the freehand drawing of lines, annotation and erasure on images loaded as [templates](templates.md), in a choice of 7 colors. It is intended for surveying with a mobile computer.
 
-Click and hold the left mouse button to draw while the mouse is moved. Hold the right mouse button as the mouse is moved to erase. The markup is saved in the template image file **permanently**, so it is good practice to keep a copy of the template file in another place or use a blank transparent image for drawing.
+Click and hold the left mouse button to draw while the mouse is moved. Hold the
+right mouse button as the mouse is moved to erase. On desktop platforms,
+saving the modified template writes the markup into that image permanently,
+so keep an independent copy or use a blank transparent image. On iPhone and
+iPad, edits remain recoverable private changes until you choose **Save
+template**; Mapper then verifies that an existing Files version is unchanged
+or offers to save a new copy.
 
 
 ## Editing toolbar {#editing-toolbar}

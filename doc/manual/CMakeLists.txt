@@ -86,6 +86,9 @@ set(Mapper_HELP_NAMESPACE "openorienteering.mapper-${Mapper_VERSION}.help"
 if(NOT MANUAL_SECTIONS)
 	if(ANDROID)
 		set(MANUAL_SECTIONS_DEFAULT ANDROID)
+	elseif(IOS)
+		# IOS also sets APPLE, so it must be selected before the macOS case.
+		set(MANUAL_SECTIONS_DEFAULT IOS)
 	elseif(APPLE)
 		set(MANUAL_SECTIONS_DEFAULT MACOS)
 	elseif(UNIX)
@@ -269,4 +272,3 @@ if(Mapper_MANUAL_PDF)
 	  DESTINATION "${MAPPER_ABOUT_DESTINATION}"
 	)
 endif()
-

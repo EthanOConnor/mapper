@@ -22,7 +22,7 @@
 #include <QStandardPaths>
 #include <QUrl>
 
-#ifdef Q_OS_MACOS
+#if defined(Q_OS_MACOS) || defined(Q_OS_IOS)
 #include <Security/Security.h>
 #elif defined(Q_OS_ANDROID)
 #include <QJniEnvironment>
@@ -123,7 +123,7 @@ QByteArray serverKey(const QString &server_url) {
   return {token, {}, true};
 }
 
-#if !defined(Q_OS_MACOS) && !defined(Q_OS_WIN) && !defined(Q_OS_ANDROID)
+#if !defined(Q_OS_MACOS) && !defined(Q_OS_IOS) && !defined(Q_OS_WIN) && !defined(Q_OS_ANDROID)
 QString secretTool() {
   return QStandardPaths::findExecutable(QStringLiteral("secret-tool"));
 }
@@ -220,7 +220,7 @@ MapHubCredentials::Result removeSecretService(const QString &account) {
 }
 #endif
 
-#ifdef Q_OS_MACOS
+#if defined(Q_OS_MACOS) || defined(Q_OS_IOS)
 CFMutableDictionaryRef macQuery(const QByteArray &account) {
   auto *query = CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
                                           &kCFTypeDictionaryKeyCallBacks,
@@ -268,7 +268,7 @@ QString MapHubCredentials::fallbackPath(const QString &server_url) {
 MapHubCredentials::Result
 MapHubCredentials::readToken(const QString &server_url) {
   auto account = accountName(server_url).toUtf8();
-#ifdef Q_OS_MACOS
+#if defined(Q_OS_MACOS) || defined(Q_OS_IOS)
   auto *query = macQuery(account);
   CFDictionarySetValue(query, kSecReturnData, kCFBooleanTrue);
   CFDictionarySetValue(query, kSecMatchLimit, kSecMatchLimitOne);
@@ -280,7 +280,7 @@ MapHubCredentials::readToken(const QString &server_url) {
   if (status != errSecSuccess)
     return {{},
             credentialTr(
-                "macOS Keychain could not read the Map Hub credential (%1).")
+                "Apple Keychain could not read the Map Hub credential (%1).")
                 .arg(status),
             false};
   auto *data = static_cast<CFDataRef>(result);
@@ -339,7 +339,7 @@ MapHubCredentials::writeToken(const QString &server_url, const QString &token) {
       bytes.contains('\n'))
     return {{}, credentialTr("The Map Hub token is invalid."), false};
   auto account = accountName(server_url).toUtf8();
-#ifdef Q_OS_MACOS
+#if defined(Q_OS_MACOS) || defined(Q_OS_IOS)
   auto *query = macQuery(account);
   auto *data = macData(bytes);
   auto *update = CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
@@ -357,7 +357,7 @@ MapHubCredentials::writeToken(const QString &server_url, const QString &token) {
   if (status != errSecSuccess)
     return {{},
             credentialTr(
-                "macOS Keychain could not store the Map Hub credential (%1).")
+                "Apple Keychain could not store the Map Hub credential (%1).")
                 .arg(status),
             false};
   return {token, {}, false};
@@ -410,14 +410,14 @@ MapHubCredentials::writeToken(const QString &server_url, const QString &token) {
 MapHubCredentials::Result
 MapHubCredentials::removeToken(const QString &server_url) {
   auto account = accountName(server_url).toUtf8();
-#ifdef Q_OS_MACOS
+#if defined(Q_OS_MACOS) || defined(Q_OS_IOS)
   auto *query = macQuery(account);
   auto status = SecItemDelete(query);
   CFRelease(query);
   if (status != errSecSuccess && status != errSecItemNotFound)
     return {{},
             credentialTr(
-                "macOS Keychain could not remove the Map Hub credential (%1).")
+                "Apple Keychain could not remove the Map Hub credential (%1).")
                 .arg(status),
             false};
 #elif defined(Q_OS_WIN)

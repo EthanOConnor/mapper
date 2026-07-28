@@ -25,6 +25,37 @@ bool isContentUri(QStringView path)
 	return QUrl{path.toString()}.scheme().compare(QLatin1String("content"), Qt::CaseInsensitive) == 0;
 }
 
+bool requiresDirectWrite(QStringView path)
+{
+	if (isContentUri(path))
+		return true;
+#if defined(Q_OS_IOS)
+	const auto candidate = QDir::cleanPath(QFileInfo{path.toString()}.absoluteFilePath());
+	const auto is_inside = [&candidate](const QString& root) {
+		if (root.isEmpty())
+			return false;
+		const auto clean_root = QDir::cleanPath(root);
+		return candidate == clean_root
+		       || candidate.startsWith(clean_root + QDir::separator());
+	};
+	for (const auto location : {
+		     QStandardPaths::AppDataLocation,
+		     QStandardPaths::AppLocalDataLocation,
+		     QStandardPaths::CacheLocation,
+		     QStandardPaths::DocumentsLocation,
+		     QStandardPaths::TempLocation})
+	{
+		if (is_inside(QStandardPaths::writableLocation(location)))
+			return false;
+	}
+	// QFileDialog's security-scoped URLs are ordinary file paths on iOS. Any
+	// writable path outside our container must be treated as a single-item grant.
+	return QDir::isAbsolutePath(candidate);
+#else
+	return false;
+#endif
+}
+
 QString fromUrl(const QUrl& url)
 {
 	if (!url.isValid() || url.isEmpty())
@@ -93,9 +124,14 @@ QString suffix(QStringView path)
 
 QString autosavePath(QStringView path)
 {
+#if !defined(Q_OS_IOS)
 	if (!isContentUri(path))
 		return path.toString() + QLatin1String(".autosave");
+#endif
 
+	// Provider-backed documents must never receive an adjacent sidecar: the
+	// grant covers the selected file, not its parent directory. iOS uses this
+	// private location for every document because provider URLs are file paths.
 	auto root = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
 	if (root.isEmpty())
 		root = QStandardPaths::writableLocation(QStandardPaths::TempLocation);

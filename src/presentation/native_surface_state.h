@@ -19,6 +19,7 @@ enum class NativePlatform : std::uint8_t
 	AndroidNdk = 3,
 	Wayland = 4,
 	Xcb = 5,
+	UiKit = 6,
 };
 
 /**

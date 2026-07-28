@@ -59,6 +59,7 @@ class GPSDisplay;
 class GPSTemporaryMarkers;
 class GPSTrackRecorder;
 class GeoreferencingDialog;
+class GnssStatusOverlay;
 class MainWindow;
 class MapCoordF;
 class MapEditorActivity;
@@ -233,10 +234,22 @@ public:
 	
 	/** Override from MainWindowController */
 	bool saveTo(const QString& path, const FileFormat& format) override;
+	bool markSaveCommitted(
+		quint64 staged_revision,
+		bool retain_external_resource_dirtiness = true) override;
+	quint64 saveRevision() const override;
+	bool hasDirtyExternalResources() const override;
+	bool stageSaveTo(const QString& logical_path,
+	                 const FileFormat& format,
+	                 QIODevice* target_device = nullptr,
+	                 quint64* staged_revision = nullptr) override;
 	/** Override from MainWindowController */
 	bool exportTo(const QString& path, const FileFormat& format) override;
 	/** Override from MainWindowController */
-	bool loadFrom(const QString& path, const FileFormat& format, QWidget* dialog_parent = nullptr) override;
+	bool loadFrom(const QString& path,
+	              const FileFormat& format,
+	              QWidget* dialog_parent = nullptr,
+	              QIODevice* source_device = nullptr) override;
 	
 	/** Override from MainWindowController */
 	void attach(MainWindow* window) override;
@@ -491,6 +504,9 @@ public slots:
 	
 	/** Enables or disables GPS display. */
 	void enableGPSDisplay(bool enable);
+	void positionGnssStatusOverlay();
+	/** Returns whether location updates and their visible UI are active. */
+	bool isGPSDisplayEnabled() const;
 	/** Enables or disables showing distance rings when GPS display is active. */
 	void enableGPSDistanceRings(bool enable);
 	/** Updates availability of the GPS point drawing tool. */
@@ -594,6 +610,13 @@ public slots:
 	void setWindowStateChanged();
 	
 private:
+	bool exportToImplementation(
+		const QString& logical_path,
+		const FileFormat& format,
+		bool save_modified_templates,
+		QIODevice* target_device = nullptr,
+		quint64* staged_revision = nullptr);
+
 	/**
 	 * Saves the window state in the permanent settings.
 	 * 
@@ -834,6 +857,7 @@ private:
 	GPSTemporaryMarkers* gps_marker_display;
 	GPSDisplay* gps_display;
 	GPSTrackRecorder* gps_track_recorder;
+	GnssStatusOverlay* gnss_status_overlay;
 	QAction* compass_action = {};
 	CompassDisplay* compass_display;
 	QAction* align_map_with_north_act = {};

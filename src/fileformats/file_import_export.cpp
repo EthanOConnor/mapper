@@ -257,7 +257,7 @@ void Importer::validate()
 	
 	if (have_lost_template)
 	{
-#if defined(Q_OS_ANDROID)
+#if defined(MAPPER_MOBILE)
 		addWarning(tr("At least one template file could not be found."));
 #else
 		addWarning(tr("At least one template file could not be found.") + QLatin1Char(' ') +
@@ -281,7 +281,7 @@ void Importer::validate()
 Exporter::~Exporter() = default;
 
 
-bool Exporter::doExport()
+bool Exporter::doExport(bool save_modified_templates)
 {
 	std::unique_ptr<QSaveFile> managed_file;
 	std::unique_ptr<QTemporaryFile> staged_file;
@@ -290,9 +290,11 @@ bool Exporter::doExport()
 	{
 		if (!device_)
 		{
-			if (DocumentPath::isContentUri(path))
+			const bool provider_backed_output = DocumentPath::requiresDirectWrite(path);
+			if (provider_backed_output)
 			{
-				// Android document providers do not offer QSaveFile's atomic rename.
+				// Mobile document-provider grants cover the selected file, not a
+				// sibling temporary file needed by QSaveFile's atomic rename.
 				// Complete serialization locally before replacing the selected document.
 				staged_file = std::make_unique<QTemporaryFile>();
 				device_ = staged_file.get();
@@ -382,8 +384,10 @@ bool Exporter::doExport()
 		success = false;
 	}
 	
-	// Save modified templates
-	for (auto i = 0; i < map->getNumTemplates(); ++i)
+	// Ordinary Save preserves the established behavior. Provider staging must
+	// serialize only the map: template files have independent grants/identities
+	// and require their own explicit save transaction.
+	for (auto i = 0; save_modified_templates && i < map->getNumTemplates(); ++i)
 	{
 		auto const* temp = map->getTemplate(i);
 		auto const filename = temp->getTemplateFilename();

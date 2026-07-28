@@ -1,0 +1,46 @@
+diff --git a/sqlite3.c b/sqlite3.c
+index 8c4f6ab..7067b8c 100644
+--- a/sqlite3.c
++++ b/sqlite3.c
+@@ -40264,5 +40264,6 @@
+ #if !defined(SQLITE_ENABLE_LOCKING_STYLE)
+-#  if defined(__APPLE__)
++#  if defined(__APPLE__) \
++      && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)
+ #    define SQLITE_ENABLE_LOCKING_STYLE 1
+ #  else
+ #    define SQLITE_ENABLE_LOCKING_STYLE 0
+@@ -40341,3 +40342,4 @@
+-#if defined(__APPLE__) || SQLITE_ENABLE_LOCKING_STYLE
++#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) \
++    || SQLITE_ENABLE_LOCKING_STYLE
+ # include <sys/mount.h>
+ #endif
+@@ -40477,6 +40479,7 @@ struct unixFile {
+ #if SQLITE_ENABLE_LOCKING_STYLE
+   int openFlags;                      /* The flags specified at open() */
+ #endif
+-#if SQLITE_ENABLE_LOCKING_STYLE || defined(__APPLE__)
++#if SQLITE_ENABLE_LOCKING_STYLE \
++    || (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE))
+   unsigned fsFlags;                   /* cached details from statfs() */
+ #endif
+@@ -41750,2 +41753,2 @@ static int findInodeInfo(
+-#ifdef __APPLE__
++#if defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)
+   /* On OS X on an msdos filesystem, the inode number is reported
+@@ -46756,6 +46759,7 @@ static int unixOpen(
+ #if SQLITE_ENABLE_LOCKING_STYLE
+   int isAutoProxy  = (flags & SQLITE_OPEN_AUTOPROXY);
+ #endif
+-#if defined(__APPLE__) || SQLITE_ENABLE_LOCKING_STYLE
++#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) \
++    || SQLITE_ENABLE_LOCKING_STYLE
+   struct statfs fsInfo;
+ #endif
+@@ -46955,3 +46959,4 @@ static int unixOpen(
+
+-#if defined(__APPLE__) || SQLITE_ENABLE_LOCKING_STYLE
++#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) \
++    || SQLITE_ENABLE_LOCKING_STYLE
+   if( fstatfs(fd, &fsInfo) == -1 ){

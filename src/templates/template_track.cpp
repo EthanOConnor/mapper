@@ -237,12 +237,10 @@ bool TemplateTrack::loadTypeSpecificTemplateConfiguration(QXmlStreamReader& xml)
 }
 
 
-bool TemplateTrack::saveTemplateFile() const
+bool TemplateTrack::writeTemplateFile(const QString& path) const
 {
-	if (!track.saveTo(template_path))
+	if (!track.saveTo(path))
 		return false;
-	
-	const_cast<TemplateTrack*>(this)->setHasUnsavedChanges(false);
 	return true;
 }
 

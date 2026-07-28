@@ -27,11 +27,15 @@
 #include <Qt>
 #include <QMainWindow>
 #include <QObject>
+#include <QPointer>
 #include <QString>
 #include <QStringList>
 
 #include "collaboration/managed_map_workspace.h"
 #include "core/autosave.h"
+#if defined(Q_OS_IOS)
+#  include "core/apple_document_access.h"
+#endif
 #include "fileformats/file_format.h"
 
 class QAction;
@@ -41,6 +45,7 @@ class QKeyEvent;
 class QLabel;
 class QMenu;
 class QStackedWidget;
+class QTemporaryFile;
 class QToolBar;
 class QTimer;
 class QWidget;
@@ -48,10 +53,9 @@ class QWidget;
 namespace OpenOrienteering {
 
 class MainWindowController;
+class MapEditorController;
 class MapperServiceProxy;
 class Toast;
-
-
 /**
  * The MainWindow class provides the generic application window.
  * 
@@ -227,6 +231,33 @@ public:
 	 *  the [new] window's current path.
 	 */
 	void openPathLater(const QString &path);
+
+	/**
+	 * Handles a document delivered by the operating system. Mobile platforms
+	 * deliberately keep one editing document in the single application scene.
+	 */
+	void openExternalPath(const QString& path);
+
+#if defined(Q_OS_IOS)
+	enum class NativeDocumentCheckpoint
+	{
+		BestEffort,
+		Required,
+		Skip,
+	};
+
+	/** Serializes native pickers and coordinated provider transactions. */
+	bool beginNativeDocumentInteraction(
+		NativeDocumentCheckpoint checkpoint = NativeDocumentCheckpoint::BestEffort);
+	void endNativeDocumentInteraction();
+
+	/** Finds the real document window above a dialog or embedded preview. */
+	static MainWindow* nativeDocumentInteractionOwner(QWidget* widget);
+
+	/** Deletes an unlinked private draft only after its map revision commits. */
+	void deferPrivateDraftCleanup(
+		const QString& path, const QString& resource_identity);
+#endif
 	
 	/**
 	 * Save the content of the main window.
@@ -540,6 +571,26 @@ private:
 	void renewMapHubLeaseIfNeeded();
 
 	static MainWindow* findMainWindow(const QString& file_name);
+
+#if defined(Q_OS_IOS)
+	AppleDocumentAccess::ChangeHandler makePresentedDocumentChangeHandler();
+	void handlePresentedDocumentChange(const AppleDocumentAccess::PresentedDocumentEvent& event);
+	void processPresentedDocumentChange();
+	bool reloadPresentedDocument(bool discard_local_recovery = false);
+	bool exportPresentedDocument(const FileFormat& format, const QString& suggested_name);
+	void setUnsavedStateAfterDocumentCommit(bool external_resources_dirty);
+	bool migrateRecoveryForDocumentMove(const QString& old_path, const QString& new_path);
+	void replayPendingPresentedDocumentEvents();
+	bool persistRecoverySnapshot();
+	bool persistAuxiliaryDraftRecovery();
+	void discardAuxiliaryDraftRecovery();
+	bool persistMapRecoverySnapshot();
+	void restoreAuxiliaryDraftRecovery();
+	bool canAdvancePrivateRecovery() const;
+	void commitDeferredPrivateDraftCleanup();
+	void clearDeferredPrivateDraftCleanup();
+	bool stopPresentingForClose();
+#endif
 	
 	
 	/// The active controller
@@ -579,6 +630,41 @@ private:
 	bool has_unsaved_changes;
 	/// Indicates the presence of an autosave conflict. @see setHasAutosaveConflict()
 	bool has_autosave_conflict;
+#if defined(Q_OS_IOS)
+	/// The in-memory editor is older than a coordinated provider write.
+	bool external_change_pending = false;
+	/// This window owns the process-wide iOS file presenter.
+	bool presents_document = false;
+	/// Rejects callbacks from a presenter replaced by Save As or Close.
+	quint64 presented_document_token = 0;
+	/// Provider callbacks seen by a nested dialog while an open is committing.
+	QList<AppleDocumentAccess::PresentedDocumentEvent> pending_presented_document_events;
+	/// Defers provider callbacks until a staged open/save/reload transaction commits.
+	bool provider_document_transaction_active = false;
+	/// Lets an owning transaction apply its queued callbacks without opening reentrancy.
+	bool replaying_presented_document_events = false;
+	/// Native waits pause foreground GPS recording after making a recovery receipt.
+	QPointer<MapEditorController> native_interaction_gps_controller;
+	bool resume_gps_after_native_interaction = false;
+	/// Rejects a second Close while the first close prompt or save is running.
+	bool close_in_progress = false;
+	/// Monotonic external lifecycle revision used to reject stale GUI staging.
+	quint64 presented_document_change_generation = 0;
+	/// Dirty bytes belonging to the UIDocument, excluding independent templates.
+	bool presented_document_content_dirty = false;
+	bool external_resources_dirty = false;
+	/// A deleted provider item remains a recoverable in-memory document until Save As.
+	bool presented_document_deleted = false;
+	/// Keeps the coordinated provider snapshot alive for deferred imports.
+	std::unique_ptr<QTemporaryFile> presented_document_snapshot;
+	struct DeferredPrivateDraftCleanup
+	{
+		QString path;
+		QString resource_identity;
+	};
+	/// Old private links that remain valid until their removal is provider-safe.
+	QList<DeferredPrivateDraftCleanup> deferred_private_draft_cleanup;
+#endif
 	
 	/// Was the window maximized before going into fullscreen mode? In this case, we have to show it maximized again when leaving fullscreen mode.
 	bool maximized_before_fullscreen;

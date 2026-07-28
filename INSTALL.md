@@ -1,17 +1,23 @@
 # Building Mapper
 
-Mapper uses one CMake/Ninja build on Linux, macOS, Windows, and Android. The
-project baseline is CMake 4.4.0, Ninja 1.13.0, a C++23 compiler, and Qt 6.10.3.
-Desktop and Android packages are built by the same presets used in GitHub
-Actions.
+Mapper uses one CMake build on Linux, macOS, Windows, Android, and iOS. Ninja
+drives the desktop and Android builds; iOS uses CMake's Xcode generator and the
+official Qt iOS toolchain. The project baseline is CMake 4.4.0, Ninja 1.13.0,
+a C++23 compiler, and Qt 6.10.3 for desktop and Android. The validated iOS
+baseline is the official Qt 6.11.1 kit. The same checked-in presets drive local
+and hosted builds.
 
-Qt 6.10.3 is deliberate: it is the newest stable release with a complete
-unauthenticated installer matrix in the public Qt online repository. Qt 6.11.1
-is stable, but released `aqtinstall` cannot consume its split Windows metadata
-layout; the project does not add credentials or unreleased download machinery
-just to claim a newer version.
-Update the CMake requirement, CI environment, and this guide together when a
-newer stable release reaches the whole matrix.
+The Qt 6.10.3 desktop/Android baseline is deliberate: it is the newest stable
+release with a complete unauthenticated installer matrix in the public Qt
+online repository. Qt 6.11.1 is stable, but released `aqtinstall` cannot
+consume its split Windows metadata layout; the project does not add
+credentials or unreleased download machinery just to claim a newer version.
+iOS advances independently to the official Qt 6.11.1 kit because it is the
+validated current static device/simulator toolchain for this foundation. The
+native document picker, coordinated `UIDocument` writes, and persisted
+security-scoped bookmarks are implemented by Mapper with public UIKit and
+Foundation APIs. Update each CMake requirement, its CI environment, and this
+guide together when changing either baseline.
 
 ## Dependencies
 
@@ -128,12 +134,126 @@ cmake --build --preset ci-android --target apk aab
 Qt's generated `apk` and `aab` targets own Android packaging; there is no
 second platform build system.
 
+## iOS
+
+iOS and iPadOS 18.0 are the minimum deployment targets. The application
+supports both iPhone and iPad and uses UIKit with a native Metal surface for
+the Vello/wgpu renderer. It is an ordinary Qt application, not a Mac Catalyst
+build.
+
+Install Xcode with the iOS SDK, CMake 4.4 or newer, Rust, Doxygen, and the
+official Qt 6.11.1 iOS kit with the Image Formats, Positioning, and Sensors
+modules. Install the matching Qt 6.11.1 macOS host tools as well. Release
+builds also require `cargo-about` 0.9.1 for dependency notices:
+
+```sh
+cargo install cargo-about --version 0.9.1 --locked --features cli
+```
+
+The official Qt kit contains an arm64
+device slice and an x86_64 simulator slice; the simulator preset intentionally
+targets that supplied x86_64 slice, including when the Mac host is Apple
+silicon. On Apple silicon, install Rosetta and a universal iOS Simulator runtime
+before launching that x86_64 application. Add both Rust targets:
+
+```sh
+rustup target add aarch64-apple-ios x86_64-apple-ios
+```
+
+Bootstrap the manifest-owned vcpkg baseline exactly as in the desktop section,
+then expose all three toolchain roots:
+
+```sh
+export VCPKG_ROOT="$PWD/.vcpkg"
+export QT_ROOT_DIR="$HOME/Qt/6.11.1/ios"
+export QT_HOST_PATH="$HOME/Qt/6.11.1/macos"
+```
+
+The presets use the Qt toolchain as CMake's primary toolchain and ask Qt to
+chain-load vcpkg. The checked-in iOS triplets keep PROJ, GDAL, ICU, and the
+other native dependencies static and aligned with the selected SDK and Rust
+target. Build the simulator application with:
+
+```sh
+cmake --preset ios-simulator
+cmake --build --preset ios-simulator
+```
+
+On an Intel Mac, select the matching host-tools triplet when configuring:
+
+```sh
+cmake --preset ios-simulator -DVCPKG_HOST_TRIPLET=x64-osx-release
+```
+
+This produces
+`build/ios-simulator/src/Release-iphonesimulator/Mapper.app`. Install and launch
+it in a booted compatible simulator with `xcrun simctl install` and
+`xcrun simctl launch`. The simulator build is unsigned and is a runtime
+development surface, not a distributable package.
+
+The generic arm64 device compile used by CI is also unsigned. To reproduce
+that signing-independent gate locally, use:
+
+```sh
+cmake --preset ios-device \
+  -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO
+cmake --build --preset ios-device
+```
+
+`ios-release` is the delivery configuration. It enables the offline iOS manual,
+complete dependency notices, and all runtime resources, but the repository
+does not contain an Apple team identifier, signing identity, provisioning
+profile, or export policy. The release owner supplies those externally and
+archives the generated Xcode project. Every uploaded build must also receive a
+positive, monotonically increasing `CFBundleVersion`; the example uses an
+explicit release-system build number:
+
+```sh
+cmake --preset ios-release \
+  -DMapper_IOS_BUILD_NUMBER="$MAPPER_IOS_BUILD_NUMBER"
+xcodebuild \
+  -project build/ios-release/Mapper.xcodeproj \
+  -scheme Mapper \
+  -configuration Release \
+  -destination 'generic/platform=iOS' \
+  -archivePath "$PWD/build/ios-release/Mapper.xcarchive" \
+  DEVELOPMENT_TEAM="$MAPPER_APPLE_TEAM_ID" \
+  CODE_SIGN_STYLE=Automatic \
+  archive
+xcodebuild \
+  -exportArchive \
+  -archivePath "$PWD/build/ios-release/Mapper.xcarchive" \
+  -exportPath "$PWD/build/ios-release/export" \
+  -exportOptionsPlist "$MAPPER_IOS_EXPORT_OPTIONS_PLIST"
+```
+
+Do not place Apple credentials or organization-specific export settings in the
+repository. A signed archive or IPA is accepted only after completing
+`test/manual/ios-release-acceptance.md` on physical devices.
+
+iOS main-document Open and Save As use Mapper's UIKit
+`UIDocumentPickerViewController` bridge; Save As first uses a native action
+sheet to choose the map format. Mapper is not a
+`UIDocumentBrowserViewController` application: the Qt application lifecycle
+remains authoritative, while Files and other providers grant security-scoped
+URLs. Mapper persists those URLs with Apple's public bookmark APIs and edits
+the active document through a `UIDocument` subclass, which supplies coordinated
+provider I/O and file presentation for its complete editing lifetime. Do not
+replace this path with copied files, raw provider paths, or a second
+document-browser lifecycle.
+
 ## GitHub delivery
 
-Pull requests and `main` pushes build, test, and package every target.
+Pull requests and `main` pushes run the maintained automated gate for every
+target. The iOS matrix keeps a minimum-runtime lane on the Intel runner (Xcode
+26.3 plus an iOS 18.6 simulator) and a current-SDK arm64 lane (Xcode 26.6 at
+this baseline). Both create an unsigned arm64 `.xcarchive`; the compatibility
+lane also builds and launches the official x86_64 simulator slice. CI does not
+manufacture a signed IPA.
 Pushing a `v*` tag builds the same matrix, creates GitHub artifact attestations,
 and opens a draft GitHub release containing the desktop, APK, and AAB packages.
-The release remains a draft until the club's Apple, Windows, and Android signing
+iOS signing and export of an installable candidate stay external release-owner
+steps. The release remains a draft until the club's Apple, Windows, and Android signing
 identities are connected and the resulting packages have passed device smoke
 tests; unsigned binaries are never published automatically.
 

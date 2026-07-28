@@ -55,6 +55,9 @@
 #include <QWidget>
 
 #include "core/georeferencing.h"
+#if defined(Q_OS_IOS)
+#include "core/apple_document_access.h"
+#endif
 #include "core/map.h"
 #include "core/map_coord.h"
 #include "core/map_view.h"
@@ -294,13 +297,39 @@ Template* PaintOnTemplateFeature::setupTemplate() const
 	                          + QLatin1Char(',')
 			                  + QString::number(qRound64(projected_top_left.y()))
 	                          + QLatin1String(".png");
-	QString image_file_path = QFileInfo(window->currentPath()).absoluteDir().canonicalPath()
-	                          + QLatin1Char('/')
-	                          + filename;
+	QString image_file_path;
+#if defined(Q_OS_IOS)
+	const auto draft_directory =
+		AppleDocumentAccess::privateAuxiliaryDraftDirectory(window->currentPath());
+	if (draft_directory.isEmpty())
+	{
+		showMessage(window, tr("Cannot create a private template draft."));
+		return nullptr;
+	}
+	image_file_path = QDir{draft_directory}.filePath(filename);
+	// A provider rename changes the directory chosen for future drafts, but an
+	// existing private draft keeps its stable identity. Reuse it by filename.
+	for (int index = map.getNumTemplates() - 1; index >= 0; --index)
+	{
+		auto* candidate = map.getTemplate(index);
+		if (candidate->canBeDrawnOnto()
+		    && AppleDocumentAccess::isPrivateAuxiliaryDraft(
+			    candidate->getTemplatePath())
+		    && QFileInfo{candidate->getTemplatePath()}.fileName() == filename)
+		{
+			image_file_path = candidate->getTemplatePath();
+			break;
+		}
+	}
+#else
+	image_file_path = QFileInfo(window->currentPath()).absoluteDir().canonicalPath()
+	                  + QLatin1Char('/')
+	                  + filename;
+#endif
 	
 	// When needing a new file, we try write it and read it once (for confidence
 	// in permissions), but remove it before exiting this function.
-	bool remove_file = false;
+	bool new_file = false;
 	
 	Template* temp = nullptr;
 	if (QFileInfo::exists(image_file_path))
@@ -343,7 +372,7 @@ Template* PaintOnTemplateFeature::setupTemplate() const
 			            .arg(filename, writer.errorString()));
 			return nullptr;
 		}
-		remove_file = true;
+		new_file = true;
 	}
 	
 	if (!temp)
@@ -369,9 +398,11 @@ Template* PaintOnTemplateFeature::setupTemplate() const
 		map.addTemplate(-1, std::move(template_image));
 	}
 	
-	if (remove_file)
+	if (new_file)
 	{
+#if !defined(Q_OS_IOS)
 		QFile::remove(image_file_path);   // Created for check/initialization.
+#endif
 		temp->setHasUnsavedChanges(true); // Save again when the map is saved.
 	}
 	

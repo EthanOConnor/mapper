@@ -63,7 +63,11 @@
 #  include "gdal/gdal_settings_page.h"
 #endif
 
-#ifdef MAPPER_USE_SENSORS
+#ifdef MAPPER_GNSS_AVAILABLE
+#  include "gnss/ui/gnss_settings_page.h"
+#endif
+
+#if defined(MAPPER_USE_SENSORS) && !defined(MAPPER_GNSS_AVAILABLE)
 #  include "sensors/sensors_settings_page.h"
 #endif
 
@@ -217,10 +221,13 @@ void SettingsDialog::addPages()
 	addPage(new GeneralSettingsPage(this));
 	addPage(new EditorSettingsPage(this));
 	addPage(new MapHubSettingsPage(this));
+#ifdef MAPPER_GNSS_AVAILABLE
+	addPage(new GnssSettingsPage(this));
+#endif
 #ifdef MAPPER_USE_GDAL
 	addPage(new GdalSettingsPage(this));
 #endif
-#ifdef MAPPER_USE_SENSORS
+#if defined(MAPPER_USE_SENSORS) && !defined(MAPPER_GNSS_AVAILABLE)
 	addPage(new SensorsSettingsPage(this));
 #endif
     addPage(new PaintOnTemplateSettingsPage(this));

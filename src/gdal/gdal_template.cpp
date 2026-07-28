@@ -31,6 +31,7 @@
 #include <QChar>
 #include <QDebug>
 #include <QFile>
+#include <QFileInfo>
 #include <QImageReader>
 #include <QPointF>
 #include <QRect>
@@ -45,6 +46,9 @@
 #include <cpl_conv.h>
 #include <gdal.h>
 
+#if defined(Q_OS_IOS)
+#  include "core/apple_document_access.h"
+#endif
 #include "core/georeferencing.h"
 #include "core/latlon.h"
 #include "core/map.h"
@@ -201,8 +205,16 @@ GdalTemplate::~GdalTemplate()
 GdalTemplate* GdalTemplate::duplicate() const
 {
 	auto* copy = new GdalTemplate(*this);
-	if (template_state == Loaded && isTiledSource() && !copy->loadTemplateFileImpl())
-		copy->setTemplateState(Invalid);
+	if (template_state == Loaded && isTiledSource())
+	{
+#if defined(Q_OS_IOS)
+		copy->setTemplateState(Unloaded);
+		copy->loadTemplateFile();
+#else
+		if (!copy->loadTemplateFileImpl())
+			copy->setTemplateState(Invalid);
+#endif
+	}
 	return copy;
 }
 
@@ -214,6 +226,21 @@ const char* GdalTemplate::getTemplateType() const
 
 Template::LookupResult GdalTemplate::tryToFindTemplateFile(const QString& map_path)
 {
+#if defined(Q_OS_IOS)
+	const auto resolved_path =
+		AppleDocumentAccess::resolvedAuxiliaryDocumentPath(template_path);
+	bool resolved_identity_adopted = false;
+	if (!resolved_path.isEmpty()
+	    && QFileInfo{resolved_path}.absoluteFilePath()
+	       != QFileInfo{template_path}.absoluteFilePath()
+	    && adoptTemplatePath(resolved_path))
+	{
+		map->emitTemplateChanged(this);
+		resolved_identity_adopted = true;
+	}
+	if (!resolved_identity_adopted)
+		ensureAuxiliaryDocumentAccess();
+#endif
 	auto template_path_utf8 = template_path.toUtf8();
 	if (GdalFile::isRelative(template_path_utf8))
 	{

@@ -14,7 +14,7 @@ message(STATUS "Configuring ${PROJECT_NAME} deployment")
 # Android packages are produced directly by Qt's generated apk and aab targets.
 # The package source and application metadata are configured on Mapper before
 # Qt finalizes the target in src/CMakeLists.txt.
-if(ANDROID)
+if(ANDROID OR IOS)
 	return()
 endif()
 

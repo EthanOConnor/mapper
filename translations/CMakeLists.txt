@@ -181,14 +181,28 @@ install(
 
 if(APPLE)
 	# Localized resources just to enable localized native dialogs.
+	set(Mapper_native_localizations)
 	foreach(mapper_trans ${Mapper_translations})
 		get_filename_component(mapper_lang ${mapper_trans} NAME_WE)
 		string(REPLACE OpenOrienteering_ "" language_code ${mapper_lang})
-		configure_file(locversion.plist.in ${language_code}.lproj/locversion.plist @ONLY)
+		if(IOS)
+			if(language_code STREQUAL "pt_BR")
+				set(language_code "pt-BR")
+			elseif(language_code STREQUAL "zh_CN")
+				set(language_code "zh-Hans")
+			elseif(language_code STREQUAL "zh_Hant")
+				set(language_code "zh-Hant")
+			endif()
+		endif()
+		set(localization_marker
+			"${CMAKE_CURRENT_BINARY_DIR}/${language_code}.lproj/locversion.plist")
+		configure_file(locversion.plist.in "${localization_marker}" @ONLY)
+		list(APPEND Mapper_native_localizations "${localization_marker}")
 		install(
 		  DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/${language_code}.lproj"
 		  DESTINATION "${MAPPER_DATA_DESTINATION}")
 	endforeach()
+	set(Mapper_native_localizations ${Mapper_native_localizations} PARENT_SCOPE)
 endif()
 
 set(Qt6_LUPDATE_EXECUTABLE Qt6::lupdate)
