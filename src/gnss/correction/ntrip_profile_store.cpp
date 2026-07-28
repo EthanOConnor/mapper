@@ -266,6 +266,47 @@ bool NtripProfileStore::save(const NtripProfile& input, QString* error)
 	return false;
 }
 
+bool NtripProfileStore::rename(
+  const QString& old_name, const NtripProfile& input, QString* error)
+{
+	auto clean_old_name = old_name.trimmed();
+	auto profile = ntripProfileNormalized(input);
+	if (clean_old_name == profile.name)
+		return save(profile, error);
+
+	auto names = profileNames();
+	if (!names.contains(clean_old_name))
+	{
+		if (error)
+			*error = storeError("The selected NTRIP profile no longer exists.");
+		return false;
+	}
+	if (names.contains(profile.name))
+	{
+		if (error)
+			*error = storeError(
+			  "Another NTRIP profile already uses this name.");
+		return false;
+	}
+
+	// Save the complete replacement before removing the original so a failed
+	// Keychain or settings write cannot destroy the working profile.
+	if (!save(profile, error))
+		return false;
+
+	QString remove_error;
+	if (remove(clean_old_name, &remove_error))
+		return true;
+
+	// The original still exists, so roll back the replacement and report the
+	// original failure. This keeps rename all-or-nothing in normal failures.
+	QString rollback_error;
+	remove(profile.name, &rollback_error);
+	if (error)
+		*error = remove_error;
+	return false;
+}
+
 bool NtripProfileStore::remove(const QString& name, QString* error)
 {
 	if (!writePassword(credentialAccount(name), QString{}, error))

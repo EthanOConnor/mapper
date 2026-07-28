@@ -21,6 +21,7 @@
 
 #include "gnss/correction/ntrip_profile.h"
 #include "gnss/correction/ntrip_profile_store.h"
+#include "settings.h"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -152,7 +153,9 @@ void NtripSettingsWidget::addProfile()
 
 	// Immediately open edit dialog so the user can fill in caster details
 	editProfile(row);
-	if (!NtripProfileStore::profileNames().contains(name))
+	if (row < profile_list->count()
+	    && !NtripProfileStore::profileNames().contains(
+	      profile_list->item(row)->text()))
 		delete profile_list->takeItem(row);
 
 	emit profilesChanged();
@@ -183,6 +186,10 @@ void NtripSettingsWidget::editProfile(int index)
 	dialog.setWindowTitle(tr("Edit Profile: %1").arg(name));
 
 	auto* form = new QFormLayout(&dialog);
+
+	auto* name_edit = new QLineEdit(original.name, &dialog);
+	name_edit->setClearButtonEnabled(true);
+	form->addRow(tr("Profile name:"), name_edit);
 
 	auto* host_edit = new QLineEdit(original.casterHost, &dialog);
 	host_edit->setPlaceholderText(tr("caster.example.org"));
@@ -236,35 +243,48 @@ void NtripSettingsWidget::editProfile(int index)
 
 	auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
 	form->addRow(buttons);
-	connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
 	connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
 
-	if (dialog.exec() != QDialog::Accepted)
-		return;
+	auto was_saved = saved_profile.has_value();
+	auto profile_saved = false;
+	connect(buttons, &QDialogButtonBox::accepted, &dialog, [&]() {
+		NtripProfile profile;
+		profile.name = name_edit->text();
+		profile.casterHost = host_edit->text();
+		profile.casterPort = static_cast<quint16>(port_spin->value());
+		profile.mountpoint = mountpoint_edit->text();
+		profile.username = username_edit->text();
+		profile.password = password_edit->text();
+		profile.sendEmptyBasicAuth = empty_basic_auth_box->isChecked();
+		profile.useTls = tls_box->isChecked();
+		profile.version = static_cast<NtripVersion>(
+		  version_box->currentData().toInt());
+		profile.sendGga = send_gga_box->isChecked();
+		profile.ggaIntervalSec = gga_interval_spin->value();
+		profile = ntripProfileNormalized(profile);
 
-	NtripProfile profile;
-	profile.name = name;
-	profile.casterHost = host_edit->text();
-	profile.casterPort = static_cast<quint16>(port_spin->value());
-	profile.mountpoint = mountpoint_edit->text();
-	profile.username = username_edit->text();
-	profile.password = password_edit->text();
-	profile.sendEmptyBasicAuth = empty_basic_auth_box->isChecked();
-	profile.useTls = tls_box->isChecked();
-	profile.version = static_cast<NtripVersion>(
-	  version_box->currentData().toInt());
-	profile.sendGga = send_gga_box->isChecked();
-	profile.ggaIntervalSec = gga_interval_spin->value();
-	profile = ntripProfileNormalized(profile);
+		QString save_error;
+		auto saved = was_saved
+		  ? NtripProfileStore::rename(name, profile, &save_error)
+		  : NtripProfileStore::save(profile, &save_error);
+		if (!saved)
+		{
+			QMessageBox::warning(&dialog, tr("NTRIP profile not saved"),
+			                     save_error);
+			return;
+		}
 
-	QString save_error;
-	if (!NtripProfileStore::save(profile, &save_error))
-	{
-		QMessageBox::warning(this, tr("NTRIP profile not saved"), save_error);
-		return;
-	}
+		profile_list->item(index)->setText(profile.name);
+		auto& settings = Settings::getInstance();
+		if (was_saved && settings.gnssNtripActiveProfile() == name)
+			settings.setGnssNtripActiveProfile(profile.name);
+		profile_saved = true;
+		dialog.accept();
+	});
 
-	emit profilesChanged();
+	dialog.exec();
+	if (profile_saved)
+		emit profilesChanged();
 }
 
 

@@ -31,6 +31,9 @@ public:
 	static std::optional<NtripProfile> load(const QString& name,
 	                                       QString* error = nullptr);
 	static bool save(const NtripProfile& profile, QString* error = nullptr);
+	static bool rename(const QString& old_name,
+	                   const NtripProfile& profile,
+	                   QString* error = nullptr);
 	static bool remove(const QString& name, QString* error = nullptr);
 
 private:
