@@ -134,6 +134,7 @@ bool SettingsDialog::selectPage(const QString &title) {
                        : nullptr;
       if (!page || page->title() != title)
         continue;
+      direct_page_entry = true;
       stack_widget->setCurrentWidget(scrollarea);
       resizeToFit(*scrollarea);
       scrollarea->ensureVisible(0, 0);
@@ -164,6 +165,10 @@ void SettingsDialog::keyPressEvent(QKeyEvent *event) {
   case Qt::Key_Back:
   case Qt::Key_Escape:
     if (stack_widget && stack_widget->currentIndex() > 0) {
+      if (direct_page_entry) {
+        reject();
+        return;
+      }
       stack_widget->setCurrentIndex(0);
       auto buttons = button_box->standardButtons();
       button_box->setStandardButtons((buttons & ~QDialogButtonBox::Reset) |
@@ -299,7 +304,8 @@ void SettingsDialog::buttonPressed(QAbstractButton *button) {
     callOnAllPages(&SettingsPage::apply);
     if (apply_failed)
       break;
-    if (stack_widget && stack_widget->currentIndex() > 0) {
+    if (stack_widget && stack_widget->currentIndex() > 0 &&
+        !direct_page_entry) {
       stack_widget->setCurrentIndex(0);
       button_box->setStandardButtons(button_box->standardButtons() &
                                      ~QDialogButtonBox::Reset);

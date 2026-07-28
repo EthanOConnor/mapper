@@ -58,7 +58,12 @@ public:
    */
   ~SettingsDialog() override;
 
-  /** Selects a settings page by its translated title. */
+  /**
+   * Selects a settings page by its translated title.
+   *
+   * In mobile mode, a programmatically selected page is a direct-entry flow:
+   * accepting it closes the dialog instead of revealing the settings menu.
+   */
   bool selectPage(const QString &title);
 
 protected:
@@ -109,6 +114,7 @@ private:
    */
   QDialogButtonBox *button_box;
   bool apply_failed = false;
+  bool direct_page_entry = false;
 
   int scrollbar_extent;
 };
