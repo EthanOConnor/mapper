@@ -79,16 +79,16 @@ private:
 	
 	QComboBox* language_box;
 	
-	QDoubleSpinBox* ppi_edit;
-	QCheckBox* open_mru_check;
-	QCheckBox* tips_visible_check;
+	QDoubleSpinBox* ppi_edit = nullptr;
+	QCheckBox* open_mru_check = nullptr;
+	QCheckBox* tips_visible_check = nullptr;
 	
 	QCheckBox* compatibility_check;
 	QCheckBox* undo_check;
 	QCheckBox* autosave_check;
 	QSpinBox*  autosave_interval_edit;
 	
-	QComboBox* encoding_box;
+	QComboBox* encoding_box = nullptr;
 };
 
 

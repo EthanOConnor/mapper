@@ -59,13 +59,13 @@ private:
 	QSpinBox* snap_distance;
 	QDoubleSpinBox* fixed_angle_stepping;
 	QCheckBox* select_symbol_of_objects;
-	QCheckBox* zoom_out_away_from_cursor;
-	QCheckBox* draw_last_point_on_right_click;
+	QCheckBox* zoom_out_away_from_cursor = nullptr;
+	QCheckBox* draw_last_point_on_right_click = nullptr;
 	QCheckBox* keep_settings_of_closed_templates;
-	QCheckBox* ignore_touch_input;
+	QCheckBox* ignore_touch_input = nullptr;
 	
-	QComboBox* edit_tool_delete_bezier_point_action;
-	QComboBox* edit_tool_delete_bezier_point_action_alternative;
+	QComboBox* edit_tool_delete_bezier_point_action = nullptr;
+	QComboBox* edit_tool_delete_bezier_point_action_alternative = nullptr;
 	
 	QSpinBox* rectangle_helper_cross_radius;
 	QCheckBox* rectangle_preview_line_width;

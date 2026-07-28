@@ -79,25 +79,29 @@ GdalSettingsPage::GdalSettingsPage(QWidget* parent)
 	form_layout->addRow(export_one_layer_per_symbol);
 	
 	
-	form_layout->addItem(Util::SpacerItem::create(this));
-	form_layout->addRow(Util::Headline::create(tr("Configuration")));
-	
 	auto layout = new QVBoxLayout(this);
 	
 	layout->addLayout(form_layout);
 	
-	parameters = new QTableWidget(1, 2);
-	parameters->verticalHeader()->hide();
-	parameters->setHorizontalHeaderLabels({ tr("Parameter"), tr("Value") });
-	auto header_view = parameters->horizontalHeader();
-	header_view->setSectionResizeMode(0, QHeaderView::Stretch);
-	header_view->setSectionResizeMode(1, QHeaderView::Stretch);
-	header_view->setSectionsClickable(false);
-	layout->addWidget(parameters, 1);
+	if (!Settings::mobileModeEnforced())
+	{
+		form_layout->addItem(Util::SpacerItem::create(this));
+		form_layout->addRow(Util::Headline::create(tr("Configuration")));
+
+		parameters = new QTableWidget(1, 2);
+		parameters->verticalHeader()->hide();
+		parameters->setHorizontalHeaderLabels({ tr("Parameter"), tr("Value") });
+		auto header_view = parameters->horizontalHeader();
+		header_view->setSectionResizeMode(0, QHeaderView::Stretch);
+		header_view->setSectionResizeMode(1, QHeaderView::Stretch);
+		header_view->setSectionsClickable(false);
+		layout->addWidget(parameters, 1);
+	}
 	
 	updateWidgets();
 	
-	connect(parameters, &QTableWidget::cellChanged, this, &GdalSettingsPage::cellChange);
+	if (parameters)
+		connect(parameters, &QTableWidget::cellChanged, this, &GdalSettingsPage::cellChange);
 }
 
 GdalSettingsPage::~GdalSettingsPage() = default;
@@ -124,25 +128,28 @@ void GdalSettingsPage::apply()
 	manager.setExportOptionEnabled(GdalManager::OneLayerPerSymbol, export_one_layer_per_symbol->isChecked());
 	manager.setImportOptionEnabled(GdalManager::ClipLayers, clip_layers->isChecked());
 	
-	const auto old_parameters = manager.parameterKeys();
-	
-	QStringList new_parameters;
-	new_parameters.reserve(parameters->rowCount());
-	for (int row = 0, end = parameters->rowCount(); row < end; ++row)
+	if (parameters)
 	{
-		auto key = parameters->item(row, 0)->text().trimmed();
-		if (!key.isEmpty())
+		const auto old_parameters = manager.parameterKeys();
+
+		QStringList new_parameters;
+		new_parameters.reserve(parameters->rowCount());
+		for (int row = 0, end = parameters->rowCount(); row < end; ++row)
 		{
-			new_parameters.append(key);
-			auto value = parameters->item(row, 1)->text();
-			manager.setParameterValue(key, value.trimmed());
+			auto key = parameters->item(row, 0)->text().trimmed();
+			if (!key.isEmpty())
+			{
+				new_parameters.append(key);
+				auto value = parameters->item(row, 1)->text();
+				manager.setParameterValue(key, value.trimmed());
+			}
 		}
-	}
-	for (const auto& key : std::as_const(old_parameters))
-	{
-		if (!new_parameters.contains(key))
+		for (const auto& key : std::as_const(old_parameters))
 		{
-			manager.unsetParameter(key);
+			if (!new_parameters.contains(key))
+			{
+				manager.unsetParameter(key);
+			}
 		}
 	}
 	
@@ -164,23 +171,26 @@ void GdalSettingsPage::updateWidgets()
 	
 	export_one_layer_per_symbol->setChecked(manager.isExportOptionEnabled(GdalManager::OneLayerPerSymbol));
 	
-	auto options = manager.parameterKeys();
-	options.sort();
-	parameters->setRowCount(options.size() + 1);
-	
-	QSignalBlocker block(parameters);
-	auto row = 0;
-	for (const auto& item : std::as_const(options))
+	if (parameters)
 	{
-		auto key_item = new QTableWidgetItem(item);
-		parameters->setItem(row, 0, key_item);
-		auto value_item = new QTableWidgetItem(manager.parameterValue(item));
-		parameters->setItem(row, 1, value_item);
-		++row;
+		auto options = manager.parameterKeys();
+		options.sort();
+		parameters->setRowCount(options.size() + 1);
+
+		QSignalBlocker block(parameters);
+		auto row = 0;
+		for (const auto& item : std::as_const(options))
+		{
+			auto key_item = new QTableWidgetItem(item);
+			parameters->setItem(row, 0, key_item);
+			auto value_item = new QTableWidgetItem(manager.parameterValue(item));
+			parameters->setItem(row, 1, value_item);
+			++row;
+		}
+		parameters->setRowCount(row+1);
+		parameters->setItem(row, 0, new QTableWidgetItem());
+		parameters->setItem(row, 1, new QTableWidgetItem());
 	}
-	parameters->setRowCount(row+1);
-	parameters->setItem(row, 0, new QTableWidgetItem());
-	parameters->setItem(row, 1, new QTableWidgetItem());
 }
 
 void GdalSettingsPage::cellChange(int row, int column)

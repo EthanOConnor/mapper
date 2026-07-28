@@ -74,6 +74,7 @@ GeneralSettingsPage::GeneralSettingsPage(QWidget* parent)
 , translation_file(getSetting(Settings::General_TranslationFile).toString())
 {
 	auto layout = new QFormLayout(this);
+	auto const mobile = Settings::mobileModeEnforced();
 	
 	layout->addRow(Util::Headline::create(tr("Appearance")));
 	
@@ -96,29 +97,33 @@ GeneralSettingsPage::GeneralSettingsPage(QWidget* parent)
 	}
 	language_layout->addWidget(language_file_button);
 	
-	layout->addItem(Util::SpacerItem::create(this));
-	layout->addRow(Util::Headline::create(tr("Screen")));
-	
-	auto ppi_widget = new QWidget();
-	auto ppi_layout = new QHBoxLayout(ppi_widget);
-	ppi_layout->setContentsMargins({});
-	layout->addRow(tr("Pixels per inch:"), ppi_widget);
-	
-	ppi_edit = Util::SpinBox::create(2, 0.01, 9999);
-	ppi_layout->addWidget(ppi_edit);
-	
-	auto ppi_calculate_button = new QToolButton();
-	ppi_calculate_button->setIcon(ActionIcon::fromName(u"settings"));
-	ppi_layout->addWidget(ppi_calculate_button);
-	
-	layout->addItem(Util::SpacerItem::create(this));
-	layout->addRow(Util::Headline::create(tr("Program start")));
-	
-	open_mru_check = new QCheckBox(::OpenOrienteering::AbstractHomeScreenWidget::tr("Open most recently used file"));
-	layout->addRow(open_mru_check);
-	
-	tips_visible_check = new QCheckBox(::OpenOrienteering::AbstractHomeScreenWidget::tr("Show tip of the day"));
-	layout->addRow(tips_visible_check);
+	QToolButton* ppi_calculate_button = nullptr;
+	if (!mobile)
+	{
+		layout->addItem(Util::SpacerItem::create(this));
+		layout->addRow(Util::Headline::create(tr("Screen")));
+
+		auto ppi_widget = new QWidget();
+		auto ppi_layout = new QHBoxLayout(ppi_widget);
+		ppi_layout->setContentsMargins({});
+		layout->addRow(tr("Pixels per inch:"), ppi_widget);
+
+		ppi_edit = Util::SpinBox::create(2, 0.01, 9999);
+		ppi_layout->addWidget(ppi_edit);
+
+		ppi_calculate_button = new QToolButton();
+		ppi_calculate_button->setIcon(ActionIcon::fromName(u"settings"));
+		ppi_layout->addWidget(ppi_calculate_button);
+
+		layout->addItem(Util::SpacerItem::create(this));
+		layout->addRow(Util::Headline::create(tr("Program start")));
+
+		open_mru_check = new QCheckBox(::OpenOrienteering::AbstractHomeScreenWidget::tr("Open most recently used file"));
+		layout->addRow(open_mru_check);
+
+		tips_visible_check = new QCheckBox(::OpenOrienteering::AbstractHomeScreenWidget::tr("Show tip of the day"));
+		layout->addRow(tips_visible_check);
+	}
 	
 	layout->addItem(Util::SpacerItem::create(this));
 	layout->addRow(Util::Headline::create(tr("Saving files")));
@@ -140,39 +145,44 @@ GeneralSettingsPage::GeneralSettingsPage(QWidget* parent)
 	autosave_interval_edit = Util::SpinBox::create(1, 120, tr("min", "unit minutes"), 1);
 	layout->addRow(tr("Recovery information saving interval:"), autosave_interval_edit);
 	
-	layout->addItem(Util::SpacerItem::create(this));
-	layout->addRow(Util::Headline::create(tr("File import and export")));
-	
-	QStringList available_codecs;
-	available_codecs.append(tr("Default"));
-	encoding_box = new QComboBox();
-	encoding_box->setEditable(true);
-	encoding_box->addItem(available_codecs.first());
-	encoding_box->addItem(QString::fromLatin1("Windows-1252")); // Serves as an example, not translated.
-	const auto available_codecs_raw = Util::availableEncodingNames();
-	available_codecs.reserve(available_codecs_raw.size());
-	for (const QByteArray& item : available_codecs_raw)
+	if (!mobile)
 	{
-		available_codecs.append(QString::fromUtf8(item));
+		layout->addItem(Util::SpacerItem::create(this));
+		layout->addRow(Util::Headline::create(tr("File import and export")));
+
+		QStringList available_codecs;
+		available_codecs.append(tr("Default"));
+		encoding_box = new QComboBox();
+		encoding_box->setEditable(true);
+		encoding_box->addItem(available_codecs.first());
+		encoding_box->addItem(QString::fromLatin1("Windows-1252")); // Serves as an example, not translated.
+		const auto available_codecs_raw = Util::availableEncodingNames();
+		available_codecs.reserve(available_codecs_raw.size());
+		for (const QByteArray& item : available_codecs_raw)
+		{
+			available_codecs.append(QString::fromUtf8(item));
+		}
+		if (available_codecs.size() > 1)
+		{
+			available_codecs.sort(Qt::CaseInsensitive);
+			available_codecs.removeDuplicates();
+			encoding_box->addItem(tr("More..."));
+		}
+		auto completer = new QCompleter(available_codecs, this);
+		completer->setModelSorting(QCompleter::CaseInsensitivelySortedModel);
+		completer->setCaseSensitivity(Qt::CaseInsensitive);
+		completer->setCompletionMode(QCompleter::UnfilteredPopupCompletion);
+		encoding_box->setCompleter(completer);
+		layout->addRow(tr("8-bit encoding:"), encoding_box);
 	}
-	if (available_codecs.size() > 1)
-	{
-		available_codecs.sort(Qt::CaseInsensitive);
-		available_codecs.removeDuplicates();
-		encoding_box->addItem(tr("More..."));
-	}
-	auto completer = new QCompleter(available_codecs, this);
-	completer->setModelSorting(QCompleter::CaseInsensitivelySortedModel);
-	completer->setCaseSensitivity(Qt::CaseInsensitive);
-	completer->setCompletionMode(QCompleter::UnfilteredPopupCompletion);
-	encoding_box->setCompleter(completer);
-	layout->addRow(tr("8-bit encoding:"), encoding_box);
 	
 	updateWidgets();
 	
 	connect(language_file_button, &QAbstractButton::clicked, this, &GeneralSettingsPage::openTranslationFileDialog);
-	connect(ppi_calculate_button, &QAbstractButton::clicked, this, &GeneralSettingsPage::openPPICalculationDialog);
-	connect(encoding_box, &QComboBox::currentTextChanged, this, &GeneralSettingsPage::encodingChanged);
+	if (ppi_calculate_button)
+		connect(ppi_calculate_button, &QAbstractButton::clicked, this, &GeneralSettingsPage::openPPICalculationDialog);
+	if (encoding_box)
+		connect(encoding_box, &QComboBox::currentTextChanged, this, &GeneralSettingsPage::encodingChanged);
 	connect(autosave_check, &QAbstractButton::toggled, autosave_interval_edit, &QWidget::setEnabled);
 	connect(autosave_check, &QAbstractButton::toggled, layout->labelForField(autosave_interval_edit), &QWidget::setEnabled);
 	
@@ -224,19 +234,25 @@ void GeneralSettingsPage::apply()
 #endif
 	}
 	
-	setSetting(Settings::General_OpenMRUFile, open_mru_check->isChecked());
-	setSetting(Settings::HomeScreen_TipsVisible, tips_visible_check->isChecked());
+	if (open_mru_check)
+		setSetting(Settings::General_OpenMRUFile, open_mru_check->isChecked());
+	if (tips_visible_check)
+		setSetting(Settings::HomeScreen_TipsVisible, tips_visible_check->isChecked());
 	setSetting(Settings::General_RetainCompatiblity, compatibility_check->isChecked());
 	setSetting(Settings::General_SaveUndoRedo, undo_check->isChecked());
-	setSetting(Settings::General_PixelsPerInch, ppi_edit->value());
+	if (ppi_edit)
+		setSetting(Settings::General_PixelsPerInch, ppi_edit->value());
 	
-	auto encoding = encoding_box->currentText().toLatin1();
-	if (QLatin1String(encoding) == encoding_box->itemText(0)
-	    || !Util::encodingForName(encoding))
+	if (encoding_box)
 	{
-		encoding = "Default";
+		auto encoding = encoding_box->currentText().toLatin1();
+		if (QLatin1String(encoding) == encoding_box->itemText(0)
+		    || !Util::encodingForName(encoding))
+		{
+			encoding = "Default";
+		}
+		setSetting(Settings::General_Local8BitEncoding, encoding);
 	}
-	setSetting(Settings::General_Local8BitEncoding, encoding);
 	
 	int interval = autosave_interval_edit->value();
 	if (!autosave_check->isChecked())
@@ -283,9 +299,12 @@ void GeneralSettingsPage::updateWidgets()
 {
 	updateLanguageBox(getSetting(Settings::General_Language));
 	
-	ppi_edit->setValue(getSetting(Settings::General_PixelsPerInch).toDouble());
-	open_mru_check->setChecked(getSetting(Settings::General_OpenMRUFile).toBool());
-	tips_visible_check->setChecked(getSetting(Settings::HomeScreen_TipsVisible).toBool());
+	if (ppi_edit)
+		ppi_edit->setValue(getSetting(Settings::General_PixelsPerInch).toDouble());
+	if (open_mru_check)
+		open_mru_check->setChecked(getSetting(Settings::General_OpenMRUFile).toBool());
+	if (tips_visible_check)
+		tips_visible_check->setChecked(getSetting(Settings::HomeScreen_TipsVisible).toBool());
 	compatibility_check->setChecked(getSetting(Settings::General_RetainCompatiblity).toBool());
 	undo_check->setChecked(getSetting(Settings::General_SaveUndoRedo).toBool());
 	int autosave_interval = getSetting(Settings::General_AutosaveInterval).toInt();
@@ -293,11 +312,14 @@ void GeneralSettingsPage::updateWidgets()
 	autosave_interval_edit->setEnabled(autosave_interval > 0);
 	autosave_interval_edit->setValue(qAbs(autosave_interval));
 	
-	auto encoding = getSetting(Settings::General_Local8BitEncoding).toByteArray();
-	if (encoding != "Default"
-	    && Util::encodingForName(encoding))
+	if (encoding_box)
 	{
-		encoding_box->setCurrentText(QString::fromLatin1(encoding));
+		auto encoding = getSetting(Settings::General_Local8BitEncoding).toByteArray();
+		if (encoding != "Default"
+		    && Util::encodingForName(encoding))
+		{
+			encoding_box->setCurrentText(QString::fromLatin1(encoding));
+		}
 	}
 }
 

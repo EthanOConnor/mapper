@@ -43,6 +43,7 @@ EditorSettingsPage::EditorSettingsPage(QWidget* parent)
  : SettingsPage(parent)
 {
 	auto layout = new QFormLayout(this);
+	auto const mobile = Settings::mobileModeEnforced();
 	
 	if (Settings::getInstance().touchModeEnabled())
 	{
@@ -57,43 +58,55 @@ EditorSettingsPage::EditorSettingsPage(QWidget* parent)
 	layout->addRow(tr("Click tolerance:"), tolerance);
 	
 	snap_distance = Util::SpinBox::create(0, 100, tr("mm", "millimeters"));
-	layout->addRow(tr("Snap distance (%1):").arg(ModifierKey::shift()), snap_distance);
+	layout->addRow(mobile ? tr("Snap distance:")
+	                      : tr("Snap distance (%1):").arg(ModifierKey::shift()),
+	               snap_distance);
 	
 	fixed_angle_stepping = Util::SpinBox::create<Util::RotationalDegrees>();
 	fixed_angle_stepping->setDecimals(1);
 	fixed_angle_stepping->setRange(0.1, 180.0);
-	layout->addRow(tr("Stepping of fixed angle mode (%1):").arg(ModifierKey::control()), fixed_angle_stepping);
+	layout->addRow(mobile ? tr("Fixed-angle step:")
+	                      : tr("Stepping of fixed angle mode (%1):").arg(ModifierKey::control()),
+	               fixed_angle_stepping);
 
 	select_symbol_of_objects = new QCheckBox(tr("When selecting an object, automatically select its symbol, too"));
 	layout->addRow(select_symbol_of_objects);
 	
-	zoom_out_away_from_cursor = new QCheckBox(tr("Zoom away from cursor when zooming out"));
-	layout->addRow(zoom_out_away_from_cursor);
-	
-	draw_last_point_on_right_click = new QCheckBox(tr("Drawing tools: set last point on finishing with right click"));
-	layout->addRow(draw_last_point_on_right_click);
+	if (!mobile)
+	{
+		zoom_out_away_from_cursor = new QCheckBox(tr("Zoom away from cursor when zooming out"));
+		layout->addRow(zoom_out_away_from_cursor);
+
+		draw_last_point_on_right_click = new QCheckBox(tr("Drawing tools: set last point on finishing with right click"));
+		layout->addRow(draw_last_point_on_right_click);
+	}
 	
 	keep_settings_of_closed_templates = new QCheckBox(tr("Templates: keep settings of closed templates"));
 	layout->addRow(keep_settings_of_closed_templates);
 	
-	ignore_touch_input = new QCheckBox(tr("User input: Ignore display touch"));
-	layout->addRow(ignore_touch_input);
+	if (!mobile)
+	{
+		ignore_touch_input = new QCheckBox(tr("User input: Ignore display touch"));
+		layout->addRow(ignore_touch_input);
+	}
 	
-	
-	layout->addItem(Util::SpacerItem::create(this));
-	layout->addRow(Util::Headline::create(tr("Edit tool:")));
-	
-	edit_tool_delete_bezier_point_action = new QComboBox();
-	edit_tool_delete_bezier_point_action->addItem(tr("Retain old shape"), (int)Settings::DeleteBezierPoint_RetainExistingShape);
-	edit_tool_delete_bezier_point_action->addItem(tr("Reset outer curve handles"), (int)Settings::DeleteBezierPoint_ResetHandles);
-	edit_tool_delete_bezier_point_action->addItem(tr("Keep outer curve handles"), (int)Settings::DeleteBezierPoint_KeepHandles);
-	layout->addRow(tr("Action on deleting a curve point with %1:").arg(ModifierKey::control()), edit_tool_delete_bezier_point_action);
-	
-	edit_tool_delete_bezier_point_action_alternative = new QComboBox();
-	edit_tool_delete_bezier_point_action_alternative->addItem(tr("Retain old shape"), (int)Settings::DeleteBezierPoint_RetainExistingShape);
-	edit_tool_delete_bezier_point_action_alternative->addItem(tr("Reset outer curve handles"), (int)Settings::DeleteBezierPoint_ResetHandles);
-	edit_tool_delete_bezier_point_action_alternative->addItem(tr("Keep outer curve handles"), (int)Settings::DeleteBezierPoint_KeepHandles);
-	layout->addRow(tr("Action on deleting a curve point with %1:").arg(ModifierKey::controlShift()), edit_tool_delete_bezier_point_action_alternative);
+	if (!mobile)
+	{
+		layout->addItem(Util::SpacerItem::create(this));
+		layout->addRow(Util::Headline::create(tr("Edit tool:")));
+
+		edit_tool_delete_bezier_point_action = new QComboBox();
+		edit_tool_delete_bezier_point_action->addItem(tr("Retain old shape"), (int)Settings::DeleteBezierPoint_RetainExistingShape);
+		edit_tool_delete_bezier_point_action->addItem(tr("Reset outer curve handles"), (int)Settings::DeleteBezierPoint_ResetHandles);
+		edit_tool_delete_bezier_point_action->addItem(tr("Keep outer curve handles"), (int)Settings::DeleteBezierPoint_KeepHandles);
+		layout->addRow(tr("Action on deleting a curve point with %1:").arg(ModifierKey::control()), edit_tool_delete_bezier_point_action);
+
+		edit_tool_delete_bezier_point_action_alternative = new QComboBox();
+		edit_tool_delete_bezier_point_action_alternative->addItem(tr("Retain old shape"), (int)Settings::DeleteBezierPoint_RetainExistingShape);
+		edit_tool_delete_bezier_point_action_alternative->addItem(tr("Reset outer curve handles"), (int)Settings::DeleteBezierPoint_ResetHandles);
+		edit_tool_delete_bezier_point_action_alternative->addItem(tr("Keep outer curve handles"), (int)Settings::DeleteBezierPoint_KeepHandles);
+		layout->addRow(tr("Action on deleting a curve point with %1:").arg(ModifierKey::controlShift()), edit_tool_delete_bezier_point_action_alternative);
+	}
 	
 	layout->addItem(Util::SpacerItem::create(this));
 	layout->addRow(Util::Headline::create(tr("Rectangle tool:")));
@@ -127,12 +140,17 @@ void EditorSettingsPage::apply()
 	setSetting(Settings::MapEditor_SnapDistanceMM, snap_distance->value());
 	setSetting(Settings::MapEditor_FixedAngleStepping, fixed_angle_stepping->value());
 	setSetting(Settings::MapEditor_ChangeSymbolWhenSelecting, select_symbol_of_objects->isChecked());
-	setSetting(Settings::MapEditor_ZoomOutAwayFromCursor, zoom_out_away_from_cursor->isChecked());
-	setSetting(Settings::MapEditor_DrawLastPointOnRightClick, draw_last_point_on_right_click->isChecked());
+	if (zoom_out_away_from_cursor)
+		setSetting(Settings::MapEditor_ZoomOutAwayFromCursor, zoom_out_away_from_cursor->isChecked());
+	if (draw_last_point_on_right_click)
+		setSetting(Settings::MapEditor_DrawLastPointOnRightClick, draw_last_point_on_right_click->isChecked());
 	setSetting(Settings::Templates_KeepSettingsOfClosed, keep_settings_of_closed_templates->isChecked());
-	setSetting(Settings::MapEditor_IgnoreTouchInput, ignore_touch_input->isChecked());
-	setSetting(Settings::EditTool_DeleteBezierPointAction, edit_tool_delete_bezier_point_action->currentData());
-	setSetting(Settings::EditTool_DeleteBezierPointActionAlternative, edit_tool_delete_bezier_point_action_alternative->currentData());
+	if (ignore_touch_input)
+		setSetting(Settings::MapEditor_IgnoreTouchInput, ignore_touch_input->isChecked());
+	if (edit_tool_delete_bezier_point_action)
+		setSetting(Settings::EditTool_DeleteBezierPointAction, edit_tool_delete_bezier_point_action->currentData());
+	if (edit_tool_delete_bezier_point_action_alternative)
+		setSetting(Settings::EditTool_DeleteBezierPointActionAlternative, edit_tool_delete_bezier_point_action_alternative->currentData());
 	setSetting(Settings::RectangleTool_HelperCrossRadiusMM, rectangle_helper_cross_radius->value());
 	setSetting(Settings::RectangleTool_PreviewLineWidth, rectangle_preview_line_width->isChecked());
 }
@@ -151,13 +169,18 @@ void EditorSettingsPage::updateWidgets()
 	snap_distance->setValue(getSetting(Settings::MapEditor_SnapDistanceMM).toInt());
 	fixed_angle_stepping->setValue(getSetting(Settings::MapEditor_FixedAngleStepping).toInt());
 	select_symbol_of_objects->setChecked(getSetting(Settings::MapEditor_ChangeSymbolWhenSelecting).toBool());
-	zoom_out_away_from_cursor->setChecked(getSetting(Settings::MapEditor_ZoomOutAwayFromCursor).toBool());
-	draw_last_point_on_right_click->setChecked(getSetting(Settings::MapEditor_DrawLastPointOnRightClick).toBool());
+	if (zoom_out_away_from_cursor)
+		zoom_out_away_from_cursor->setChecked(getSetting(Settings::MapEditor_ZoomOutAwayFromCursor).toBool());
+	if (draw_last_point_on_right_click)
+		draw_last_point_on_right_click->setChecked(getSetting(Settings::MapEditor_DrawLastPointOnRightClick).toBool());
 	keep_settings_of_closed_templates->setChecked(getSetting(Settings::Templates_KeepSettingsOfClosed).toBool());
-	ignore_touch_input->setChecked(getSetting(Settings::MapEditor_IgnoreTouchInput).toBool());
+	if (ignore_touch_input)
+		ignore_touch_input->setChecked(getSetting(Settings::MapEditor_IgnoreTouchInput).toBool());
 	
-	edit_tool_delete_bezier_point_action->setCurrentIndex(edit_tool_delete_bezier_point_action->findData(getSetting(Settings::EditTool_DeleteBezierPointAction).toInt()));
-	edit_tool_delete_bezier_point_action_alternative->setCurrentIndex(edit_tool_delete_bezier_point_action_alternative->findData(getSetting(Settings::EditTool_DeleteBezierPointActionAlternative).toInt()));
+	if (edit_tool_delete_bezier_point_action)
+		edit_tool_delete_bezier_point_action->setCurrentIndex(edit_tool_delete_bezier_point_action->findData(getSetting(Settings::EditTool_DeleteBezierPointAction).toInt()));
+	if (edit_tool_delete_bezier_point_action_alternative)
+		edit_tool_delete_bezier_point_action_alternative->setCurrentIndex(edit_tool_delete_bezier_point_action_alternative->findData(getSetting(Settings::EditTool_DeleteBezierPointActionAlternative).toInt()));
 	
 	rectangle_helper_cross_radius->setValue(getSetting(Settings::RectangleTool_HelperCrossRadiusMM).toInt());
 	rectangle_preview_line_width->setChecked(getSetting(Settings::RectangleTool_PreviewLineWidth).toBool());

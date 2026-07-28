@@ -59,7 +59,7 @@ private:
 	QCheckBox* view_hatch;
 	QCheckBox* view_baseline;
 	QCheckBox* export_one_layer_per_symbol;
-	QTableWidget* parameters;
+	QTableWidget* parameters = nullptr;
 };
 
 

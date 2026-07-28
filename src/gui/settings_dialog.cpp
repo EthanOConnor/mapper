@@ -236,7 +236,8 @@ void SettingsDialog::resizeToFit(QScrollArea &scrollarea) {
 void SettingsDialog::addPages() {
   addPage(new GeneralSettingsPage(this));
   addPage(new EditorSettingsPage(this));
-  addPage(new MapHubSettingsPage(this));
+  if (!Settings::mobileModeEnforced())
+    addPage(new MapHubSettingsPage(this));
 #ifdef MAPPER_GNSS_AVAILABLE
   addPage(new GnssSettingsPage(this));
 #endif
