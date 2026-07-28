@@ -65,6 +65,9 @@ private:
   void startAssignment(const QString &assignment_id, const QString &project_id,
                        const QString &project_title,
                        const QString &assignment_title);
+  void openProject(const QString &project_id, const QString &project_title);
+  void requestProjectAccess(const QString &project_id,
+                            const QString &project_title);
   QString projectTitle(const QString &project_id) const;
   QString uniqueDestination(const QString &project_title,
                             const QString &project_id,

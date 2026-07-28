@@ -954,9 +954,9 @@ MapHubDialog::MapHubDialog(MainWindow *window)
       "QTabBar::tab:selected { color: palette(text); border-bottom: 3px "
       "solid palette(highlight); }"
       "QTreeWidget { background: palette(window); border: 0; }"
-      "QToolButton#mapHubProjectMore { background: transparent; border: 0; "
+      "QToolButton#mapHubVenueMore { background: transparent; border: 0; "
       "border-radius: 10px; padding: 8px; }"
-      "QToolButton#mapHubProjectMore:pressed { background: "
+      "QToolButton#mapHubVenueMore:pressed { background: "
       "palette(alternate-base); }"
       "QPushButton#mapHubLibraryPrimary { background: palette(highlight); "
       "color: palette(highlighted-text); border: 0; border-radius: 12px; "
@@ -1344,6 +1344,7 @@ MapHubDialog::MapHubDialog(MainWindow *window)
       tree->setColumnHidden(column, true);
   }
   project_list->setRootIsDecorated(false);
+  project_list->setSelectionMode(QAbstractItemView::NoSelection);
   project_list->setColumnHidden(4, false);
   project_list->header()->setSectionResizeMode(4, QHeaderView::Fixed);
   project_list->setColumnWidth(4, 52);
@@ -1885,12 +1886,113 @@ void MapHubDialog::populate(const QJsonObject &response) {
   assignment_list->resizeColumnToContents(1);
   project_list->clear();
 #if defined(MAPPER_MOBILE)
-  QHash<QString, QString> venue_names;
-  for (const auto value : response.value(QStringLiteral("venues")).toArray()) {
-    const auto venue = value.toObject();
-    venue_names.insert(venue.value(QStringLiteral("id")).toString(),
-                       venue.value(QStringLiteral("name")).toString());
+  QHash<QString, QVector<QJsonObject>> projects_by_venue;
+  for (const auto value :
+       response.value(QStringLiteral("projects")).toArray()) {
+    const auto project = value.toObject();
+    const auto venues = project.value(QStringLiteral("venues")).toArray();
+    if (venues.isEmpty()) {
+      projects_by_venue[QString{}].append(project);
+      continue;
+    }
+    for (const auto venue_value : venues) {
+      const auto venue_id =
+          venue_value.toObject().value(QStringLiteral("id")).toString();
+      if (!venue_id.isEmpty())
+        projects_by_venue[venue_id].append(project);
+    }
   }
+
+  auto add_venue = [this](const QString &venue_id, const QString &name,
+                          const QString &city,
+                          const QVector<QJsonObject> &projects) {
+    if (projects.isEmpty())
+      return;
+    auto *item = new QTreeWidgetItem({name, {}, {}, {}, {}});
+    item->setData(0, id_role, venue_id);
+    item->setData(0, item_kind_role, QStringLiteral("venue"));
+    item->setData(0, title_role, name);
+    QStringList details;
+    details.append(city);
+    details.append(tr("%n map(s)", nullptr, int(projects.size())));
+    details.removeAll(QString{});
+    item->setText(
+        0, name + QLatin1Char('\n') +
+               details.join(QStringLiteral("  •  ")));
+    item->setFlags(item->flags() & ~Qt::ItemIsSelectable);
+    project_list->addTopLevelItem(item);
+
+    auto *more = new QToolButton(project_list);
+    more->setObjectName(QStringLiteral("mapHubVenueMore"));
+    more->setAutoRaise(true);
+    more->setFocusPolicy(Qt::NoFocus);
+    more->setIcon(ActionIcon::fromName(u"three-dots"));
+    more->setIconSize(QSize(24, 24));
+    more->setMinimumSize(44, 44);
+    more->setToolTip(tr("Maps at %1").arg(name));
+    more->setAccessibleName(tr("Choose a map at %1").arg(name));
+    more->setPopupMode(QToolButton::InstantPopup);
+    auto *menu = new QMenu(more);
+    for (const auto &project : projects) {
+      const auto project_id =
+          project.value(QStringLiteral("id")).toString();
+      const auto project_title =
+          project.value(QStringLiteral("title")).toString();
+      const auto revision =
+          project.value(QStringLiteral("current_revision")).toObject();
+      auto *map_menu = menu->addMenu(project_title);
+      auto revision_label =
+          revision.isEmpty()
+              ? tr("No current revision")
+              : tr("Current revision: r%1")
+                    .arg(revision.value(QStringLiteral("number")).toInt());
+      const auto revision_state =
+          revision.value(QStringLiteral("state")).toString();
+      if (!revision_state.isEmpty())
+        revision_label += QStringLiteral("  •  ") + revision_state;
+      auto *revision_action = map_menu->addAction(revision_label);
+      revision_action->setEnabled(false);
+      map_menu->addSeparator();
+      auto *open_action = map_menu->addAction(tr("Open read-only"));
+
+      bool can_start_editing = false;
+      for (int i = 0; i < assignment_list->topLevelItemCount(); ++i) {
+        const auto *assignment = assignment_list->topLevelItem(i);
+        if (assignment->data(0, project_id_role).toString() == project_id &&
+            assignmentCanStart(assignment)) {
+          can_start_editing = true;
+          break;
+        }
+      }
+      auto *access_action = map_menu->addAction(
+          can_start_editing ? tr("Start editing…")
+                            : tr("Request editing access…"));
+      connect(open_action, &QAction::triggered, this,
+              [this, project_id, project_title] {
+                openProject(project_id, project_title);
+              });
+      connect(access_action, &QAction::triggered, this,
+              [this, project_id, project_title] {
+                requestProjectAccess(project_id, project_title);
+              });
+    }
+    more->setMenu(menu);
+    project_list->setItemWidget(item, 4, more);
+  };
+
+  for (const auto value :
+       response.value(QStringLiteral("venues")).toArray()) {
+    const auto venue = value.toObject();
+    const auto venue_id = venue.value(QStringLiteral("id")).toString();
+    add_venue(venue_id,
+              venue.value(QStringLiteral("name")).toString(),
+              venue.value(QStringLiteral("city")).toString(),
+              projects_by_venue.value(venue_id));
+  }
+  const auto unassigned = projects_by_venue.value(QString{});
+  if (!unassigned.isEmpty())
+    add_venue({}, tr("No venue assigned"), {}, unassigned);
+  project_list->header()->resizeSection(4, 52);
 #else
   QHash<QString, int> project_counts;
   QHash<QString, int> event_counts;
@@ -1936,107 +2038,10 @@ void MapHubDialog::populate(const QJsonObject &response) {
     venue_items.insert(venue_id, item);
   }
   QTreeWidgetItem *unassigned = nullptr;
-#endif
   for (const auto value :
        response.value(QStringLiteral("projects")).toArray()) {
     auto object = value.toObject();
     auto revision = object.value(QStringLiteral("current_revision")).toObject();
-#if defined(MAPPER_MOBILE)
-    auto *item = new QTreeWidgetItem({
-        object.value(QStringLiteral("title")).toString(),
-        {},
-        {},
-        {},
-        {},
-    });
-    const auto project_id =
-        object.value(QStringLiteral("id")).toString();
-    const auto title =
-        object.value(QStringLiteral("title")).toString();
-    item->setData(0, id_role, project_id);
-    item->setData(0, item_kind_role, QStringLiteral("project"));
-    item->setData(0, title_role, title);
-
-    QStringList project_venue_names;
-    for (const auto value :
-         object.value(QStringLiteral("venues")).toArray()) {
-      const auto venue = value.toObject();
-      auto name = venue.value(QStringLiteral("name")).toString();
-      if (name.isEmpty())
-        name = venue_names.value(
-            venue.value(QStringLiteral("id")).toString());
-      if (!name.isEmpty() && !project_venue_names.contains(name))
-        project_venue_names.append(name);
-    }
-    QStringList details;
-    details.append(project_venue_names.isEmpty()
-                       ? tr("No venue assigned")
-                       : project_venue_names.join(QStringLiteral(", ")));
-    details.append(object.value(QStringLiteral("kind")).toString());
-    details.append(object.value(QStringLiteral("status")).toString());
-    if (!revision.isEmpty())
-      details.append(
-          tr("r%1").arg(revision.value(QStringLiteral("number")).toInt()));
-    details.removeAll(QString{});
-    item->setText(
-        0, title + QLatin1Char('\n') +
-               details.join(QStringLiteral("  •  ")));
-    project_list->addTopLevelItem(item);
-
-    auto *more = new QToolButton(project_list);
-    more->setObjectName(QStringLiteral("mapHubProjectMore"));
-    more->setAutoRaise(true);
-    more->setFocusPolicy(Qt::NoFocus);
-    more->setIcon(ActionIcon::fromName(u"three-dots"));
-    more->setIconSize(QSize(24, 24));
-    more->setMinimumSize(44, 44);
-    more->setToolTip(tr("Map and revision options"));
-    more->setAccessibleName(tr("More options for %1").arg(title));
-    more->setPopupMode(QToolButton::InstantPopup);
-    auto *menu = new QMenu(more);
-    auto revision_label = revision.isEmpty()
-                              ? tr("No current revision")
-                              : tr("Current revision: r%1")
-                                    .arg(revision
-                                             .value(QStringLiteral("number"))
-                                             .toInt());
-    const auto revision_state =
-        revision.value(QStringLiteral("state")).toString();
-    if (!revision_state.isEmpty())
-      revision_label += QStringLiteral("  •  ") + revision_state;
-    auto *revision_action = menu->addAction(revision_label);
-    revision_action->setEnabled(false);
-    menu->addSeparator();
-    auto *open_action = menu->addAction(tr("Open read-only"));
-    bool can_start_editing = false;
-    for (int i = 0; i < assignment_list->topLevelItemCount(); ++i) {
-      const auto *assignment = assignment_list->topLevelItem(i);
-      if (assignment->data(0, project_id_role).toString() == project_id &&
-          assignmentCanStart(assignment)) {
-        can_start_editing = true;
-        break;
-      }
-    }
-    auto *access_action = menu->addAction(
-        can_start_editing ? tr("Start editing…")
-                          : tr("Request editing access…"));
-    more->setMenu(menu);
-    connect(menu, &QMenu::aboutToShow, this, [this, item] {
-      project_list->setCurrentItem(item);
-      updateActions();
-    });
-    connect(open_action, &QAction::triggered, this,
-            [this, item] {
-              project_list->setCurrentItem(item);
-              openSelectedProject();
-            });
-    connect(access_action, &QAction::triggered, this,
-            [this, item] {
-              project_list->setCurrentItem(item);
-              requestSelectedProjectAccess();
-            });
-    project_list->setItemWidget(item, 4, more);
-#else
     auto add_project = [&](QTreeWidgetItem *parent) {
       auto *item = new QTreeWidgetItem({
           object.value(QStringLiteral("title")).toString(),
@@ -2051,18 +2056,6 @@ void MapHubDialog::populate(const QJsonObject &response) {
       item->setData(0, item_kind_role, QStringLiteral("project"));
       item->setData(0, title_role,
                     object.value(QStringLiteral("title")).toString());
-#if defined(MAPPER_MOBILE)
-      QStringList details;
-      details.append(object.value(QStringLiteral("kind")).toString());
-      details.append(object.value(QStringLiteral("status")).toString());
-      if (!revision.isEmpty())
-        details.append(
-            tr("r%1").arg(revision.value(QStringLiteral("number")).toInt()));
-      details.removeAll(QString{});
-      item->setText(0, object.value(QStringLiteral("title")).toString() +
-                           QLatin1Char('\n') +
-                           details.join(QStringLiteral("  •  ")));
-#endif
       parent->addChild(item);
     };
     auto project_venues = object.value(QStringLiteral("venues")).toArray();
@@ -2082,11 +2075,7 @@ void MapHubDialog::populate(const QJsonObject &response) {
           add_project(parent);
       }
     }
-#endif
   }
-#if defined(MAPPER_MOBILE)
-  project_list->header()->resizeSection(4, 52);
-#else
   project_list->resizeColumnToContents(0);
   project_list->resizeColumnToContents(1);
 #endif
@@ -2225,7 +2214,12 @@ void MapHubDialog::updateActions() {
             ? tr("This assignment is no longer open for editing.")
             : tr("Open or resume the assignment's managed workspace."));
   }
+#if defined(MAPPER_MOBILE)
+  open_project_button->setVisible(false);
+  request_access_button->setVisible(false);
+#else
   open_project_button->setVisible(showing_projects);
+#endif
   auto *project = project_list->currentItem();
   const auto project_selected =
       project &&
@@ -2245,7 +2239,9 @@ void MapHubDialog::updateActions() {
   open_project_button->setText(tr("Open selected map read-only"));
   open_project_button->setEnabled(showing_projects && !busy &&
                                   project_selected);
+#if !defined(MAPPER_MOBILE)
   request_access_button->setVisible(showing_projects);
+#endif
   request_access_button->setEnabled(showing_projects && !busy &&
                                     project_selected);
   request_access_button->setText(project_is_editable
@@ -2310,10 +2306,17 @@ void MapHubDialog::openSelectedProject() {
   if (!item || busy ||
       item->data(0, item_kind_role).toString() != QLatin1String("project"))
     return;
-  auto project_id = item->data(0, id_role).toString();
+  const auto project_id = item->data(0, id_role).toString();
   auto title = item->data(0, title_role).toString();
   if (title.isEmpty())
     title = item->text(0);
+  openProject(project_id, title);
+}
+
+void MapHubDialog::openProject(const QString &project_id,
+                               const QString &title) {
+  if (busy || project_id.isEmpty())
+    return;
   setBusy(true, tr("Preparing the current revision of %1…").arg(title));
   client->openProject(project_id, [this, project_id,
                                    title](const QJsonObject &response,
@@ -2483,6 +2486,13 @@ void MapHubDialog::requestSelectedProjectAccess() {
   auto title = item->data(0, title_role).toString();
   if (title.isEmpty())
     title = item->text(0);
+  requestProjectAccess(project_id, title);
+}
+
+void MapHubDialog::requestProjectAccess(const QString &project_id,
+                                        const QString &title) {
+  if (busy || project_id.isEmpty())
+    return;
   setBusy(true, tr("Checking editing access for %1…").arg(title));
   client->openProject(project_id, [this, project_id,
                                    title](const QJsonObject &response,

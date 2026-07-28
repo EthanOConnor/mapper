@@ -675,7 +675,8 @@ void MapEditorController::showPopupWidget(QWidget* child_widget, const QString& 
 		switch (location)
 		{
 		case PopupLocationTop:
-			if (top_action_bar && top_action_bar->isVisible())
+			if (top_action_bar && top_action_bar->isVisible()
+			    && top_action_bar->parentWidget() == map_widget)
 				y += top_action_bar->height();
 			break;
 		case PopupLocationBottom:
@@ -1989,21 +1990,18 @@ void MapEditorController::createMobileGUI()
 	
 	bottom_action_bar->setToUseOverflowActionFrom(top_action_bar);
 	
-	top_action_bar->setParent(map_widget);
-	top_action_bar->setGeometry(
-	    0, 0, map_widget->width(), top_action_bar->sizeHint().height());
-	top_action_bar->show();
-	top_action_bar->raise();
-	show_top_bar_button->hide();
-	
 	auto* container_widget = new QWidget();
 	auto* layout = new QVBoxLayout();
 	layout->setContentsMargins(0, 0, 0, 0);
 	layout->setSpacing(0);
+	layout->addWidget(top_action_bar);
 	layout->addWidget(map_widget, 1);
 	layout->addWidget(bottom_action_bar);
 	container_widget->setLayout(layout);
 	window->setCentralWidget(container_widget);
+	top_action_bar->show();
+	top_action_bar->raise();
+	show_top_bar_button->hide();
 }
 
 void MapEditorController::detach()
@@ -4218,7 +4216,8 @@ void MapEditorController::enableCompassDisplay(bool enable)
 	else if (enable)
 	{
 		auto size = compass_display->sizeHint();
-		if (top_action_bar->isVisible())
+		if (top_action_bar->isVisible()
+		    && top_action_bar->parentWidget() == map_widget)
 			compass_display->setGeometry(0, top_action_bar->size().height(), size.width(), size.height());
 		else
 			compass_display->setGeometry(show_top_bar_button->size().width(), 0, size.width(), size.height());
@@ -4238,6 +4237,7 @@ void MapEditorController::positionGnssStatusOverlay()
 		return;
 	auto size = gnss_status_overlay->sizeHint();
 	auto top = top_action_bar && top_action_bar->isVisible()
+	           && top_action_bar->parentWidget() == map_widget
 	         ? top_action_bar->height() : 0;
 	auto left = std::max(0, map_widget->width() - size.width());
 	gnss_status_overlay->setGeometry(
@@ -4298,7 +4298,10 @@ void MapEditorController::showTopActionBar()
 	top_action_bar->show();
 	top_action_bar->raise();
 	
-	compass_display->move(0, top_action_bar->size().height());
+	compass_display->move(
+	    0, top_action_bar->parentWidget() == map_widget
+	           ? top_action_bar->size().height()
+	           : 0);
 	positionGnssStatusOverlay();
 }
 
