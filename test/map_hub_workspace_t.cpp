@@ -7,8 +7,10 @@
 #include "map_hub_workspace_t.h"
 
 #include <limits>
+#include <utility>
 
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QEventLoop>
 #include <QFile>
@@ -27,6 +29,7 @@
 #include "collaboration/managed_map_workspace.h"
 #include "collaboration/map_hub_api_client.h"
 #include "collaboration/map_hub_imagery_catalog.h"
+#include "collaboration/map_hub_read_only_document.h"
 #include "collaboration/map_hub_sync_queue.h"
 #include "collaboration/map_hub_workspace.h"
 #include "collaboration/oom_json.h"
@@ -105,6 +108,7 @@ void MapHubWorkspaceTest::initTestCase() {
   QVERIFY(record_directory.isValid());
   qputenv("MAPPER_MANAGED_WORKSPACE_ROOT", record_directory.path().toUtf8());
   qputenv("MAPPER_MAP_HUB_SYNC_ROOT", record_directory.path().toUtf8());
+  qputenv("MAPPER_MAP_HUB_READ_ONLY_ROOT", record_directory.path().toUtf8());
 }
 
 void MapHubWorkspaceTest::recordRoundTripsWithoutSecrets() {
@@ -165,6 +169,69 @@ void MapHubWorkspaceTest::recordIsBoundToCanonicalMapPath() {
   }
   QVERIFY(ManagedMapWorkspace::recordPathForMap(first) !=
           ManagedMapWorkspace::recordPathForMap(second));
+}
+
+void MapHubWorkspaceTest::
+    readOnlyDocumentRoundTripsAndRejectsPathSubstitution() {
+  QTemporaryDir directory;
+  QVERIFY(directory.isValid());
+  const auto map_path =
+      directory.filePath(QStringLiteral("Luther Burbank-r7.omap"));
+  const auto other_path = directory.filePath(QStringLiteral("other.omap"));
+  for (const auto &path : {map_path, other_path}) {
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    QCOMPARE(file.write("omap"), qint64(4));
+  }
+
+  MapHubReadOnlyDocument original;
+  original.local_map_path = map_path;
+  original.server_url = QStringLiteral("https://maps.example.test");
+  original.organization_id =
+      QStringLiteral("10000000-0000-4000-8000-000000000001");
+  original.organization_name = QStringLiteral("Cascade Orienteering");
+  original.project_id = QStringLiteral("20000000-0000-4000-8000-000000000001");
+  original.project_title = QStringLiteral("Luther Burbank Park");
+  original.revision_id = QStringLiteral("30000000-0000-4000-8000-000000000007");
+  original.revision_number = 7;
+  original.revision_sha256 = QString(64, QLatin1Char('a'));
+  original.revision_size_bytes = 4;
+  original.artifact_kind = QStringLiteral("omap");
+  original.artifact_name = QStringLiteral("luther-burbank.omap");
+  original.manifest_url =
+      QStringLiteral("https://maps.example.test/api/v1/projects/"
+                     "20000000-0000-4000-8000-000000000001/manifest");
+  original.access_request_id =
+      QStringLiteral("40000000-0000-4000-8000-000000000001");
+  original.access_request_status = QStringLiteral("pending");
+  original.last_checked_at = QDateTime::currentDateTimeUtc();
+
+  QString error;
+  QVERIFY2(MapHubReadOnlyDocument::save(original, &error), qPrintable(error));
+  const auto loaded = MapHubReadOnlyDocument::loadForMap(map_path, &error);
+  QVERIFY2(loaded.isValid(), qPrintable(error));
+  QCOMPARE(loaded.project_id, original.project_id);
+  QCOMPARE(loaded.revision_id, original.revision_id);
+  QCOMPARE(loaded.access_request_status, QStringLiteral("pending"));
+  QCOMPARE(loaded.revision_size_bytes, qint64(4));
+
+  QFile record(MapHubReadOnlyDocument::recordPathForMap(map_path));
+  QVERIFY(record.open(QIODevice::ReadOnly));
+  const auto bytes = record.readAll();
+  QVERIFY(!bytes.contains("Bearer"));
+  QVERIFY(!bytes.contains("lease"));
+#ifdef Q_OS_UNIX
+  QVERIFY(record.permissions().testFlag(QFileDevice::ReadOwner));
+  QVERIFY(!record.permissions().testFlag(QFileDevice::ReadGroup));
+  QVERIFY(!record.permissions().testFlag(QFileDevice::ReadOther));
+#endif
+
+  QVERIFY(!MapHubReadOnlyDocument::loadForMap(other_path).isValid());
+  QVERIFY(MapHubReadOnlyDocument::recordPathForMap(map_path) !=
+          MapHubReadOnlyDocument::recordPathForMap(other_path));
+  QVERIFY(MapHubReadOnlyDocument::removeForMap(map_path, &error));
+  QVERIFY(
+      !QFileInfo::exists(MapHubReadOnlyDocument::recordPathForMap(map_path)));
 }
 
 void MapHubWorkspaceTest::validatesServerTransport() {
@@ -231,6 +298,219 @@ void MapHubWorkspaceTest::hashesArtifactsExactly() {
       QStringLiteral(
           "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"));
   QVERIFY(error.isEmpty());
+}
+
+void MapHubWorkspaceTest::editAccessUsesNativeIdempotentEndpoints() {
+  QTcpServer server;
+  if (!server.listen(QHostAddress::LocalHost))
+    QSKIP("The test sandbox does not permit a loopback listener");
+
+  const auto project_id =
+      QStringLiteral("20000000-0000-4000-8000-000000000001");
+  const auto request_id =
+      QStringLiteral("40000000-0000-4000-8000-000000000001");
+  QList<QByteArray> requests;
+  connect(&server, &QTcpServer::newConnection, this, [&] {
+    auto *socket = server.nextPendingConnection();
+    connect(
+        socket, &QTcpSocket::readyRead, this,
+        [&, socket, bytes = QByteArray{}, responded = false]() mutable {
+          if (responded)
+            return;
+          bytes.append(socket->readAll());
+          const auto header_end = bytes.indexOf("\r\n\r\n");
+          if (header_end < 0)
+            return;
+          const QRegularExpression length_pattern(
+              QStringLiteral("(?im)^Content-Length:\\s*(\\d+)\\s*$"));
+          const auto match =
+              length_pattern.match(QString::fromLatin1(bytes.left(header_end)));
+          const auto content_length =
+              match.hasMatch() ? match.captured(1).toLongLong() : 0;
+          if (bytes.size() < header_end + 4 + content_length)
+            return;
+          responded = true;
+          requests.push_back(bytes);
+          const auto request_number = requests.size();
+          if (request_number == 2) {
+            socket->write("HTTP/1.1 304 Not Modified\r\n"
+                          "ETag: \"request-v1\"\r\n"
+                          "Content-Length: 0\r\n"
+                          "Connection: close\r\n\r\n");
+          } else {
+            const auto status = request_number == 1 ? QByteArray("pending")
+                                                    : QByteArray("cancelled");
+            const auto response_body =
+                QByteArray("{\"schema_version\":1,\"request\":{\"id\":\"") +
+                request_id.toUtf8() + QByteArray("\",\"project_id\":\"") +
+                project_id.toUtf8() +
+                QByteArray("\",\"requested_revision_id\":null,\"status\":\"") +
+                status +
+                QByteArray("\",\"message\":\"Field work tomorrow\","
+                           "\"created_at\":\"2026-07-28T12:00:00Z\","
+                           "\"updated_at\":\"2026-07-28T12:00:00Z\","
+                           "\"expires_at\":\"2026-08-04T12:00:00Z\","
+                           "\"resolved_at\":null,\"already_authorized\":false,"
+                           "\"assignment\":null,\"poll_url\":\"https://maps."
+                           "example.test/poll\",\"cancel_url\":\"https://maps."
+                           "example.test/cancel\"}}");
+            socket->write(
+                QByteArray("HTTP/1.1 200 OK\r\nContent-Type: "
+                           "application/json\r\nETag: \"request-v1\"\r\n"
+                           "Content-Length: ") +
+                QByteArray::number(response_body.size()) +
+                QByteArray("\r\nConnection: close\r\n\r\n") + response_body);
+          }
+          socket->disconnectFromHost();
+        });
+  });
+
+  MapHubApiClient client(
+      QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort()),
+      QStringLiteral("test-token"));
+  QEventLoop loop;
+  MapHubApiClient::Error callback_error;
+  bool saw_not_modified = false;
+  bool completed = false;
+  client.createEditAccessRequest(
+      project_id, QStringLiteral("Field work tomorrow"),
+      QStringLiteral("edit-access-fixture"),
+      [&](const QJsonObject &created,
+          const MapHubApiClient::Error &create_error) {
+        if (create_error) {
+          callback_error = create_error;
+          loop.quit();
+          return;
+        }
+        QCOMPARE(created.value(QStringLiteral("request"))
+                     .toObject()
+                     .value(QStringLiteral("status"))
+                     .toString(),
+                 QStringLiteral("pending"));
+        client.editAccessRequest(
+            request_id, QStringLiteral("\"request-v1\""),
+            [&](const QJsonObject &, const QString &, bool not_modified,
+                const MapHubApiClient::Error &poll_error) {
+              if (poll_error) {
+                callback_error = poll_error;
+                loop.quit();
+                return;
+              }
+              saw_not_modified = not_modified;
+              client.cancelEditAccessRequest(
+                  request_id, [&](const QJsonObject &cancelled,
+                                  const MapHubApiClient::Error &cancel_error) {
+                    callback_error = cancel_error;
+                    completed = true;
+                    QCOMPARE(cancelled.value(QStringLiteral("request"))
+                                 .toObject()
+                                 .value(QStringLiteral("status"))
+                                 .toString(),
+                             QStringLiteral("cancelled"));
+                    loop.quit();
+                  });
+            });
+      });
+  QTimer::singleShot(5000, &loop, &QEventLoop::quit);
+  loop.exec();
+
+  QVERIFY2(completed, "Edit-access request sequence timed out");
+  QVERIFY2(!callback_error, qPrintable(callback_error.message));
+  QVERIFY(saw_not_modified);
+  QCOMPARE(requests.size(), 3);
+  const QByteArray create_line = QByteArray("POST /api/v1/projects/") +
+                                 project_id.toUtf8() +
+                                 QByteArray("/edit-access-requests HTTP/1.1");
+  const QByteArray poll_line = QByteArray("GET /api/v1/edit-access-requests/") +
+                               request_id.toUtf8() + QByteArray(" HTTP/1.1");
+  const QByteArray cancel_line =
+      QByteArray("POST /api/v1/edit-access-requests/") + request_id.toUtf8() +
+      QByteArray("/cancel HTTP/1.1");
+  QVERIFY(requests[0].contains(create_line));
+  QVERIFY(requests[0].contains("Idempotency-Key: edit-access-fixture"));
+  QVERIFY(requests[0].contains("{\"message\":\"Field work tomorrow\"}"));
+  QVERIFY(requests[1].contains(poll_line));
+  QVERIFY(requests[1].toLower().contains(
+      QByteArray("if-none-match: \"request-v1\"")));
+  QVERIFY(requests[2].contains(cancel_line));
+}
+
+void MapHubWorkspaceTest::verifiedDownloadRequiresBoundRevisionHeaders() {
+  QTcpServer server;
+  if (!server.listen(QHostAddress::LocalHost))
+    QSKIP("The test sandbox does not permit a loopback listener");
+
+  const QByteArray artifact("omap");
+  const auto artifact_sha = QString::fromLatin1(
+      QCryptographicHash::hash(artifact, QCryptographicHash::Sha256).toHex());
+  QList<QByteArray> requests;
+  connect(&server, &QTcpServer::newConnection, this, [&] {
+    auto *socket = server.nextPendingConnection();
+    connect(socket, &QTcpSocket::readyRead, this,
+            [&, socket, bytes = QByteArray{}, responded = false]() mutable {
+              if (responded)
+                return;
+              bytes.append(socket->readAll());
+              if (!bytes.contains("\r\n\r\n"))
+                return;
+              responded = true;
+              requests.push_back(bytes);
+              const auto header_size =
+                  requests.size() == 1 ? QByteArray("4") : QByteArray("5");
+              socket->write(
+                  QByteArray("HTTP/1.1 200 OK\r\nContent-Type: "
+                             "application/octet-stream\r\nContent-Length: 4\r\n"
+                             "X-Artifact-SHA256: ") +
+                  artifact_sha.toUtf8() + QByteArray("\r\nX-Artifact-Size: ") +
+                  header_size + QByteArray("\r\nConnection: close\r\n\r\n") +
+                  artifact);
+              socket->disconnectFromHost();
+            });
+  });
+
+  QTemporaryDir directory;
+  QVERIFY(directory.isValid());
+  const auto first_path = directory.filePath(QStringLiteral("verified.omap"));
+  const auto second_path = directory.filePath(QStringLiteral("rejected.omap"));
+  MapHubApiClient client(
+      QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort()),
+      QStringLiteral("test-token"));
+  QEventLoop loop;
+  MapHubApiClient::Error first_error;
+  MapHubApiClient::Error second_error;
+  bool completed = false;
+  auto url = QUrl(
+      QStringLiteral("http://127.0.0.1:%1/artifact").arg(server.serverPort()));
+  client.downloadArtifact(
+      url, artifact_sha, artifact.size(), first_path,
+      [&](const QString &path, const MapHubApiClient::Error &error) {
+        first_error = error;
+        if (error) {
+          loop.quit();
+          return;
+        }
+        QCOMPARE(path, first_path);
+        client.downloadArtifact(
+            url, artifact_sha, artifact.size(), second_path,
+            [&](const QString &, const MapHubApiClient::Error &error) {
+              second_error = error;
+              completed = true;
+              loop.quit();
+            });
+      });
+  QTimer::singleShot(5000, &loop, &QEventLoop::quit);
+  loop.exec();
+
+  QVERIFY2(completed, "Artifact verification sequence timed out");
+  QVERIFY2(!first_error, qPrintable(first_error.message));
+  QCOMPARE(second_error.code, QStringLiteral("artifact_metadata_mismatch"));
+  QFile verified(first_path);
+  QVERIFY(verified.open(QIODevice::ReadOnly));
+  QCOMPARE(verified.readAll(), artifact);
+  QVERIFY(!QFileInfo::exists(second_path));
+  QCOMPARE(requests.size(), 2);
+  for (const auto &request : std::as_const(requests))
+    QVERIFY(request.toLower().contains("accept-encoding: identity"));
 }
 
 void MapHubWorkspaceTest::checkpointCarriesStreamProjectionDigest() {

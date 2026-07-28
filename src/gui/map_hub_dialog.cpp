@@ -6,7 +6,10 @@
 
 #include "map_hub_dialog.h"
 
+#include <algorithm>
+#include <functional>
 #include <limits>
+#include <utility>
 
 #include <QAbstractItemView>
 #include <QCheckBox>
@@ -35,16 +38,20 @@
 #include <QRegularExpression>
 #include <QScrollArea>
 #include <QScroller>
+#include <QSet>
 #include <QSettings>
 #include <QSize>
 #include <QSizePolicy>
 #include <QSpinBox>
 #include <QStackedWidget>
+#include <QStandardPaths>
 #include <QTabBar>
 #include <QTabWidget>
+#include <QTextEdit>
 #include <QTimer>
 #include <QToolButton>
 #include <QTreeWidget>
+#include <QTreeWidgetItemIterator>
 #include <QUuid>
 #include <QVBoxLayout>
 
@@ -53,8 +60,10 @@
 #include "collaboration/map_hub_credentials.h"
 #include "collaboration/map_hub_imagery_catalog.h"
 #include "collaboration/map_hub_operation_store.h"
+#include "collaboration/map_hub_read_only_document.h"
 #include "collaboration/map_hub_workspace.h"
 #include "core/document_path.h"
+#include "fileformats/file_format_registry.h"
 #include "gui/action_icon.h"
 #include "gui/main_window.h"
 #include "imagery/tile_network_manager.h"
@@ -117,6 +126,48 @@ QString artifactExtension(const QJsonObject &revision) {
   return suffix == QLatin1String("ocd") ? suffix : QStringLiteral("omap");
 }
 
+QString readOnlyArtifactExtension(const QJsonObject &revision) {
+  auto original_name =
+      revision.value(QStringLiteral("original_name")).toString();
+  auto suffix = QFileInfo(original_name).suffix().toLower();
+  if (suffix.isEmpty()) {
+    const auto kind =
+        revision.value(QStringLiteral("artifact_kind")).toString().toLower();
+    suffix = kind == QLatin1String("ocad") ? QStringLiteral("ocd") : kind;
+  }
+  if (suffix.isEmpty() || suffix.size() > 12 ||
+      !QRegularExpression(QStringLiteral("^[a-z0-9]+$"))
+           .match(suffix)
+           .hasMatch())
+    return {};
+  const auto candidate = QStringLiteral("map.%1").arg(suffix);
+  return FileFormats.findFormatForFilename(candidate,
+                                           &FileFormat::supportsFileOpen)
+             ? suffix
+             : QString{};
+}
+
+QString readOnlyDestination(const QString &server, const QString &project_title,
+                            const QString &project_id,
+                            const QString &revision_id, int revision_number,
+                            const QString &extension) {
+  const auto server_key = QString::fromLatin1(
+      QCryptographicHash::hash(server.toUtf8(), QCryptographicHash::Sha256)
+          .toHex()
+          .left(16));
+  auto directory =
+      QDir(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation))
+          .filePath(QStringLiteral("map-hub-library/%1/%2/%3")
+                        .arg(server_key, shortStableId(project_id),
+                             shortStableId(revision_id)));
+  if (!QDir().mkpath(directory))
+    return {};
+  return QDir(directory).filePath(QStringLiteral("%1-r%2.%3")
+                                      .arg(safeFileName(project_title))
+                                      .arg(revision_number)
+                                      .arg(extension));
+}
+
 QString projectManifestUrl(const QString &server, const QString &project_id) {
   auto url = QUrl::fromUserInput(server).adjusted(QUrl::StripTrailingSlash);
   url.setPath(QStringLiteral("/api/v1/projects/%1/manifest").arg(project_id));
@@ -132,6 +183,322 @@ QString eventWebUrl(const QString &server, const QString &event_id) {
   url.setFragment(QString{});
   return url.toString(QUrl::FullyEncoded);
 }
+
+class EditAccessDialog final : public QDialog {
+public:
+  using RequestChanged = std::function<void(const QJsonObject &)>;
+  using StartEditing = std::function<void(const QString &)>;
+
+  EditAccessDialog(MapHubApiClient *client, QString project_id,
+                   const QString &project_title,
+                   const QJsonObject &active_request,
+                   const QJsonObject &existing_assignment,
+                   RequestChanged request_changed, StartEditing start_editing,
+                   QWidget *parent)
+      : QDialog(parent), client(client), project_id(std::move(project_id)),
+        request_changed(std::move(request_changed)),
+        start_editing(std::move(start_editing)), status(new QLabel(this)),
+        message(new QTextEdit(this)),
+        request_button(new QPushButton(tr("Request editing access"), this)),
+        cancel_request_button(new QPushButton(tr("Cancel request"), this)),
+        start_button(new QPushButton(tr("Start editing"), this)),
+        close_button(new QPushButton(tr("Close"), this)),
+        poll_timer(new QTimer(this)) {
+    setWindowTitle(tr("Editing access — %1").arg(project_title));
+#if defined(MAPPER_MOBILE)
+    if (parent) {
+      setAttribute(Qt::WA_WindowPropagation);
+      setPalette(parent->palette());
+      resize(parent->size());
+    }
+    auto mobile_font = font();
+    mobile_font.setPointSizeF(16.0);
+    setFont(mobile_font);
+    setStyleSheet(QStringLiteral(
+        "QDialog { background: palette(window); }"
+        "QTextEdit { background: palette(base); border: 1px solid "
+        "palette(midlight); border-radius: 10px; padding: 8px; }"
+        "QPushButton#editAccessPrimary { background: palette(highlight); "
+        "color: palette(highlighted-text); border: 0; border-radius: 12px; "
+        "padding: 10px 14px; }"
+        "QPushButton#editAccessQuiet { background: transparent; border: 0; "
+        "color: palette(link); padding: 9px; }"));
+#else
+    resize(560, 410);
+#endif
+
+    auto *title = new QLabel(tr("Request editing access"), this);
+    auto title_font = title->font();
+    title_font.setPointSizeF(title_font.pointSizeF() * 1.5);
+    title_font.setBold(true);
+    title->setFont(title_font);
+    auto *intro = new QLabel(
+        tr("You can keep using the current approved revision read-only. "
+           "Request access when you need to publish map edits."),
+        this);
+    intro->setWordWrap(true);
+    status->setWordWrap(true);
+    message->setPlaceholderText(
+        tr("Optional note for the editor or map coordinator"));
+    message->setAcceptRichText(false);
+    message->setMaximumHeight(120);
+    auto *message_label = new QLabel(tr("Message (optional)"), this);
+
+    request_button->setObjectName(QStringLiteral("editAccessPrimary"));
+    start_button->setObjectName(QStringLiteral("editAccessPrimary"));
+    cancel_request_button->setObjectName(QStringLiteral("editAccessQuiet"));
+    close_button->setObjectName(QStringLiteral("editAccessQuiet"));
+    auto *buttons = new QHBoxLayout;
+    buttons->addWidget(cancel_request_button);
+    buttons->addStretch();
+    buttons->addWidget(close_button);
+    buttons->addWidget(request_button);
+    buttons->addWidget(start_button);
+    auto *layout = new QVBoxLayout(this);
+    layout->setContentsMargins(20, 18, 20, 18);
+    layout->setSpacing(12);
+    layout->addWidget(title);
+    layout->addWidget(intro);
+    layout->addWidget(status);
+    layout->addWidget(message_label);
+    layout->addWidget(message);
+    layout->addStretch();
+    layout->addLayout(buttons);
+
+    poll_timer->setSingleShot(true);
+    connect(poll_timer, &QTimer::timeout, this, [this] { pollRequest(); });
+    connect(request_button, &QPushButton::clicked, this,
+            [this] { createRequest(); });
+    connect(cancel_request_button, &QPushButton::clicked, this,
+            [this] { cancelRequest(); });
+    connect(start_button, &QPushButton::clicked, this, [this] {
+      if (!assignment_id.isEmpty()) {
+        this->start_editing(assignment_id);
+        accept();
+      }
+    });
+    connect(close_button, &QPushButton::clicked, this, &QDialog::reject);
+
+    start_button->hide();
+    cancel_request_button->hide();
+    if (!active_request.isEmpty())
+      applyRequest(active_request);
+    else if (!existing_assignment.isEmpty())
+      applyExistingAssignment(existing_assignment);
+    else
+      showReady();
+  }
+
+private:
+  void setBusy(bool value) {
+    busy = value;
+    request_button->setEnabled(!value);
+    cancel_request_button->setEnabled(!value);
+    start_button->setEnabled(!value);
+    message->setEnabled(!value && request_id.isEmpty());
+  }
+
+  void showReady() {
+    request_id.clear();
+    request_status.clear();
+    assignment_id.clear();
+    status->setText(
+        tr("Map Hub will route this to the current editor when the map is "
+           "checked out, notify the person who assigned that checkout, and "
+           "keep project coordinators available for recovery."));
+    message->setEnabled(true);
+    request_button->setText(tr("Request editing access"));
+    request_button->show();
+    cancel_request_button->hide();
+    start_button->hide();
+  }
+
+  void applyExistingAssignment(const QJsonObject &assignment) {
+    const auto candidate_id = assignment.value(QStringLiteral("id")).toString();
+    const auto candidate_status =
+        assignment.value(QStringLiteral("status")).toString();
+    if (QUuid(candidate_id).isNull() ||
+        (candidate_status != QLatin1String("offered") &&
+         candidate_status != QLatin1String("accepted") &&
+         candidate_status != QLatin1String("active"))) {
+      showReady();
+      return;
+    }
+    assignment_id = candidate_id;
+    status->setText(
+        tr("You already have an editable assignment for this map. Starting it "
+           "will acquire a current editing lease and synchronize the map."));
+    message->setEnabled(false);
+    request_button->hide();
+    cancel_request_button->hide();
+    start_button->show();
+  }
+
+  void applyRequest(const QJsonObject &envelope) {
+    auto request = envelope.value(QStringLiteral("request")).toObject();
+    if (request.isEmpty())
+      request = envelope;
+    const auto candidate_id = request.value(QStringLiteral("id")).toString();
+    const auto candidate_project =
+        request.value(QStringLiteral("project_id")).toString();
+    const auto candidate_status =
+        request.value(QStringLiteral("status")).toString();
+    static const QSet<QString> statuses = {
+        QStringLiteral("pending"), QStringLiteral("approved"),
+        QStringLiteral("declined"), QStringLiteral("cancelled"),
+        QStringLiteral("expired")};
+    if (QUuid(candidate_id).isNull() || candidate_project != project_id ||
+        !statuses.contains(candidate_status)) {
+      setBusy(false);
+      status->setText(
+          tr("Map Hub returned an invalid edit-access response. No local "
+             "authority was changed."));
+      return;
+    }
+
+    request_id = candidate_id;
+    request_status = candidate_status;
+    assignment_id = request.value(QStringLiteral("assignment"))
+                        .toObject()
+                        .value(QStringLiteral("id"))
+                        .toString();
+    if (request_changed)
+      request_changed(request);
+    setBusy(false);
+    message->setEnabled(false);
+    request_button->hide();
+    cancel_request_button->hide();
+    start_button->hide();
+
+    const auto resolution =
+        request.value(QStringLiteral("resolution_message")).toString();
+    if (request_status == QLatin1String("pending")) {
+      status->setText(
+          tr("Request pending. The current editor and the person who assigned "
+             "their checkout have been notified; Map Hub will also route it "
+             "to project coordinators when needed."));
+      cancel_request_button->show();
+      schedulePoll();
+    } else if (request_status == QLatin1String("approved") &&
+               !QUuid(assignment_id).isNull()) {
+      status->setText(
+          tr("Editing access approved. Start editing to acquire a current "
+             "lease and synchronize the connected workspace."));
+      start_button->show();
+      poll_timer->stop();
+    } else {
+      poll_timer->stop();
+      status->setText(
+          resolution.isEmpty()
+              ? tr("This request is %1. You can submit a new request if "
+                   "editing is still needed.")
+                    .arg(request_status)
+              : resolution);
+      request_id.clear();
+      idempotency_key.clear();
+      request_button->setText(tr("Request editing access again"));
+      request_button->show();
+      message->setEnabled(true);
+    }
+  }
+
+  void createRequest() {
+    if (!client || busy)
+      return;
+    const auto note = message->toPlainText().trimmed();
+    if (note.size() > 500 || note.toUtf8().size() > 2000) {
+      status->setText(
+          tr("Please shorten the message to 500 characters or fewer."));
+      return;
+    }
+    if (idempotency_key.isEmpty())
+      idempotency_key =
+          QStringLiteral("mapper-edit-access-%1")
+              .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    setBusy(true);
+    status->setText(tr("Sending the edit-access request…"));
+    client->createEditAccessRequest(
+        project_id, note, idempotency_key,
+        [this](const QJsonObject &response,
+               const MapHubApiClient::Error &error) {
+          if (error) {
+            setBusy(false);
+            status->setText(error.message);
+            return;
+          }
+          applyRequest(response);
+        });
+  }
+
+  void cancelRequest() {
+    if (!client || busy || QUuid(request_id).isNull())
+      return;
+    setBusy(true);
+    status->setText(tr("Cancelling the request…"));
+    client->cancelEditAccessRequest(
+        request_id, [this](const QJsonObject &response,
+                           const MapHubApiClient::Error &error) {
+          if (error) {
+            setBusy(false);
+            status->setText(error.message);
+            return;
+          }
+          applyRequest(response);
+        });
+  }
+
+  void schedulePoll() {
+    if (request_status != QLatin1String("pending"))
+      return;
+    poll_timer->start(poll_delay_ms);
+    poll_delay_ms = std::min(poll_delay_ms * 2, 30000);
+  }
+
+  void pollRequest() {
+    if (!client || busy || request_status != QLatin1String("pending") ||
+        QUuid(request_id).isNull())
+      return;
+    client->editAccessRequest(
+        request_id, etag,
+        [this](const QJsonObject &response, const QString &response_etag,
+               bool not_modified, const MapHubApiClient::Error &error) {
+          if (!response_etag.isEmpty())
+            etag = response_etag;
+          if (error) {
+            status->setText(
+                tr("Request pending. Mapper is offline or could not refresh "
+                   "its status; it will try again automatically."));
+            schedulePoll();
+            return;
+          }
+          if (!not_modified) {
+            poll_delay_ms = 2000;
+            applyRequest(response);
+          } else {
+            schedulePoll();
+          }
+        });
+  }
+
+  QPointer<MapHubApiClient> client;
+  QString project_id;
+  RequestChanged request_changed;
+  StartEditing start_editing;
+  QLabel *status;
+  QTextEdit *message;
+  QPushButton *request_button;
+  QPushButton *cancel_request_button;
+  QPushButton *start_button;
+  QPushButton *close_button;
+  QTimer *poll_timer;
+  QString request_id;
+  QString request_status;
+  QString assignment_id;
+  QString idempotency_key;
+  QString etag;
+  int poll_delay_ms = 2000;
+  bool busy = false;
+};
 
 class ConnectedMapDialog final : public QDialog {
 public:
@@ -509,8 +876,9 @@ MapHubDialog::MapHubDialog(MainWindow *window)
       tabs(new QTabWidget(this)), assignment_list(new QTreeWidget(this)),
       project_list(new QTreeWidget(this)), event_list(new QTreeWidget(this)),
       start_button(new QPushButton(tr("Start selected assignment"), this)),
-      open_project_button(
-          new QPushButton(tr("Current revision details…"), this)),
+      open_project_button(new QPushButton(tr("Open selected map"), this)),
+      request_access_button(
+          new QPushButton(tr("Request editing access…"), this)),
       open_event_button(new QPushButton(tr("Open event in Map Hub…"), this)),
       new_button(new QPushButton(tr("New connected map…"), this)),
       refresh_button(new QPushButton(tr("Refresh"), this)) {
@@ -950,10 +1318,11 @@ MapHubDialog::MapHubDialog(MainWindow *window)
 #if defined(MAPPER_MOBILE)
   start_button->setText(tr("Open selected assignment"));
   open_project_button->setText(tr("View selected revision"));
+  request_access_button->setText(tr("Request editing access"));
   open_event_button->setText(tr("Open selected event"));
   new_button->setText(tr("Create connected map"));
-  for (auto *button :
-       {start_button, open_project_button, open_event_button, new_button}) {
+  for (auto *button : {start_button, open_project_button, request_access_button,
+                       open_event_button, new_button}) {
     button->setMinimumHeight(44);
     button->setObjectName(QStringLiteral("mapHubLibraryPrimary"));
   }
@@ -961,6 +1330,7 @@ MapHubDialog::MapHubDialog(MainWindow *window)
 #endif
   buttons->addWidget(start_button);
   buttons->addWidget(open_project_button);
+  buttons->addWidget(request_access_button);
   buttons->addWidget(open_event_button);
   buttons->addWidget(new_button);
 #if defined(MAPPER_MOBILE)
@@ -1011,6 +1381,8 @@ MapHubDialog::MapHubDialog(MainWindow *window)
           &MapHubDialog::startSelectedAssignment);
   connect(open_project_button, &QPushButton::clicked, this,
           &MapHubDialog::openSelectedProject);
+  connect(request_access_button, &QPushButton::clicked, this,
+          &MapHubDialog::requestSelectedProjectAccess);
   connect(open_event_button, &QPushButton::clicked, this,
           &MapHubDialog::openSelectedEvent);
   connect(new_button, &QPushButton::clicked, this,
@@ -1636,6 +2008,29 @@ void MapHubDialog::populate(const QJsonObject &response) {
     undated_events->setExpanded(true);
   event_list->resizeColumnToContents(0);
   event_list->resizeColumnToContents(1);
+
+  QString document_error;
+  const auto current_document =
+      window && !window->currentPath().isEmpty()
+          ? MapHubReadOnlyDocument::loadForMap(window->currentPath(),
+                                               &document_error)
+          : MapHubReadOnlyDocument{};
+  if (current_document.isValid()) {
+    QTreeWidgetItemIterator candidate(project_list);
+    while (*candidate) {
+      if ((*candidate)->data(0, item_kind_role).toString() ==
+              QLatin1String("project") &&
+          (*candidate)->data(0, id_role).toString() ==
+              current_document.project_id) {
+        project_list->setCurrentItem(*candidate);
+        if ((*candidate)->parent())
+          (*candidate)->parent()->setExpanded(true);
+        tabs->setCurrentWidget(project_list);
+        break;
+      }
+      ++candidate;
+    }
+  }
   updateActions();
 }
 
@@ -1685,11 +2080,28 @@ void MapHubDialog::updateActions() {
       }
     }
   }
-  open_project_button->setText(project_is_editable
-                                    ? tr("Open selected map for editing")
-                                    : tr("View selected revision"));
+  open_project_button->setText(tr("Open selected map read-only"));
   open_project_button->setEnabled(showing_projects && !busy &&
                                   project_selected);
+  request_access_button->setVisible(showing_projects);
+  request_access_button->setEnabled(showing_projects && !busy &&
+                                    project_selected);
+  request_access_button->setText(project_is_editable
+                                      ? tr("Start editing")
+                                      : tr("Request editing access"));
+  if (project_selected && window && !window->currentPath().isEmpty()) {
+    QString document_error;
+    const auto document = MapHubReadOnlyDocument::loadForMap(
+        window->currentPath(), &document_error);
+    if (document.isValid() &&
+        document.project_id == project->data(0, id_role).toString()) {
+      if (document.access_request_status == QLatin1String("pending"))
+        request_access_button->setText(tr("Check editing-access request"));
+      else if (document.access_request_status == QLatin1String("approved") &&
+               !document.approved_assignment_id.isEmpty())
+        request_access_button->setText(tr("Start approved editing"));
+    }
+  }
   open_event_button->setVisible(showing_events);
   open_event_button->setEnabled(
       showing_events && !busy && event_list->currentItem() &&
@@ -1737,60 +2149,218 @@ void MapHubDialog::openSelectedProject() {
       item->data(0, item_kind_role).toString() != QLatin1String("project"))
     return;
   auto project_id = item->data(0, id_role).toString();
-  // The Maps tab is the user's primary library. If this account has an open
-  // Mapper assignment for the selected map, enter the same managed-workspace
-  // flow directly instead of making the user rediscover it under My work.
-  for (int i = 0; i < assignment_list->topLevelItemCount(); ++i) {
-    auto *assignment = assignment_list->topLevelItem(i);
-    if (assignment->data(0, project_id_role).toString() == project_id &&
-        assignmentCanStart(assignment)) {
-      assignment_list->setCurrentItem(assignment);
-      startSelectedAssignment();
-      return;
-    }
-  }
   auto title = item->data(0, title_role).toString();
   if (title.isEmpty())
     title = item->text(0);
-  setBusy(true, tr("Loading current revision details for %1…").arg(title));
-  client->projectManifest(
-      project_id, [this, title](const QJsonObject &manifest,
-                                const MapHubApiClient::Error &error) {
-        if (error) {
-          setBusy(false);
-          showError(tr("Could not open library map"), error);
-          return;
-        }
-        const auto revision =
-            manifest.value(QStringLiteral("current_revision")).toObject();
-        setBusy(false);
-        if (revision.isEmpty()) {
-          QMessageBox::information(
-              this, tr("No approved revision"),
-              tr("“%1” does not yet have an approved current revision.")
-                  .arg(title));
-          return;
-        }
+  setBusy(true, tr("Preparing the current revision of %1…").arg(title));
+  client->openProject(project_id, [this, project_id,
+                                   title](const QJsonObject &response,
+                                          const MapHubApiClient::Error &error) {
+    if (error) {
+      setBusy(false);
+      showError(tr("Could not open library map"), error);
+      return;
+    }
+    const auto response_project =
+        response.value(QStringLiteral("project")).toObject();
+    const auto revision = response.value(QStringLiteral("revision")).toObject();
+    const auto revision_id = revision.value(QStringLiteral("id")).toString();
+    const auto revision_number =
+        revision.value(QStringLiteral("number")).toInt();
+    const auto revision_sha =
+        revision.value(QStringLiteral("sha256")).toString().toLower();
+    const auto revision_size =
+        revision.value(QStringLiteral("size_bytes")).toInteger(-1);
+    const auto download_url =
+        QUrl(revision.value(QStringLiteral("download_url")).toString());
+    const auto extension = readOnlyArtifactExtension(revision);
+    static const QRegularExpression sha256_pattern(
+        QStringLiteral("^[0-9a-f]{64}$"));
+    if (response.value(QStringLiteral("schema_version")).toInt() != 1 ||
+        response.value(QStringLiteral("mode")).toString() !=
+            QLatin1String("read_only") ||
+        response_project.value(QStringLiteral("id")).toString() != project_id ||
+        QUuid(revision_id).isNull() || revision_number < 1 ||
+        !sha256_pattern.match(revision_sha).hasMatch() || revision_size < 1 ||
+        download_url.isEmpty() || extension.isEmpty()) {
+      setBusy(false);
+      QMessageBox::warning(
+          this, tr("Invalid map response"),
+          tr("Map Hub did not return a complete, supported, verifiable "
+             "read-only revision. Nothing was opened."));
+      return;
+    }
 
-        const auto number = revision.value(QStringLiteral("number")).toInt();
-        const auto kind =
-            revision.value(QStringLiteral("artifact_kind")).toString();
-        const auto name =
-            revision.value(QStringLiteral("original_name")).toString();
-        const auto sha = revision.value(QStringLiteral("sha256")).toString();
-        QMessageBox::information(
-            this, tr("Current approved revision"),
-            tr("“%1” is currently at approved revision r%2.\n\n"
-               "Artifact: %3%4\nSHA-256: %5\n\n"
-               "This is an immutable library snapshot. To edit it, start an "
-               "assigned work package so Mapper can checkpoint and submit "
-               "every change through Map Hub.")
-                .arg(title)
-                .arg(number)
-                .arg(kind.isEmpty() ? tr("map") : kind.toUpper())
-                .arg(name.isEmpty() ? QString{} : tr(" — %1").arg(name))
-                .arg(sha.isEmpty() ? tr("not supplied") : sha));
-      });
+    auto server = Settings::getInstance()
+                      .getSetting(Settings::MapHub_ServerUrl)
+                      .toString();
+    auto destination = readOnlyDestination(
+        server, title, project_id, revision_id, revision_number, extension);
+    if (destination.isEmpty()) {
+      setBusy(false);
+      QMessageBox::warning(
+          this, tr("Could not prepare map"),
+          tr("Mapper could not create its private Map Hub library cache."));
+      return;
+    }
+
+    MapHubReadOnlyDocument document;
+    document.local_map_path = destination;
+    document.server_url = server;
+    const auto organization =
+        library_response.value(QStringLiteral("organization")).toObject();
+    document.organization_id =
+        organization.value(QStringLiteral("id")).toString();
+    document.organization_name =
+        organization.value(QStringLiteral("name")).toString();
+    document.project_id = project_id;
+    document.project_title =
+        response_project.value(QStringLiteral("title")).toString();
+    if (document.project_title.isEmpty())
+      document.project_title = title;
+    document.revision_id = revision_id;
+    document.revision_number = revision_number;
+    document.revision_sha256 = revision_sha;
+    document.revision_size_bytes = revision_size;
+    document.artifact_kind =
+        revision.value(QStringLiteral("artifact_kind")).toString();
+    document.artifact_name =
+        revision.value(QStringLiteral("original_name")).toString();
+    document.manifest_url = projectManifestUrl(server, project_id);
+    const auto active_request = response.value(QStringLiteral("edit_access"))
+                                    .toObject()
+                                    .value(QStringLiteral("active_request"))
+                                    .toObject();
+    document.access_request_id =
+        active_request.value(QStringLiteral("id")).toString();
+    document.access_request_status =
+        active_request.value(QStringLiteral("status")).toString();
+    const auto approved_assignment =
+        active_request.value(QStringLiteral("assignment")).toObject();
+    document.approved_assignment_id =
+        approved_assignment.value(QStringLiteral("id")).toString();
+    document.last_checked_at = QDateTime::currentDateTimeUtc();
+    if (!document.isValid()) {
+      setBusy(false);
+      QMessageBox::warning(
+          this, tr("Invalid map response"),
+          tr("Map Hub did not identify the account, project, and "
+             "revision consistently. Nothing was opened."));
+      return;
+    }
+
+    auto open_verified = [this, document](const QString &path) {
+#ifdef MAPPER_MOBILE
+      if (window->hasOpenedFile() &&
+          DocumentPath::canonical(window->currentPath()) !=
+              DocumentPath::canonical(path) &&
+          !window->closeFile()) {
+        setBusy(false);
+        return;
+      }
+#endif
+      setBusy(false);
+      if (window->openMapHubReadOnly(path, document))
+        accept();
+    };
+
+    setBusy(true, tr("Synchronizing project-authorized tiled sources…"));
+    client->projectManifest(
+        project_id, [this, document, destination, download_url, revision_sha,
+                     revision_size, open_verified = std::move(open_verified)](
+                        const QJsonObject &manifest,
+                        const MapHubApiClient::Error &manifest_error) mutable {
+          if (!manifest_error) {
+            auto installed =
+                MapHubImageryCatalog::install(manifest, document.manifest_url);
+            if (!installed)
+              QMessageBox::warning(this, tr("Map opened without project tiles"),
+                                   installed.error);
+          }
+
+          const QFileInfo cached(destination);
+          QString cached_hash_error;
+          const auto cached_hash =
+              cached.isFile() && cached.size() == revision_size
+                  ? MapHubApiClient::sha256ForFile(destination,
+                                                   &cached_hash_error)
+                  : QString{};
+          if (cached_hash.compare(revision_sha, Qt::CaseInsensitive) == 0) {
+            open_verified(destination);
+            return;
+          }
+
+          if (cached.exists())
+            QFile::setPermissions(
+                destination,
+                QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+          setBusy(true, tr("Downloading and verifying read-only revision r%1…")
+                            .arg(document.revision_number));
+          client->downloadArtifact(
+              download_url, revision_sha, revision_size, destination,
+              [this, open_verified = std::move(open_verified)](
+                  const QString &path,
+                  const MapHubApiClient::Error &download_error) mutable {
+                if (download_error) {
+                  setBusy(false);
+                  showError(tr("Could not download map"), download_error);
+                  return;
+                }
+                open_verified(path);
+              });
+        });
+  });
+}
+
+void MapHubDialog::requestSelectedProjectAccess() {
+  auto *item = project_list->currentItem();
+  if (!item || busy ||
+      item->data(0, item_kind_role).toString() != QLatin1String("project"))
+    return;
+  const auto project_id = item->data(0, id_role).toString();
+  auto title = item->data(0, title_role).toString();
+  if (title.isEmpty())
+    title = item->text(0);
+  setBusy(true, tr("Checking editing access for %1…").arg(title));
+  client->openProject(project_id, [this, project_id,
+                                   title](const QJsonObject &response,
+                                          const MapHubApiClient::Error &error) {
+    setBusy(false);
+    if (error) {
+      showError(tr("Could not check editing access"), error);
+      return;
+    }
+    const auto response_project =
+        response.value(QStringLiteral("project")).toObject();
+    const auto edit_access =
+        response.value(QStringLiteral("edit_access")).toObject();
+    if (response.value(QStringLiteral("schema_version")).toInt() != 1 ||
+        response_project.value(QStringLiteral("id")).toString() != project_id ||
+        edit_access.isEmpty()) {
+      QMessageBox::warning(
+          this, tr("Invalid editing-access response"),
+          tr("Map Hub did not return a complete editing-access route. "
+             "No request was sent."));
+      return;
+    }
+
+    QString assignment_to_start;
+    EditAccessDialog dialog(
+        client, project_id, title,
+        edit_access.value(QStringLiteral("active_request")).toObject(),
+        edit_access.value(QStringLiteral("existing_assignment")).toObject(),
+        [this, project_id](const QJsonObject &request) {
+          window->updateMapHubReadOnlyAccess(project_id, request);
+        },
+        [&assignment_to_start](const QString &assignment_id) {
+          assignment_to_start = assignment_id;
+        },
+        this);
+    dialog.exec();
+    if (!assignment_to_start.isEmpty())
+      startAssignment(assignment_to_start, project_id, title,
+                      tr("approved map assignment"));
+  });
 }
 
 void MapHubDialog::openSelectedEvent() {
@@ -1828,18 +2398,25 @@ void MapHubDialog::startSelectedAssignment() {
   auto assignment_id = item->data(0, id_role).toString();
   auto project_id = item->data(0, project_id_role).toString();
   auto title = projectTitle(project_id);
-  auto server =
-      Settings::getInstance().getSetting(Settings::MapHub_ServerUrl).toString();
-  auto manifest_url = projectManifestUrl(server, project_id);
   auto assignment_title = item->data(0, title_role).toString();
   if (assignment_title.isEmpty())
     assignment_title = item->text(0);
+  startAssignment(assignment_id, project_id, title, assignment_title);
+}
+
+void MapHubDialog::startAssignment(const QString &assignment_id,
+                                   const QString &project_id,
+                                   const QString &project_title,
+                                   const QString &assignment_title) {
+  auto server =
+      Settings::getInstance().getSetting(Settings::MapHub_ServerUrl).toString();
+  auto manifest_url = projectManifestUrl(server, project_id);
   setBusy(
       true,
       tr("Starting %1 and obtaining its editing lease…").arg(assignment_title));
   client->startAssignment(
       assignment_id,
-      [this, assignment_id, project_id, title, manifest_url](
+      [this, assignment_id, project_id, project_title, manifest_url](
           const QJsonObject &response, const MapHubApiClient::Error &error) {
         if (error) {
           setBusy(false);
@@ -1848,9 +2425,10 @@ void MapHubDialog::startSelectedAssignment() {
         }
         setBusy(true, tr("Synchronizing project-authorized tiled sources…"));
         client->projectManifest(
-            project_id, [this, response, assignment_id, title, manifest_url](
-                            const QJsonObject &manifest,
-                            const MapHubApiClient::Error &manifest_error) {
+            project_id,
+            [this, response, assignment_id, project_title,
+             manifest_url](const QJsonObject &manifest,
+                           const MapHubApiClient::Error &manifest_error) {
               ManagedMapWorkspace defaults;
               if (!manifest_error) {
                 auto target =
@@ -1874,7 +2452,7 @@ void MapHubDialog::startSelectedAssignment() {
                        "settings or tiled sources: %1")
                         .arg(manifest_error.message));
               }
-              beginWorkspace(response, assignment_id, title, defaults);
+              beginWorkspace(response, assignment_id, project_title, defaults);
             });
       });
 }

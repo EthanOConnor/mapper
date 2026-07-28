@@ -15,10 +15,13 @@ private slots:
   void initTestCase();
   void recordRoundTripsWithoutSecrets();
   void recordIsBoundToCanonicalMapPath();
+  void readOnlyDocumentRoundTripsAndRejectsPathSubstitution();
   void validatesServerTransport();
   void identifiesMapperWorkspacePackageTypes();
   void classifiesWorkspaceBaselines();
   void hashesArtifactsExactly();
+  void editAccessUsesNativeIdempotentEndpoints();
+  void verifiedDownloadRequiresBoundRevisionHeaders();
   void checkpointCarriesStreamProjectionDigest();
   void snapshotCompressesEntityIndex();
   void transactionPostCompressesSemanticOperations();

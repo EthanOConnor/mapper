@@ -127,6 +127,15 @@ public:
 	
 	/** Returns if the editor is in mobile mode. */
 	bool isInMobileMode() const;
+
+	/**
+	 * Makes this controller a non-mutating viewer.
+	 *
+	 * Read-only mode retains navigation, selection, measurement, export, and
+	 * GNSS display while disabling every map-changing action and tool.
+	 */
+	void setReadOnly(bool read_only);
+	bool isReadOnly() const { return read_only; }
 	
 	/**
 	 * Changes to new_tool as the new active tool.
@@ -691,6 +700,7 @@ private:
 	
 	/// Updates enabled state of all widgets
 	void updateWidgets();
+	void enforceReadOnlyActions();
 	
 	void createSymbolWidget(QWidget* parent = nullptr);
 	
@@ -726,6 +736,7 @@ private:
 	Symbol* active_symbol;
 	
 	bool editing_in_progress;
+	bool read_only;
 	
 	// Action handling
 	QHash<QByteArray, QAction*> actionsById;

@@ -239,8 +239,8 @@ void MapHubApiClient::finishJson(QNetworkReply *reply, JsonHandler handler) {
         if (reply->rawHeader("Content-Encoding")
                 .compare("zstd", Qt::CaseInsensitive) == 0) {
           QString decompression_error;
-          auto decoded = ZstdCodec::decompress(
-              *body, max_json_response_bytes, &decompression_error);
+          auto decoded = ZstdCodec::decompress(*body, max_json_response_bytes,
+                                               &decompression_error);
           if (decoded.isEmpty() && !body->isEmpty()) {
             handler({},
                     {reply->attribute(QNetworkRequest::HttpStatusCodeAttribute)
@@ -309,19 +309,20 @@ void MapHubApiClient::workspaceOperations(const QString &workspace_id,
   finishJson(network->get(req), std::move(handler));
 }
 
-void MapHubApiClient::postWorkspaceTransaction(
-    const QString &workspace_id, const QByteArray &canonical_json,
-    const QString &editing_lease, JsonHandler handler) {
+void MapHubApiClient::postWorkspaceTransaction(const QString &workspace_id,
+                                               const QByteArray &canonical_json,
+                                               const QString &editing_lease,
+                                               JsonHandler handler) {
   if (!ensureReady(true, handler))
     return;
-  if (!validStableId(workspace_id) ||
-      !validHeaderValue(editing_lease, 512)) {
+  if (!validStableId(workspace_id) || !validHeaderValue(editing_lease, 512)) {
     handler({}, invalidIdentifierError());
     return;
   }
   if (canonical_json.isEmpty() || canonical_json.size() > 1024 * 1024) {
-    handler({}, {0, QStringLiteral("invalid_payload"),
-                 tr("The Map Hub edit transaction is empty or exceeds 1 MiB.")});
+    handler({},
+            {0, QStringLiteral("invalid_payload"),
+             tr("The Map Hub edit transaction is empty or exceeds 1 MiB.")});
     return;
   }
   auto req = request(
@@ -346,8 +347,7 @@ void MapHubApiClient::acknowledgeWorkspaceOperations(
     const QString &editing_lease, JsonHandler handler) {
   if (!ensureReady(true, handler))
     return;
-  if (!validStableId(workspace_id) ||
-      !validHeaderValue(editing_lease, 512)) {
+  if (!validStableId(workspace_id) || !validHeaderValue(editing_lease, 512)) {
     handler({}, invalidIdentifierError());
     return;
   }
@@ -363,26 +363,24 @@ void MapHubApiClient::acknowledgeWorkspaceOperations(
 
 void MapHubApiClient::uploadWorkspaceSnapshot(
     const QString &workspace_id, const QString &file_path,
-    const QByteArray &canonical_entity_index,
-    qint64 base_stream_sequence, const QString &base_stream_hash,
-    const QString &file_sha256, qint64 file_size,
-    const QString &workspace_revision_id,
-    const QString &project_revision_id,
-    const QString &client_instance_id, const QString &editing_lease,
-    const QString &idempotency_key, JsonHandler handler) {
+    const QByteArray &canonical_entity_index, qint64 base_stream_sequence,
+    const QString &base_stream_hash, const QString &file_sha256,
+    qint64 file_size, const QString &workspace_revision_id,
+    const QString &project_revision_id, const QString &client_instance_id,
+    const QString &editing_lease, const QString &idempotency_key,
+    JsonHandler handler) {
   if (!ensureReady(true, handler))
     return;
   static const QRegularExpression hash_pattern(
       QStringLiteral("^[0-9a-f]{64}$"));
-  if (!validStableId(workspace_id) ||
-      !validStableId(client_instance_id) || base_stream_sequence < 0 ||
+  if (!validStableId(workspace_id) || !validStableId(client_instance_id) ||
+      base_stream_sequence < 0 ||
       !hash_pattern.match(base_stream_hash).hasMatch() ||
-      !hash_pattern.match(file_sha256).hasMatch() ||
-      file_size < 1 || file_size > max_artifact_bytes ||
+      !hash_pattern.match(file_sha256).hasMatch() || file_size < 1 ||
+      file_size > max_artifact_bytes ||
       (!workspace_revision_id.isEmpty() &&
        !validStableId(workspace_revision_id)) ||
-      (!project_revision_id.isEmpty() &&
-       !validStableId(project_revision_id)) ||
+      (!project_revision_id.isEmpty() && !validStableId(project_revision_id)) ||
       !validHeaderValue(editing_lease, 512) ||
       !validHeaderValue(idempotency_key, 120) ||
       canonical_entity_index.isEmpty() ||
@@ -391,10 +389,10 @@ void MapHubApiClient::uploadWorkspaceSnapshot(
                  tr("The Map Hub snapshot metadata is invalid.")});
     return;
   }
-  const auto entity_index_sha256 = QString::fromLatin1(
-      QCryptographicHash::hash(canonical_entity_index,
-                               QCryptographicHash::Sha256)
-          .toHex());
+  const auto entity_index_sha256 =
+      QString::fromLatin1(QCryptographicHash::hash(canonical_entity_index,
+                                                   QCryptographicHash::Sha256)
+                              .toHex());
   auto entity_index_payload = canonical_entity_index;
   auto entity_index_encoding = QStringLiteral("identity");
   if (canonical_entity_index.size() >= 512) {
@@ -410,8 +408,8 @@ void MapHubApiClient::uploadWorkspaceSnapshot(
   req.setRawHeader("X-Editing-Lease", editing_lease.toUtf8());
   auto *multi = new QHttpMultiPart(QHttpMultiPart::FormDataType);
   multi->append(textPart("protocol", QStringLiteral("oom-map-ops/1")));
-  multi->append(textPart("base_stream_sequence",
-                         QString::number(base_stream_sequence)));
+  multi->append(
+      textPart("base_stream_sequence", QString::number(base_stream_sequence)));
   multi->append(textPart("base_stream_hash", base_stream_hash));
   multi->append(textPart("sha256", file_sha256));
   multi->append(textPart("size_bytes", QString::number(file_size)));
@@ -428,9 +426,8 @@ void MapHubApiClient::uploadWorkspaceSnapshot(
       QNetworkRequest::ContentDispositionHeader,
       QStringLiteral(
           "form-data; name=\"file\"; filename=\"workspace-snapshot.omap\""));
-  map_part.setHeader(
-      QNetworkRequest::ContentTypeHeader,
-      QStringLiteral("application/vnd.openorienteering.omap"));
+  map_part.setHeader(QNetworkRequest::ContentTypeHeader,
+                     QStringLiteral("application/vnd.openorienteering.omap"));
   auto *file = new QFile(file_path, multi);
   if (!file->open(QIODevice::ReadOnly) || file->size() != file_size) {
     const auto message =
@@ -537,6 +534,141 @@ void MapHubApiClient::projectManifest(const QString &project_id,
       std::move(handler));
 }
 
+void MapHubApiClient::openProject(const QString &project_id,
+                                  JsonHandler handler) {
+  if (!ensureReady(true, handler))
+    return;
+  if (!validStableId(project_id)) {
+    handler({}, invalidIdentifierError());
+    return;
+  }
+  finishJson(network->get(request(
+                 QStringLiteral("/api/v1/projects/%1/open").arg(project_id))),
+             std::move(handler));
+}
+
+void MapHubApiClient::createEditAccessRequest(const QString &project_id,
+                                              const QString &message,
+                                              const QString &idempotency_key,
+                                              JsonHandler handler) {
+  if (!ensureReady(true, handler))
+    return;
+  if (!validStableId(project_id)) {
+    handler({}, invalidIdentifierError());
+    return;
+  }
+  if (message.toUtf8().size() > 2000 ||
+      !validHeaderValue(idempotency_key, 120)) {
+    handler({}, {0, QStringLiteral("invalid_edit_access_request"),
+                 tr("The edit-access request or transaction key is invalid.")});
+    return;
+  }
+  auto req = request(QStringLiteral("/api/v1/projects/%1/edit-access-requests")
+                         .arg(project_id));
+  req.setHeader(QNetworkRequest::ContentTypeHeader,
+                QStringLiteral("application/json"));
+  req.setRawHeader("Idempotency-Key", idempotency_key.toUtf8());
+  QJsonObject body;
+  if (!message.trimmed().isEmpty())
+    body.insert(QStringLiteral("message"), message.trimmed());
+  finishJson(
+      network->post(req, QJsonDocument(body).toJson(QJsonDocument::Compact)),
+      std::move(handler));
+}
+
+void MapHubApiClient::editAccessRequest(const QString &request_id,
+                                        const QString &etag,
+                                        SyncStateHandler handler) {
+  if (!ensureReady(true, [handler](const QJsonObject &, const Error &error) {
+        handler({}, {}, false, error);
+      }))
+    return;
+  if (!validStableId(request_id)) {
+    handler({}, {}, false, invalidIdentifierError());
+    return;
+  }
+  auto req = request(
+      QStringLiteral("/api/v1/edit-access-requests/%1").arg(request_id));
+  if (!etag.isEmpty() && validHeaderValue(etag, 512))
+    req.setRawHeader("If-None-Match", etag.toUtf8());
+  auto *reply = network->get(req);
+  auto body = std::make_shared<QByteArray>();
+  auto too_large = std::make_shared<bool>(false);
+  reply->setReadBufferSize(max_json_response_bytes + 1);
+  connect(reply, &QIODevice::readyRead, this, [reply, body, too_large] {
+    if (*too_large)
+      return;
+    body->append(reply->readAll());
+    if (body->size() > max_json_response_bytes) {
+      *too_large = true;
+      reply->abort();
+    }
+  });
+  connect(
+      reply, &QNetworkReply::finished, this,
+      [reply, body, too_large, handler = std::move(handler)]() mutable {
+        if (!*too_large) {
+          body->append(reply->readAll());
+          *too_large = body->size() > max_json_response_bytes;
+        }
+        const auto response_etag = QString::fromUtf8(reply->rawHeader("ETag"));
+        const auto status =
+            reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status == 304 && reply->error() == QNetworkReply::NoError) {
+          handler({}, response_etag, true, {});
+        } else if (*too_large) {
+          handler({}, response_etag, false,
+                  {status, QStringLiteral("response_too_large"),
+                   tr("Map Hub returned more than 16 MiB of edit-access "
+                      "state; Mapper discarded the response.")});
+        } else {
+          if (reply->rawHeader("Content-Encoding")
+                  .compare("zstd", Qt::CaseInsensitive) == 0) {
+            QString decompression_error;
+            auto decoded = ZstdCodec::decompress(
+                *body, max_json_response_bytes, &decompression_error);
+            if (decoded.isEmpty() && !body->isEmpty()) {
+              handler({}, response_etag, false,
+                      {status,
+                       QStringLiteral("invalid_compressed_response"),
+                       decompression_error});
+              reply->deleteLater();
+              return;
+            }
+            *body = std::move(decoded);
+          }
+          if (reply->error() != QNetworkReply::NoError) {
+            handler({}, response_etag, false, replyError(reply, *body));
+            reply->deleteLater();
+            return;
+          }
+          QJsonParseError parse_error;
+          const auto document = QJsonDocument::fromJson(*body, &parse_error);
+          if (parse_error.error != QJsonParseError::NoError ||
+              !document.isObject()) {
+            handler({}, response_etag, false,
+                    {status, QStringLiteral("invalid_response"),
+                     tr("Map Hub returned invalid edit-access state.")});
+          } else {
+            handler(document.object(), response_etag, false, {});
+          }
+        }
+        reply->deleteLater();
+      });
+}
+
+void MapHubApiClient::cancelEditAccessRequest(const QString &request_id,
+                                              JsonHandler handler) {
+  if (!validStableId(request_id)) {
+    handler({}, invalidIdentifierError());
+    return;
+  }
+  sendJson(
+      "POST",
+      QStringLiteral("/api/v1/edit-access-requests/%1/cancel").arg(request_id),
+      {}, true, std::move(handler));
+}
+
 void MapHubApiClient::createProject(const QJsonObject &project,
                                     const QString &idempotency_key,
                                     JsonHandler handler) {
@@ -573,8 +705,7 @@ void MapHubApiClient::checkpoint(
     const QString &label, const QString &change_summary,
     const QString &idempotency_key, qint64 stream_sequence,
     const QString &stream_hash, const QString &project_revision_id,
-    const QString &entity_index_sha256,
-    JsonHandler handler) {
+    const QString &entity_index_sha256, JsonHandler handler) {
   if (!ensureReady(true, handler))
     return;
   if (!validStableId(workspace_id)) {
@@ -584,10 +715,8 @@ void MapHubApiClient::checkpoint(
   static const QRegularExpression hash_pattern(
       QStringLiteral("^[0-9a-f]{64}$"));
   if ((!base_revision_id.isEmpty() && !validStableId(base_revision_id)) ||
-      (!project_revision_id.isEmpty() &&
-       !validStableId(project_revision_id)) ||
-      stream_sequence < 0 ||
-      !hash_pattern.match(stream_hash).hasMatch() ||
+      (!project_revision_id.isEmpty() && !validStableId(project_revision_id)) ||
+      stream_sequence < 0 || !hash_pattern.match(stream_hash).hasMatch() ||
       !hash_pattern.match(entity_index_sha256).hasMatch() ||
       !validHeaderValue(idempotency_key, 120) ||
       (!editing_lease.isEmpty() && !validHeaderValue(editing_lease, 4096))) {
@@ -603,8 +732,7 @@ void MapHubApiClient::checkpoint(
     req.setRawHeader("X-Editing-Lease", editing_lease.toUtf8());
   auto *multi = new QHttpMultiPart(QHttpMultiPart::FormDataType);
   multi->append(textPart("base_revision_id", base_revision_id));
-  multi->append(
-      textPart("stream_sequence", QString::number(stream_sequence)));
+  multi->append(textPart("stream_sequence", QString::number(stream_sequence)));
   multi->append(textPart("stream_hash", stream_hash));
   multi->append(textPart("project_revision_id", project_revision_id));
   multi->append(textPart("entity_index_sha256", entity_index_sha256));
@@ -706,8 +834,7 @@ void MapHubApiClient::workspaceSyncState(const QString &workspace_id,
           body->append(reply->readAll());
           *too_large = body->size() > max_json_response_bytes;
         }
-        const auto response_etag =
-            QString::fromUtf8(reply->rawHeader("ETag"));
+        const auto response_etag = QString::fromUtf8(reply->rawHeader("ETag"));
         const auto status =
             reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         if (status == 304 && reply->error() == QNetworkReply::NoError) {
@@ -768,6 +895,14 @@ void MapHubApiClient::downloadArtifact(const QUrl &url,
                                        const QString &expected_sha256,
                                        const QString &destination,
                                        DownloadHandler handler) {
+  downloadArtifact(url, expected_sha256, -1, destination, std::move(handler));
+}
+
+void MapHubApiClient::downloadArtifact(const QUrl &url,
+                                       const QString &expected_sha256,
+                                       qint64 expected_size,
+                                       const QString &destination,
+                                       DownloadHandler handler) {
   if (!isAcceptableServerUrl(server_url) || bearer_token.trimmed().isEmpty()) {
     handler({},
             {0, QStringLiteral("invalid_configuration"), configurationError()});
@@ -781,13 +916,22 @@ void MapHubApiClient::downloadArtifact(const QUrl &url,
                     "this artifact; it was not downloaded.")});
     return;
   }
+  if (expected_size > max_artifact_bytes) {
+    handler({}, {0, QStringLiteral("response_too_large"),
+                 tr("The map artifact exceeds Mapper's 2 GiB download "
+                    "limit.")});
+    return;
+  }
   if (!isSameOrigin(url)) {
     handler({}, {0, QStringLiteral("untrusted_download"),
                  tr("Map Hub returned an artifact URL on a different origin; "
                     "the token was not sent.")});
     return;
   }
-  auto *reply = network->get(request(url));
+  auto download_request = request(url);
+  download_request.setRawHeader("Accept", "application/octet-stream");
+  download_request.setRawHeader("Accept-Encoding", "identity");
+  auto *reply = network->get(download_request);
   auto *file = new QSaveFile(destination, reply);
   if (!file->open(QIODevice::WriteOnly)) {
     auto message = file->errorString();
@@ -799,30 +943,46 @@ void MapHubApiClient::downloadArtifact(const QUrl &url,
   auto *state = new ArtifactDownloadState;
   connect(reply, &QNetworkReply::downloadProgress, this,
           &MapHubApiClient::downloadProgress);
-  connect(reply, &QNetworkReply::metaDataChanged, this, [reply, state] {
-    bool valid = false;
-    const auto length =
-        reply->header(QNetworkRequest::ContentLengthHeader).toLongLong(&valid);
-    if (valid && length > max_artifact_bytes && !state->error) {
-      state->error = {
-          reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt(),
-          QStringLiteral("response_too_large"),
-          MapHubApiClient::tr(
-              "The map artifact exceeds Mapper's 2 GiB download "
-              "limit.")};
-      reply->abort();
-    }
-  });
+  connect(
+      reply, &QNetworkReply::metaDataChanged, this,
+      [reply, state, expected_size] {
+        bool valid = false;
+        const auto length = reply->header(QNetworkRequest::ContentLengthHeader)
+                                .toLongLong(&valid);
+        if (valid &&
+            (length > max_artifact_bytes ||
+             (expected_size >= 0 && length != expected_size)) &&
+            !state->error) {
+          state->error = {
+              reply->attribute(QNetworkRequest::HttpStatusCodeAttribute)
+                  .toInt(),
+              length > max_artifact_bytes ? QStringLiteral("response_too_large")
+                                          : QStringLiteral("size_mismatch"),
+              length > max_artifact_bytes
+                  ? MapHubApiClient::tr("The map artifact exceeds Mapper's 2 "
+                                        "GiB download limit.")
+                  : MapHubApiClient::tr(
+                        "The map artifact response size did not match its "
+                        "revision metadata.")};
+          reply->abort();
+        }
+      });
   connect(reply, &QIODevice::readyRead, this, [reply, file, state] {
     consumeArtifactData(reply, file, state, true);
   });
   connect(
       reply, &QNetworkReply::finished, this,
-      [reply, file, state, destination, expected_sha256,
+      [reply, file, state, destination, expected_sha256, expected_size,
        handler = std::move(handler)]() mutable {
         consumeArtifactData(reply, file, state, false);
         const auto actual = QString::fromLatin1(state->hash.result().toHex());
+        const auto received = state->received;
         const auto state_error = state->error;
+        bool header_size_valid = false;
+        const auto header_size =
+            reply->rawHeader("X-Artifact-Size").toLongLong(&header_size_valid);
+        const auto header_sha =
+            QString::fromLatin1(reply->rawHeader("X-Artifact-SHA256"));
         delete state;
         if (state_error) {
           file->cancelWriting();
@@ -830,6 +990,18 @@ void MapHubApiClient::downloadArtifact(const QUrl &url,
         } else if (reply->error() != QNetworkReply::NoError) {
           file->cancelWriting();
           handler({}, replyError(reply, {}));
+        } else if (expected_size >= 0 &&
+                   (!header_size_valid || header_size != expected_size ||
+                    header_sha.compare(expected_sha256, Qt::CaseInsensitive) !=
+                        0)) {
+          file->cancelWriting();
+          handler({},
+                  {reply->attribute(QNetworkRequest::HttpStatusCodeAttribute)
+                       .toInt(),
+                   QStringLiteral("artifact_metadata_mismatch"),
+                   MapHubApiClient::tr(
+                       "Map Hub did not bind the download response to the "
+                       "requested revision metadata.")});
         } else if (actual.compare(expected_sha256, Qt::CaseInsensitive) != 0) {
           file->cancelWriting();
           handler({},
@@ -838,6 +1010,15 @@ void MapHubApiClient::downloadArtifact(const QUrl &url,
                    QStringLiteral("checksum_mismatch"),
                    MapHubApiClient::tr("The downloaded map did not match the "
                                        "server checksum; it was not opened.")});
+        } else if (expected_size >= 0 && received != expected_size) {
+          file->cancelWriting();
+          handler({},
+                  {reply->attribute(QNetworkRequest::HttpStatusCodeAttribute)
+                       .toInt(),
+                   QStringLiteral("size_mismatch"),
+                   MapHubApiClient::tr(
+                       "The downloaded map size did not match the revision "
+                       "metadata; it was not opened.")});
         } else if (!file->commit()) {
           handler({}, {0, QStringLiteral("local_file"), file->errorString()});
         } else {

@@ -46,6 +46,7 @@
 #include <QSaveFile>
 #include <QScopeGuard>
 #include <QScopedValueRollback>
+#include <QSet>
 #include <QSettings>
 #include <QStackedWidget>
 #include <QStatusBar>
@@ -69,6 +70,7 @@
 #include "collaboration/managed_map_workspace.h"
 #include "collaboration/map_hub_api_client.h"
 #include "collaboration/map_hub_credentials.h"
+#include "collaboration/map_hub_read_only_document.h"
 #include "collaboration/map_hub_sync_controller.h"
 #include "collaboration/map_hub_workspace.h"
 #include "core/document_path.h"
@@ -166,6 +168,10 @@ MainWindow::MainWindow(bool as_main_window, QWidget* parent, Qt::WindowFlags fla
 	connect(map_hub_lease_timer, &QTimer::timeout, this,
 	        &MainWindow::renewMapHubLeaseIfNeeded);
 	map_hub_lease_timer->start();
+	map_hub_access_timer = new QTimer(this);
+	map_hub_access_timer->setSingleShot(true);
+	connect(map_hub_access_timer, &QTimer::timeout, this,
+	        &MainWindow::pollMapHubReadOnlyAccess);
 	map_hub_sync = new MapHubSyncController(this);
 	connect(
 		map_hub_sync, &MapHubSyncController::stateChanged, this,
@@ -245,6 +251,8 @@ void MainWindow::applicationStateChanged()
 	if (QGuiApplication::applicationState() == Qt::ApplicationActive)
 	{
 		QTimer::singleShot(0, this, &MainWindow::renewMapHubLeaseIfNeeded);
+		if (map_hub_read_only && map_hub_access_timer)
+			map_hub_access_timer->start(0);
 		if (map_hub_sync)
 			map_hub_sync->applicationBecameActive();
 	}
@@ -525,7 +533,7 @@ void MainWindow::createFileMenu()
 	save_act->setWhatsThis(Util::makeWhatThis("file_menu.html"));
 	connect(save_act, &QAction::triggered, this, &MainWindow::save);
 	
-	auto save_as_act = new QAction(tr("Save &as..."), this);
+	save_as_act = new QAction(tr("Save &as..."), this);
 	save_as_act->setMenuRole(QAction::NoRole);
 	if (QKeySequence::keyBindings(QKeySequence::SaveAs).empty())
 		save_as_act->setShortcut(tr("Ctrl+Shift+S"));
@@ -1283,18 +1291,137 @@ bool MainWindow::openConnectedWorkspace(const QString& source_path,
 	return true;
 }
 
+bool MainWindow::openMapHubReadOnly(
+	const QString& source_path, const MapHubReadOnlyDocument& document)
+{
+	const QFileInfo source_info(source_path);
+	QString hash_error;
+	const auto actual_sha = MapHubApiClient::sha256ForFile(
+	  source_path, &hash_error);
+	if (!source_info.isFile()
+	    || source_info.size() != document.revision_size_bytes
+	    || actual_sha.compare(document.revision_sha256,
+	                          Qt::CaseInsensitive) != 0)
+	{
+		QMessageBox::warning(
+		  this,
+		  tr("Could not verify read-only map"),
+		  hash_error.isEmpty()
+		    ? tr("The cached Map Hub revision did not match its advertised "
+		         "size and checksum. It was not opened.")
+		    : hash_error);
+		return false;
+	}
+	if (!QFile::setPermissions(source_path, QFileDevice::ReadOwner))
+	{
+		QMessageBox::warning(
+		  this, tr("Could not protect read-only map"),
+		  tr("Mapper could not make its private Map Hub cache immutable. "
+		     "The map was not opened."));
+		return false;
+	}
+	if (!openPath(source_path))
+		return false;
+
+	auto* open_window = findMainWindow(source_path);
+	if (!open_window)
+	{
+		QMessageBox::warning(
+		  this, tr("Map Hub"),
+		  tr("The verified map opened, but Mapper could not identify its "
+		     "viewer window."));
+		return false;
+	}
+
+	auto bound_document = document;
+	bound_document.local_map_path = source_path;
+	QString metadata_error;
+	if (!MapHubReadOnlyDocument::save(bound_document, &metadata_error))
+	{
+		QMessageBox::warning(
+		  open_window, tr("Map opened without read-only protection"),
+		  metadata_error);
+		open_window->closeFile();
+		return false;
+	}
+	open_window->updateMapHubActions();
+	open_window->configureMapHubSync();
+	open_window->showStatusBarMessage(
+	  tr("Opened verified Map Hub revision r%1 read-only.")
+	    .arg(bound_document.revision_number),
+	  10000);
+	return true;
+}
+
+void MainWindow::updateMapHubReadOnlyAccess(
+	const QString& project_id, const QJsonObject& request)
+{
+	if (currentPath().isEmpty())
+		return;
+	QString error;
+	auto document = MapHubReadOnlyDocument::loadForMap(currentPath(), &error);
+	if (!document.isValid() || document.project_id != project_id)
+		return;
+
+	const auto request_id = request.value(QStringLiteral("id")).toString();
+	const auto status = request.value(QStringLiteral("status")).toString();
+	static const QSet<QString> valid_statuses = {
+		QStringLiteral("pending"),
+		QStringLiteral("approved"),
+		QStringLiteral("declined"),
+		QStringLiteral("cancelled"),
+		QStringLiteral("expired"),
+	};
+	if (QUuid(request_id).isNull() || !valid_statuses.contains(status))
+		return;
+	const auto previous_request_id = document.access_request_id;
+	const auto previous_status = document.access_request_status;
+	document.access_request_id = request_id;
+	document.access_request_status = status;
+	const auto assignment =
+	  request.value(QStringLiteral("assignment")).toObject();
+	document.approved_assignment_id =
+	  assignment.value(QStringLiteral("id")).toString();
+	document.last_checked_at = QDateTime::currentDateTimeUtc();
+	if (previous_request_id != request_id)
+		map_hub_access_etag.clear();
+	if (MapHubReadOnlyDocument::save(document, &error))
+	{
+		updateMapHubActions();
+		configureMapHubSync();
+		if (status == QLatin1String("approved") && previous_status != status)
+			showStatusBarMessage(
+			  tr("Editing access for “%1” was approved.")
+			    .arg(document.project_title),
+			  15000);
+	}
+	else
+	{
+		showStatusBarMessage(
+		  tr("Mapper could not retain the Map Hub request status: %1")
+		    .arg(error),
+		  10000);
+	}
+}
+
 void MainWindow::updateMapHubActions()
 {
 	if (!map_hub_checkpoint_act || !map_hub_submit_act)
 		return;
 	QString error;
 	auto workspace = current_path.isEmpty() ? ManagedMapWorkspace{} : ManagedMapWorkspace::loadForMap(current_path, &error);
+	auto read_only = current_path.isEmpty()
+	               ? MapHubReadOnlyDocument{}
+	               : MapHubReadOnlyDocument::loadForMap(current_path, &error);
 	auto native_workspace = workspace.isValid()
 	                     && DocumentPath::suffix(current_path).compare(
 	                          QLatin1String("omap"), Qt::CaseInsensitive) == 0;
 	map_hub_checkpoint_act->setEnabled(
-	  native_workspace && workspace.status != QLatin1String("submitted"));
-	map_hub_submit_act->setEnabled(native_workspace && workspace.status != QLatin1String("submitted"));
+	  !read_only.isValid() && native_workspace
+	  && workspace.status != QLatin1String("submitted"));
+	map_hub_submit_act->setEnabled(
+	  !read_only.isValid() && native_workspace
+	  && workspace.status != QLatin1String("submitted"));
 	if (native_workspace)
 	{
 		map_hub_checkpoint_act->setText(tr("Checkpoint “%1” to Map Hub").arg(workspace.project_title));
@@ -1312,14 +1439,74 @@ void MainWindow::configureMapHubSync()
 	if (!map_hub_sync)
 		return;
 	map_hub_sync->clear();
-	if (!controller || currentPath().isEmpty() || !currentFormat()
-	    || DocumentPath::suffix(currentPath()).compare(
-	         QLatin1String("omap"), Qt::CaseInsensitive) != 0)
-		return;
-	QString error;
-	auto managed = ManagedMapWorkspace::loadForMap(currentPath(), &error);
 	auto* map_editor = qobject_cast<MapEditorController*>(controller);
-	if (!managed.isValid() || !map_editor)
+	if (!controller || currentPath().isEmpty() || !currentFormat()
+	    || !map_editor)
+	{
+		map_hub_read_only = false;
+		if (map_hub_access_timer)
+			map_hub_access_timer->stop();
+		map_hub_access_etag.clear();
+		return;
+	}
+	QString error;
+	auto read_only = MapHubReadOnlyDocument::loadForMap(currentPath(), &error);
+	if (read_only.isValid())
+	{
+		map_hub_read_only = true;
+		map_editor->setReadOnly(true);
+		if (save_act)
+			save_act->setEnabled(false);
+		if (save_as_act)
+			save_as_act->setEnabled(false);
+		map_hub_sync_label->setVisible(true);
+		QString action = tr("Request edit access");
+		QString state = tr("Read-only r%1").arg(read_only.revision_number);
+		if (read_only.access_request_status == QLatin1String("pending"))
+		{
+			state = tr("Edit access pending");
+			action = tr("Check request");
+		}
+		else if (read_only.access_request_status == QLatin1String("approved")
+		         && !read_only.approved_assignment_id.isEmpty())
+		{
+			state = tr("Edit access approved");
+			action = tr("Start editing");
+		}
+		map_hub_sync_label->setText(
+		  tr("%1 · <a href=\"map-hub\">%2</a>")
+		    .arg(state.toHtmlEscaped(), action.toHtmlEscaped()));
+		map_hub_sync_label->setToolTip(
+		  tr("This verified Map Hub revision cannot be changed locally."));
+		if (read_only.access_request_status == QLatin1String("pending")
+		    && map_hub_access_timer && !map_hub_access_poll_pending
+		    && !map_hub_access_timer->isActive())
+		{
+			map_hub_access_timer->start(2000);
+		}
+		else if (read_only.access_request_status != QLatin1String("pending")
+		         && map_hub_access_timer)
+		{
+			map_hub_access_timer->stop();
+			map_hub_access_etag.clear();
+		}
+		return;
+	}
+
+	map_hub_read_only = false;
+	if (map_hub_access_timer)
+		map_hub_access_timer->stop();
+	map_hub_access_etag.clear();
+	map_editor->setReadOnly(false);
+	if (save_act)
+		save_act->setEnabled(has_opened_file);
+	if (save_as_act)
+		save_as_act->setEnabled(has_opened_file);
+	if (DocumentPath::suffix(currentPath()).compare(
+	      QLatin1String("omap"), Qt::CaseInsensitive) != 0)
+		return;
+	auto managed = ManagedMapWorkspace::loadForMap(currentPath(), &error);
+	if (!managed.isValid())
 		return;
 	map_hub_sync->configure(
 		managed,
@@ -1352,6 +1539,73 @@ void MainWindow::configureMapHubSync()
 			}
 			return true;
 		});
+}
+
+void MainWindow::pollMapHubReadOnlyAccess()
+{
+	if (map_hub_access_poll_pending || currentPath().isEmpty()
+	    || QGuiApplication::applicationState() != Qt::ApplicationActive)
+		return;
+
+	QString error;
+	const auto document =
+	  MapHubReadOnlyDocument::loadForMap(currentPath(), &error);
+	if (!document.isValid()
+	    || document.access_request_status != QLatin1String("pending")
+	    || QUuid(document.access_request_id).isNull())
+		return;
+	const auto credential = MapHubCredentials::readToken(document.server_url);
+	if (!credential || credential.token.isEmpty())
+	{
+		map_hub_sync_label->setToolTip(
+		  tr("Reconnect this Map Hub account to refresh the access request."));
+		return;
+	}
+
+	map_hub_access_poll_pending = true;
+	auto* client =
+	  new MapHubApiClient(document.server_url, credential.token, this);
+	const auto expected_path = DocumentPath::canonical(currentPath());
+	const auto expected_request = document.access_request_id;
+	client->editAccessRequest(
+	  document.access_request_id, map_hub_access_etag,
+	  [this, client, expected_path, expected_request](
+	    const QJsonObject& response, const QString& etag, bool not_modified,
+	    const MapHubApiClient::Error& poll_error) {
+		  map_hub_access_poll_pending = false;
+		  client->deleteLater();
+		  if (DocumentPath::canonical(currentPath()) != expected_path)
+		  {
+			  if (map_hub_access_timer)
+				  map_hub_access_timer->start(0);
+			  return;
+		  }
+		  if (!etag.isEmpty())
+			  map_hub_access_etag = etag;
+		  if (poll_error)
+		  {
+			  if (map_hub_access_timer)
+				  map_hub_access_timer->start(30000);
+			  return;
+		  }
+		  if (!not_modified)
+		  {
+			  auto request =
+			    response.value(QStringLiteral("request")).toObject();
+			  if (request.isEmpty())
+				  request = response;
+			  if (request.value(QStringLiteral("id")).toString()
+			      != expected_request)
+				  return;
+			  updateMapHubReadOnlyAccess(
+			    request.value(QStringLiteral("project_id")).toString(),
+			    request);
+		  }
+		  else if (map_hub_access_timer)
+		  {
+			  map_hub_access_timer->start(10000);
+		  }
+	  });
 }
 
 void MainWindow::renewMapHubLeaseIfNeeded()
@@ -2861,6 +3115,9 @@ bool MainWindow::removeAutosaveFile() const
 
 Autosave::AutosaveResult MainWindow::autosave()
 {
+	if (map_hub_read_only)
+		return Autosave::Success;
+
 	QString path = currentPath();
 	auto autosave_format = FileFormats.findFormat(FileFormats.defaultFormat());
 	if (path.isEmpty() || !controller || !autosave_format)
@@ -2912,6 +3169,15 @@ Autosave::AutosaveResult MainWindow::autosave()
 
 bool MainWindow::save()
 {
+	if (map_hub_read_only)
+	{
+		QMessageBox::information(
+		  this, tr("Read-only Map Hub map"),
+		  tr("Request editing access from Map Hub before changing or saving "
+		     "this map."));
+		return false;
+	}
+
 	auto path = currentPath();
 	auto format = currentFormat();
 	if (path.isEmpty()
@@ -2930,6 +3196,15 @@ bool MainWindow::save()
 
 bool MainWindow::saveTo(const QString &path, const FileFormat& format)
 {
+	if (map_hub_read_only)
+	{
+		QMessageBox::information(
+		  this, tr("Read-only Map Hub map"),
+		  tr("Request editing access from Map Hub before changing or saving "
+		     "this map."));
+		return false;
+	}
+
 	if (!controller || path.isEmpty())
 	{
 		qWarning("Unexpected call to MainWindow::saveTo(PATH, FORMAT)");
@@ -3650,6 +3925,15 @@ bool MainWindow::exportPresentedDocument(
 
 bool MainWindow::showSaveAsDialog()
 {
+	if (map_hub_read_only)
+	{
+		QMessageBox::information(
+		  this, tr("Read-only Map Hub map"),
+		  tr("Request editing access from Map Hub before creating an "
+		     "editable copy."));
+		return false;
+	}
+
 	if (!controller)
 		return false;
 	

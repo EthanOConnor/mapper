@@ -44,6 +44,7 @@ class QEvent;
 class QKeyEvent;
 class QLabel;
 class QMenu;
+class QJsonObject;
 class QStackedWidget;
 class QTemporaryFile;
 class QToolBar;
@@ -57,6 +58,7 @@ class MapEditorController;
 class MapHubSyncController;
 class MapperServiceProxy;
 class Toast;
+struct MapHubReadOnlyDocument;
 /**
  * The MainWindow class provides the generic application window.
  * 
@@ -351,6 +353,14 @@ public slots:
 	                            const QString& normalized_omap_path,
 	                            ManagedMapWorkspace workspace);
 
+	/** Open a verified immutable Map Hub revision in non-mutating viewer mode. */
+	bool openMapHubReadOnly(const QString& source_path,
+	                       const MapHubReadOnlyDocument& document);
+
+	/** Persist native edit-access state for the current read-only map. */
+	void updateMapHubReadOnlyAccess(const QString& project_id,
+	                                const QJsonObject& request);
+
 	/** Save and upload an immutable checkpoint for the current managed map. */
 	void checkpointMapHub();
 
@@ -571,6 +581,7 @@ private:
 	void updateMapHubActions();
 	void renewMapHubLeaseIfNeeded();
 	void configureMapHubSync();
+	void pollMapHubReadOnlyAccess();
 
 	static MainWindow* findMainWindow(const QString& file_name);
 
@@ -606,6 +617,7 @@ private:
 	QToolBar* general_toolbar;
 	QMenu* file_menu;
 	QAction* save_act;
+	QAction* save_as_act = nullptr;
 	QMenu* open_recent_menu;
 	bool open_recent_menu_inserted;
 	QAction* recent_file_act[max_recent_files];
@@ -615,8 +627,12 @@ private:
 	QAction* map_hub_submit_act = nullptr;
 	QTimer* map_hub_lease_timer = nullptr;
 	bool map_hub_lease_renewal_pending = false;
+	QTimer* map_hub_access_timer = nullptr;
+	bool map_hub_access_poll_pending = false;
+	QString map_hub_access_etag;
 	MapHubSyncController* map_hub_sync = nullptr;
 	QLabel* map_hub_sync_label = nullptr;
+	bool map_hub_read_only = false;
 	QLabel* status_label;
 	Toast* toast = nullptr;
 	

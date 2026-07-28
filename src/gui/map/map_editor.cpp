@@ -78,6 +78,7 @@
 #include <QRect>
 #include <QRectF>
 #include <QSettings>
+#include <QSet>
 #include <QScopeGuard>
 #include <QSignalBlocker>
 #include <QSize>
@@ -263,6 +264,64 @@ QString OpenOrienteeringObjects()
 
 }  // namespace MimeType
 
+namespace {
+
+bool isReadOnlySafeAction(const QByteArray& id)
+{
+	static const QSet<QByteArray> safe_actions = {
+		"print",
+		"export-image",
+		"export-kmz",
+		"export-simple-course",
+		"export-pdf",
+		"export-vector",
+		"copy",
+		"select-all",
+		"select-nothing",
+		"invert-selection",
+		"select-by-symbol",
+		"showgrid",
+		"panmap",
+		"movegps",
+		"follow-position",
+		"zoomin",
+		"zoomout",
+		"boxzoom",
+		"showall",
+		"fullscreen",
+		"setzoom",
+		"hatchareasview",
+		"baselineview",
+		"hidealltemplates",
+		"overprintsimulation",
+		"symbolwindow",
+		"colorwindow",
+		"templatewindow",
+		"tagswindow",
+		"manageimagerycatalogs",
+		"manageimagerynetworkpermissions",
+		"offlineimagery",
+		"measure",
+		"touchcursor",
+		"gpsdisplay",
+		"gpsdistancerings",
+		"gpstemporarypoint",
+		"gpstemporarypath",
+		"gpstemporaryclear",
+		"compassdisplay",
+		"alignmapwithnorth",
+		"copy-coords",
+	};
+	return safe_actions.contains(id);
+}
+
+bool isReadOnlySafeTool(const MapEditorTool* tool)
+{
+	return !tool || tool->toolType() == MapEditorTool::Pan
+	       || tool->toolType() == MapEditorTool::BoxZoom;
+}
+
+}  // namespace
 
 
 // ### MapEditorController ###
@@ -284,6 +343,7 @@ MapEditorController::MapEditorController(OperatingMode mode, Map* map, MapView* 
 	symbol_widget = nullptr;
 	window = nullptr;
 	editing_in_progress = false;
+	read_only = false;
 	
 	cut_hole_menu = nullptr;
 	
@@ -309,6 +369,7 @@ MapEditorController::MapEditorController(OperatingMode mode, Map* map, MapView* 
 	
 	statusbar_zoom_frame = nullptr;
 	statusbar_cursorpos_label = nullptr;
+	mobile_symbol_selector_action = nullptr;
 	
 	gps_display = nullptr;
 	gps_track_recorder = nullptr;
@@ -367,8 +428,48 @@ bool MapEditorController::isInMobileMode() const
 	return mobile_mode;
 }
 
+void MapEditorController::setReadOnly(bool value)
+{
+	if (read_only == value)
+		return;
+
+	read_only = value;
+	if (read_only)
+	{
+		setEditorActivity(nullptr);
+		setOverrideTool(nullptr);
+		if (!isReadOnlySafeTool(current_tool))
+			setTool(new PanTool(this, pan_act));
+	}
+
+	if (symbol_widget)
+		symbol_widget->setEnabled(!read_only && !editing_in_progress);
+	if (mobile_symbol_selector_action)
+		mobile_symbol_selector_action->setEnabled(!read_only
+		                                          && !editing_in_progress);
+	if (color_dock_widget && color_dock_widget->widget())
+		color_dock_widget->widget()->setEnabled(!read_only
+		                                        && !editing_in_progress);
+	if (template_dock_widget)
+		template_dock_widget->setEnabled(!read_only);
+	if (tags_dock_widget && tags_dock_widget->widget())
+		tags_dock_widget->widget()->setEnabled(!read_only);
+	if (mappart_selector_box)
+		mappart_selector_box->setEnabled(!read_only && !editing_in_progress);
+
+	updateWidgets();
+	enforceReadOnlyActions();
+}
+
 void MapEditorController::setTool(MapEditorTool* new_tool)
 {
+	if (read_only && !isReadOnlySafeTool(new_tool))
+	{
+		if (new_tool)
+			new_tool->deleteLater();
+		return;
+	}
+
 	if (current_tool)
 	{
 		if (current_tool->editingInProgress())
@@ -402,6 +503,13 @@ void MapEditorController::setEditTool()
 
 void MapEditorController::setOverrideTool(MapEditorTool* new_override_tool)
 {
+	if (read_only && !isReadOnlySafeTool(new_override_tool))
+	{
+		if (new_override_tool)
+			new_override_tool->deleteLater();
+		return;
+	}
+
 	if (override_tool == new_override_tool)
 		return;
 	
@@ -1047,6 +1155,12 @@ QAction* MapEditorController::newAction(const char* id, const QString &tr_text, 
 	if (receiver) QObject::connect(action, SIGNAL(triggered()), receiver, slot);
 	actionsById[id] = action;
 	action->setMenuRole(QAction::NoRole);
+	const auto action_id = QByteArray(id);
+	connect(action, &QAction::changed, this, [this, action, action_id] {
+		if (read_only && !isReadOnlySafeAction(action_id)
+		    && action->isEnabled())
+			action->setEnabled(false);
+	});
 	return action;
 }
 
@@ -1066,6 +1180,12 @@ QAction* MapEditorController::newToolAction(const char* id, const QString &tr_te
 	if (whats_this_link) action->setWhatsThis(Util::makeWhatThis(whats_this_link));
 	if (receiver) QObject::connect(action, SIGNAL(activated()), receiver, slot);
 	actionsById[id] = action;
+	const auto action_id = QByteArray(id);
+	connect(action, &QAction::changed, this, [this, action, action_id] {
+		if (read_only && !isReadOnlySafeAction(action_id)
+		    && action->isEnabled())
+			action->setEnabled(false);
+	});
 	return action;
 }
 
@@ -4513,6 +4633,33 @@ void MapEditorController::updateWidgets()
 			updateMapPartsUI();
 		}
 	}
+	enforceReadOnlyActions();
+}
+
+void MapEditorController::enforceReadOnlyActions()
+{
+	if (!read_only)
+		return;
+
+	for (auto it = actionsById.cbegin(); it != actionsById.cend(); ++it)
+	{
+		if (!isReadOnlySafeAction(it.key()))
+			it.value()->setEnabled(false);
+	}
+	if (mobile_symbol_selector_action)
+		mobile_symbol_selector_action->setEnabled(false);
+	if (mappart_add_act)
+		mappart_add_act->setEnabled(false);
+	if (mappart_rename_act)
+		mappart_rename_act->setEnabled(false);
+	if (mappart_remove_act)
+		mappart_remove_act->setEnabled(false);
+	if (mappart_merge_act)
+		mappart_merge_act->setEnabled(false);
+	if (mappart_move_menu)
+		mappart_move_menu->setEnabled(false);
+	if (mappart_merge_menu)
+		mappart_merge_menu->setEnabled(false);
 }
 
 void MapEditorController::createSymbolWidget(QWidget* parent)

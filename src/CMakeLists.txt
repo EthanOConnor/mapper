@@ -119,6 +119,7 @@ set(Mapper_Common_SRCS
   settings.cpp
 
 	collaboration/managed_map_workspace.cpp
+	collaboration/map_hub_read_only_document.cpp
 	collaboration/map_hub_api_client.cpp
 	collaboration/map_hub_credentials.cpp
 	collaboration/map_hub_edit_transaction.cpp

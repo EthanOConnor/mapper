@@ -57,17 +57,24 @@ public:
                                 JsonHandler handler);
   void library(JsonHandler handler);
   void projectManifest(const QString &project_id, JsonHandler handler);
+  void openProject(const QString &project_id, JsonHandler handler);
+  void createEditAccessRequest(const QString &project_id,
+                               const QString &message,
+                               const QString &idempotency_key,
+                               JsonHandler handler);
+  void editAccessRequest(const QString &request_id, const QString &etag,
+                         SyncStateHandler handler);
+  void cancelEditAccessRequest(const QString &request_id, JsonHandler handler);
   void createProject(const QJsonObject &project, const QString &idempotency_key,
                      JsonHandler handler);
   void startAssignment(const QString &assignment_id, JsonHandler handler);
   void checkpoint(const QString &workspace_id, const QString &file_path,
                   const QString &base_revision_id, const QString &editing_lease,
                   const QString &label, const QString &change_summary,
-                  const QString &idempotency_key,
-                  qint64 stream_sequence, const QString &stream_hash,
+                  const QString &idempotency_key, qint64 stream_sequence,
+                  const QString &stream_hash,
                   const QString &project_revision_id,
-                  const QString &entity_index_sha256,
-                  JsonHandler handler);
+                  const QString &entity_index_sha256, JsonHandler handler);
   void submitRevision(const QString &revision_id, const QString &editing_lease,
                       JsonHandler handler);
   void renewLease(const QString &workspace_id, const QString &editing_lease,
@@ -87,15 +94,17 @@ public:
                                       JsonHandler handler);
   void uploadWorkspaceSnapshot(
       const QString &workspace_id, const QString &file_path,
-      const QByteArray &canonical_entity_index,
-      qint64 base_stream_sequence, const QString &base_stream_hash,
-      const QString &file_sha256, qint64 file_size,
-      const QString &workspace_revision_id,
-      const QString &project_revision_id,
-      const QString &client_instance_id, const QString &editing_lease,
-      const QString &idempotency_key, JsonHandler handler);
+      const QByteArray &canonical_entity_index, qint64 base_stream_sequence,
+      const QString &base_stream_hash, const QString &file_sha256,
+      qint64 file_size, const QString &workspace_revision_id,
+      const QString &project_revision_id, const QString &client_instance_id,
+      const QString &editing_lease, const QString &idempotency_key,
+      JsonHandler handler);
   void downloadArtifact(const QUrl &url, const QString &expected_sha256,
                         const QString &destination, DownloadHandler handler);
+  void downloadArtifact(const QUrl &url, const QString &expected_sha256,
+                        qint64 expected_size, const QString &destination,
+                        DownloadHandler handler);
 
   static QString sha256ForFile(const QString &path, QString *error = nullptr);
   static bool isAcceptableServerUrl(const QUrl &url);

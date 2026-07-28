@@ -38,6 +38,7 @@ private slots:
   void refresh();
   void startSelectedAssignment();
   void openSelectedProject();
+  void requestSelectedProjectAccess();
   void openSelectedEvent();
   void createConnectedMap();
   void updateActions();
@@ -61,6 +62,9 @@ private:
   void beginWorkspace(const QJsonObject &response, const QString &assignment_id,
                       const QString &project_title,
                       const ManagedMapWorkspace &defaults);
+  void startAssignment(const QString &assignment_id, const QString &project_id,
+                       const QString &project_title,
+                       const QString &assignment_title);
   QString projectTitle(const QString &project_id) const;
   QString uniqueDestination(const QString &project_title,
                             const QString &project_id,
@@ -97,6 +101,7 @@ private:
   QTreeWidget *event_list;
   QPushButton *start_button;
   QPushButton *open_project_button;
+  QPushButton *request_access_button;
   QPushButton *open_event_button;
   QPushButton *new_button;
   QPushButton *refresh_button;
