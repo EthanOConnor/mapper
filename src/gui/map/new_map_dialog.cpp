@@ -95,11 +95,25 @@ NewMapDialog::NewMapDialog(QWidget *parent)
   auto mobile_font = font();
   mobile_font.setPointSizeF(16.0);
   setFont(mobile_font);
+  setStyleSheet(QStringLiteral(
+      "QDialog { background: palette(window); }"
+      "QFrame#newMapCard { background: palette(base); border: 1px solid "
+      "palette(midlight); border-radius: 14px; }"
+      "QComboBox, QListWidget { background: palette(window); border: 1px "
+      "solid palette(midlight); border-radius: 10px; padding: 7px 9px; }"
+      "QListWidget::item { padding: 11px 7px; }"
+      "QPushButton#newMapPrimary { background: palette(highlight); color: "
+      "palette(highlighted-text); border: 0; border-radius: 12px; "
+      "padding: 10px 14px; }"
+      "QPushButton#newMapQuiet { background: transparent; border: 0; "
+      "color: palette(highlight); padding: 10px 14px; }"
+      "QWidget#newMapFooter { background: palette(base); border-top: 1px "
+      "solid palette(midlight); }"));
 
   auto *content = new QWidget(this);
   auto *content_layout = new QVBoxLayout(content);
-  content_layout->setContentsMargins(20, 18, 20, 20);
-  content_layout->setSpacing(10);
+  content_layout->setContentsMargins(18, 18, 18, 20);
+  content_layout->setSpacing(12);
 
   auto *title = new QLabel(tr("New local map"), content);
   auto title_font = title->font();
@@ -115,47 +129,59 @@ NewMapDialog::NewMapDialog(QWidget *parent)
   content_layout->addWidget(intro);
   content_layout->addSpacing(10);
 
-  auto make_step_title = [content](const QString &text) {
-    auto *label = new QLabel(text, content);
+  auto make_step_title = [](const QString &text, QWidget *parent) {
+    auto *label = new QLabel(text, parent);
     auto font = label->font();
     font.setBold(true);
-    font.setPointSizeF(font.pointSizeF() * 1.15);
+    font.setPointSizeF(17.0);
     label->setFont(font);
     return label;
   };
 
-  content_layout->addWidget(make_step_title(tr("1  Map scale")));
+  auto *scale_card = new QFrame(content);
+  scale_card->setObjectName(QStringLiteral("newMapCard"));
+  auto *scale_card_layout = new QVBoxLayout(scale_card);
+  scale_card_layout->setContentsMargins(14, 13, 14, 14);
+  scale_card_layout->setSpacing(8);
+  scale_card_layout->addWidget(
+      make_step_title(tr("1  Map scale"), scale_card));
   auto *scale_row = new QHBoxLayout();
-  auto *scale_prefix = new QLabel(tr("1 :"), content);
+  scale_row->setSpacing(10);
+  auto *scale_prefix = new QLabel(tr("1 :"), scale_card);
   auto scale_prefix_font = scale_prefix->font();
   scale_prefix_font.setBold(true);
   scale_prefix->setFont(scale_prefix_font);
   scale_combo->setMinimumHeight(44);
   scale_row->addWidget(scale_prefix);
   scale_row->addWidget(scale_combo, 1);
-  content_layout->addLayout(scale_row);
+  scale_card_layout->addLayout(scale_row);
   auto *scale_help = new QLabel(tr("This filters the installed symbol "
                                    "standards. You can type a custom scale."),
-                                content);
+                                scale_card);
   scale_help->setWordWrap(true);
   scale_help->setStyleSheet(QStringLiteral("color: palette(mid);"));
-  content_layout->addWidget(scale_help);
-  content_layout->addWidget(requirement_label);
-  content_layout->addSpacing(10);
+  scale_card_layout->addWidget(scale_help);
+  scale_card_layout->addWidget(requirement_label);
+  content_layout->addWidget(scale_card);
 
-  content_layout->addWidget(make_step_title(tr("2  Symbol standard")));
+  auto *symbols_card = new QFrame(content);
+  symbols_card->setObjectName(QStringLiteral("newMapCard"));
+  auto *symbols_card_layout = new QVBoxLayout(symbols_card);
+  symbols_card_layout->setContentsMargins(14, 13, 14, 14);
+  symbols_card_layout->setSpacing(8);
+  symbols_card_layout->addWidget(
+      make_step_title(tr("2  Symbol standard"), symbols_card));
   auto *symbols_help =
       new QLabel(tr("Choose the symbols you will map with. An empty set is "
                     "intended for advanced setup."),
-                 content);
+                 symbols_card);
   symbols_help->setWordWrap(true);
   symbols_help->setStyleSheet(QStringLiteral("color: palette(mid);"));
-  content_layout->addWidget(symbols_help);
+  symbols_card_layout->addWidget(symbols_help);
   symbol_set_list->setMinimumHeight(260);
-  symbol_set_list->setStyleSheet(
-      QStringLiteral("QListWidget::item { padding: 12px 8px; }"));
-  content_layout->addWidget(symbol_set_list, 1);
-  content_layout->addWidget(symbol_set_matching);
+  symbols_card_layout->addWidget(symbol_set_list, 1);
+  symbols_card_layout->addWidget(symbol_set_matching);
+  content_layout->addWidget(symbols_card, 1);
 
   auto *scroll_area = new QScrollArea(this);
   scroll_area->setWidgetResizable(true);
@@ -166,14 +192,18 @@ NewMapDialog::NewMapDialog(QWidget *parent)
   scroll_area->setWidget(content);
 
   create_button->setText(tr("Continue to Files"));
-  create_button->setMinimumHeight(44);
+  create_button->setMinimumHeight(48);
+  create_button->setObjectName(QStringLiteral("newMapPrimary"));
+  button_box->button(QDialogButtonBox::Cancel)
+      ->setObjectName(QStringLiteral("newMapQuiet"));
   auto *layout = new QVBoxLayout(this);
   layout->setContentsMargins({});
   layout->setSpacing(0);
   layout->addWidget(scroll_area, 1);
   auto *button_row = new QWidget(this);
+  button_row->setObjectName(QStringLiteral("newMapFooter"));
   auto *button_layout = new QVBoxLayout(button_row);
-  button_layout->setContentsMargins(20, 10, 20, 14);
+  button_layout->setContentsMargins(18, 10, 18, 14);
   button_layout->addWidget(button_box);
   layout->addWidget(button_row);
 #else

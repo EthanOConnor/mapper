@@ -38,6 +38,7 @@
 #include <QScrollArea>
 #include <QScroller>
 #include <QSettings>
+#include <QSize>
 #include <QStyle>
 #include <QToolButton>
 #include <QVBoxLayout>
@@ -354,12 +355,12 @@ HomeScreenWidgetMobile::HomeScreenWidgetMobile(HomeScreenController *controller,
 
   auto *content = new QWidget(scroll_area);
   auto *content_layout = new QVBoxLayout(content);
-  content_layout->setContentsMargins(20, 18, 20, 24);
-  content_layout->setSpacing(12);
+  content_layout->setContentsMargins(18, 18, 18, 24);
+  content_layout->setSpacing(8);
 
   auto *title = new QLabel(tr("Mapper"), content);
   auto title_font = title->font();
-  title_font.setPointSizeF(title_font.pointSizeF() * 2.2);
+  title_font.setPointSizeF(title_font.pointSizeF() * 2.0);
   title_font.setWeight(QFont::Bold);
   title->setFont(title_font);
   content_layout->addWidget(title);
@@ -370,13 +371,13 @@ HomeScreenWidgetMobile::HomeScreenWidgetMobile(HomeScreenController *controller,
   subtitle->setWordWrap(true);
   subtitle->setStyleSheet(QStringLiteral("color: palette(mid);"));
   content_layout->addWidget(subtitle);
-  content_layout->addSpacing(8);
+  content_layout->addSpacing(12);
 
   auto make_section_title = [content](const QString &text) {
     auto *label = new QLabel(text, content);
     auto font = label->font();
     font.setBold(true);
-    font.setPointSizeF(font.pointSizeF() * 1.15);
+    font.setPointSizeF(17.0);
     label->setFont(font);
     return label;
   };
@@ -388,10 +389,39 @@ HomeScreenWidgetMobile::HomeScreenWidgetMobile(HomeScreenController *controller,
     action_font.setPointSizeF(16.0);
     button->setFont(action_font);
     button->setIcon(icon);
-    button->setMinimumHeight(92);
+    button->setIconSize(QSize(30, 30));
+    button->setMinimumHeight(88);
     button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
+    button->setStyleSheet(QStringLiteral(
+        "QCommandLinkButton { background: transparent; border: 0; "
+        "border-radius: 0; padding: 10px 12px; text-align: left; }"
+        "QCommandLinkButton:pressed { background: palette(alternate-base); }"));
     return button;
   };
+
+  auto make_action_group =
+      [content](const QList<QCommandLinkButton *> &actions) {
+        auto *group = new QFrame(content);
+        group->setObjectName(QStringLiteral("startupActionGroup"));
+        group->setStyleSheet(QStringLiteral(
+            "QFrame#startupActionGroup { background: palette(base); "
+            "border: 1px solid palette(midlight); border-radius: 14px; }"));
+        auto *group_layout = new QVBoxLayout(group);
+        group_layout->setContentsMargins({});
+        group_layout->setSpacing(0);
+        for (int i = 0; i < actions.size(); ++i) {
+          group_layout->addWidget(actions.at(i));
+          if (i + 1 == actions.size())
+            continue;
+          auto *separator = new QFrame(group);
+          separator->setFrameShape(QFrame::NoFrame);
+          separator->setFixedHeight(1);
+          separator->setStyleSheet(
+              QStringLiteral("background: palette(midlight); border: 0;"));
+          group_layout->addWidget(separator);
+        }
+        return group;
+      };
 
   content_layout->addWidget(make_section_title(tr("Continue")));
   recent_files_empty_label = new QLabel(
@@ -399,8 +429,9 @@ HomeScreenWidgetMobile::HomeScreenWidgetMobile(HomeScreenController *controller,
       content);
   recent_files_empty_label->setWordWrap(true);
   recent_files_empty_label->setStyleSheet(
-      QStringLiteral("padding: 12px; color: palette(mid); "
-                     "background: palette(base); border-radius: 8px;"));
+      QStringLiteral("padding: 14px; color: palette(mid); "
+                     "background: palette(base); border: 1px solid "
+                     "palette(midlight); border-radius: 14px;"));
   content_layout->addWidget(recent_files_empty_label);
 
   file_list_widget = makeFileListWidget();
@@ -409,19 +440,20 @@ HomeScreenWidgetMobile::HomeScreenWidgetMobile(HomeScreenController *controller,
   file_list_widget->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
   file_list_widget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
   file_list_widget->setStyleSheet(QStringLiteral(
-      "QListWidget { background: palette(base); border-radius: 8px; }"
+      "QListWidget { background: palette(base); border: 1px solid "
+      "palette(midlight); border-radius: 14px; }"
       "QListWidget::item { padding: 12px 8px; border-bottom: 1px solid "
       "palette(midlight); }"));
   connect(file_list_widget, &QListWidget::itemClicked, this,
           &HomeScreenWidgetMobile::itemClicked);
   content_layout->addWidget(file_list_widget);
 
-  content_layout->addSpacing(8);
+  content_layout->addSpacing(10);
   content_layout->addWidget(make_section_title(tr("Open or start")));
   auto *map_hub_button = make_action(
       tr("Map Hub"),
       tr("Open an assignment, organization map, or event workspace."),
-      style()->standardIcon(QStyle::SP_DriveNetIcon));
+      ActionIcon::fromName(u"map-information"));
   auto *open_button =
       make_action(tr("Browse Files"),
                   tr("Open an existing OMAP, OCD, or other supported map."),
@@ -436,12 +468,11 @@ HomeScreenWidgetMobile::HomeScreenWidgetMobile(HomeScreenController *controller,
           &MainWindow::showOpenDialog);
   connect(new_button, &QAbstractButton::clicked, controller->getWindow(),
           &MainWindow::showNewMapWizard);
-  content_layout->addWidget(map_hub_button);
-  content_layout->addWidget(open_button);
-  content_layout->addWidget(new_button);
+  content_layout->addWidget(
+      make_action_group({map_hub_button, open_button, new_button}));
 
 #ifdef MAPPER_GNSS_AVAILABLE
-  content_layout->addSpacing(8);
+  content_layout->addSpacing(10);
   content_layout->addWidget(make_section_title(tr("Ready for the field")));
   auto gnss_description = tr("Use iPhone location, or configure a Bluetooth "
                              "GNSS receiver and NTRIP corrections.");
@@ -456,20 +487,31 @@ HomeScreenWidgetMobile::HomeScreenWidgetMobile(HomeScreenController *controller,
                             ActionIcon::fromName(u"tool-gps-display"));
   connect(gnss_button, &QAbstractButton::clicked, this,
           &HomeScreenWidgetMobile::showGnssSettings);
-  content_layout->addWidget(gnss_button);
+  content_layout->addWidget(make_action_group({gnss_button}));
 #endif
 
-  content_layout->addSpacing(8);
+  content_layout->addSpacing(10);
   content_layout->addWidget(make_section_title(tr("Learn and configure")));
   auto *examples_button =
       make_action(tr("Example maps"),
                   tr("Explore bundled maps without choosing a file provider."),
-                  style()->standardIcon(QStyle::SP_FileDialogDetailedView));
+                  ActionIcon::fromName(u"symbols"));
   connect(examples_button, &QAbstractButton::clicked, this,
           &HomeScreenWidgetMobile::showExamples);
-  content_layout->addWidget(examples_button);
+  content_layout->addWidget(make_action_group({examples_button}));
 
-  auto *utility_buttons = new QHBoxLayout();
+  auto *utility_card = new QFrame(content);
+  utility_card->setObjectName(QStringLiteral("startupUtilityCard"));
+  utility_card->setStyleSheet(QStringLiteral(
+      "QFrame#startupUtilityCard { background: palette(base); border: 1px "
+      "solid palette(midlight); border-radius: 14px; }"
+      "QFrame#startupUtilityCard QPushButton { background: transparent; "
+      "border: 0; padding: 10px 6px; }"
+      "QFrame#startupUtilityCard QPushButton:pressed { background: "
+      "palette(alternate-base); }"));
+  auto *utility_buttons = new QHBoxLayout(utility_card);
+  utility_buttons->setContentsMargins(4, 4, 4, 4);
+  utility_buttons->setSpacing(0);
   auto *settings_button = new QPushButton(ActionIcon::fromName(u"settings"),
                                           tr("Settings"), content);
   auto *help_button =
@@ -485,7 +527,7 @@ HomeScreenWidgetMobile::HomeScreenWidgetMobile(HomeScreenController *controller,
   utility_buttons->addWidget(settings_button);
   utility_buttons->addWidget(help_button);
   utility_buttons->addWidget(about_button);
-  content_layout->addLayout(utility_buttons);
+  content_layout->addWidget(utility_card);
   content_layout->addStretch();
 
   scroll_area->setWidget(content);
@@ -645,13 +687,28 @@ void HomeScreenWidgetMobile::showGnssSettings() {
 void HomeScreenWidgetMobile::showExamples() {
   QDialog dialog(controller->getWindow());
   dialog.setWindowTitle(tr("Example maps"));
-  if (auto *main_window = controller->getWindow())
+  if (auto *main_window = controller->getWindow()) {
+    dialog.setAttribute(Qt::WA_WindowPropagation);
+    dialog.setPalette(main_window->palette());
     dialog.resize(main_window->size());
+  }
+  auto mobile_font = dialog.font();
+  mobile_font.setPointSizeF(16.0);
+  dialog.setFont(mobile_font);
+  dialog.setStyleSheet(QStringLiteral(
+      "QDialog { background: palette(window); }"
+      "QListWidget { background: palette(base); border: 1px solid "
+      "palette(midlight); border-radius: 14px; }"
+      "QListWidget::item { padding: 13px 10px; border-bottom: 1px solid "
+      "palette(midlight); }"
+      "QPushButton#examplesQuiet { background: transparent; border: 0; "
+      "color: palette(highlight); padding: 10px 14px; }"));
 
   auto *intro = new QLabel(tr("These read-only examples are included with "
                               "Mapper. Choose one to open it."),
                            &dialog);
   intro->setWordWrap(true);
+  intro->setStyleSheet(QStringLiteral("color: palette(mid);"));
   auto *list = new QListWidget(&dialog);
   QScroller::grabGesture(list->viewport(), QScroller::TouchGesture);
   list->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
@@ -669,7 +726,17 @@ void HomeScreenWidgetMobile::showExamples() {
     item->setData(pathRole(), file_info.filePath());
   }
   auto *buttons = new QDialogButtonBox(QDialogButtonBox::Cancel, &dialog);
+  buttons->button(QDialogButtonBox::Cancel)
+      ->setObjectName(QStringLiteral("examplesQuiet"));
   auto *layout = new QVBoxLayout(&dialog);
+  layout->setContentsMargins(18, 18, 18, 14);
+  layout->setSpacing(12);
+  auto *title = new QLabel(tr("Example maps"), &dialog);
+  auto title_font = title->font();
+  title_font.setPointSizeF(title_font.pointSizeF() * 1.8);
+  title_font.setBold(true);
+  title->setFont(title_font);
+  layout->addWidget(title);
   layout->addWidget(intro);
   layout->addWidget(list, 1);
   layout->addWidget(buttons);
