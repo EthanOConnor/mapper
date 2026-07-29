@@ -297,6 +297,7 @@ void MapHubWorkspaceTest::
   const auto bytes = record.readAll();
   QVERIFY(!bytes.contains("Bearer"));
   QVERIFY(!bytes.contains("lease"));
+  record.close();
 #ifdef Q_OS_UNIX
   QVERIFY(record.permissions().testFlag(QFileDevice::ReadOwner));
   QVERIFY(!record.permissions().testFlag(QFileDevice::ReadGroup));
