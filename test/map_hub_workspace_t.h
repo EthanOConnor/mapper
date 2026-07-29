@@ -28,6 +28,7 @@ private slots:
   void canonicalizesOperationJsonExactly();
   void rejectsValuesOutsideOperationJsonProfile();
   void boundsZstdTransportFrames();
+  void workspaceSyncStateDecodesBoundedZstd();
   void pendingDraftRoundTripsAndCoalesces();
   void pendingDraftRejectsMovedOrMissingSnapshots();
   void relocatesStaleIosWorkspaceRoots();

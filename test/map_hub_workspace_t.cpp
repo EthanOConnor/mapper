@@ -100,6 +100,81 @@ void MapHubWorkspaceTest::boundsZstdTransportFrames() {
   QVERIFY(!error.isEmpty());
 }
 
+void MapHubWorkspaceTest::workspaceSyncStateDecodesBoundedZstd() {
+  QTcpServer server;
+  if (!server.listen(QHostAddress::LocalHost))
+    QSKIP("The test sandbox does not permit a loopback listener");
+
+  const auto workspace_id =
+      QStringLiteral("60000000-0000-4000-8000-000000000081");
+  const QByteArray json =
+      "{\"protocol\":\"oom-map-ops/1\",\"stream\":{\"head_sequence\":0}}";
+  QString compression_error;
+  const auto compressed = ZstdCodec::compress(json, 3, &compression_error);
+  QVERIFY2(!compressed.isEmpty(), qPrintable(compression_error));
+
+  QList<QByteArray> requests;
+  connect(&server, &QTcpServer::newConnection, this, [&] {
+    auto *socket = server.nextPendingConnection();
+    connect(socket, &QTcpSocket::readyRead, this,
+            [&, socket, bytes = QByteArray{}, responded = false]() mutable {
+              if (responded)
+                return;
+              bytes.append(socket->readAll());
+              if (!bytes.contains("\r\n\r\n"))
+                return;
+              responded = true;
+              requests.push_back(bytes);
+              const auto response_body =
+                  requests.size() == 1 ? compressed : QByteArray("not-zstd");
+              socket->write(
+                  QByteArray("HTTP/1.1 200 OK\r\n"
+                             "Content-Type: application/json\r\n"
+                             "Content-Encoding: zstd\r\n"
+                             "ETag: \"sync-v1\"\r\n"
+                             "Content-Length: ") +
+                  QByteArray::number(response_body.size()) +
+                  QByteArray("\r\nConnection: close\r\n\r\n") + response_body);
+              socket->disconnectFromHost();
+            });
+  });
+
+  MapHubApiClient client(
+      QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort()),
+      QStringLiteral("test-token"));
+  QEventLoop loop;
+  bool decoded = false;
+  MapHubApiClient::Error corrupt_error;
+  client.workspaceSyncState(
+      workspace_id, QStringLiteral("\"sync-v0\""),
+      [&](const QJsonObject &state, const QString &etag, bool not_modified,
+          const MapHubApiClient::Error &error) {
+        QVERIFY2(!error, qPrintable(error.message));
+        QVERIFY(!not_modified);
+        QCOMPARE(etag, QStringLiteral("\"sync-v1\""));
+        QCOMPARE(state.value(QStringLiteral("protocol")).toString(),
+                 QStringLiteral("oom-map-ops/1"));
+        decoded = true;
+        client.workspaceSyncState(
+            workspace_id, {},
+            [&](const QJsonObject &, const QString &, bool,
+                const MapHubApiClient::Error &error) {
+              corrupt_error = error;
+              loop.quit();
+            });
+      });
+  QTimer::singleShot(5000, &loop, &QEventLoop::quit);
+  loop.exec();
+
+  QVERIFY(decoded);
+  QCOMPARE(corrupt_error.code,
+           QStringLiteral("invalid_compressed_response"));
+  QCOMPARE(requests.size(), 2);
+  QVERIFY(requests[0].toLower().contains("accept-encoding: zstd"));
+  QVERIFY(requests[0].toLower().contains(
+      "if-none-match: \"sync-v0\""));
+}
+
 void MapHubWorkspaceTest::initTestCase() {
   QCoreApplication::setOrganizationName(QStringLiteral("OpenOrienteeringTest"));
   QCoreApplication::setApplicationName(QStringLiteral("MapperMapHubTest"));

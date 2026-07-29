@@ -60,6 +60,26 @@ MapHubApiClient::Error invalidIdentifierError() {
               "sent.")};
 }
 
+bool decodeJsonResponse(QNetworkReply *reply, QByteArray *body,
+                        MapHubApiClient::Error *error) {
+  if (reply->rawHeader("Content-Encoding")
+          .compare("zstd", Qt::CaseInsensitive) != 0)
+    return true;
+
+  QString decompression_error;
+  auto decoded =
+      ZstdCodec::decompress(*body, max_json_response_bytes,
+                            &decompression_error);
+  if (decoded.isEmpty() && !body->isEmpty()) {
+    *error = {
+        reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt(),
+        QStringLiteral("invalid_compressed_response"), decompression_error};
+    return false;
+  }
+  *body = std::move(decoded);
+  return true;
+}
+
 struct ArtifactDownloadState {
   QCryptographicHash hash{QCryptographicHash::Sha256};
   qint64 received = 0;
@@ -236,21 +256,11 @@ void MapHubApiClient::finishJson(QNetworkReply *reply, JsonHandler handler) {
           reply->deleteLater();
           return;
         }
-        if (reply->rawHeader("Content-Encoding")
-                .compare("zstd", Qt::CaseInsensitive) == 0) {
-          QString decompression_error;
-          auto decoded = ZstdCodec::decompress(*body, max_json_response_bytes,
-                                               &decompression_error);
-          if (decoded.isEmpty() && !body->isEmpty()) {
-            handler({},
-                    {reply->attribute(QNetworkRequest::HttpStatusCodeAttribute)
-                         .toInt(),
-                     QStringLiteral("invalid_compressed_response"),
-                     decompression_error});
-            reply->deleteLater();
-            return;
-          }
-          *body = std::move(decoded);
+        MapHubApiClient::Error decoding_error;
+        if (!decodeJsonResponse(reply, body.get(), &decoding_error)) {
+          handler({}, decoding_error);
+          reply->deleteLater();
+          return;
         }
         if (reply->error() != QNetworkReply::NoError) {
           handler({}, replyError(reply, *body));
@@ -622,20 +632,11 @@ void MapHubApiClient::editAccessRequest(const QString &request_id,
                    tr("Map Hub returned more than 16 MiB of edit-access "
                       "state; Mapper discarded the response.")});
         } else {
-          if (reply->rawHeader("Content-Encoding")
-                  .compare("zstd", Qt::CaseInsensitive) == 0) {
-            QString decompression_error;
-            auto decoded = ZstdCodec::decompress(
-                *body, max_json_response_bytes, &decompression_error);
-            if (decoded.isEmpty() && !body->isEmpty()) {
-              handler({}, response_etag, false,
-                      {status,
-                       QStringLiteral("invalid_compressed_response"),
-                       decompression_error});
-              reply->deleteLater();
-              return;
-            }
-            *body = std::move(decoded);
+          MapHubApiClient::Error decoding_error;
+          if (!decodeJsonResponse(reply, body.get(), &decoding_error)) {
+            handler({}, response_etag, false, decoding_error);
+            reply->deleteLater();
+            return;
           }
           if (reply->error() != QNetworkReply::NoError) {
             handler({}, response_etag, false, replyError(reply, *body));
@@ -842,11 +843,20 @@ void MapHubApiClient::workspaceSyncState(const QString &workspace_id,
         } else if (*too_large) {
           handler({}, response_etag, false,
                   {status, QStringLiteral("response_too_large"),
-                   tr("Map Hub returned more than 8 MiB of synchronization "
+                   tr("Map Hub returned more than 16 MiB of synchronization "
                       "state; Mapper discarded the response.")});
-        } else if (reply->error() != QNetworkReply::NoError) {
-          handler({}, response_etag, false, replyError(reply, *body));
         } else {
+          MapHubApiClient::Error decoding_error;
+          if (!decodeJsonResponse(reply, body.get(), &decoding_error)) {
+            handler({}, response_etag, false, decoding_error);
+            reply->deleteLater();
+            return;
+          }
+          if (reply->error() != QNetworkReply::NoError) {
+            handler({}, response_etag, false, replyError(reply, *body));
+            reply->deleteLater();
+            return;
+          }
           QJsonParseError parse_error;
           auto document = QJsonDocument::fromJson(*body, &parse_error);
           if (parse_error.error != QJsonParseError::NoError ||
