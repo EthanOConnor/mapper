@@ -13,13 +13,19 @@ vcpkg_download_distfile(ARCHIVE
     SHA512 355a8db490ec2a68c2801644e56178a26416c355792586a6c1c904de116e26f8602bc344e7172181c9d92c4c9e696319243e16405460fad87b23ee997a3ef9da
 )
 
+set(sqlite_patches
+    "${sqlite_builtin_port_dir}/fix-arm-uwp.patch"
+    "${sqlite_builtin_port_dir}/add-config-include.patch"
+)
+if(VCPKG_TARGET_IS_IOS)
+    list(APPEND sqlite_patches
+        "${CMAKE_CURRENT_LIST_DIR}/ios-required-reason-api.patch")
+endif()
+
 vcpkg_extract_source_archive(
     SOURCE_PATH
     ARCHIVE "${ARCHIVE}"
-    PATCHES
-        "${sqlite_builtin_port_dir}/fix-arm-uwp.patch"
-        "${sqlite_builtin_port_dir}/add-config-include.patch"
-        "${CMAKE_CURRENT_LIST_DIR}/ios-required-reason-api.patch"
+    PATCHES ${sqlite_patches}
 )
 
 if(VCPKG_LIBRARY_LINKAGE STREQUAL "dynamic")

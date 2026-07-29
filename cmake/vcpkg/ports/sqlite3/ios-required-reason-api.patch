@@ -38,7 +38,7 @@ index 8c4f6ab..7067b8c 100644
 +    || SQLITE_ENABLE_LOCKING_STYLE
    struct statfs fsInfo;
  #endif
-@@ -46955,3 +46959,4 @@ static int unixOpen(
+@@ -46954,3 +46958,4 @@ static int unixOpen(
 
 -#if defined(__APPLE__) || SQLITE_ENABLE_LOCKING_STYLE
 +#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) \
