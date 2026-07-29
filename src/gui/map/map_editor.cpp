@@ -386,6 +386,14 @@ MapEditorController::MapEditorController(OperatingMode mode, Map* map, MapView* 
 
 MapEditorController::~MapEditorController()
 {
+	if (map)
+	{
+		// An unattached controller may still own a fully loaded map.  Do not
+		// let UndoManager::clear(), called by Map::~Map(), update UI actions
+		// which are only created when the controller is attached.
+		disconnect(
+		  &map->undoManager(), nullptr, this, nullptr);
+	}
 	paste_act = nullptr;
 	delete current_tool;
 	delete override_tool;
@@ -3179,7 +3187,8 @@ void MapEditorController::updateSymbolAndObjectDependentActions()
 
 void MapEditorController::undoStepAvailabilityChanged()
 {
-	if (mode != MapEditor)
+	if (mode != MapEditor || !map || !undo_act || !redo_act
+	    || !clear_undo_redo_history_act)
 		return;
 	
 	undo_act->setEnabled(map->undoManager().canUndo());

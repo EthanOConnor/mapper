@@ -56,6 +56,7 @@
 #include "tools/edit_point_tool.h"
 #include "tools/edit_tool.h"
 #include "tools/sketch_tool.h"
+#include "undo/undo.h"
 #include "undo/undo_manager.h"
 
 using namespace OpenOrienteering;
@@ -265,6 +266,18 @@ void ToolsTest::newMapStartsWithoutFormat()
 	auto* map = new Map;
 	TestMapEditor editor(map);  // taking ownership
 	QCOMPARE(editor.window->currentFormat(), nullptr);
+}
+
+void ToolsTest::unattachedLoadedEditorDestructsCleanly()
+{
+	auto* map = new Map;
+	map->undoManager().push(
+	  std::make_unique<NoOpUndoStep>(map, true));
+
+	// File-provider reloads construct and load a replacement controller before
+	// attaching it to a window.  Destroying a superseded replacement must not
+	// send UndoManager teardown signals to actions which do not exist yet.
+	delete new MapEditorController(MapEditorController::MapEditor, map);
 }
 
 void ToolsTest::framePublishesTemplateContextBeforeRasterCollection()
