@@ -7,6 +7,7 @@
 #ifndef OPENORIENTEERING_SKETCH_TOOL_H
 #define OPENORIENTEERING_SKETCH_TOOL_H
 
+#include <functional>
 #include <vector>
 
 #include <QColor>
@@ -40,6 +41,7 @@ public:
 	~SketchTool() override;
 
 	void setLayer(MapPart* layer);
+	void setChooseLayerCallback(std::function<void()> callback);
 
 	void init() override;
 	const QCursor& getCursor() const override;
@@ -63,6 +65,7 @@ private:
 	void updateDrawingBounds(MapWidget* widget);
 
 	MapPart* layer = nullptr;
+	std::function<void()> choose_layer_callback;
 	QPointer<ActionGridBar> widget;
 	QAction* width_action = nullptr;
 

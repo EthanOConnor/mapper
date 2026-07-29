@@ -15,6 +15,8 @@ class SketchLayerTest : public QObject
 
 private slots:
 	void createsOneLayerAndLazyStyles();
+	void ownedLayerMetadataRoundTrips();
+	void readOnlySidecarRoundTripsVectorLayers();
 	void roundTripsAsNativeVectorData();
 	void encodesAsConnectedEditingEntities();
 	void simplifiesDenseInputWithoutRasterStorage();

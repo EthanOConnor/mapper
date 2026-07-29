@@ -161,7 +161,7 @@ public:
 	void setOverrideTool(MapEditorTool* new_override_tool);
 	
 	/** Returns the current tool. */
-	inline MapEditorTool* getTool() const {return current_tool;}
+	MapEditorTool* getTool() const;
 	
 	/** Returns the default drawing tool for a given symbol. */
 	MapEditorTool* getDefaultDrawToolForSymbol(const Symbol* symbol);
@@ -730,7 +730,7 @@ private:
 	bool mobile_mode;
 	bool window_state_changed = false;
 	
-	MapEditorTool* current_tool;
+	QPointer<MapEditorTool> current_tool;
 	MapEditorTool* override_tool;
 	MapEditorActivity* editor_activity;
 	

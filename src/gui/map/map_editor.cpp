@@ -180,6 +180,7 @@
 #include "tools/rotate_pattern_tool.h"
 #include "tools/rotate_tool.h"
 #include "tools/scale_tool.h"
+#include "tools/sketch_tool.h"
 #include "tools/tool.h"
 #include "undo/map_part_undo.h"
 #include "undo/object_undo.h"
@@ -310,6 +311,7 @@ bool isReadOnlySafeAction(const QByteArray& id)
 		"gpstemporaryclear",
 		"compassdisplay",
 		"alignmapwithnorth",
+		"sketch",
 		"copy-coords",
 	};
 	return safe_actions.contains(id);
@@ -318,7 +320,8 @@ bool isReadOnlySafeAction(const QByteArray& id)
 bool isReadOnlySafeTool(const MapEditorTool* tool)
 {
 	return !tool || tool->toolType() == MapEditorTool::Pan
-	       || tool->toolType() == MapEditorTool::BoxZoom;
+	       || tool->toolType() == MapEditorTool::BoxZoom
+	       || qobject_cast<const SketchTool*>(tool);
 }
 
 }  // namespace
@@ -457,7 +460,7 @@ void MapEditorController::setReadOnly(bool value)
 	if (mappart_selector_box)
 		mappart_selector_box->setEnabled(!read_only && !editing_in_progress);
 	if (sketch_feature)
-		sketch_feature->setEnabled(!read_only && !editing_in_progress);
+		sketch_feature->setEnabled(!editing_in_progress);
 
 	updateWidgets();
 	enforceReadOnlyActions();
@@ -495,6 +498,11 @@ void MapEditorController::setTool(MapEditorTool* new_tool)
 	
 	if (!override_tool)
 		map_widget->setTool(current_tool);
+}
+
+MapEditorTool* MapEditorController::getTool() const
+{
+	return current_tool.data();
 }
 
 void MapEditorController::setEditTool()
@@ -537,7 +545,7 @@ void MapEditorController::setOverrideTool(MapEditorTool* new_override_tool)
 		current_tool->init();
 	}
 	
-	map_widget->setTool(override_tool ? override_tool : current_tool);
+	map_widget->setTool(override_tool ? override_tool : current_tool.data());
 }
 
 MapEditorTool* MapEditorController::getDefaultDrawToolForSymbol(const Symbol* symbol)
@@ -606,7 +614,7 @@ void MapEditorController::setEditingInProgress(bool value)
 		symbol_report_feature->setEnabled(!editing_in_progress);
 		
 		// Sketch layer
-		sketch_feature->setEnabled(!read_only && !editing_in_progress);
+		sketch_feature->setEnabled(!editing_in_progress);
 		
 		updateObjectDependentActions();
 		updateSymbolDependentActions();
@@ -642,6 +650,21 @@ void MapEditorController::setEditorActivity(MapEditorActivity* new_activity)
 void MapEditorController::showPopupWidget(QWidget* child_widget, const QString& title, PopupLocation location)
 {
 	auto const make_mobile_popup = [this, child_widget]() -> QWidget* {
+		if (qobject_cast<ActionGridBar*>(child_widget))
+		{
+			auto* container = map_widget->parentWidget();
+			child_widget->setParent(container);
+			if (auto* layout = qobject_cast<QVBoxLayout*>(
+			        container ? container->layout() : nullptr))
+			{
+				const auto bottom_index =
+				    layout->indexOf(bottom_action_bar);
+				layout->insertWidget(
+				    bottom_index < 0 ? layout->count() : bottom_index,
+				    child_widget);
+				return child_widget;
+			}
+		}
 		// Binding child_widget lifetime directly to map_widget
 		child_widget->setParent(map_widget);
 		

@@ -34,6 +34,7 @@ CompassDisplay::CompassDisplay(QWidget* parent)
  , last_update_time(QTime::currentTime())
 {
 	setAttribute(Qt::WA_NoSystemBackground, true);
+	setAttribute(Qt::WA_TransparentForMouseEvents, true);
 }
 
 CompassDisplay::~CompassDisplay()

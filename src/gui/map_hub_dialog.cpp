@@ -954,6 +954,8 @@ MapHubDialog::MapHubDialog(MainWindow *window)
       "QTabBar::tab:selected { color: palette(text); border-bottom: 3px "
       "solid palette(highlight); }"
       "QTreeWidget { background: palette(window); border: 0; }"
+      "QTreeWidget#mapHubVenueList::item:selected { background: transparent; "
+      "color: palette(text); }"
       "QToolButton#mapHubVenueMore { background: transparent; border: 0; "
       "border-radius: 10px; padding: 8px; }"
       "QToolButton#mapHubVenueMore:pressed { background: "
@@ -1344,7 +1346,10 @@ MapHubDialog::MapHubDialog(MainWindow *window)
       tree->setColumnHidden(column, true);
   }
   project_list->setRootIsDecorated(false);
+  project_list->setObjectName(QStringLiteral("mapHubVenueList"));
   project_list->setSelectionMode(QAbstractItemView::NoSelection);
+  project_list->setFocusPolicy(Qt::NoFocus);
+  project_list->setEditTriggers(QAbstractItemView::NoEditTriggers);
   project_list->setColumnHidden(4, false);
   project_list->header()->setSectionResizeMode(4, QHeaderView::Fixed);
   project_list->setColumnWidth(4, 52);
@@ -1431,6 +1436,13 @@ MapHubDialog::MapHubDialog(MainWindow *window)
           &MapHubDialog::updateActions);
   connect(project_list, &QTreeWidget::itemSelectionChanged, this,
           &MapHubDialog::updateActions);
+#if defined(MAPPER_MOBILE)
+  connect(project_list, &QAbstractItemView::pressed, this,
+          [this] {
+            project_list->setCurrentItem(nullptr);
+            project_list->clearSelection();
+          });
+#endif
   connect(event_list, &QTreeWidget::itemSelectionChanged, this,
           &MapHubDialog::updateActions);
   connect(tabs, &QTabWidget::currentChanged, this,
@@ -1845,6 +1857,35 @@ void MapHubDialog::populate(const QJsonObject &response) {
     tree->setUpdatesEnabled(false);
 #endif
   library_response = response;
+  const auto current_person_id =
+      response.value(QStringLiteral("current_person_id")).toString();
+  if (!current_person_id.isEmpty()) {
+    QString current_person_name;
+    for (const auto value :
+         response.value(QStringLiteral("people")).toArray()) {
+      const auto person = value.toObject();
+      if (person.value(QStringLiteral("id")).toString() ==
+          current_person_id) {
+        current_person_name =
+            person.value(QStringLiteral("display_name")).toString();
+        break;
+      }
+    }
+    const auto server = Settings::getInstance()
+                            .getSetting(Settings::MapHub_ServerUrl)
+                            .toString();
+    const auto account_key =
+        QStringLiteral("FieldSketches/MapHub/%1/")
+            .arg(QString::fromLatin1(
+                QCryptographicHash::hash(server.toUtf8(),
+                                        QCryptographicHash::Sha256)
+                    .toHex()));
+    QSettings settings;
+    settings.setValue(account_key + QStringLiteral("person_id"),
+                      current_person_id);
+    settings.setValue(account_key + QStringLiteral("display_name"),
+                      current_person_name);
+  }
   auto organization = response.value(QStringLiteral("organization")).toObject();
   connection_label->setText(
       tr("Connected to %1")

@@ -146,6 +146,7 @@ set(Mapper_Common_SRCS
   core/map_part.cpp
   core/map_printer.cpp
   core/sketch_layer.cpp
+  core/sketch_layer_sidecar.cpp
   core/map_view.cpp
   core/path_coord.cpp
   core/storage_location.cpp

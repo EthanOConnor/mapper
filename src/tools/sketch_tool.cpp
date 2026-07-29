@@ -146,6 +146,11 @@ void SketchTool::setLayer(MapPart* new_layer)
 	layer = new_layer;
 }
 
+void SketchTool::setChooseLayerCallback(std::function<void()> callback)
+{
+	choose_layer_callback = std::move(callback);
+}
+
 void SketchTool::init()
 {
 	setStatusBarText(
@@ -180,10 +185,18 @@ ActionGridBar* SketchTool::makeToolBar()
 	auto* modes = new QActionGroup(this);
 	modes->setExclusive(true);
 
+	auto* layer_action = new QAction(
+	    ActionIcon::fromName(u"map-parts"), tr("Sketch layer"), toolbar);
+	connect(layer_action, &QAction::triggered, this, [this] {
+		if (choose_layer_callback)
+			choose_layer_callback();
+	});
+	toolbar->addAction(layer_action, 0, 0);
+
 	auto colors = Settings::getInstance().paintOnTemplateColors();
 	if (colors.empty())
 		colors.push_back(Qt::black);
-	auto count = (colors.size() + 1) % 2;
+	auto count = std::size_t{2};
 	for (const auto& color : colors)
 	{
 		QPixmap pixmap(icon_size, icon_size);

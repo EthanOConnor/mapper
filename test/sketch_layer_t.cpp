@@ -10,6 +10,9 @@
 #include <variant>
 
 #include <QBuffer>
+#include <QFileInfo>
+#include <QScopeGuard>
+#include <QTemporaryDir>
 #include <QtTest>
 
 #include "collaboration/map_hub_edit_transaction.h"
@@ -17,6 +20,7 @@
 #include "core/map_part.h"
 #include "core/objects/object.h"
 #include "core/sketch_layer.h"
+#include "core/sketch_layer_sidecar.h"
 #include "core/symbols/sketch_symbol.h"
 #include "render/render_snapshot.h"
 #include "render/qt_render_bridge.h"
@@ -63,6 +67,85 @@ void SketchLayerTest::createsOneLayerAndLazyStyles()
 	    map, color, SketchLayer::Width::Broad);
 	QVERIFY(broad != medium);
 	QCOMPARE(map.getNumSymbols(), 2);
+}
+
+void SketchLayerTest::ownedLayerMetadataRoundTrips()
+{
+	Map original;
+	const auto owner_id =
+	    QStringLiteral("10000000-0000-4000-8000-000000000001");
+	auto* layer = SketchLayer::create(
+	    original, QStringLiteral("Field Sketches — Jul 28, 2026"),
+	    owner_id, QStringLiteral("Ethan"), QDate(2026, 7, 28));
+
+	QBuffer output;
+	QVERIFY(original.exportToIODevice(output));
+	QVERIFY(output.data().contains("mapper-sketch-layer-v1"));
+	QVERIFY(output.data().contains(owner_id.toUtf8()));
+
+	QBuffer input;
+	input.setData(output.data());
+	QVERIFY(input.open(QIODevice::ReadOnly));
+	Map restored;
+	QVERIFY(restored.importFromIODevice(input));
+	auto* restored_layer =
+	    SketchLayer::findById(restored, layer->persistentId());
+	QVERIFY(restored_layer);
+	QCOMPARE(restored_layer->sketchOwnerId(), owner_id);
+	QCOMPARE(restored_layer->sketchOwnerName(), QStringLiteral("Ethan"));
+	QCOMPARE(restored_layer->sketchCreatedOn(), QDate(2026, 7, 28));
+}
+
+void SketchLayerTest::readOnlySidecarRoundTripsVectorLayers()
+{
+	QTemporaryDir root;
+	QVERIFY(root.isValid());
+	qputenv("MAPPER_FIELD_SKETCH_ROOT", root.path().toUtf8());
+	const auto reset_root =
+	    qScopeGuard([] { qunsetenv("MAPPER_FIELD_SKETCH_ROOT"); });
+
+	Map source;
+	const auto owner_id =
+	    QStringLiteral("10000000-0000-4000-8000-000000000002");
+	auto* layer = SketchLayer::create(
+	    source, QStringLiteral("Field Sketches — Jul 28, 2026"),
+	    owner_id, QStringLiteral("Ethan"), QDate(2026, 7, 28));
+	auto* symbol = SketchLayer::ensureSymbol(
+	    source, QColor(20, 80, 220, 190), SketchLayer::Width::Broad);
+	addStroke(
+	    source, layer, symbol,
+	    {MapCoord(-5000, 1000), MapCoord(0, -1200),
+	     MapCoord(8000, 2200)});
+
+	QString error;
+	const auto key = QStringLiteral(
+	    "map-hub:https://maps.example.test:"
+	    "20000000-0000-4000-8000-000000000001");
+	QVERIFY2(SketchLayerSidecar::save(source, key, &error),
+	         qPrintable(error));
+	QVERIFY(QFileInfo::exists(SketchLayerSidecar::pathForKey(key)));
+
+	Map restored;
+	QVERIFY2(SketchLayerSidecar::load(restored, key, &error),
+	         qPrintable(error));
+	auto* restored_layer =
+	    SketchLayer::findById(restored, layer->persistentId());
+	QVERIFY(restored_layer);
+	QCOMPARE(restored_layer->getName(), layer->getName());
+	QCOMPARE(restored_layer->sketchOwnerId(), owner_id);
+	QCOMPARE(restored_layer->getNumObjects(), 1);
+	const auto* restored_path =
+	    dynamic_cast<const PathObject*>(restored_layer->getObject(0));
+	QVERIFY(restored_path);
+	QCOMPARE(restored_path->getCoordinateCount(),
+	         MapCoordVector::size_type(3));
+	QCOMPARE(restored_path->getCoordinate(1), MapCoord(0, -1200));
+	const auto* restored_symbol =
+	    dynamic_cast<const SketchSymbol*>(restored_path->getSymbol());
+	QVERIFY(restored_symbol);
+	QCOMPARE(restored_symbol->strokeColor().rgba64(),
+	         symbol->strokeColor().rgba64());
+	QCOMPARE(restored_symbol->getLineWidth(), symbol->getLineWidth());
 }
 
 void SketchLayerTest::roundTripsAsNativeVectorData()
@@ -229,6 +312,11 @@ void SketchLayerTest::rendersOnlyWithHelperLayersEnabled()
 	QCOMPARE(render::toQColor(stroke->color).rgba64(), color.rgba64());
 	QVERIFY(stroke->style.width >=
 	        SketchLayer::widthMillimeters(SketchLayer::Width::Broad));
+}
+
+namespace {
+[[maybe_unused]] const auto qpa_selected =
+    qputenv("QT_QPA_PLATFORM", "offscreen");
 }
 
 QTEST_MAIN(SketchLayerTest)

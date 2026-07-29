@@ -8,6 +8,8 @@
 #define OPENORIENTEERING_SKETCH_LAYER_FEATURE_H
 
 #include <QObject>
+#include <QDate>
+#include <QString>
 
 class QAction;
 
@@ -31,9 +33,20 @@ private:
 	void sketchClicked(bool checked);
 	void startSketching();
 	void finishSketching();
+	bool chooseLayerForToday();
+	void loadReadOnlySidecar();
+	void persistReadOnlySidecar();
+	void resolveUserIdentity();
+	QString uniqueDefaultLayerName() const;
 
 	MapEditorController& controller;
 	QAction* sketch_action = nullptr;
+	QString current_user_id;
+	QString current_user_name;
+	QString selected_layer_id;
+	QString sidecar_storage_key;
+	QDate layer_choice_date;
+	bool sidecar_loaded = false;
 
 	Q_DISABLE_COPY(SketchLayerFeature)
 };

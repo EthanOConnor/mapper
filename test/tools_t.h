@@ -37,7 +37,7 @@ private slots:
 	
 	void editTool();
 	void sketchToolDrawsWithGlobalUndo();
-	void sketchActionCannotMutateReadOnlyMap();
+	void sketchToolAnnotatesReadOnlyMap();
 	
 	void testFindObjects();
 };

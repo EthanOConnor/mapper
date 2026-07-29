@@ -10,6 +10,8 @@
 #include <vector>
 
 #include <QColor>
+#include <QDate>
+#include <QString>
 
 #include "core/map_coord.h"
 
@@ -36,6 +38,7 @@ public:
 	};
 
 	static QString layerName();
+	static QString defaultLayerName(const QDate& date);
 	static qreal widthMillimeters(Width width) noexcept;
 	static QString widthName(Width width);
 	static Width widthFromSetting(int value) noexcept;
@@ -47,6 +50,13 @@ public:
 
 	static MapPart* find(Map& map) noexcept;
 	static const MapPart* find(const Map& map) noexcept;
+	static std::vector<MapPart*> all(Map& map);
+	static std::vector<const MapPart*> all(const Map& map);
+	static MapPart* findById(Map& map, const QString& id) noexcept;
+	static MapPart* create(Map& map, const QString& name,
+	                       const QString& owner_id,
+	                       const QString& owner_name,
+	                       const QDate& created_on);
 	static MapPart* ensure(Map& map);
 	static int partIndex(const Map& map) noexcept;
 

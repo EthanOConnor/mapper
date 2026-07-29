@@ -30,6 +30,7 @@
 #include <QObject>
 #include <QPoint>
 #include <QPointF>
+#include <QPointer>
 #include <QRect>
 #include <QRectF>
 #include <QScopedPointer>
@@ -428,7 +429,7 @@ private:
 	void updateCursorposLabel(const MapCoordF& pos);
 	
 	MapView* view;
-	MapEditorTool* tool;
+	QPointer<MapEditorTool> tool;
 	MapEditorActivity* activity;
 	
 	CoordsType coords_type;

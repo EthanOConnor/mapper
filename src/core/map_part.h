@@ -28,6 +28,7 @@
 #include <vector>
 #include <utility>
 
+#include <QDate>
 #include <QHash>
 #include <QRectF>
 #include <QString>
@@ -107,6 +108,15 @@ public:
 
 	/** Assigns a fresh stable identity when a copy becomes a new entity. */
 	void renewPersistentId();
+
+	/** Marks this part as a user-owned field-sketch layer. */
+	void setSketchLayerMetadata(const QString& owner_id,
+	                            const QString& owner_name,
+	                            const QDate& created_on);
+	const QString& sketchOwnerId() const noexcept;
+	const QString& sketchOwnerName() const noexcept;
+	const QDate& sketchCreatedOn() const noexcept;
+	bool hasSketchLayerMetadata() const noexcept;
 	
 	/**
 	 * Sets the part's name.
@@ -275,6 +285,9 @@ private:
 
 	QString persistent_id;
 	QString name;
+	QString sketch_owner_id;
+	QString sketch_owner_name;
+	QDate sketch_created_on;
 	ObjectList objects;  ///< @todo This could be a spatial representation optimized for quick access
 	Map* const map;
 };

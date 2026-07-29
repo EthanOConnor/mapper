@@ -30,11 +30,14 @@
 #include <QtTest>
 #include <QAction>
 #include <QApplication>
+#include <QDialog>
 #include <QEvent>
+#include <QListWidget>
 #include <QMouseEvent>
 #include <QPoint>
 #include <QPointF>
 #include <QString>
+#include <QTimer>
 
 #include "core/map.h"
 #include "core/map_color.h"
@@ -116,6 +119,19 @@ QAction* actionWithText(QObject* parent, const QString& text)
 			return action;
 	}
 	return nullptr;
+}
+
+void acceptFirstSketchLayer()
+{
+	QTimer::singleShot(0, [] {
+		auto* dialog = qobject_cast<QDialog*>(
+		    QApplication::activeModalWidget());
+		QVERIFY(dialog);
+		auto* list = dialog->findChild<QListWidget*>();
+		QVERIFY(list);
+		list->setCurrentRow(0);
+		dialog->accept();
+	});
 }
 
 } // namespace
@@ -310,12 +326,19 @@ void ToolsTest::sketchToolDrawsWithGlobalUndo()
 	auto* map = new Map;
 	TestMapEditor editor(map);
 	editor.map_widget->resize(320, 240);
+	SketchLayer::ensure(*map);
 	auto* sketch_action =
 	    actionWithText(editor.window, QStringLiteral("Sketch"));
 	QVERIFY(sketch_action);
 	QVERIFY(sketch_action->isEnabled());
+	acceptFirstSketchLayer();
 	sketch_action->trigger();
-	QVERIFY(qobject_cast<SketchTool*>(editor.editor->getTool()));
+	auto* sketch_tool =
+	    qobject_cast<SketchTool*>(editor.editor->getTool());
+	QVERIFY(sketch_tool);
+	QVERIFY(actionWithText(editor.window, QStringLiteral("Sketch layer")));
+	QVERIFY(actionWithText(editor.window, QStringLiteral("Erase stroke")));
+	QVERIFY(actionWithText(editor.window, QStringLiteral("Stroke width")));
 
 	editor.simulateDrag(QPoint(80, 120), QPoint(240, 120));
 	auto* layer = SketchLayer::find(*map);
@@ -323,25 +346,50 @@ void ToolsTest::sketchToolDrawsWithGlobalUndo()
 	QCOMPARE(layer->getNumObjects(), 1);
 	QVERIFY(map->undoManager().canUndo());
 
-	QVERIFY(map->undoManager().undo(editor.window));
+	QAction* global_undo = nullptr;
+	for (auto* action : editor.window->findChildren<QAction*>(
+	         QString{}, Qt::FindDirectChildrenOnly))
+	{
+		if (action->text() == QStringLiteral("Undo"))
+		{
+			global_undo = action;
+			break;
+		}
+	}
+	QVERIFY(global_undo);
+	global_undo->trigger();
 	QCOMPARE(layer->getNumObjects(), 0);
+
+	// A tool may be destroyed asynchronously after its controls have closed.
+	// The controller must not retain a dangling tool pointer when Sketch is
+	// selected again.
+	sketch_tool->deleteLater();
+	QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+	QVERIFY(!editor.editor->getTool());
+	QVERIFY(!sketch_action->isChecked());
+	sketch_action->trigger();
+	QVERIFY(qobject_cast<SketchTool*>(editor.editor->getTool()));
+
 	QVERIFY(map->undoManager().redo(editor.window));
 	QCOMPARE(layer->getNumObjects(), 1);
 }
 
-void ToolsTest::sketchActionCannotMutateReadOnlyMap()
+void ToolsTest::sketchToolAnnotatesReadOnlyMap()
 {
 	auto* map = new Map;
 	TestMapEditor editor(map);
+	auto* layer = SketchLayer::ensure(*map);
 	editor.editor->setReadOnly(true);
 	auto* sketch_action =
 	    actionWithText(editor.window, QStringLiteral("Sketch"));
 	QVERIFY(sketch_action);
-	QVERIFY(!sketch_action->isEnabled());
-	const auto initial_parts = map->getNumParts();
+	QVERIFY(sketch_action->isEnabled());
+	acceptFirstSketchLayer();
 	sketch_action->trigger();
-	QCOMPARE(map->getNumParts(), initial_parts);
-	QCOMPARE(SketchLayer::find(*map), nullptr);
+	QVERIFY(qobject_cast<SketchTool*>(editor.editor->getTool()));
+	editor.simulateDrag(QPoint(80, 120), QPoint(240, 120));
+	QCOMPARE(map->getNumParts(), 2);
+	QCOMPARE(layer->getNumObjects(), 1);
 }
 
 void ToolsTest::testFindObjects()

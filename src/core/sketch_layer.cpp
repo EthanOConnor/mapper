@@ -10,7 +10,9 @@
 #include <cmath>
 
 #include <QString>
+#include <QCoreApplication>
 #include <QLineF>
+#include <QLocale>
 
 #include "core/map.h"
 #include "core/map_part.h"
@@ -89,6 +91,13 @@ QString SketchLayer::layerName()
 	return QString::fromLatin1(layer_name);
 }
 
+QString SketchLayer::defaultLayerName(const QDate& date)
+{
+	return QCoreApplication::translate(
+	           "SketchLayer", "Field Sketches — %1")
+	    .arg(QLocale().toString(date, QLocale::ShortFormat));
+}
+
 qreal SketchLayer::widthMillimeters(Width width) noexcept
 {
 	switch (width)
@@ -140,6 +149,8 @@ bool SketchLayer::isSketchPart(const MapPart* part) noexcept
 {
 	if (!part)
 		return false;
+	if (part->hasSketchLayerMetadata())
+		return true;
 	if (part->getName() == QLatin1String(layer_name))
 		return true;
 	return part->existsObject(
@@ -167,6 +178,42 @@ const MapPart* SketchLayer::find(const Map& map) noexcept
 			return part;
 	}
 	return nullptr;
+}
+
+std::vector<MapPart*> SketchLayer::all(Map& map)
+{
+	std::vector<MapPart*> result;
+	for (int i = 0; i < map.getNumParts(); ++i)
+		if (isSketchPart(map.getPart(i)))
+			result.push_back(map.getPart(i));
+	return result;
+}
+
+std::vector<const MapPart*> SketchLayer::all(const Map& map)
+{
+	std::vector<const MapPart*> result;
+	for (int i = 0; i < map.getNumParts(); ++i)
+		if (isSketchPart(map.getPart(i)))
+			result.push_back(map.getPart(i));
+	return result;
+}
+
+MapPart* SketchLayer::findById(Map& map, const QString& id) noexcept
+{
+	for (auto* part : all(map))
+		if (part->persistentId() == id)
+			return part;
+	return nullptr;
+}
+
+MapPart* SketchLayer::create(
+        Map& map, const QString& name, const QString& owner_id,
+        const QString& owner_name, const QDate& created_on)
+{
+	auto* part = new MapPart(name, &map);
+	part->setSketchLayerMetadata(owner_id, owner_name, created_on);
+	map.addPart(part, map.getNumParts());
+	return part;
 }
 
 MapPart* SketchLayer::ensure(Map& map)

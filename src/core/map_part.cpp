@@ -49,6 +49,11 @@ namespace literal
 	const QLatin1String objects("objects");
 	const QLatin1String object("object");
 	const QLatin1String count("count");
+	const QLatin1String kind("kind");
+	const QLatin1String sketch_kind("mapper-sketch-layer-v1");
+	const QLatin1String sketch_owner_id("sketch_owner_id");
+	const QLatin1String sketch_owner_name("sketch_owner_name");
+	const QLatin1String sketch_created_on("sketch_created_on");
 }
 
 
@@ -76,6 +81,35 @@ void MapPart::renewPersistentId()
 	persistent_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
 }
 
+void MapPart::setSketchLayerMetadata(
+        const QString& owner_id, const QString& owner_name,
+        const QDate& created_on)
+{
+	sketch_owner_id = owner_id;
+	sketch_owner_name = owner_name;
+	sketch_created_on = created_on;
+}
+
+const QString& MapPart::sketchOwnerId() const noexcept
+{
+	return sketch_owner_id;
+}
+
+const QString& MapPart::sketchOwnerName() const noexcept
+{
+	return sketch_owner_name;
+}
+
+const QDate& MapPart::sketchCreatedOn() const noexcept
+{
+	return sketch_created_on;
+}
+
+bool MapPart::hasSketchLayerMetadata() const noexcept
+{
+	return !sketch_owner_id.isEmpty();
+}
+
 MapPart::~MapPart()
 {
 	for (Object* object : objects)
@@ -97,6 +131,16 @@ void MapPart::save(QXmlStreamWriter& xml) const
 	XmlElementWriter part_element(xml, literal::part);
 	part_element.writeAttribute(literal::name, name);
 	part_element.writeAttribute(literal::uuid, persistent_id);
+	if (hasSketchLayerMetadata())
+	{
+		part_element.writeAttribute(literal::kind, literal::sketch_kind);
+		part_element.writeAttribute(literal::sketch_owner_id, sketch_owner_id);
+		part_element.writeAttribute(
+		    literal::sketch_owner_name, sketch_owner_name);
+		part_element.writeAttribute(
+		    literal::sketch_created_on,
+		    sketch_created_on.toString(Qt::ISODate));
+	}
 	{
 		XmlElementWriter objects_element(xml, literal::objects);
 		objects_element.writeAttribute(literal::count, objects.size());
@@ -119,6 +163,17 @@ MapPart* MapPart::load(QXmlStreamReader& xml, Map& map, SymbolDictionary& symbol
 	const auto parsed_uuid = QUuid(loaded_uuid);
 	if (!parsed_uuid.isNull())
 		part->persistent_id = parsed_uuid.toString(QUuid::WithoutBraces);
+	if (part_element.attribute<QString>(literal::kind)
+	    == literal::sketch_kind)
+	{
+		part->sketch_owner_id =
+		    part_element.attribute<QString>(literal::sketch_owner_id);
+		part->sketch_owner_name =
+		    part_element.attribute<QString>(literal::sketch_owner_name);
+		part->sketch_created_on = QDate::fromString(
+		    part_element.attribute<QString>(literal::sketch_created_on),
+		    Qt::ISODate);
+	}
 	
 	while (xml.readNextStartElement())
 	{
