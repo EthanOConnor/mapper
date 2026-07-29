@@ -950,7 +950,8 @@ jobs:
           host: mac
           target: desktop
           arch: clang_64
-          archives: qtbase qttools
+          # Qt 6.11's lrelease links QtQml even for ordinary .ts catalogs.
+          archives: qtbase qtdeclarative qttools
           cache: false
           install-deps: true
 

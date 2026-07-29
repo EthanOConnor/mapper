@@ -835,7 +835,7 @@ void TileNetworkManagerTest::enteringOfflineModeAbortsActiveRequests()
 	QCOMPARE(
 		server.paths().count(QStringLiteral("/hold/offline")),
 		1);
-	server.releaseAll();
+	QTRY_COMPARE_WITH_TIMEOUT(server.heldCount(), 0, 2000);
 }
 
 void TileNetworkManagerTest::offlineTransitionRejectsQueuedOnlineSuccess()
