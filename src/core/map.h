@@ -1359,6 +1359,12 @@ signals:
 	                                  OpenOrienteering::Template* new_template);
 
 	/**
+	 * Emitted after any durable map edit, including edits owned by a
+	 * feature-specific history rather than the main map undo stack.
+	 */
+	void editCommitted(const OpenOrienteering::UndoStep* inverse_step);
+
+	/**
 	 * Emitted when the map enters or leaves the state which is saved on map.
 	 */
 	void hasUnsavedChanged(bool is_clean);

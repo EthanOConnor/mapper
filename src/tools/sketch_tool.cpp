@@ -139,11 +139,27 @@ SketchTool::~SketchTool()
 {
 	if (widget)
 		editor->deletePopupWidget(widget);
+	undo_action = nullptr;
+	redo_action = nullptr;
 }
 
-void SketchTool::setLayer(MapPart* new_layer)
+void SketchTool::setLayer(MapPart* new_layer, UndoManager* new_history)
 {
+	if (history)
+		history->disconnect(this);
 	layer = new_layer;
+	history = new_history;
+	if (history)
+	{
+		auto update_actions = [this] {
+			updateUndoRedoAvailability();
+		};
+		connect(history, &UndoManager::canUndoChanged,
+		        this, update_actions);
+		connect(history, &UndoManager::canRedoChanged,
+		        this, update_actions);
+	}
+	updateUndoRedoAvailability();
 }
 
 void SketchTool::setChooseLayerCallback(std::function<void()> callback)
@@ -248,26 +264,39 @@ ActionGridBar* SketchTool::makeToolBar()
 	width_action->setMenu(width_menu);
 	toolbar->addActionAtEnd(width_action, 0, 1);
 
-	auto* undo_action =
-	    new QAction(ActionIcon::fromName(u"undo"), tr("Undo"), toolbar);
-	undo_action->setEnabled(map()->undoManager().canUndo());
-	connect(undo_action, &QAction::triggered, this, [this] {
-		map()->undoManager().undo(mainWindow());
-	});
-	connect(&map()->undoManager(), &UndoManager::canUndoChanged,
-	        undo_action, &QAction::setEnabled);
+	undo_action =
+	    new QAction(ActionIcon::fromName(u"undo"), tr("Undo sketch"), toolbar);
+	connect(undo_action, &QAction::triggered,
+	        this, &SketchTool::undoSketch);
 	toolbar->addActionAtEnd(undo_action, 0, 0);
 
-	auto* redo_action =
-	    new QAction(ActionIcon::fromName(u"redo"), tr("Redo"), toolbar);
-	redo_action->setEnabled(map()->undoManager().canRedo());
-	connect(redo_action, &QAction::triggered, this, [this] {
-		map()->undoManager().redo(mainWindow());
-	});
-	connect(&map()->undoManager(), &UndoManager::canRedoChanged,
-	        redo_action, &QAction::setEnabled);
+	redo_action =
+	    new QAction(ActionIcon::fromName(u"redo"), tr("Redo sketch"), toolbar);
+	connect(redo_action, &QAction::triggered,
+	        this, &SketchTool::redoSketch);
 	toolbar->addActionAtEnd(redo_action, 1, 0);
+	updateUndoRedoAvailability();
 	return toolbar;
+}
+
+void SketchTool::updateUndoRedoAvailability()
+{
+	if (!undo_action || !redo_action)
+		return;
+	undo_action->setEnabled(history && history->canUndo());
+	redo_action->setEnabled(history && history->canRedo());
+}
+
+void SketchTool::undoSketch()
+{
+	if (history && history->canUndo())
+		history->undo(mainWindow());
+}
+
+void SketchTool::redoSketch()
+{
+	if (history && history->canRedo())
+		history->redo(mainWindow());
 }
 
 void SketchTool::setColor(const QColor& color)
@@ -393,7 +422,8 @@ void SketchTool::finishStroke(MapWidget* map_widget)
 	undo_step->setPartIndex(part_index);
 	undo_step->addObject(object_index);
 	map()->setObjectsDirty();
-	map()->push(undo_step);
+	history->push(std::unique_ptr<UndoStep>(undo_step));
+	updateUndoRedoAvailability();
 }
 
 void SketchTool::eraseTouchedStrokes()
@@ -432,7 +462,8 @@ void SketchTool::eraseTouchedStrokes()
 		undo_step->addObject(index, object);
 	undo_step->removeContainedObjects(false);
 	map()->setObjectsDirty();
-	map()->push(undo_step);
+	history->push(std::unique_ptr<UndoStep>(undo_step));
+	updateUndoRedoAvailability();
 }
 
 void SketchTool::updateDrawingBounds(MapWidget* map_widget)

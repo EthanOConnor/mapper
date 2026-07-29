@@ -511,7 +511,7 @@ void MapHubSyncController::configure(const ManagedMapWorkspace &new_workspace,
   if (needs_initial_seed)
     stageSnapshot();
   saveWorkspace();
-  edit_connection = connect(&map->undoManager(), &UndoManager::editCommitted,
+  edit_connection = connect(map, &Map::editCommitted,
                             this, &MapHubSyncController::queueCommittedEdit);
   const auto structure_changed = [this] {
     if (!applying_remote_operations)

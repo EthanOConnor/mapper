@@ -334,7 +334,7 @@ void ToolsTest::editTool()
 	editor.editor->setTool(nullptr);
 }
 
-void ToolsTest::sketchToolDrawsWithGlobalUndo()
+void ToolsTest::sketchToolKeepsPrivateHistory()
 {
 	auto* map = new Map;
 	TestMapEditor editor(map);
@@ -352,12 +352,46 @@ void ToolsTest::sketchToolDrawsWithGlobalUndo()
 	QVERIFY(actionWithText(editor.window, QStringLiteral("Sketch layer")));
 	QVERIFY(actionWithText(editor.window, QStringLiteral("Erase stroke")));
 	QVERIFY(actionWithText(editor.window, QStringLiteral("Stroke width")));
+	auto* sketch_undo =
+	    actionWithText(editor.window, QStringLiteral("Undo sketch"));
+	auto* sketch_redo =
+	    actionWithText(editor.window, QStringLiteral("Redo sketch"));
+	QVERIFY(sketch_undo);
+	QVERIFY(sketch_redo);
+	QVERIFY(!sketch_undo->isEnabled());
+	QVERIFY(!sketch_redo->isEnabled());
+	int committed_edits = 0;
+	connect(map, &Map::editCommitted, map,
+	        [&committed_edits] { ++committed_edits; });
 
 	editor.simulateDrag(QPoint(80, 120), QPoint(240, 120));
 	auto* layer = SketchLayer::find(*map);
 	QVERIFY(layer);
 	QCOMPARE(layer->getNumObjects(), 1);
+	QVERIFY(!map->undoManager().canUndo());
+	QVERIFY(sketch_undo->isEnabled());
+	QVERIFY(!sketch_redo->isEnabled());
+	QCOMPARE(committed_edits, 1);
+
+	// Ordinary map edits have a separate history and do not obscure the
+	// selected sketch layer's next undo operation.
+	map->undoManager().push(
+	    std::make_unique<NoOpUndoStep>(map, true));
+	QCOMPARE(committed_edits, 2);
 	QVERIFY(map->undoManager().canUndo());
+	QVERIFY(sketch_undo->isEnabled());
+	sketch_undo->trigger();
+	QCOMPARE(layer->getNumObjects(), 0);
+	QCOMPARE(map->undoManager().nextUndoStep()->getType(),
+	         UndoStep::ValidNoOpUndoStepType);
+	QVERIFY(!sketch_undo->isEnabled());
+	QVERIFY(sketch_redo->isEnabled());
+	QCOMPARE(committed_edits, 3);
+	sketch_redo->trigger();
+	QCOMPARE(layer->getNumObjects(), 1);
+	QVERIFY(sketch_undo->isEnabled());
+	QVERIFY(!sketch_redo->isEnabled());
+	QCOMPARE(committed_edits, 4);
 
 	QAction* global_undo = nullptr;
 	for (auto* action : editor.window->findChildren<QAction*>(
@@ -371,19 +405,28 @@ void ToolsTest::sketchToolDrawsWithGlobalUndo()
 	}
 	QVERIFY(global_undo);
 	global_undo->trigger();
-	QCOMPARE(layer->getNumObjects(), 0);
+	QCOMPARE(layer->getNumObjects(), 1);
+	QVERIFY(!map->undoManager().canUndo());
 
 	// A tool may be destroyed asynchronously after its controls have closed.
-	// The controller must not retain a dangling tool pointer when Sketch is
-	// selected again.
+	// The layer's private history survives when Sketch is selected again.
 	sketch_tool->deleteLater();
 	QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
 	QVERIFY(!editor.editor->getTool());
 	QVERIFY(!sketch_action->isChecked());
 	sketch_action->trigger();
 	QVERIFY(qobject_cast<SketchTool*>(editor.editor->getTool()));
-
-	QVERIFY(map->undoManager().redo(editor.window));
+	sketch_undo =
+	    actionWithText(editor.window, QStringLiteral("Undo sketch"));
+	sketch_redo =
+	    actionWithText(editor.window, QStringLiteral("Redo sketch"));
+	QVERIFY(sketch_undo);
+	QVERIFY(sketch_redo);
+	QVERIFY(sketch_undo->isEnabled());
+	sketch_undo->trigger();
+	QCOMPARE(layer->getNumObjects(), 0);
+	QVERIFY(sketch_redo->isEnabled());
+	sketch_redo->trigger();
 	QCOMPARE(layer->getNumObjects(), 1);
 }
 

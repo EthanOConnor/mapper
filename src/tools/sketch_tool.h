@@ -30,6 +30,7 @@ class ActionGridBar;
 class MapEditorController;
 class MapPart;
 class MapWidget;
+class UndoManager;
 
 /** Interactive pen and stroke eraser for the seamless vector sketch layer. */
 class SketchTool final : public MapEditorTool
@@ -40,7 +41,7 @@ public:
 	SketchTool(MapEditorController* editor, QAction* tool_action);
 	~SketchTool() override;
 
-	void setLayer(MapPart* layer);
+	void setLayer(MapPart* layer, UndoManager* history);
 	void setChooseLayerCallback(std::function<void()> callback);
 
 	void init() override;
@@ -63,11 +64,17 @@ private:
 	void finishStroke(MapWidget* widget);
 	void eraseTouchedStrokes();
 	void updateDrawingBounds(MapWidget* widget);
+	void updateUndoRedoAvailability();
+	void undoSketch();
+	void redoSketch();
 
 	MapPart* layer = nullptr;
+	QPointer<UndoManager> history;
 	std::function<void()> choose_layer_callback;
 	QPointer<ActionGridBar> widget;
-	QAction* width_action = nullptr;
+	QPointer<QAction> width_action;
+	QPointer<QAction> undo_action;
+	QPointer<QAction> redo_action;
 
 	QColor stroke_color = Qt::black;
 	SketchLayer::Width stroke_width = SketchLayer::Width::Medium;

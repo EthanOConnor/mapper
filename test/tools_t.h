@@ -37,7 +37,7 @@ private slots:
 	void framePublishesTemplateContextBeforeRasterCollection();
 	
 	void editTool();
-	void sketchToolDrawsWithGlobalUndo();
+	void sketchToolKeepsPrivateHistory();
 	void sketchToolAnnotatesReadOnlyMap();
 	
 	void testFindObjects();

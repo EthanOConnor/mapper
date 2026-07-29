@@ -54,8 +54,7 @@ SketchLayerFeature::SketchLayerFeature(MapEditorController& controller)
 	    tr("Draw seamless field notes on a single map-owned sketch layer."));
 	connect(sketch_action, &QAction::triggered,
 	        this, &SketchLayerFeature::sketchClicked);
-	connect(&controller.getMap()->undoManager(),
-	        &UndoManager::editCommitted, this,
+	connect(controller.getMap(), &Map::editCommitted, this,
 	        [this] { persistReadOnlySidecar(); });
 }
 
@@ -101,17 +100,36 @@ void SketchLayerFeature::startSketching()
 		tool = new SketchTool(&controller, sketch_action);
 		controller.setTool(tool);
 	}
-	tool->setLayer(layer);
+	tool->setLayer(layer, historyFor(layer));
 	tool->setChooseLayerCallback([this] {
 		layer_choice_date = {};
 		if (!chooseLayerForToday())
 			return;
 		if (auto* active =
 		        qobject_cast<SketchTool*>(controller.getTool()))
-			active->setLayer(SketchLayer::findById(
-			    *controller.getMap(), selected_layer_id));
+		{
+			auto* selected = SketchLayer::findById(
+			    *controller.getMap(), selected_layer_id);
+			active->setLayer(selected, historyFor(selected));
+		}
 	});
 	sketch_action->setChecked(true);
+}
+
+UndoManager* SketchLayerFeature::historyFor(MapPart* layer)
+{
+	if (!layer)
+		return nullptr;
+	const auto id = layer->persistentId();
+	auto found = layer_histories.find(id);
+	if (found != layer_histories.end())
+		return found->second.get();
+	auto history = std::make_unique<UndoManager>(controller.getMap());
+	connect(history.get(), &UndoManager::editCommitted,
+	        controller.getMap(), &Map::editCommitted);
+	auto* result = history.get();
+	layer_histories.emplace(id, std::move(history));
+	return result;
 }
 
 void SketchLayerFeature::finishSketching()

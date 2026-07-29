@@ -436,6 +436,8 @@ Map::Map()
 	connect(this, &Map::colorChanged, this, &Map::checkSpotColorPresence);
 	connect(this, &Map::colorDeleted, this, &Map::checkSpotColorPresence);
 	connect(undo_manager.data(), &UndoManager::cleanChanged, this, &Map::undoCleanChanged);
+	connect(undo_manager.data(), &UndoManager::editCommitted,
+	        this, &Map::editCommitted);
 }
 
 Map::~Map()
