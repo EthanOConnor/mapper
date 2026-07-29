@@ -21,6 +21,13 @@
 
 namespace OpenOrienteering::presentation {
 
+QEvent::Type VelloCanvas::touchGestureHandoffEventType() noexcept
+{
+	static const auto type =
+	    static_cast<QEvent::Type>(QEvent::registerEventType());
+	return type;
+}
+
 VelloCanvas::VelloCanvas(QWidget* parent)
  : QWidget(parent)
  , surface_(new NativeSurfaceWindow())
@@ -257,18 +264,23 @@ bool VelloCanvas::forwardInputEvent(QEvent* event)
 			QCoreApplication::sendEvent(target, &forwarded);
 		};
 
-		// A second finger transfers input authority from the selected tool to
-		// MapWidget's gesture recognizer. End the synthetic single-finger
-		// sequence first so no pressed-button state leaks out of the handoff.
-		if (points.size() >= 2 && forwarding_single_touch_)
+		// Preserve the original event before synthesizing any mouse transition.
+		// In particular, a second finger or TouchCancel must let MapWidget
+		// cancel the selected tool before the synthetic release arrives.
+		QCoreApplication::sendEvent(target, event);
+
+		// A second finger or OS cancellation transfers input authority away
+		// from the selected tool. Qt may retarget the raw touch update before
+		// MapWidget sees it, so send an explicit cancellation contract first.
+		if ((points.size() >= 2 || event->type() == QEvent::TouchCancel)
+		    && forwarding_single_touch_)
 		{
+			QEvent handoff(touchGestureHandoffEventType());
+			QCoreApplication::sendEvent(target, &handoff);
 			deliver_mouse(
 				QEvent::MouseButtonRelease, Qt::LeftButton, Qt::NoButton);
 			forwarding_single_touch_ = false;
 		}
-
-		// Preserve the original event for pinch/two-finger recognition.
-		QCoreApplication::sendEvent(target, event);
 
 		if (points.size() == 1)
 		{

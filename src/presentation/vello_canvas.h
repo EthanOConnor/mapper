@@ -14,6 +14,7 @@
 #include <string>
 
 #include <QCursor>
+#include <QEvent>
 #include <QPointF>
 #include <QWidget>
 #include <QTimer>
@@ -48,6 +49,7 @@ public:
 	std::size_t encodedSceneCount() const noexcept;
 	void setPresentationCursor(const QCursor& cursor);
 	QCursor presentationCursor() const;
+	static QEvent::Type touchGestureHandoffEventType() noexcept;
 
 private:
 	bool forwardInputEvent(QEvent* event);

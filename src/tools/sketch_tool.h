@@ -54,6 +54,7 @@ public:
 	bool mouseReleaseEvent(QMouseEvent* event, const MapCoordF& map_coord,
 	                       MapWidget* widget) override;
 	bool keyPressEvent(QKeyEvent* event) override;
+	void gestureStarted() override;
 
 	void draw(render::OverlaySceneBuilder* painter, MapWidget* widget) override;
 

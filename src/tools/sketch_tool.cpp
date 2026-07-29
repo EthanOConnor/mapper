@@ -385,6 +385,15 @@ bool SketchTool::keyPressEvent(QKeyEvent* event)
 	return false;
 }
 
+void SketchTool::gestureStarted()
+{
+	if (!dragging)
+		return;
+	coords.clear();
+	map()->clearDrawingBoundingBox();
+	dragging = false;
+}
+
 void SketchTool::finishStroke(MapWidget* map_widget)
 {
 	if (stroke_erasing)

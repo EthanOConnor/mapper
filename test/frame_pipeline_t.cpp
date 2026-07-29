@@ -111,10 +111,12 @@ public:
 	int presses = 0;
 	int moves = 0;
 	int releases = 0;
+	QVector<QEvent::Type> sequence;
 
 protected:
 	bool eventFilter(QObject*, QEvent* event) override
 	{
+		sequence.push_back(event->type());
 		switch (event->type())
 		{
 		case QEvent::MouseButtonPress:
@@ -595,6 +597,39 @@ void FramePipelineTest::mapWidgetUsesTheFrameContract()
 	QCOMPARE(touch_probe.presses, 1);
 	QCOMPARE(touch_probe.moves, 1);
 	QCOMPARE(touch_probe.releases, 1);
+
+	// A second finger must reach MapWidget before the synthetic mouse release
+	// which ends the provisional one-finger sequence. This lets drawing tools
+	// cancel rather than committing a stroke at a pinch finger.
+	touch_probe.sequence.clear();
+	QTouchEvent second_touch_begin(
+		QEvent::TouchBegin, &touch_device, Qt::NoModifier,
+		{ QEventPoint(0, QEventPoint::State::Pressed,
+		              drag_start, global_start) });
+	QCoreApplication::sendEvent(native_surface, &second_touch_begin);
+	QTouchEvent second_touch_update(
+		QEvent::TouchUpdate, &touch_device, Qt::NoModifier,
+		{
+			QEventPoint(0, QEventPoint::State::Updated,
+			            drag_end, global_end),
+			QEventPoint(1, QEventPoint::State::Pressed,
+			            QPointF(405, 280),
+			            QPointF(native_surface->mapToGlobal(QPoint(405, 280))))
+		});
+	QCoreApplication::sendEvent(native_surface, &second_touch_update);
+	const auto handoff_index = touch_probe.sequence.indexOf(
+	    presentation::VelloCanvas::touchGestureHandoffEventType());
+	const auto release_index =
+	    touch_probe.sequence.indexOf(QEvent::MouseButtonRelease);
+	QVERIFY2(handoff_index >= 0,
+	         qPrintable(QStringLiteral("event sequence: %1")
+	             .arg([&] {
+		             QStringList types;
+		             for (const auto type : touch_probe.sequence)
+			             types.push_back(QString::number(type));
+		             return types.join(u',');
+	             }())));
+	QVERIFY(release_index > handoff_index);
 	widget.removeEventFilter(&touch_probe);
 
 	auto const frame_is_current = [canvas] {

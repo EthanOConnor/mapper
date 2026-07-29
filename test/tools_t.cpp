@@ -364,6 +364,21 @@ void ToolsTest::sketchToolKeepsPrivateHistory()
 	connect(map, &Map::editCommitted, map,
 	        [&committed_edits] { ++committed_edits; });
 
+	// A second finger/pinch cancels the provisional stroke. Its following
+	// synthetic mouse release must not commit anything.
+	QTest::mousePress(editor.map_widget, Qt::LeftButton, {}, QPoint(80, 80));
+	QMouseEvent gesture_move(
+	    QEvent::MouseMove, QPointF(150, 80),
+	    QPointF(editor.map_widget->mapToGlobal(QPoint(150, 80))),
+	    Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
+	QApplication::sendEvent(editor.map_widget, &gesture_move);
+	sketch_tool->gestureStarted();
+	QTest::mouseRelease(
+	    editor.map_widget, Qt::LeftButton, {}, QPoint(150, 80));
+	QCOMPARE(SketchLayer::find(*map)->getNumObjects(), 0);
+	QCOMPARE(committed_edits, 0);
+	QVERIFY(!sketch_undo->isEnabled());
+
 	editor.simulateDrag(QPoint(80, 120), QPoint(240, 120));
 	auto* layer = SketchLayer::find(*map);
 	QVERIFY(layer);

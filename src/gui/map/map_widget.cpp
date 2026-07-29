@@ -984,6 +984,13 @@ void MapWidget::showHelpMessage(render::OverlaySceneBuilder* painter, const QStr
 
 bool MapWidget::event(QEvent* event)
 {
+	if (event->type()
+	    == presentation::VelloCanvas::touchGestureHandoffEventType())
+	{
+		if (tool)
+			tool->gestureStarted();
+		return true;
+	}
 	switch (event->type())
 	{
 	case QEvent::Gesture:
@@ -994,8 +1001,13 @@ bool MapWidget::event(QEvent* event)
 	case QEvent::TouchUpdate:
 	case QEvent::TouchEnd:
 	case QEvent::TouchCancel:
-		if (static_cast<QTouchEvent*>(event)->points().count() >= 2)
+		if (event->type() == QEvent::TouchCancel
+		    || static_cast<QTouchEvent*>(event)->points().count() >= 2)
+		{
+			if (tool)
+				tool->gestureStarted();
 			return true;
+		}
 		break;
 		
 	case QEvent::KeyPress:
