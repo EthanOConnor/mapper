@@ -2155,9 +2155,13 @@ void MapHubSyncController::pollSyncState() {
   if (!account || account.token.isEmpty())
     return;
   auto *client = new MapHubApiClient(workspace.server_url, account.token, this);
+  const auto lease = MapHubCredentials::readToken(
+      MapHubCredentials::workspaceLeaseKey(workspace.server_url,
+                                           workspace.workspace_id));
+  const auto editing_lease = lease ? lease.token : QString{};
   poll_pending = true;
   client->workspaceSyncState(
-      workspace.workspace_id, workspace.sync_etag,
+      workspace.workspace_id, workspace.sync_etag, editing_lease,
       [this, client](const QJsonObject &response, const QString &etag,
                      bool not_modified,
                      const MapHubApiClient::Error &error) mutable {

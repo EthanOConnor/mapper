@@ -147,6 +147,7 @@ void MapHubWorkspaceTest::workspaceSyncStateDecodesBoundedZstd() {
   MapHubApiClient::Error corrupt_error;
   client.workspaceSyncState(
       workspace_id, QStringLiteral("\"sync-v0\""),
+      QStringLiteral("fixture-lease"),
       [&](const QJsonObject &state, const QString &etag, bool not_modified,
           const MapHubApiClient::Error &error) {
         QVERIFY2(!error, qPrintable(error.message));
@@ -156,7 +157,7 @@ void MapHubWorkspaceTest::workspaceSyncStateDecodesBoundedZstd() {
                  QStringLiteral("oom-map-ops/1"));
         decoded = true;
         client.workspaceSyncState(
-            workspace_id, {},
+            workspace_id, {}, QStringLiteral("fixture-lease"),
             [&](const QJsonObject &, const QString &, bool,
                 const MapHubApiClient::Error &error) {
               corrupt_error = error;
@@ -173,6 +174,7 @@ void MapHubWorkspaceTest::workspaceSyncStateDecodesBoundedZstd() {
   QVERIFY(requests[0].toLower().contains("accept-encoding: zstd"));
   QVERIFY(requests[0].toLower().contains(
       "if-none-match: \"sync-v0\""));
+  QVERIFY(requests[0].contains("X-Editing-Lease: fixture-lease"));
 }
 
 void MapHubWorkspaceTest::initTestCase() {

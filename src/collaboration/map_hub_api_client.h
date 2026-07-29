@@ -80,6 +80,7 @@ public:
   void renewLease(const QString &workspace_id, const QString &editing_lease,
                   JsonHandler handler);
   void workspaceSyncState(const QString &workspace_id, const QString &etag,
+                          const QString &editing_lease,
                           SyncStateHandler handler);
   void workspaceOperations(const QString &workspace_id, qint64 after_sequence,
                            int limit, JsonHandler handler);

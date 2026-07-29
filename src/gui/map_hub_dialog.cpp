@@ -2689,8 +2689,13 @@ void MapHubDialog::beginWorkspace(const QJsonObject &response,
       return;
     }
     setBusy(true, tr("Reading the current connected-editing state…"));
+    const auto editing_lease =
+        response.value(QStringLiteral("lease"))
+            .toObject()
+            .value(QStringLiteral("token"))
+            .toString();
     client->workspaceSyncState(
-        workspace_id, {},
+        workspace_id, {}, editing_lease,
         [this, response, assignment_id, project_title, defaults,
          sync_state_key](const QJsonObject &sync_state, const QString &, bool,
                          const MapHubApiClient::Error &error) mutable {

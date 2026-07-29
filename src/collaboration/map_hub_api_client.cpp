@@ -802,19 +802,26 @@ void MapHubApiClient::renewLease(const QString &workspace_id,
 
 void MapHubApiClient::workspaceSyncState(const QString &workspace_id,
                                          const QString &etag,
+                                         const QString &editing_lease,
                                          SyncStateHandler handler) {
   if (!ensureReady(true, [handler](const QJsonObject &, const Error &error) {
         handler({}, {}, false, error);
       }))
     return;
-  if (!validStableId(workspace_id)) {
-    handler({}, {}, false, invalidIdentifierError());
+  if (!validStableId(workspace_id) ||
+      (!editing_lease.isEmpty() &&
+       !validHeaderValue(editing_lease, 4096))) {
+    handler({}, {}, false,
+            {0, QStringLiteral("invalid_request_metadata"),
+             tr("The workspace identifier or editing lease is invalid.")});
     return;
   }
   auto req = request(
       QStringLiteral("/api/v1/workspaces/%1/sync-state").arg(workspace_id));
   if (!etag.isEmpty() && validHeaderValue(etag, 512))
     req.setRawHeader("If-None-Match", etag.toUtf8());
+  if (!editing_lease.isEmpty())
+    req.setRawHeader("X-Editing-Lease", editing_lease.toUtf8());
   auto *reply = network->get(req);
   auto body = std::make_shared<QByteArray>();
   auto too_large = std::make_shared<bool>(false);
