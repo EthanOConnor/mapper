@@ -44,6 +44,13 @@ PanTool::~PanTool() = default;
 
 void PanTool::clickPress()
 {
+	// A native surface can lose the matching release when its mouse grab is
+	// interrupted (for example while a macOS gesture or surface transition is
+	// being processed).  Treat the next press as the start of a new pan.  The
+	// cancel hook commits the currently visible offset before resetting the
+	// tool state, so recovery is seamless and does not discard movement.
+	if (isDragging())
+		cancelDragging();
 	startDragging();
 }
 

@@ -37,6 +37,7 @@ private slots:
 	void framePublishesTemplateContextBeforeRasterCollection();
 	
 	void editTool();
+	void panToolRecoversFromLostRelease();
 	void sketchToolKeepsPrivateHistory();
 	void sketchToolAnnotatesReadOnlyMap();
 	

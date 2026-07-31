@@ -55,6 +55,7 @@
 #include "templates/template_image.h"
 #include "tools/edit_point_tool.h"
 #include "tools/edit_tool.h"
+#include "tools/pan_tool.h"
 #include "tools/sketch_tool.h"
 #include "undo/undo.h"
 #include "undo/undo_manager.h"
@@ -332,6 +333,47 @@ void ToolsTest::editTool()
 	
 	// Cleanup
 	editor.editor->setTool(nullptr);
+}
+
+void ToolsTest::panToolRecoversFromLostRelease()
+{
+	auto* map = new Map;
+	TestMapEditor editor(map);
+	editor.map_widget->resize(320, 240);
+	editor.editor->setTool(new PanTool(editor.editor, nullptr));
+	auto* view = editor.map_widget->getMapView();
+	auto const initial_center = view->center();
+
+	auto send_mouse = [&](QEvent::Type type, const QPoint& position,
+	                      Qt::MouseButton button, Qt::MouseButtons buttons) {
+		QMouseEvent event(type, QPointF(position),
+		                  QPointF(editor.map_widget->mapToGlobal(position)),
+		                  button, buttons, Qt::NoModifier);
+		QApplication::sendEvent(editor.map_widget, &event);
+	};
+
+	// Reproduce a native-surface sequence where the first pan's release is
+	// lost.  The following press must commit the visible offset and establish
+	// a fresh drag instead of asserting in startDragging().
+	send_mouse(QEvent::MouseButtonPress, {80, 120},
+	           Qt::LeftButton, Qt::LeftButton);
+	send_mouse(QEvent::MouseMove, {130, 120},
+	           Qt::NoButton, Qt::LeftButton);
+	QCOMPARE(view->panOffset(), QPoint(50, 0));
+
+	send_mouse(QEvent::MouseButtonPress, {130, 120},
+	           Qt::LeftButton, Qt::LeftButton);
+	QCOMPARE(view->panOffset(), QPoint());
+	auto const center_after_recovery = view->center();
+	QVERIFY(center_after_recovery != initial_center);
+
+	send_mouse(QEvent::MouseMove, {180, 120},
+	           Qt::NoButton, Qt::LeftButton);
+	QCOMPARE(view->panOffset(), QPoint(50, 0));
+	send_mouse(QEvent::MouseButtonRelease, {180, 120},
+	           Qt::LeftButton, Qt::NoButton);
+	QCOMPARE(view->panOffset(), QPoint());
+	QVERIFY(view->center() != center_after_recovery);
 }
 
 void ToolsTest::sketchToolKeepsPrivateHistory()
