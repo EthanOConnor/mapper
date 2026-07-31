@@ -418,6 +418,7 @@ private:
 	void publishRenderContext();
 	ViewRenderContext currentViewRenderContext() const;
 	void observeTemplate(Template* temp);
+	bool transformInteractionActive() const;
 	
 	/**
 	 * Updates the content of the zoom display.
@@ -455,12 +456,15 @@ private:
 	QTimer zoom_limit_feedback_timer;
 	bool frame_update_scheduled = false;
 	bool render_context_update_scheduled;
+	bool retained_template_layers_valid = false;
+	bool template_refresh_deferred = false;
 	
 	// Panning (operation)
 	QPoint pan_offset;
 	
 	render::FramePlanner frame_planner;
 	render::TemplateLayerPlanner template_layer_planner;
+	render::TemplateLayerPlan retained_template_layers;
 	render::OverlaySceneBuilder overlay_scene_builder;
 	presentation::VelloCanvas* vello_canvas;
 	render::Revision overlay_revision = 1;

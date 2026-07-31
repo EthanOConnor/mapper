@@ -92,6 +92,7 @@ public:
 	void collectRasterTiles(const QRectF&, double, bool,
 	                        QVector<RasterTemplateTile>& out) const override
 	{
+		++collection_count;
 		if (armed)
 		{
 			collected = true;
@@ -111,6 +112,7 @@ public:
 	mutable bool context_seen = false;
 	mutable bool collected = false;
 	mutable bool collected_without_context = false;
+	mutable int collection_count = 0;
 };
 
 QAction* actionWithText(QObject* parent, const QString& text)
@@ -374,6 +376,37 @@ void ToolsTest::panToolRecoversFromLostRelease()
 	           Qt::LeftButton, Qt::NoButton);
 	QCOMPARE(view->panOffset(), QPoint());
 	QVERIFY(view->center() != center_after_recovery);
+}
+
+void ToolsTest::panDefersTemplateSceneIntegration()
+{
+	auto* map = new Map;
+	auto raster = std::make_unique<FrameContextRasterTemplate>(map);
+	auto* raster_ptr = raster.get();
+	map->addTemplate(0, std::move(raster));
+	TestMapEditor editor(map);
+	editor.map_widget->resize(320, 240);
+	auto* view = editor.map_widget->getMapView();
+	view->setTemplateVisibility(raster_ptr, { 1, true });
+	QTRY_VERIFY_WITH_TIMEOUT(raster_ptr->collection_count > 0, 1000);
+	editor.editor->setTool(new PanTool(editor.editor, nullptr));
+	QTest::qWait(20);
+	auto const resting_collections = raster_ptr->collection_count;
+
+	QTest::mousePress(editor.map_widget, Qt::LeftButton, {}, QPoint(80, 120));
+	QMouseEvent move(
+		QEvent::MouseMove, QPointF(140, 120),
+		QPointF(editor.map_widget->mapToGlobal(QPoint(140, 120))),
+		Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
+	QApplication::sendEvent(editor.map_widget, &move);
+	map->setTemplateAreaDirty(raster_ptr, QRectF(-10, -10, 20, 20), 0);
+	QTest::qWait(20);
+	QCOMPARE(raster_ptr->collection_count, resting_collections);
+
+	QTest::mouseRelease(
+		editor.map_widget, Qt::LeftButton, {}, QPoint(140, 120));
+	QTRY_VERIFY_WITH_TIMEOUT(
+		raster_ptr->collection_count > resting_collections, 1000);
 }
 
 void ToolsTest::sketchToolKeepsPrivateHistory()

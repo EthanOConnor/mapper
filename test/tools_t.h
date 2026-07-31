@@ -38,6 +38,7 @@ private slots:
 	
 	void editTool();
 	void panToolRecoversFromLostRelease();
+	void panDefersTemplateSceneIntegration();
 	void sketchToolKeepsPrivateHistory();
 	void sketchToolAnnotatesReadOnlyMap();
 	

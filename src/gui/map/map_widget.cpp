@@ -166,6 +166,10 @@ void MapWidget::setMapView(MapView* view)
 {
 	if (this->view != view)
 	{
+		template_layer_planner.clear();
+		retained_template_layers = {};
+		retained_template_layers_valid = false;
+		template_refresh_deferred = false;
 		if (this->view)
 		{
 			auto* map = this->view->getMap();
@@ -216,7 +220,14 @@ void MapWidget::setMapView(MapView* view)
 			connect(map, &Map::templateAreaDirty,
 			        this, [this](Template* temp, const QRectF& map_rect, int pixel_border) {
 				if (this->view->isTemplateVisible(temp))
+				{
+					if (transformInteractionActive())
+					{
+						template_refresh_deferred = true;
+						return;
+					}
 					markTemplateAreaDirty(this->view->calculateViewBoundingBox(map_rect), pixel_border);
+				}
 			});
 			connect(map, &Map::objectAreaDirty,
 			        this, &MapWidget::markObjectAreaDirty);
@@ -453,6 +464,12 @@ ViewRenderContext MapWidget::currentViewRenderContext() const
 		view->calculateViewedRect(viewportToView(rect())),
 		view->getZoom(),
 	};
+}
+
+bool MapWidget::transformInteractionActive() const
+{
+	return dragging || pinching || current_pressed_buttons != 0
+	       || !pan_offset.isNull();
 }
 
 void MapWidget::viewChanged(MapView::ChangeFlags changes)
@@ -1166,10 +1183,35 @@ void MapWidget::renderFrame()
 	render::TemplateLayerPlan template_layers;
 	if (!view->areAllTemplatesHidden())
 	{
-		template_layers = template_layer_planner.plan(
-			*map, *view, render::fromQRectF(map_view_rect),
-			render_request.scaling, true
-		);
+		if (transformInteractionActive() && retained_template_layers_valid)
+		{
+			// Interaction frames must never admit, convert, or encode newly
+			// completed raster resources. World-space retained scenes follow the
+			// current view transform, while background fetch/decode/warp continues.
+			template_layers = retained_template_layers;
+			template_layers.complete = true;
+			template_layers.newly_resident_images = 0;
+			template_layers.newly_resident_bytes = 0;
+		}
+		else
+		{
+			template_layers = template_layer_planner.plan(
+				*map, *view, render::fromQRectF(map_view_rect),
+				render_request.scaling, true
+			);
+			retained_template_layers = template_layers;
+			retained_template_layers.complete = true;
+			retained_template_layers.newly_resident_images = 0;
+			retained_template_layers.newly_resident_bytes = 0;
+			retained_template_layers_valid = true;
+			template_refresh_deferred = false;
+		}
+	}
+	else
+	{
+		retained_template_layers = {};
+		retained_template_layers_valid = false;
+		template_refresh_deferred = false;
 	}
 
 	overlay_scene_builder.begin(overlay_revision++, viewport_bounds);
@@ -1352,6 +1394,8 @@ void MapWidget::mouseReleaseEvent(QMouseEvent* event)
 {
 	current_pressed_buttons = event->buttons();
 	last_mouse_release_time = QTime::currentTime();
+	if (!transformInteractionActive() && template_refresh_deferred)
+		scheduleFrameUpdate();
 	if (touch_cursor && tool && tool->usesTouchCursor())
 	{
 		auto translation = touch_cursor->mouseReleaseEvent(*event);
