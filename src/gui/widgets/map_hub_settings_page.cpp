@@ -18,10 +18,12 @@
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QStandardPaths>
+#include <QSysInfo>
 #include <QToolButton>
 
 #include "collaboration/map_hub_api_client.h"
 #include "collaboration/map_hub_credentials.h"
+#include "collaboration/map_hub_device_authorization.h"
 #include "core/document_path.h"
 #include "gui/util_gui.h"
 #include "imagery/tile_network_manager.h"
@@ -33,6 +35,7 @@ MapHubSettingsPage::MapHubSettingsPage(QWidget *parent)
     : SettingsPage(parent), server_edit(new QLineEdit(this)),
       workspace_root_edit(new QLineEdit(this)), token_edit(new QLineEdit(this)),
       credential_status(new QLabel(this)),
+      passkey_button(new QPushButton(tr("Connect with passkey…"), this)),
       test_button(new QPushButton(tr("Test connection"), this)),
       clear_button(new QPushButton(tr("Disconnect"), this)),
       invite_edit(new QLineEdit(this)),
@@ -53,10 +56,19 @@ MapHubSettingsPage::MapHubSettingsPage(QWidget *parent)
   layout->addRow(tr("Local workspaces:"), workspace_widget);
 
   layout->addRow(Util::Headline::create(tr("Connected account")));
+  auto *passkey_help = new QLabel(
+      tr("Connect Mapper in your browser with a passkey. The resulting "
+         "account credential is stored only in this device's secure "
+         "credential store and is used for all Map Hub features, including "
+         "protected imagery."),
+      this);
+  passkey_help->setWordWrap(true);
+  layout->addRow(passkey_help);
+  layout->addRow(passkey_button);
   token_edit->setEchoMode(QLineEdit::Password);
   token_edit->setPlaceholderText(
-      tr("Paste a Mapper API token to replace the stored token"));
-  layout->addRow(tr("Account token:"), token_edit);
+      tr("Advanced: paste a Mapper API token to replace the stored token"));
+  layout->addRow(tr("Advanced token:"), token_edit);
   credential_status->setWordWrap(true);
   layout->addRow(credential_status);
   auto *account_buttons = new QWidget(this);
@@ -70,8 +82,8 @@ MapHubSettingsPage::MapHubSettingsPage(QWidget *parent)
   layout->addRow(Util::Headline::create(tr("Use an emailed invitation")));
   invite_edit->setEchoMode(QLineEdit::Password);
   auto *invitation_help = new QLabel(
-      tr("Account setup opens in your browser. A passkey is offered first. "
-         "When setup finishes, paste the Mapper connection token above."),
+      tr("Use this only to create a new account. After setup, return here and "
+         "choose Connect with passkey."),
       this);
   invitation_help->setWordWrap(true);
   layout->addRow(invitation_help);
@@ -89,6 +101,8 @@ MapHubSettingsPage::MapHubSettingsPage(QWidget *parent)
           &MapHubSettingsPage::testConnection);
   connect(clear_button, &QPushButton::clicked, this,
           &MapHubSettingsPage::clearCredential);
+  connect(passkey_button, &QPushButton::clicked, this,
+          &MapHubSettingsPage::connectWithPasskey);
   connect(invitation_button, &QPushButton::clicked, this,
           &MapHubSettingsPage::openInvitation);
   reset();
@@ -108,8 +122,7 @@ void MapHubSettingsPage::updateCredentialStatus() {
     credential_status->setText(tr("Credential error: %1").arg(result.error));
   else if (result.token.isEmpty())
     credential_status->setText(
-        tr("Not connected. Paste a Mapper connection token, or use an emailed "
-           "invitation to set up an account in your browser."));
+        tr("Not connected. Connect with a passkey to use Map Hub."));
   else if (result.used_fallback)
     credential_status->setText(
         tr("Connected. This system has no desktop secret service, so the token "
@@ -187,9 +200,71 @@ void MapHubSettingsPage::reset() {
 }
 
 void MapHubSettingsPage::setBusy(bool busy) {
+  passkey_button->setEnabled(!busy);
   test_button->setEnabled(!busy);
   invitation_button->setEnabled(!busy);
   server_edit->setEnabled(!busy);
+}
+
+void MapHubSettingsPage::connectWithPasskey() {
+  const auto server = server_edit->text().trimmed();
+  if (!MapHubApiClient::isAcceptableServerUrl(QUrl::fromUserInput(server))) {
+    QMessageBox::warning(this, tr("Map Hub"),
+                         tr("Enter an HTTPS Map Hub URL. HTTP is allowed only "
+                            "for localhost development."));
+    return;
+  }
+  if (passkey_connection)
+    return;
+
+  setBusy(true);
+  credential_status->setText(tr("Preparing secure browser sign-in…"));
+  const auto client_name = tr("Mapper on %1").arg(QSysInfo::machineHostName());
+  passkey_connection = new MapHubDeviceAuthorization(server, client_name, this);
+  connect(passkey_connection, &MapHubDeviceAuthorization::verificationRequired,
+          this, [this](const QUrl &url, const QString &code) {
+            credential_status->setText(
+                code.isEmpty()
+                    ? tr("Finish the passkey sign-in in your browser…")
+                    : tr("Finish the passkey sign-in in your browser. "
+                         "Confirm code %1.")
+                          .arg(code));
+            if (!QDesktopServices::openUrl(url)) {
+              QMessageBox::warning(this, tr("Map Hub"),
+                                   tr("Mapper could not open Map Hub in your "
+                                      "browser."));
+              passkey_connection->cancel();
+            }
+          });
+  connect(passkey_connection, &MapHubDeviceAuthorization::completed, this,
+          [this, server](const MapHubDeviceAuthorization::Result &result,
+                         const MapHubApiClient::Error &error) {
+            auto *connection = passkey_connection.data();
+            passkey_connection = nullptr;
+            if (connection)
+              connection->deleteLater();
+            setBusy(false);
+            if (error) {
+              credential_status->setText(error.message);
+              return;
+            }
+            const auto stored = MapHubCredentials::writeToken(server, result.token);
+            if (!stored) {
+              credential_status->setText(stored.error);
+              return;
+            }
+            if (loaded_server != server)
+              imagery::TileNetworkManager::instance().clearBearerCredential(
+                  QUrl(loaded_server));
+            imagery::TileNetworkManager::instance().setBearerCredential(
+                QUrl(server), result.token.toUtf8(),
+                MapHubCredentials::accountName(server).toUtf8());
+            setSetting(Settings::MapHub_ServerUrl, server);
+            loaded_server = server;
+            credential_status->setText(
+                tr("Connected to %1.").arg(result.organization_name));
+          });
+  passkey_connection->start();
 }
 
 void MapHubSettingsPage::testConnection() {

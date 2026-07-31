@@ -114,6 +114,7 @@ set(Mapper_Common_SRCS
 	collaboration/managed_map_workspace.cpp
 	collaboration/map_hub_api_client.cpp
 	collaboration/map_hub_credentials.cpp
+	collaboration/map_hub_device_authorization.cpp
 	collaboration/map_hub_imagery_catalog.cpp
   
   core/autosave.cpp

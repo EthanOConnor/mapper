@@ -34,6 +34,7 @@
 #include <QSpinBox>
 #include <QStackedWidget>
 #include <QStandardPaths>
+#include <QSysInfo>
 #include <QTabWidget>
 #include <QTreeWidget>
 #include <QUuid>
@@ -42,6 +43,7 @@
 #include "collaboration/managed_map_workspace.h"
 #include "collaboration/map_hub_api_client.h"
 #include "collaboration/map_hub_credentials.h"
+#include "collaboration/map_hub_device_authorization.h"
 #include "collaboration/map_hub_imagery_catalog.h"
 #include "core/document_path.h"
 #include "gui/main_window.h"
@@ -403,6 +405,8 @@ MapHubDialog::MapHubDialog(MainWindow *window)
       first_use_invite(new QLineEdit(first_use_page)),
       first_use_account_tabs(new QTabWidget(first_use_page)),
       first_use_browse(new QPushButton(tr("Choose…"), first_use_page)),
+      passkey_button(new QPushButton(tr("Connect with passkey…"),
+                                      first_use_page)),
       connect_button(
           new QPushButton(tr("Connect and open Map Hub"), first_use_page)),
       invitation_button(new QPushButton(tr("Set up account in browser…"),
@@ -425,8 +429,9 @@ MapHubDialog::MapHubDialog(MainWindow *window)
   title_font.setBold(true);
   first_use_title->setFont(title_font);
   auto *first_use_intro = new QLabel(
-      tr("Use the invitation from your map librarian to create an account, or "
-         "connect an existing account token."),
+      tr("Connect Mapper to Map Hub with a passkey. The resulting secure "
+         "connection gives access to the library, workspaces, and authorized "
+         "imagery."),
       first_use_page);
   first_use_intro->setWordWrap(true);
   first_use_status->setWordWrap(true);
@@ -442,12 +447,25 @@ MapHubDialog::MapHubDialog(MainWindow *window)
   connection_form->addRow(tr("Map Hub server:"), first_use_server);
   connection_form->addRow(tr("Local map workspaces:"), workspace_row);
 
+  auto *passkey_page = new QWidget(first_use_account_tabs);
+  auto *passkey_layout = new QVBoxLayout(passkey_page);
+  auto *passkey_help = new QLabel(
+      tr("Sign in in your browser with Touch ID, a security key, or another "
+         "passkey. Mapper returns here automatically after you approve this "
+         "device."),
+      passkey_page);
+  passkey_help->setWordWrap(true);
+  passkey_layout->addWidget(passkey_help);
+  passkey_layout->addWidget(passkey_button, 0, Qt::AlignLeft);
+  passkey_layout->addStretch();
+  first_use_account_tabs->addTab(passkey_page, tr("Connect with passkey"));
+
   auto *invitation_page = new QWidget(first_use_account_tabs);
   auto *invitation_form = new QFormLayout(invitation_page);
   first_use_invite->setEchoMode(QLineEdit::Password);
   auto *invitation_help = new QLabel(
-      tr("Account setup opens in your browser. A passkey is offered first; "
-         "you can choose a password there instead."),
+      tr("Use this if you need to create an account. When setup is complete, "
+         "return to the Connect with passkey tab."),
       invitation_page);
   invitation_help->setWordWrap(true);
   invitation_form->addRow(invitation_help);
@@ -460,15 +478,13 @@ MapHubDialog::MapHubDialog(MainWindow *window)
   first_use_token->setEchoMode(QLineEdit::Password);
   first_use_token->setPlaceholderText(tr("Mapper API token"));
   auto *token_help = new QLabel(
-      tr("Use this if a Map Hub administrator gave you an account token "
-         "instead of an invitation."),
+      tr("Advanced fallback for a token provided by a Map Hub administrator."),
       token_page);
   token_help->setWordWrap(true);
   token_form->addRow(token_help);
   token_form->addRow(tr("Account token:"), first_use_token);
   token_form->addRow(connect_button);
-  first_use_account_tabs->addTab(token_page,
-                                 tr("Paste Mapper connection token"));
+  first_use_account_tabs->addTab(token_page, tr("Advanced token"));
 
   auto *first_use_close = new QPushButton(tr("Not now"), first_use_page);
   auto *first_use_buttons = new QHBoxLayout;
@@ -519,6 +535,8 @@ MapHubDialog::MapHubDialog(MainWindow *window)
   layout->addWidget(pages);
   connect(first_use_browse, &QPushButton::clicked, this,
           &MapHubDialog::browseFirstUseWorkspace);
+  connect(passkey_button, &QPushButton::clicked, this,
+          &MapHubDialog::connectWithPasskey);
   connect(connect_button, &QPushButton::clicked, this,
           &MapHubDialog::connectExistingAccount);
   connect(invitation_button, &QPushButton::clicked, this,
@@ -577,6 +595,7 @@ void MapHubDialog::setFirstUseBusy(bool value, const QString &message) {
   first_use_server->setEnabled(!value);
   first_use_workspace->setEnabled(!value);
   first_use_browse->setEnabled(!value);
+  passkey_button->setEnabled(!value);
   first_use_token->setEnabled(!value);
   first_use_invite->setEnabled(!value);
   first_use_account_tabs->setEnabled(!value);
@@ -645,6 +664,55 @@ bool MapHubDialog::saveFirstUseConnection(const QString &server,
   return true;
 }
 
+void MapHubDialog::connectWithPasskey() {
+  QString server;
+  QString workspace_root;
+  if (!firstUseConnection(server, workspace_root) || passkey_connection)
+    return;
+
+  setFirstUseBusy(true, tr("Preparing secure browser sign-in…"));
+  const auto client_name = tr("Mapper on %1").arg(QSysInfo::machineHostName());
+  passkey_connection = new MapHubDeviceAuthorization(server, client_name, this);
+  connect(passkey_connection, &MapHubDeviceAuthorization::verificationRequired,
+          this, [this](const QUrl &url, const QString &code) {
+            setFirstUseBusy(
+                true,
+                code.isEmpty()
+                    ? tr("Finish the passkey sign-in in your browser…")
+                    : tr("Finish the passkey sign-in in your browser. "
+                         "Confirm code %1.")
+                          .arg(code));
+            if (!QDesktopServices::openUrl(url)) {
+              QMessageBox::warning(this, tr("Map Hub"),
+                                   tr("Mapper could not open Map Hub in your "
+                                      "browser."));
+              passkey_connection->cancel();
+            }
+          });
+  connect(passkey_connection, &MapHubDeviceAuthorization::completed, this,
+          [this, server, workspace_root](
+              const MapHubDeviceAuthorization::Result &result,
+              const MapHubApiClient::Error &error) {
+            auto *connection = passkey_connection.data();
+            passkey_connection = nullptr;
+            if (connection)
+              connection->deleteLater();
+            if (error) {
+              setFirstUseBusy(false, error.message);
+              return;
+            }
+            QString storage_error;
+            if (!saveFirstUseConnection(server, workspace_root, result.token,
+                                        storage_error)) {
+              setFirstUseBusy(false, storage_error);
+              return;
+            }
+            first_use_token->clear();
+            refresh();
+          });
+  passkey_connection->start();
+}
+
 void MapHubDialog::connectExistingAccount() {
   QString server;
   QString workspace_root;
@@ -700,11 +768,9 @@ void MapHubDialog::openFirstUseInvitation() {
                             "browser."));
     return;
   }
-  first_use_account_tabs->setCurrentIndex(1);
+  first_use_account_tabs->setCurrentIndex(0);
   first_use_status->setText(
-      tr("Finish account setup in your browser, copy the Mapper connection "
-         "token, then paste it here."));
-  first_use_token->setFocus();
+      tr("Finish account setup in your browser, then connect with a passkey."));
 }
 
 void MapHubDialog::setBusy(bool value, const QString &message) {
