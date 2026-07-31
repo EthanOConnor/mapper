@@ -12,7 +12,7 @@
 
 cmake_minimum_required(VERSION 4.4)
 
-project(Mapper VERSION 0.9.7 LANGUAGES C CXX)
+project(Mapper VERSION 0.1.0 LANGUAGES C CXX)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
@@ -37,6 +37,8 @@ endif()
 
 if(Mapper_VERSION_DISPLAY)
 	message(STATUS "Custom version display string: \"${Mapper_VERSION_DISPLAY}\"")
+elseif(Mapper_VERSION STREQUAL "0.1.0")
+	set(Mapper_VERSION_DISPLAY "0.1")
 elseif(CMAKE_BUILD_TYPE AND NOT CMAKE_BUILD_TYPE MATCHES "Release|MinSizeRel|RelWithDebInfo")
 	set(Mapper_VERSION_DISPLAY "${CMAKE_BUILD_TYPE} ${Mapper_VERSION}")
 else()

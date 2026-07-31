@@ -380,6 +380,9 @@ jobs:
           mounted=0
 
           plutil -lint "$copied_app/Contents/Info.plist"
+          codesign --verify --deep --strict --verbose=2 "$copied_app"
+          signature_flags="$(codesign -dv --verbose=4 "$copied_app" 2>&1)"
+          grep -Fq 'Signature=adhoc' <<< "$signature_flags"
           unset DYLD_LIBRARY_PATH DYLD_FRAMEWORK_PATH QT_PLUGIN_PATH QML2_IMPORT_PATH
 
           mapper="$copied_app/Contents/MacOS/Mapper"

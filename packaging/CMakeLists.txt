@@ -81,6 +81,25 @@ qt_generate_deploy_app_script(
 	OUTPUT_SCRIPT mapper_deploy_script
 )
 install(SCRIPT "${mapper_deploy_script}")
+if(APPLE)
+	# Deployment and install-time stripping modify nested Mach-O files after
+	# the linker has applied incidental signatures. Seal the finished bundle
+	# so an unsigned preview is internally valid when Gatekeeper evaluates it.
+	install(CODE [[
+		set(mapper_app "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/Mapper.app")
+		execute_process(
+			COMMAND /usr/bin/codesign --force --deep --sign - --timestamp=none
+			        "${mapper_app}"
+			RESULT_VARIABLE codesign_result
+			OUTPUT_VARIABLE codesign_output
+			ERROR_VARIABLE codesign_error
+		)
+		if(NOT codesign_result EQUAL 0)
+			message(FATAL_ERROR
+				"Failed to seal ${mapper_app}: ${codesign_output}${codesign_error}")
+		endif()
+	]])
+endif()
 
 set(CPACK_PACKAGE_NAME "OpenOrienteering Mapper")
 set(CPACK_PACKAGE_VENDOR "OpenOrienteering")
