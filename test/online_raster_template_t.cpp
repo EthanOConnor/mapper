@@ -1649,10 +1649,63 @@ class OnlineRasterTemplateTest : public QObject
 							}));
 				QTRY_VERIFY_WITH_TIMEOUT(completed, 5000);
 				QVERIFY(result);
-				QCOMPARE(
-					result->image.pixelColor(1, 1).alpha(),
-					0);
+				QCOMPARE(result->image.pixelColor(1, 1).alpha(), 0);
 			}
+
+	void cpuPrewarpUsesExactCrsSamplingInsideGridCells()
+	{
+		QImage gradient(10, 3, QImage::Format_RGBA8888);
+		gradient.fill(Qt::black);
+		for (int x = 0; x < 8; ++x)
+			gradient.setPixelColor(x + 1, 1, QColor(30 * x, 30 * x, 30 * x));
+
+		OnlineRasterTemplate::AtlasBuildRequest request;
+		request.window = { 0, 0, 0, 0, 0 };
+		request.core_size = { 8, 1 };
+		request.visuals = {
+			{ QRectF(1, 1, 8, 1), gradient, QRectF(1, 1, 8, 1), {} },
+		};
+		OnlineRasterTemplate::AtlasWarpGrid warp;
+		warp.columns = 2;
+		warp.rows = 1;
+		warp.output_size = { 8, 1 };
+		warp.source_points = {
+			QPointF(1.5, 1.5), QPointF(5.9, 1.5), QPointF(8.5, 1.5),
+			QPointF(1.5, 1.5), QPointF(5.9, 1.5), QPointF(8.5, 1.5),
+		};
+		warp.exact_ownership = true;
+		warp.map_crs = QStringLiteral("EPSG:3857");
+		warp.source_crs = QStringLiteral("EPSG:3857");
+		warp.map_to_projected = QTransform{};
+		warp.map_bounds = QRectF(0, 0, 8, 1);
+		warp.core_west = 0;
+		warp.core_north = 1;
+		warp.cell_size = 1;
+		request.warp = std::move(warp);
+
+		auto cancelled = std::make_shared<std::atomic_bool>(false);
+		auto owner = RasterResourceManager::instance().createOwner(1);
+		std::optional<OnlineRasterTemplate::AtlasBuildResult> result;
+		auto completed = false;
+		QVERIFY(RasterResourceManager::instance().submit(
+			owner,
+			RasterResourceManager::Lane::Decode,
+			RasterResourceManager::Priority::Visible,
+			this,
+			[request = std::move(request), cancelled, &result, &completed](
+				const RasterResourceManager::CancellationToken& cancellation) mutable {
+				auto built = OnlineRasterTemplate::buildAtlas(
+					std::move(request), cancelled, cancellation);
+				return [&result, &completed, built = std::move(built)]() mutable {
+					result = std::move(built);
+					completed = true;
+				};
+			}));
+		QTRY_VERIFY_WITH_TIMEOUT(completed, 5000);
+		QVERIFY(result);
+		for (int x = 0; x < 8; ++x)
+			QCOMPARE(result->image.pixelColor(x + 1, 1).red(), 30 * x);
+	}
 
 	void panKeepsSourceGenerationAndCancelsOnlyIrrelevantFetches()
 	{

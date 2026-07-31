@@ -3479,83 +3479,46 @@ OnlineRasterTemplate::buildAtlas(AtlasBuildRequest request,
 				auto const bottom_left = grid.source_points.at((cell_y + 1) * row_stride + cell_x);
 				auto const bottom_right =
 					grid.source_points.at((cell_y + 1) * row_stride + cell_x + 1);
-					auto const top = top_left * (1 - fraction_x) + top_right * fraction_x;
-					auto const bottom = bottom_left * (1 - fraction_x) + bottom_right * fraction_x;
-					auto const source_point =
-						top * (1 - fraction_y)
-						+ bottom * fraction_y;
-					auto ownership_point = source_point;
-					if (grid.exact_ownership)
-					{
-						auto const right =
-							request.core_size.width() + 1.0;
-						auto const bottom_edge =
-							request.core_size.height() + 1.0;
-						auto const edge_distance = std::min({
-							std::abs(source_point.x() - 1),
-							std::abs(source_point.x() - right),
-							std::abs(source_point.y() - 1),
-							std::abs(source_point.y() - bottom_edge),
-						});
-						auto const exact_margin = std::max(
-							1.0,
-							grid.maximum_interpolation_error + 0.75);
-						if (edge_distance <= exact_margin)
-						{
-							auto const map_point = QPointF(
-								grid.map_bounds.left()
-									+ grid.map_bounds.width()
-										* (x + 0.5)
-										/ output.width(),
-								grid.map_bounds.top()
-									+ grid.map_bounds.height()
-										* (y + 0.5)
-										/ output.height());
-							bool inverse_ok = false;
-							bool forward_ok = false;
-							auto const lat_lon =
-								map_projection->inverse(
-									grid.map_to_projected.map(
-										map_point),
-									&inverse_ok);
-							auto nominal_source =
-								source_projection->forward(
-									lat_lon, &forward_ok);
-							if (!inverse_ok || !forward_ok
-							    || !std::isfinite(
-								   nominal_source.x())
-							    || !std::isfinite(
-								   nominal_source.y()))
-							{
-								continue;
-							}
-							nominal_source -=
-								grid.source_registration;
-							ownership_point = {
-								1
-									+ (nominal_source.x()
-									   - grid.core_west)
-										/ grid.cell_size,
-								1
-									+ (grid.core_north
-									   - nominal_source.y())
-										/ grid.cell_size,
-							};
-						}
-					}
-					// Neighbor pixels exist only as bilinear filter support.
-					// Exact inverse ownership near every edge makes adjacent
-					// chunks share one half-open nominal-source partition.
-					if (ownership_point.x() < 1
-					    || ownership_point.y() < 1
-					    || ownership_point.x()
-					           >= request.core_size.width() + 1
-					    || ownership_point.y()
-					           >= request.core_size.height() + 1)
+				auto const top = top_left * (1 - fraction_x) + top_right * fraction_x;
+				auto const bottom = bottom_left * (1 - fraction_x) + bottom_right * fraction_x;
+				auto source_point = top * (1 - fraction_y) + bottom * fraction_y;
+				auto ownership_point = source_point;
+				if (grid.exact_ownership)
+				{
+					auto const map_point = QPointF(
+						grid.map_bounds.left()
+							+ grid.map_bounds.width() * (x + 0.5) / output.width(),
+						grid.map_bounds.top()
+							+ grid.map_bounds.height() * (y + 0.5) / output.height());
+					bool inverse_ok = false;
+					bool forward_ok = false;
+					auto const lat_lon = map_projection->inverse(
+						grid.map_to_projected.map(map_point), &inverse_ok);
+					auto nominal_source = source_projection->forward(lat_lon, &forward_ok);
+					if (!inverse_ok || !forward_ok
+					    || !std::isfinite(nominal_source.x())
+					    || !std::isfinite(nominal_source.y()))
 					{
 						continue;
 					}
-					auto const source_x = source_point.x() - 0.5;
+					nominal_source -= grid.source_registration;
+					source_point = {
+						1 + (nominal_source.x() - grid.core_west) / grid.cell_size,
+						1 + (grid.core_north - nominal_source.y()) / grid.cell_size,
+					};
+					ownership_point = source_point;
+				}
+				// Neighbor pixels exist only as bilinear filter support. Exact
+				// inverse sampling avoids derivative seams from the coarse planning
+				// grid and gives adjacent chunks one half-open source partition.
+				if (ownership_point.x() < 1
+				    || ownership_point.y() < 1
+				    || ownership_point.x() >= request.core_size.width() + 1
+				    || ownership_point.y() >= request.core_size.height() + 1)
+				{
+					continue;
+				}
+				auto const source_x = source_point.x() - 0.5;
 				auto const source_y = source_point.y() - 0.5;
 				auto const x0 = int(std::floor(source_x));
 				auto const y0 = int(std::floor(source_y));
@@ -3563,10 +3526,10 @@ OnlineRasterTemplate::buildAtlas(AtlasBuildRequest request,
 				auto const fy = source_y - y0;
 				for (int channel = 0; channel < 4; ++channel)
 				{
-					auto const top_sample =
-						sample(x0, y0, channel) * (1 - fx) + sample(x0 + 1, y0, channel) * fx;
+					auto const top_sample = sample(x0, y0, channel) * (1 - fx)
+						+ sample(x0 + 1, y0, channel) * fx;
 					auto const bottom_sample = sample(x0, y0 + 1, channel) * (1 - fx)
-											   + sample(x0 + 1, y0 + 1, channel) * fx;
+						+ sample(x0 + 1, y0 + 1, channel) * fx;
 					destination[4 * x + channel] = uchar(std::clamp(
 						int(std::lround(top_sample * (1 - fy) + bottom_sample * fy)), 0, 255));
 				}
