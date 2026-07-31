@@ -22,11 +22,15 @@ include(GNUInstallDirs)
 include(MapperBuild)
 
 set(Mapper_COPYRIGHT "(C) 2026 The OpenOrienteering developers")
-math(EXPR Mapper_VERSION_CODE
-	"${Mapper_VERSION_MAJOR} * 1000000 + ${Mapper_VERSION_MINOR} * 10000 + ${Mapper_VERSION_PATCH} * 100 + 1")
+set(Mapper_BUILD_NUMBER "90702" CACHE STRING
+	"Monotonically increasing mobile build number")
+if(NOT Mapper_BUILD_NUMBER MATCHES "^[1-9][0-9]*$")
+	message(FATAL_ERROR "Mapper_BUILD_NUMBER must be a positive integer")
+endif()
+set(Mapper_VERSION_CODE "${Mapper_BUILD_NUMBER}")
 
 if(IOS)
-	set(Mapper_IOS_BUILD_NUMBER "${Mapper_VERSION_CODE}" CACHE STRING
+	set(Mapper_IOS_BUILD_NUMBER "${Mapper_BUILD_NUMBER}" CACHE STRING
 		"Monotonically increasing iOS CFBundleVersion")
 	if(NOT Mapper_IOS_BUILD_NUMBER MATCHES
 	   "^[1-9][0-9]*(\\.[0-9]+(\\.[0-9]+)?)?$")
