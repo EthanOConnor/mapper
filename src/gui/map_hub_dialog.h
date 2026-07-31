@@ -25,6 +25,7 @@ class QWidget;
 namespace OpenOrienteering {
 
 class MainWindow;
+class MapHubDeviceAuthorization;
 struct ManagedMapWorkspace;
 
 class MapHubDialog final : public QDialog {
@@ -41,6 +42,7 @@ private slots:
   void createConnectedMap();
   void updateActions();
   void browseFirstUseWorkspace();
+  void connectWithPasskey();
   void connectExistingAccount();
   void openFirstUseInvitation();
 
@@ -76,8 +78,10 @@ private:
   QLineEdit *first_use_invite;
   QTabWidget *first_use_account_tabs;
   QPushButton *first_use_browse;
+  QPushButton *passkey_button;
   QPushButton *connect_button;
   QPushButton *invitation_button;
+  QPointer<MapHubDeviceAuthorization> passkey_connection;
   QLabel *connection_label;
   QLabel *activity_label;
   QTabWidget *tabs;

@@ -7,6 +7,8 @@
 #ifndef OPENORIENTEERING_MAP_HUB_SETTINGS_PAGE_H
 #define OPENORIENTEERING_MAP_HUB_SETTINGS_PAGE_H
 
+#include <QPointer>
+
 #include "gui/widgets/settings_page.h"
 
 class QLabel;
@@ -14,6 +16,8 @@ class QLineEdit;
 class QPushButton;
 
 namespace OpenOrienteering {
+
+class MapHubDeviceAuthorization;
 
 class MapHubSettingsPage final : public SettingsPage {
   Q_OBJECT
@@ -28,6 +32,7 @@ public slots:
 private slots:
   void testConnection();
   void clearCredential();
+  void connectWithPasskey();
   void openInvitation();
 
 private:
@@ -39,10 +44,12 @@ private:
   QLineEdit *workspace_root_edit;
   QLineEdit *token_edit;
   QLabel *credential_status;
+  QPushButton *passkey_button;
   QPushButton *test_button;
   QPushButton *clear_button;
   QLineEdit *invite_edit;
   QPushButton *invitation_button;
+  QPointer<MapHubDeviceAuthorization> passkey_connection;
   QString loaded_server;
 };
 

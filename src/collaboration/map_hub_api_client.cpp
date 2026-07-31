@@ -290,6 +290,37 @@ void MapHubApiClient::health(JsonHandler handler) {
              std::move(handler));
 }
 
+void MapHubApiClient::startMapperConnection(const QString &client_name,
+                                            JsonHandler handler) {
+  if (!ensureReady(false, handler))
+    return;
+  if (client_name.trimmed().isEmpty() || client_name.toUtf8().size() > 80) {
+    handler({}, {0, QStringLiteral("invalid_client_name"),
+                 tr("Mapper could not create a valid connection name.")});
+    return;
+  }
+  sendJson("POST", QStringLiteral("/api/v1/auth/mapper/connect"),
+           QJsonObject{{QStringLiteral("client_name"), client_name.trimmed()}},
+           false, std::move(handler));
+}
+
+void MapHubApiClient::exchangeMapperConnection(const QString &request_id,
+                                               const QString &device_secret,
+                                               JsonHandler handler) {
+  if (!ensureReady(false, handler))
+    return;
+  if (!validStableId(request_id) || !validHeaderValue(device_secret, 200)) {
+    handler({}, {0, QStringLiteral("invalid_connection"),
+                 tr("Mapper's pending connection is invalid.")});
+    return;
+  }
+  sendJson("POST",
+           QStringLiteral("/api/v1/auth/mapper/connect/%1/exchange")
+               .arg(request_id),
+           QJsonObject{{QStringLiteral("device_secret"), device_secret}},
+           false, std::move(handler));
+}
+
 void MapHubApiClient::library(JsonHandler handler) {
   if (!ensureReady(true, handler))
     return;

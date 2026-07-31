@@ -11,14 +11,84 @@
 #include <QJsonDocument>
 #include <QStandardPaths>
 #include <QTemporaryDir>
+#include <QTcpServer>
+#include <QTcpSocket>
 #include <QtTest>
 
+#include "collaboration/map_hub_device_authorization.h"
 #include "collaboration/managed_map_workspace.h"
 #include "collaboration/map_hub_api_client.h"
 #include "collaboration/map_hub_imagery_catalog.h"
 #include "imagery/oic_catalog.h"
 
 using namespace OpenOrienteering;
+
+namespace {
+
+class DeviceAuthorizationServer final : public QObject {
+public:
+  DeviceAuthorizationServer() {
+    connect(&server, &QTcpServer::newConnection, this, [this] {
+      while (auto *socket = server.nextPendingConnection()) {
+        connect(socket, &QTcpSocket::readyRead, socket,
+                [this, socket] { handle(socket); });
+      }
+    });
+  }
+
+  bool start() { return server.listen(QHostAddress::LocalHost); }
+  QString url() const {
+    return QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort());
+  }
+  int requestCount() const { return request_count; }
+  bool valid() const { return error.isEmpty(); }
+  QString failure() const { return error; }
+  QString errorString() const { return server.errorString(); }
+
+private:
+  void handle(QTcpSocket *socket) {
+    auto request = socket->readAll();
+    if (!request.contains("\r\n\r\n"))
+      return;
+    const auto path = request.left(request.indexOf("\r\n"));
+    QByteArray payload;
+    if (request_count == 0) {
+      if (!path.startsWith("POST /api/v1/auth/mapper/connect HTTP/1.1"))
+        error = QStringLiteral("unexpected start request");
+      payload = QStringLiteral(
+                    R"({"request_id":"11111111-1111-1111-1111-111111111111","device_secret":"a-connection-secret","user_code":"123456","verification_url":"%1/account/mapper/connect/11111111-1111-1111-1111-111111111111/","expires_in":10,"interval":1})")
+                    .arg(url())
+                    .toUtf8();
+      respond(socket, "201 Created", payload);
+    } else if (request_count == 1) {
+      if (!path.startsWith(
+              "POST /api/v1/auth/mapper/connect/11111111-1111-1111-1111-111111111111/exchange HTTP/1.1"))
+        error = QStringLiteral("unexpected exchange request");
+      respond(socket, "202 Accepted", QByteArrayLiteral(R"({"status":"pending"})"));
+    } else if (request_count == 2) {
+      respond(socket, "201 Created",
+              QByteArrayLiteral(R"({"status":"connected","token":"cocm_connected","organization":{"name":"Cascade Orienteering Club"}})"));
+    } else {
+      error = QStringLiteral("unexpected extra connection request");
+      respond(socket, "500 Internal Server Error", QByteArrayLiteral("{}"));
+    }
+    ++request_count;
+  }
+
+  static void respond(QTcpSocket *socket, const QByteArray &status,
+                      const QByteArray &payload) {
+    socket->write("HTTP/1.1 " + status + "\r\nContent-Type: application/json\r\n"
+                  "Content-Length: " + QByteArray::number(payload.size()) +
+                  "\r\nConnection: close\r\n\r\n" + payload);
+    socket->disconnectFromHost();
+  }
+
+  QTcpServer server;
+  int request_count = 0;
+  QString error;
+};
+
+} // namespace
 
 void MapHubWorkspaceTest::initTestCase() {
   QCoreApplication::setOrganizationName(QStringLiteral("OpenOrienteeringTest"));
@@ -148,6 +218,44 @@ void MapHubWorkspaceTest::hashesArtifactsExactly() {
       QStringLiteral(
           "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"));
   QVERIFY(error.isEmpty());
+}
+
+void MapHubWorkspaceTest::completesBrowserMediatedConnection() {
+  DeviceAuthorizationServer server;
+  QVERIFY2(server.start(), qPrintable(server.errorString()));
+
+  MapHubDeviceAuthorization authorization(
+      server.url(), QStringLiteral("Mapper test"), this);
+  QUrl verification_url;
+  QString user_code;
+  MapHubDeviceAuthorization::Result result;
+  MapHubApiClient::Error error;
+  bool complete = false;
+  connect(&authorization, &MapHubDeviceAuthorization::verificationRequired,
+          this, [&verification_url, &user_code](const QUrl &url,
+                                                 const QString &code) {
+            verification_url = url;
+            user_code = code;
+          });
+  connect(&authorization, &MapHubDeviceAuthorization::completed, this,
+          [&result, &error, &complete](
+              const MapHubDeviceAuthorization::Result &connected,
+              const MapHubApiClient::Error &connection_error) {
+            result = connected;
+            error = connection_error;
+            complete = true;
+          });
+
+  authorization.start();
+  QTRY_VERIFY_WITH_TIMEOUT(verification_url.isValid(), 3000);
+  QCOMPARE(user_code, QStringLiteral("123456"));
+  QCOMPARE(verification_url.host(), QStringLiteral("127.0.0.1"));
+  QTRY_VERIFY_WITH_TIMEOUT(complete, 5000);
+  QVERIFY2(!error, qPrintable(error.message));
+  QCOMPARE(result.token, QStringLiteral("cocm_connected"));
+  QCOMPARE(result.organization_name, QStringLiteral("Cascade Orienteering Club"));
+  QCOMPARE(server.requestCount(), 3);
+  QVERIFY2(server.valid(), qPrintable(server.failure()));
 }
 
 void MapHubWorkspaceTest::preservesPublishedTileMatrixLimits() {
