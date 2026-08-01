@@ -4304,7 +4304,7 @@ void MapEditorController::positionGnssStatusOverlay()
 		if (safe.top() >= size.height())
 		{
 			auto left = std::max(0, window->width() - size.width()
-			                              - qRound(Util::mmToPixelLogical(1.5)));
+			                              - qRound(Util::mmToPixelLogical(3.0)));
 			auto top = std::max(0, (safe.top() - size.height()) / 2);
 			gnss_status_overlay->setGeometry(left, top,
 			                                 size.width(), size.height());

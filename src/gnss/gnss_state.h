@@ -62,6 +62,9 @@ enum class GnssProtocol : std::uint8_t
 	UBX     = 1,
 	NMEA    = 2,
 	Mixed   = 3,  ///< Both UBX and NMEA detected (common for u-blox defaults)
+	RTCM3   = 4,  ///< Correction records, not a receiver position stream
+	BINEX   = 5,  ///< Receiver observations in BINEX wire format
+	BYNAV   = 6,  ///< BYNAV native ASCII or binary records
 };
 
 

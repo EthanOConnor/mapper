@@ -22,6 +22,7 @@
 #include <cmath>
 
 #include <QColor>
+#include <QEvent>
 #include <QFont>
 #include <QFontMetricsF>
 #include <QMouseEvent>
@@ -48,6 +49,9 @@ QString protocolText(GnssProtocol protocol)
 	case GnssProtocol::UBX: return QStringLiteral("UBX");
 	case GnssProtocol::NMEA: return QStringLiteral("NMEA");
 	case GnssProtocol::Mixed: return QStringLiteral("UBX + NMEA");
+	case GnssProtocol::RTCM3: return QStringLiteral("RTCM 3");
+	case GnssProtocol::BINEX: return QStringLiteral("BINEX");
+	case GnssProtocol::BYNAV: return QStringLiteral("BYNAV");
 	case GnssProtocol::Unknown: return {};
 	}
 	return {};
@@ -115,6 +119,8 @@ GnssStatusOverlay::GnssStatusOverlay(QWidget* parent)
  : QWidget(parent)
 {
 	setAttribute(Qt::WA_NoSystemBackground, true);
+	setAttribute(Qt::WA_AcceptTouchEvents, true);
+	setCursor(Qt::PointingHandCursor);
 }
 
 GnssStatusOverlay::~GnssStatusOverlay()
@@ -150,13 +156,33 @@ QSize GnssStatusOverlay::sizeHint() const
 #if defined(Q_OS_IOS)
 	// Fits in one side of the portrait Dynamic Island/status region on current
 	// iPhones. The tap opens the full, deliberately roomy diagnostics sheet.
-	auto w = qRound(Util::mmToPixelLogical(23.0));
-	auto h = qRound(Util::mmToPixelLogical(6.5));
+	auto w = qRound(Util::mmToPixelLogical(25.0));
+	auto h = qRound(Util::mmToPixelLogical(7.5));
 #else
 	auto w = qRound(Util::mmToPixelLogical(64.0));
 	auto h = qRound(Util::mmToPixelLogical(15.0));
 #endif
 	return QSize(w, h);
+}
+
+bool GnssStatusOverlay::event(QEvent* event)
+{
+	// iOS does not always synthesize a mouse press for a QWidget occupying the
+	// top safe-area/status region. Accept native touch delivery explicitly so
+	// the capsule remains a dependable route to diagnostics.
+	if (event->type() == QEvent::TouchBegin
+	    || event->type() == QEvent::TouchUpdate)
+	{
+		event->accept();
+		return true;
+	}
+	if (event->type() == QEvent::TouchEnd)
+	{
+		event->accept();
+		emit clicked();
+		return true;
+	}
+	return QWidget::event(event);
 }
 
 void GnssStatusOverlay::paintEvent(QPaintEvent*)
@@ -187,8 +213,16 @@ void GnssStatusOverlay::paintEvent(QPaintEvent*)
 	else if (!freshPosition)
 	{
 		healthColor = QColor(0xFF, 0xC1, 0x07);
-		text = m_state.protocol == GnssProtocol::Unknown
-		     ? tr("Data?") : tr("No fix");
+		switch (m_state.protocol)
+		{
+		case GnssProtocol::RTCM3: text = tr("RTCM only"); break;
+		case GnssProtocol::BINEX: text = tr("BINEX"); break;
+		case GnssProtocol::BYNAV: text = tr("BYNAV"); break;
+		case GnssProtocol::Unknown: text = tr("Data?"); break;
+		case GnssProtocol::UBX:
+		case GnssProtocol::NMEA:
+		case GnssProtocol::Mixed: text = tr("No fix"); break;
+		}
 	}
 	else
 	{

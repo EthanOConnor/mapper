@@ -77,6 +77,9 @@ QString protocolName(GnssProtocol protocol)
 	case GnssProtocol::UBX: return QStringLiteral("UBX");
 	case GnssProtocol::NMEA: return QStringLiteral("NMEA");
 	case GnssProtocol::Mixed: return QStringLiteral("UBX + NMEA");
+	case GnssProtocol::RTCM3: return QStringLiteral("RTCM 3 corrections only");
+	case GnssProtocol::BINEX: return QStringLiteral("BINEX observations");
+	case GnssProtocol::BYNAV: return QStringLiteral("BYNAV native");
 	case GnssProtocol::Unknown: return GnssSettingsPage::tr("not detected");
 	}
 	return GnssSettingsPage::tr("not detected");
@@ -410,6 +413,15 @@ void GnssSettingsPage::updatePreflightState(const GnssState& state)
 	{
 		preflight_title_label->setText(tr("Receiver data is not recognized"));
 		preflight_detail_label->setText(tr("Bytes are arriving, but they are not a supported UBX or NMEA position stream."));
+	}
+	else if (!has_position && state.protocol != GnssProtocol::UBX
+	         && state.protocol != GnssProtocol::NMEA
+	         && state.protocol != GnssProtocol::Mixed)
+	{
+		preflight_title_label->setText(tr("Receiver output needs configuration"));
+		preflight_detail_label->setText(
+		  tr("Mapper is receiving %1, but not a UBX or NMEA position stream. Choose a receiver profile or enable position output on this port.")
+		    .arg(protocolName(state.protocol)));
 	}
 	else if (!has_position)
 	{

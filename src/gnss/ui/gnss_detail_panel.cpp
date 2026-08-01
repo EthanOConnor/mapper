@@ -463,6 +463,14 @@ void GnssDetailPanel::updateState(const GnssState& state)
 		status_detail_label->setText(
 		  tr("Bytes are arriving, but they are not a supported UBX or NMEA position stream."));
 	}
+	else if (!has_position && state.protocol != GnssProtocol::UBX
+	         && state.protocol != GnssProtocol::NMEA
+	         && state.protocol != GnssProtocol::Mixed)
+	{
+		status_summary_label->setText(tr("Receiver output needs configuration"));
+		status_detail_label->setText(
+		  tr("The connected port is carrying a recognized GNSS format, but not a UBX or NMEA position stream."));
+	}
 	else if (!has_position)
 	{
 		status_summary_label->setText(tr("Waiting for a usable position fix"));
@@ -661,6 +669,9 @@ void GnssDetailPanel::updateState(const GnssState& state)
 	case GnssProtocol::UBX: receiver_protocol_label->setText(QStringLiteral("UBX")); break;
 	case GnssProtocol::NMEA: receiver_protocol_label->setText(QStringLiteral("NMEA")); break;
 	case GnssProtocol::Mixed: receiver_protocol_label->setText(tr("UBX + NMEA")); break;
+	case GnssProtocol::RTCM3: receiver_protocol_label->setText(tr("RTCM 3 corrections only")); break;
+	case GnssProtocol::BINEX: receiver_protocol_label->setText(tr("BINEX observations")); break;
+	case GnssProtocol::BYNAV: receiver_protocol_label->setText(tr("BYNAV native")); break;
 	case GnssProtocol::Unknown: receiver_protocol_label->setText(tr("Not detected")); break;
 	}
 	receiver_last_data_label->setText(

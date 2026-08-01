@@ -31,6 +31,7 @@
 
 class QMouseEvent;
 class QPaintEvent;
+class QEvent;
 
 namespace OpenOrienteering {
 
@@ -58,6 +59,7 @@ signals:
 	void clicked();  // emitted on tap to open detail panel
 
 protected:
+	bool event(QEvent* event) override;
 	void paintEvent(QPaintEvent* event) override;
 	void mousePressEvent(QMouseEvent* event) override;
 

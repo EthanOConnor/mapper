@@ -19,9 +19,14 @@
 
 #include "protocol_detector.h"
 
+#include <cstddef>
 #include <cstdint>
 
+#if defined(MAPPER_GNSS_USE_GLEAN_WIRE)
+#  include <glean/wire.h>
+#else
 #include "protocol/ubx_messages.h"
+#endif
 
 namespace OpenOrienteering {
 
@@ -31,10 +36,36 @@ GnssProtocol ProtocolDetector::detect(const QByteArray& data)
 	if (data.size() < kMinDetectionBytes)
 		return GnssProtocol::Unknown;
 
+#if defined(MAPPER_GNSS_USE_GLEAN_WIRE)
+	glean_wire_scan_t scanner = {};
+	glean_wire_scan_feed(
+	  &scanner,
+	  reinterpret_cast<const std::uint8_t*>(data.constData()),
+	  static_cast<std::size_t>(qMin(data.size(), 4096)),
+	  nullptr, nullptr);
+
+	const bool hasUbx = glean_wire_scan_valid_count(
+	  &scanner, GLEAN_WIRE_KIND_UBX) > 0;
+	const bool hasNmea = glean_wire_scan_valid_count(
+	  &scanner, GLEAN_WIRE_KIND_NMEA) > 0;
+	if (hasUbx && hasNmea)
+		return GnssProtocol::Mixed;
+	if (hasUbx)
+		return GnssProtocol::UBX;
+	if (hasNmea)
+		return GnssProtocol::NMEA;
+	if (glean_wire_scan_valid_count(&scanner, GLEAN_WIRE_KIND_BYNAV) > 0)
+		return GnssProtocol::BYNAV;
+	if (glean_wire_scan_valid_count(&scanner, GLEAN_WIRE_KIND_BINEX) > 0)
+		return GnssProtocol::BINEX;
+	if (glean_wire_scan_valid_count(&scanner, GLEAN_WIRE_KIND_RTCM3) > 0)
+		return GnssProtocol::RTCM3;
+	return GnssProtocol::Unknown;
+#else
 	bool hasUbx = false;
 	bool hasNmea = false;
 
-	int limit = qMin(data.size(), 512);
+	int limit = qMin(data.size(), 4096);
 
 	for (int i = 0; i < limit; ++i)
 	{
@@ -82,6 +113,7 @@ GnssProtocol ProtocolDetector::detect(const QByteArray& data)
 	if (hasNmea)
 		return GnssProtocol::NMEA;
 	return GnssProtocol::Unknown;
+#endif
 }
 
 

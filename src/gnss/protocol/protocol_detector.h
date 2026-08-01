@@ -28,19 +28,20 @@
 namespace OpenOrienteering {
 
 
-/// Detects whether an incoming byte stream contains UBX, NMEA, or both.
+/// Detects checksum-valid GNSS records in an incoming byte stream.
 ///
-/// Feed the first few hundred bytes of a GNSS receiver stream to detect()
+/// Feed a bounded rolling window of a GNSS receiver stream to detect()
 /// and it will classify the protocol. u-blox receivers typically output
 /// both UBX and NMEA by default, so Mixed is a common result.
 ///
-/// This does not validate full frames — it only looks for characteristic
-/// byte patterns to make a quick classification decision.
+/// Production builds use Cascadia Glean's zero-allocation wire scanner, which
+/// validates complete records. A sync-marker fallback is retained for builds
+/// configured without the optional Glean source tree.
 class ProtocolDetector
 {
 public:
 	/// Analyze a buffer and return the detected protocol.
-	/// Examines up to the first 512 bytes.
+	/// Examines up to the first 4096 bytes.
 	static GnssProtocol detect(const QByteArray& data);
 
 	/// Minimum bytes needed for a reliable detection.

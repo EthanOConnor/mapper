@@ -235,40 +235,46 @@ void GnssSession::onTransportDataReceived(const QByteArray& data)
 	if (m_rawLogger && m_rawLogger->isLogging())
 		m_rawLogger->logReceiverData(data);
 
-	if (!m_protocolDetected)
-	{
-		// Buffer initial data for protocol detection
-		m_detectionBuffer.append(data);
-		if (m_detectionBuffer.size() >= ProtocolDetector::kMinDetectionBytes)
-		{
-			m_detectedProtocol = ProtocolDetector::detect(m_detectionBuffer);
-			m_protocolDetected = true;
-			m_state.protocol = m_detectedProtocol;
-
-			// Always feed both parsers — each skips bytes it doesn't recognize.
-			// The receiver may switch protocols mid-stream (e.g., NMEA → UBX
-			// after we send configuration), so single-parser routing is fragile.
-			m_ubxParser->addData(m_detectionBuffer);
-			m_nmeaParser->addData(m_detectionBuffer);
-			m_detectionBuffer.clear();
-			m_lastReceiverStateEmitMs = nowMs;
-			emitStateChanged();
-		}
-		else if (m_lastReceiverStateEmitMs == 0)
-		{
-			m_lastReceiverStateEmitMs = nowMs;
-			emitStateChanged();
-		}
-		return;
-	}
-
 	// Always feed both parsers — each skips foreign bytes at its sync level.
-	// Protocol detection is informational (for UI display), not routing.
+	// Protocol detection is informational (for UI display), not routing. In
+	// particular, startup noise must never delay or suppress a valid fix.
 	m_ubxParser->addData(data);
 	m_nmeaParser->addData(data);
+
+	bool protocolChanged = false;
+	if (!m_protocolDetected)
+	{
+		// BLE receivers commonly deliver an ACK, banner, partial frame, or other
+		// startup noise first. Keep a bounded rolling window and retry until a
+		// a checksum-valid GNSS record arrives instead of permanently
+		// classifying the stream from the first 16 bytes.
+		constexpr int detectionWindowBytes = 4096;
+		m_detectionBuffer.append(data);
+		if (m_detectionBuffer.size() > detectionWindowBytes)
+			m_detectionBuffer = m_detectionBuffer.right(detectionWindowBytes);
+		if (m_detectionBuffer.size() >= ProtocolDetector::kMinDetectionBytes)
+		{
+			auto detected = ProtocolDetector::detect(m_detectionBuffer);
+			if (detected != GnssProtocol::Unknown)
+			{
+				protocolChanged = m_state.protocol != detected;
+				m_detectedProtocol = detected;
+				m_state.protocol = detected;
+				// RTCM/BINEX/BYNAV can appear as an echo or startup stream
+				// before position output begins. Surface the diagnosis, but
+				// continue scanning until a supported position protocol arrives.
+				m_protocolDetected = detected == GnssProtocol::UBX
+				                  || detected == GnssProtocol::NMEA
+				                  || detected == GnssProtocol::Mixed;
+				if (m_protocolDetected)
+					m_detectionBuffer.clear();
+			}
+		}
+	}
 	// Raw-data-only streams must still become visible to diagnostics, but do
 	// not repaint the UI for every BLE notification.
-	if (nowMs - m_lastReceiverStateEmitMs >= 500)
+	if (protocolChanged || m_lastReceiverStateEmitMs == 0
+	    || nowMs - m_lastReceiverStateEmitMs >= 500)
 	{
 		m_lastReceiverStateEmitMs = nowMs;
 		emitStateChanged();

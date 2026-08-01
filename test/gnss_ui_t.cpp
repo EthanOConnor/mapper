@@ -33,10 +33,20 @@
 
 using namespace OpenOrienteering;
 
+namespace {
+
+class TestableGnssStatusOverlay : public GnssStatusOverlay
+{
+public:
+	using GnssStatusOverlay::event;
+};
+
+}  // namespace
+
 
 void GnssUiTest::overlayDistinguishesLinkFromPosition()
 {
-	GnssStatusOverlay overlay;
+	TestableGnssStatusOverlay overlay;
 	overlay.resize(overlay.sizeHint());
 	GnssState state;
 	state.transportState = GnssTransportState::Connected;
@@ -60,6 +70,9 @@ void GnssUiTest::overlayDistinguishesLinkFromPosition()
 	QTest::mouseClick(&overlay, Qt::LeftButton, Qt::NoModifier,
 	                  overlay.rect().center());
 	QCOMPARE(clicked.count(), 1);
+	QEvent touchEnd(QEvent::TouchEnd);
+	QVERIFY(overlay.event(&touchEnd));
+	QCOMPARE(clicked.count(), 2);
 
 	state.receiverBytesReceived = 128;
 	state.protocol = GnssProtocol::UBX;

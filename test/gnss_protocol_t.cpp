@@ -584,6 +584,23 @@ void GnssProtocolTest::sessionReportsRawReceiverTrafficBeforePositionParsing()
 }
 
 
+void GnssProtocolTest::sessionRedetectsProtocolAfterStartupNoise()
+{
+	GnssSession session;
+	session.feedData(QByteArray(16, '\x55'));
+	QCOMPARE(session.currentState().protocol, GnssProtocol::Unknown);
+
+	auto payload = buildNavPvtPayload(47.5, 8.5, 500.0,
+	                                  3, 0x01, 30, 50, 17);
+	session.feedData(buildUbxFrame(Ubx::kClassNAV, Ubx::kIdNAV_PVT, payload));
+
+	QCOMPARE(session.currentState().protocol, GnssProtocol::UBX);
+	QVERIFY(session.currentState().solution.hasFreshPosition);
+	QCOMPARE(session.currentState().solution.position.satellitesUsed,
+	         std::uint8_t(17));
+}
+
+
 // ======== NMEA Parser Tests ========
 
 
@@ -706,6 +723,17 @@ void GnssProtocolTest::detectUnknown()
 	// Too short
 	QByteArray tiny("$G");
 	QCOMPARE(ProtocolDetector::detect(tiny), GnssProtocol::Unknown);
+}
+
+
+void GnssProtocolTest::detectRtcm3()
+{
+	auto frame = buildRtcmFrame(1077, QByteArray(10, '\0'));
+#if defined(MAPPER_GNSS_USE_GLEAN_WIRE)
+	QCOMPARE(ProtocolDetector::detect(frame), GnssProtocol::RTCM3);
+#else
+	QCOMPARE(ProtocolDetector::detect(frame), GnssProtocol::Unknown);
+#endif
 }
 
 
