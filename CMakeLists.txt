@@ -12,7 +12,7 @@
 
 cmake_minimum_required(VERSION 4.4)
 
-project(Mapper VERSION 0.1.0 LANGUAGES C CXX)
+project(Mapper VERSION 0.1.1 LANGUAGES C CXX)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
@@ -22,7 +22,7 @@ include(GNUInstallDirs)
 include(MapperBuild)
 
 set(Mapper_COPYRIGHT "(C) 2026 The OpenOrienteering developers")
-set(Mapper_BUILD_NUMBER "90702" CACHE STRING
+set(Mapper_BUILD_NUMBER "90703" CACHE STRING
 	"Monotonically increasing mobile build number")
 if(NOT Mapper_BUILD_NUMBER MATCHES "^[1-9][0-9]*$")
 	message(FATAL_ERROR "Mapper_BUILD_NUMBER must be a positive integer")
