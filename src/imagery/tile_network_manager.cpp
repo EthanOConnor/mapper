@@ -1339,12 +1339,12 @@ private:
 		reserveResultCapacity(entry);
 
 		auto const credentialed = !entry->request.bearer_token.isEmpty();
-		if (cache_only && (!entry->request.referer.isEmpty() || credentialed))
+		if (cache_only && !entry->request.referer.isEmpty())
 		{
 			TileNetworkResult result;
 			result.outcome = TileNetworkResult::Outcome::OfflineMiss;
 			result.error_string = TileNetworkManager::tr(
-				"Credential- or Referer-dependent imagery is not stored in the offline HTTP cache.");
+				"Referer-dependent imagery is not stored in the offline HTTP cache.");
 			finish(entry, std::move(result));
 			return;
 		}
@@ -1427,10 +1427,9 @@ private:
 			QNetworkRequest::Manual);
 		request.setAttribute(QNetworkRequest::UseCredentialsAttribute, false);
 		auto const referer_dependent = !entry->request.referer.isEmpty();
-		auto const private_representation = referer_dependent || credentialed;
 		request.setAttribute(
 			QNetworkRequest::CacheLoadControlAttribute,
-			private_representation
+			referer_dependent
 				? QNetworkRequest::AlwaysNetwork
 					: cache_only
 					? QNetworkRequest::AlwaysCache
@@ -1440,7 +1439,7 @@ private:
 						: QNetworkRequest::PreferNetwork);
 		request.setAttribute(
 			QNetworkRequest::CacheSaveControlAttribute,
-			!private_representation
+			!referer_dependent
 			&& entry->request.payload_kind
 			     == NetworkPayloadKind::TileImage);
 		request.setMaximumRedirectsAllowed(config_.max_redirects);

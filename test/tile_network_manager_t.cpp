@@ -220,7 +220,8 @@ private:
 				socket, 200, {}, QByteArrayLiteral("cached"),
 				QByteArrayLiteral(
 					"Content-Type: image/png\r\n"
-					"Cache-Control: public, max-age=3600\r\n"));
+					"Cache-Control: private, max-age=3600, immutable\r\n"
+					"Vary: Authorization\r\n"));
 		}
 		else if (path == QLatin1String("/catalog"))
 		{
@@ -450,40 +451,58 @@ void TileNetworkManagerTest::approvesPrivateOriginsExplicitly()
 		TileNetworkResult::Outcome::Rejected);
 }
 
-void TileNetworkManagerTest::injectsBearerOnlyForExactOriginAndBypassesSharedCache()
+void TileNetworkManagerTest::injectsBearerOnlyForExactOriginAndUsesDiskCache()
 {
 	MiniHttpServer server;
 	MiniHttpServer redirect_target;
 	QTemporaryDir directory;
 	QVERIFY(directory.isValid());
+	{
+		TileNetworkManager manager(configFor(directory));
+		QSignalSpy spy(&manager, &TileNetworkManager::finished);
+		QVERIFY(manager.setBearerCredential(
+			server.url(QStringLiteral("/")),
+			QByteArrayLiteral("map-token"),
+			QByteArrayLiteral("account-one")));
+
+		manager.submit(request(server.url(QStringLiteral("/auth")), 1));
+		QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 1, 2000);
+		QCOMPARE(resultAt(spy, 0).outcome, TileNetworkResult::Outcome::Success);
+		QVERIFY(server.lastRequest().contains("Authorization: Bearer map-token\r\n"));
+
+		manager.submit(request(server.url(QStringLiteral("/cache")), 1));
+		QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 2, 2000);
+		QCOMPARE(server.paths().count(QStringLiteral("/cache")), 1);
+
+		server.setRedirectTarget(redirect_target.url(QStringLiteral("/ok")));
+		manager.submit(request(server.url(QStringLiteral("/private-redirect")), 1));
+		QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 3, 3000);
+		QCOMPARE(resultAt(spy, 2).outcome, TileNetworkResult::Outcome::Success);
+		QVERIFY(!redirect_target.lastRequest().contains("Authorization:"));
+	}
+
 	TileNetworkManager manager(configFor(directory));
 	QSignalSpy spy(&manager, &TileNetworkManager::finished);
 	QVERIFY(manager.setBearerCredential(
 		server.url(QStringLiteral("/")),
-		QByteArrayLiteral("map-token"),
-		QByteArrayLiteral("account-one")));
-
-	manager.submit(request(server.url(QStringLiteral("/auth")), 1));
+		QByteArrayLiteral("map-token-two"),
+		QByteArrayLiteral("account-two")));
+	manager.submit(request(server.url(QStringLiteral("/cache")), 1));
 	QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 1, 2000);
-	QCOMPARE(resultAt(spy, 0).outcome, TileNetworkResult::Outcome::Success);
-	QVERIFY(server.lastRequest().contains("Authorization: Bearer map-token\r\n"));
+	QCOMPARE(server.paths().count(QStringLiteral("/cache")), 1);
+	QVERIFY(resultAt(spy, 0).from_cache);
 
+	manager.setOfflineMode(true);
 	manager.submit(request(server.url(QStringLiteral("/cache")), 1));
 	QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 2, 2000);
-	manager.submit(request(server.url(QStringLiteral("/cache")), 1));
-	QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 3, 2000);
-	QCOMPARE(server.paths().count(QStringLiteral("/cache")), 2);
+	QCOMPARE(resultAt(spy, 1).outcome, TileNetworkResult::Outcome::Success);
+	QVERIFY(resultAt(spy, 1).from_cache);
 
-	server.setRedirectTarget(redirect_target.url(QStringLiteral("/ok")));
-	manager.submit(request(server.url(QStringLiteral("/private-redirect")), 1));
-	QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 4, 3000);
-	QCOMPARE(resultAt(spy, 3).outcome, TileNetworkResult::Outcome::Success);
-	QVERIFY(!redirect_target.lastRequest().contains("Authorization:"));
-
+	manager.setOfflineMode(false);
 	manager.clearBearerCredential(server.url(QStringLiteral("/")));
 	manager.submit(request(server.url(QStringLiteral("/auth")), 1));
-	QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 5, 2000);
-	QCOMPARE(resultAt(spy, 4).outcome, TileNetworkResult::Outcome::PermanentError);
+	QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 3, 2000);
+	QCOMPARE(resultAt(spy, 2).outcome, TileNetworkResult::Outcome::PermanentError);
 }
 
 void TileNetworkManagerTest::credentialChangesCancelRequestsAndPartitionNegativeCache()

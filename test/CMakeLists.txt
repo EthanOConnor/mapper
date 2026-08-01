@@ -188,6 +188,8 @@ add_unit_test(map_hub_workspace_t
 	../src/collaboration/managed_map_workspace
 	../src/collaboration/map_hub_read_only_document
 	../src/collaboration/map_hub_api_client
+	../src/collaboration/map_hub_credentials
+	../src/collaboration/map_hub_device_authorization
 	../src/collaboration/map_hub_imagery_catalog
 	../src/collaboration/map_hub_sync_queue
 	../src/collaboration/map_hub_workspace

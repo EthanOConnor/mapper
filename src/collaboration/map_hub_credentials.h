@@ -19,11 +19,12 @@ namespace OpenOrienteering {
 /**
  * Stores Map Hub bearer credentials outside QSettings and map documents.
  *
- * macOS and Windows use their native credential stores; Android encrypts with
- * a non-exportable Keystore key. Unix desktops use Secret Service through
- * secret-tool when available, with an owner-only file as a deliberately
- * visible fallback for minimal systems. The fallback is never placed next to
- * an .omap file.
+ * macOS stores credentials in Mapper's owner-only application data so local
+ * and ad-hoc-signed builds never trigger a Keychain ACL prompt. Windows uses
+ * its native credential store, and iOS and Android use Keychain and Keystore.
+ * Other Unix desktops use Secret Service through secret-tool when available,
+ * with the same owner-only file as a deliberately visible fallback for
+ * minimal systems. The file is never placed next to an .omap document.
  */
 class MapHubCredentials {
 public:

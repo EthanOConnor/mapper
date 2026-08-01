@@ -122,6 +122,7 @@ set(Mapper_Common_SRCS
 	collaboration/map_hub_read_only_document.cpp
 	collaboration/map_hub_api_client.cpp
 	collaboration/map_hub_credentials.cpp
+	collaboration/map_hub_device_authorization.cpp
 	collaboration/map_hub_edit_transaction.cpp
 	collaboration/map_hub_entity_index.cpp
 	collaboration/map_hub_imagery_catalog.cpp

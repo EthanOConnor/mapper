@@ -13,6 +13,7 @@ class MapHubWorkspaceTest : public QObject {
   Q_OBJECT
 private slots:
   void initTestCase();
+  void storesMacCredentialsInOwnerOnlyFile();
   void recordRoundTripsWithoutSecrets();
   void recordIsBoundToCanonicalMapPath();
   void readOnlyDocumentRoundTripsAndRejectsPathSubstitution();
@@ -20,6 +21,7 @@ private slots:
   void identifiesMapperWorkspacePackageTypes();
   void classifiesWorkspaceBaselines();
   void hashesArtifactsExactly();
+  void completesBrowserMediatedConnection();
   void editAccessUsesNativeIdempotentEndpoints();
   void verifiedDownloadRequiresBoundRevisionHeaders();
   void checkpointCarriesStreamProjectionDigest();

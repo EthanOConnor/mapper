@@ -210,8 +210,8 @@ public:
 
 	/**
 	 * Register an in-memory bearer credential for one exact origin.
-	 * Authenticated imagery bypasses the shared HTTP disk cache, preventing
-	 * account-specific responses from crossing login boundaries.
+	 * The credential is attached only in transport and is never serialized into
+	 * an imagery source, map, or HTTP cache entry.
 	 */
 	bool setBearerCredential(const QUrl& origin, QByteArray token, QByteArray identity);
 	void clearBearerCredential(const QUrl& origin);

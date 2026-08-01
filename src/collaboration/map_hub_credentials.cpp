@@ -22,7 +22,7 @@
 #include <QStandardPaths>
 #include <QUrl>
 
-#if defined(Q_OS_MACOS) || defined(Q_OS_IOS)
+#if defined(Q_OS_IOS)
 #include <Security/Security.h>
 #elif defined(Q_OS_ANDROID)
 #include <QJniEnvironment>
@@ -37,7 +37,8 @@ namespace OpenOrienteering {
 
 namespace {
 
-constexpr auto service_name = "org.openorienteering.Mapper.MapHub";
+[[maybe_unused]] constexpr auto service_name =
+    "org.openorienteering.Mapper.MapHub";
 
 QString credentialTr(const char *source) {
   return QCoreApplication::translate("MapHubCredentials", source);
@@ -220,7 +221,7 @@ MapHubCredentials::Result removeSecretService(const QString &account) {
 }
 #endif
 
-#if defined(Q_OS_MACOS) || defined(Q_OS_IOS)
+#if defined(Q_OS_IOS)
 CFMutableDictionaryRef macQuery(const QByteArray &account) {
   auto *query = CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
                                           &kCFTypeDictionaryKeyCallBacks,
@@ -267,8 +268,14 @@ QString MapHubCredentials::fallbackPath(const QString &server_url) {
 
 MapHubCredentials::Result
 MapHubCredentials::readToken(const QString &server_url) {
+#if defined(Q_OS_MACOS)
+  // A locally rebuilt/ad-hoc-signed executable does not retain a stable
+  // Keychain ACL identity and can consequently prompt on every launch. Keep
+  // desktop credentials in Mapper's owner-only application data instead.
+  return readFallback(fallbackPath(server_url));
+#else
   auto account = accountName(server_url).toUtf8();
-#if defined(Q_OS_MACOS) || defined(Q_OS_IOS)
+#if defined(Q_OS_IOS)
   auto *query = macQuery(account);
   CFDictionarySetValue(query, kSecReturnData, kCFBooleanTrue);
   CFDictionarySetValue(query, kSecMatchLimit, kSecMatchLimitOne);
@@ -328,6 +335,7 @@ MapHubCredentials::readToken(const QString &server_url) {
     return secret;
   return readFallback(fallbackPath(server_url));
 #endif
+#endif
 }
 
 MapHubCredentials::Result
@@ -338,8 +346,11 @@ MapHubCredentials::writeToken(const QString &server_url, const QString &token) {
   if (bytes.size() > 4096 || bytes.contains('\0') || bytes.contains('\r') ||
       bytes.contains('\n'))
     return {{}, credentialTr("The Map Hub token is invalid."), false};
+#if defined(Q_OS_MACOS)
+  return writeFallback(fallbackPath(server_url), token);
+#else
   auto account = accountName(server_url).toUtf8();
-#if defined(Q_OS_MACOS) || defined(Q_OS_IOS)
+#if defined(Q_OS_IOS)
   auto *query = macQuery(account);
   auto *data = macData(bytes);
   auto *update = CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
@@ -405,12 +416,14 @@ MapHubCredentials::writeToken(const QString &server_url, const QString &token) {
   }
   return writeFallback(fallbackPath(server_url), token);
 #endif
+#endif
 }
 
 MapHubCredentials::Result
 MapHubCredentials::removeToken(const QString &server_url) {
+#if !defined(Q_OS_MACOS)
   auto account = accountName(server_url).toUtf8();
-#if defined(Q_OS_MACOS) || defined(Q_OS_IOS)
+#if defined(Q_OS_IOS)
   auto *query = macQuery(account);
   auto status = SecItemDelete(query);
   CFRelease(query);
@@ -450,6 +463,7 @@ MapHubCredentials::removeToken(const QString &server_url) {
   auto removed = removeSecretService(QString::fromUtf8(account));
   if (removed.error != QLatin1String("unavailable") && !removed)
     return removed;
+#endif
 #endif
   auto fallback = fallbackPath(server_url);
   if (QFileInfo::exists(fallback) && !QFile::remove(fallback))

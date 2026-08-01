@@ -60,6 +60,7 @@
 #include "collaboration/managed_map_workspace.h"
 #include "collaboration/map_hub_api_client.h"
 #include "collaboration/map_hub_credentials.h"
+#include "collaboration/map_hub_device_authorization.h"
 #include "collaboration/map_hub_imagery_catalog.h"
 #include "collaboration/map_hub_operation_store.h"
 #include "collaboration/map_hub_read_only_document.h"
@@ -896,7 +897,6 @@ MapHubDialog::MapHubDialog(MainWindow *window)
       first_use_token(new QLineEdit(first_use_page)),
       first_use_invite(new QLineEdit(first_use_page)),
       first_use_account_tabs(new QTabWidget(first_use_page)),
-      passkey_timer(new QTimer(this)),
       first_use_browse(new QPushButton(tr("Choose…"), first_use_page)),
       connect_button(
           new QPushButton(tr("Connect and open Map Hub"), first_use_page)),
@@ -1205,6 +1205,7 @@ MapHubDialog::MapHubDialog(MainWindow *window)
       new QPushButton(tr("Open Map Hub in Safari"), passkey_page);
   passkey_open_browser->setMinimumHeight(48);
   passkey_open_browser->setObjectName(QStringLiteral("mapHubPrimary"));
+  passkey_open_browser->hide();
   passkey_layout->addWidget(passkey_open_browser);
   passkey_layout->addStretch();
   first_use_flow->addWidget(passkey_page);
@@ -1239,6 +1240,42 @@ MapHubDialog::MapHubDialog(MainWindow *window)
   connection_form->addRow(tr("Map Hub server:"), first_use_server);
   connection_form->addRow(tr("Local map workspaces:"), workspace_row);
 
+  passkey_page = new QWidget(first_use_account_tabs);
+  auto *passkey_layout = new QVBoxLayout(passkey_page);
+  auto *passkey_help = new QLabel(
+      tr("Sign in securely in your browser with a passkey. Confirm the "
+         "matching code there, then return to Mapper."),
+      passkey_page);
+  passkey_help->setWordWrap(true);
+  passkey_layout->addWidget(passkey_help);
+  passkey_start =
+      new QPushButton(tr("Sign in with passkey…"), passkey_page);
+  passkey_layout->addWidget(passkey_start);
+  auto *code_heading = new QLabel(tr("Confirmation code:"), passkey_page);
+  passkey_layout->addWidget(code_heading);
+  passkey_code = new QLabel(passkey_page);
+  auto code_font = passkey_code->font();
+  code_font.setPointSizeF(code_font.pointSizeF() * 1.8);
+  code_font.setBold(true);
+  code_font.setLetterSpacing(QFont::AbsoluteSpacing, 2.0);
+  passkey_code->setFont(code_font);
+  passkey_layout->addWidget(passkey_code);
+  passkey_status = new QLabel(passkey_page);
+  passkey_status->setWordWrap(true);
+  passkey_layout->addWidget(passkey_status);
+  passkey_open_browser =
+      new QPushButton(tr("Open Map Hub in browser"), passkey_page);
+  passkey_open_browser->hide();
+  passkey_layout->addWidget(passkey_open_browser);
+  passkey_layout->addStretch();
+  first_use_account_tabs->addTab(passkey_page, tr("Passkey"));
+  connect(passkey_start, &QAbstractButton::clicked, this,
+          &MapHubDialog::beginPasskeyConnection);
+  connect(passkey_open_browser, &QAbstractButton::clicked, this, [this] {
+    if (!passkey_verification_url.isEmpty())
+      QDesktopServices::openUrl(passkey_verification_url);
+  });
+
   auto *invitation_page = new QWidget(first_use_account_tabs);
   auto *invitation_form = new QFormLayout(invitation_page);
   invitation_form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
@@ -1270,9 +1307,6 @@ MapHubDialog::MapHubDialog(MainWindow *window)
                                  tr("Paste Mapper connection token"));
 #endif
 
-  passkey_timer->setInterval(2000);
-  connect(passkey_timer, &QTimer::timeout, this,
-          &MapHubDialog::pollPasskeyConnection);
 
   auto *first_use_close = new QPushButton(tr("Not now"), first_use_page);
 #if defined(MAPPER_MOBILE)
@@ -1493,10 +1527,13 @@ void MapHubDialog::showFirstUse(const QString &problem) {
   }
   if (first_use_flow)
     first_use_flow->setCurrentIndex(0);
+#if !defined(MAPPER_MOBILE)
+  first_use_account_tabs->setCurrentWidget(passkey_page);
+#endif
   first_use_status->setText(problem);
   pages->setCurrentWidget(first_use_page);
 #if !defined(MAPPER_MOBILE)
-  first_use_invite->setFocus();
+  passkey_start->setFocus();
 #endif
 }
 
@@ -1531,12 +1568,45 @@ void MapHubDialog::beginPasskeyConnection() {
 
   clearPasskeyConnection();
   setFirstUseBusy(true, tr("Creating a secure sign-in request…"));
-  auto *request_client = new MapHubApiClient(server, {}, this);
-  request_client->beginMapperConnection(
-      tr("Mapper on iPhone"),
-      [this, request_client, server, workspace_root](
-          const QJsonObject &response, const MapHubApiClient::Error &error) {
-        request_client->deleteLater();
+  passkey_server = server;
+  passkey_workspace_root = workspace_root;
+#if defined(MAPPER_MOBILE)
+  const auto client_name = tr("Mapper on iPhone");
+#else
+  const auto client_name = tr("Mapper desktop");
+#endif
+  passkey_connection =
+      new MapHubDeviceAuthorization(server, client_name, this);
+  connect(passkey_connection, &MapHubDeviceAuthorization::verificationRequired,
+          this, [this](const QUrl &url, const QString &user_code) {
+            passkey_verification_url = url;
+            passkey_code->setText(user_code);
+            passkey_status->setText(tr("Waiting for approval in browser…"));
+            passkey_open_browser->show();
+#if defined(MAPPER_MOBILE)
+            passkey_open_browser->setText(tr("Open Map Hub in Safari"));
+#else
+            passkey_open_browser->setText(tr("Open Map Hub in browser"));
+#endif
+            setFirstUseBusy(false);
+#if defined(MAPPER_MOBILE)
+            first_use_flow->setCurrentWidget(passkey_page);
+#else
+            first_use_account_tabs->setCurrentWidget(passkey_page);
+#endif
+            if (!QDesktopServices::openUrl(passkey_verification_url))
+              passkey_status->setText(
+                  tr("Mapper could not open the browser. Use the button below "
+                     "to try again."));
+          });
+  connect(
+      passkey_connection, &MapHubDeviceAuthorization::completed, this,
+      [this](const MapHubDeviceAuthorization::Result &result,
+             const MapHubApiClient::Error &error) {
+        auto *connection = passkey_connection.data();
+        passkey_connection = nullptr;
+        if (connection)
+          connection->deleteLater();
         if (error) {
           setFirstUseBusy(
               false,
@@ -1544,123 +1614,39 @@ void MapHubDialog::beginPasskeyConnection() {
                   ? tr("Passkey sign-in is not available on this Map Hub "
                        "server yet. Use a connection token for now.")
                   : error.message);
+          if (passkey_status)
+            passkey_status->setText(error.message);
           return;
         }
-
-        const auto request_id =
-            response.value(QStringLiteral("request_id")).toString();
-        const auto device_secret =
-            response.value(QStringLiteral("device_secret")).toString();
-        const auto user_code =
-            response.value(QStringLiteral("user_code")).toString();
-        const auto verification_url =
-            QUrl(response.value(QStringLiteral("verification_url")).toString());
-        const auto server_url = QUrl::fromUserInput(server);
-        const auto default_port = [](const QUrl &url) {
-          return url.port(url.scheme() == QLatin1String("https") ? 443 : 80);
-        };
-        const auto same_origin =
-            verification_url.isValid() &&
-            verification_url.scheme() == server_url.scheme() &&
-            verification_url.host().compare(server_url.host(),
-                                            Qt::CaseInsensitive) == 0 &&
-            default_port(verification_url) == default_port(server_url) &&
-            verification_url.userInfo().isEmpty();
-        static const QRegularExpression code_pattern(
-            QStringLiteral("^\\d{6}$"));
-        if (QUuid(request_id).isNull() || device_secret.isEmpty() ||
-            !code_pattern.match(user_code).hasMatch() || !same_origin) {
-          setFirstUseBusy(
-              false,
-              tr("Map Hub returned an invalid passkey connection request."));
-          return;
-        }
-
-        passkey_server = server;
-        passkey_workspace_root = workspace_root;
-        passkey_request_id = request_id;
-        passkey_device_secret = device_secret;
-        passkey_verification_url = verification_url;
-        passkey_code->setText(user_code);
-        passkey_status->setText(tr("Waiting for approval in Safari…"));
-        passkey_open_browser->setText(tr("Open Map Hub in Safari"));
-        setFirstUseBusy(false);
-        first_use_flow->setCurrentWidget(passkey_page);
-        passkey_timer->start();
-        if (!QDesktopServices::openUrl(passkey_verification_url))
-          passkey_status->setText(
-              tr("Mapper could not open Safari. Tap below to try again."));
-      });
-}
-
-void MapHubDialog::pollPasskeyConnection() {
-  if (passkey_poll_in_flight || passkey_request_id.isEmpty() ||
-      passkey_device_secret.isEmpty())
-    return;
-
-  passkey_poll_in_flight = true;
-  const auto request_id = passkey_request_id;
-  const auto device_secret = passkey_device_secret;
-  auto *request_client = new MapHubApiClient(passkey_server, {}, this);
-  request_client->exchangeMapperConnection(
-      request_id, device_secret,
-      [this, request_client, request_id](const QJsonObject &response,
-                                         const MapHubApiClient::Error &error) {
-        request_client->deleteLater();
-        if (request_id != passkey_request_id)
-          return;
-        passkey_poll_in_flight = false;
-        if (error) {
-          if (error.http_status == 410 || error.http_status == 404) {
-            passkey_timer->stop();
-            passkey_status->setText(
-                tr("This sign-in request expired. Go back and try again."));
-          } else {
-            passkey_status->setText(
-                tr("Mapper is waiting for Map Hub: %1").arg(error.message));
-          }
-          return;
-        }
-        if (response.value(QStringLiteral("status")).toString() ==
-            QLatin1String("pending")) {
-          passkey_status->setText(tr("Waiting for approval in Safari…"));
-          return;
-        }
-        const auto token = response.value(QStringLiteral("token")).toString();
-        if (response.value(QStringLiteral("status")).toString() !=
-                QLatin1String("connected") ||
-            token.isEmpty()) {
-          passkey_timer->stop();
-          passkey_status->setText(
-              tr("Map Hub returned an invalid sign-in response."));
-          return;
-        }
-
         QString storage_error;
         if (!saveFirstUseConnection(passkey_server, passkey_workspace_root,
-                                    token, storage_error)) {
-          passkey_timer->stop();
+                                    result.token, storage_error)) {
           passkey_status->setText(storage_error);
           return;
         }
         clearPasskeyConnection();
         refresh();
       });
+  passkey_connection->start();
 }
 
 void MapHubDialog::clearPasskeyConnection() {
-  if (passkey_timer)
-    passkey_timer->stop();
-  passkey_poll_in_flight = false;
+  if (passkey_connection) {
+    auto *connection = passkey_connection.data();
+    passkey_connection = nullptr;
+    disconnect(connection, nullptr, this, nullptr);
+    connection->cancel();
+    connection->deleteLater();
+  }
   passkey_server.clear();
   passkey_workspace_root.clear();
-  passkey_request_id.clear();
-  passkey_device_secret.clear();
   passkey_verification_url.clear();
   if (passkey_code)
     passkey_code->clear();
   if (passkey_status)
     passkey_status->clear();
+  if (passkey_open_browser)
+    passkey_open_browser->hide();
 }
 
 bool MapHubDialog::firstUseConnection(QString &server,
