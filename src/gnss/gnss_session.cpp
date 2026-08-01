@@ -118,6 +118,8 @@ void GnssSession::setTransport(std::unique_ptr<GnssTransport> transport)
 
 void GnssSession::setNtripClient(std::unique_ptr<NtripClient> ntrip)
 {
+	if (m_ntrip)
+		m_ntrip->stop();
 	m_ntrip = std::move(ntrip);
 	m_state.correctionState = m_ntrip ? GnssCorrectionState::Disconnected
 	                                  : GnssCorrectionState::Disabled;
@@ -126,6 +128,11 @@ void GnssSession::setNtripClient(std::unique_ptr<NtripClient> ntrip)
 		connectNtripSignals();
 		m_state.ntripProfileName = m_ntrip->profileName();
 	}
+	else
+	{
+		m_state.ntripProfileName.clear();
+	}
+	emitStateChanged();
 }
 
 
@@ -164,6 +171,8 @@ void GnssSession::stop()
 
 	if (m_transport)
 		m_transport->disconnectFromDevice();
+	if (m_ntrip)
+		m_ntrip->stop();
 
 	if (m_rawLogger)
 		m_rawLogger->stop();
@@ -538,7 +547,7 @@ void GnssSession::resetSessionState()
 	m_state.sessionStart = sessionStart;
 	m_state.correctionState = m_ntrip ? GnssCorrectionState::Disconnected
 	                                  : GnssCorrectionState::Disabled;
-	m_state.ntripProfileName = m_ntrip ? m_ntrip->mountpoint() : QString{};
+	m_state.ntripProfileName = m_ntrip ? m_ntrip->profileName() : QString{};
 
 	m_protocolDetected = false;
 	m_detectedProtocol = GnssProtocol::Unknown;
@@ -687,6 +696,12 @@ void GnssSession::startNtrip()
 	emitStateChanged();
 
 	m_ntrip->start();
+}
+
+
+void GnssSession::clearNtripClient()
+{
+	setNtripClient({});
 }
 
 

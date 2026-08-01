@@ -91,6 +91,7 @@
 #include <QToolButton>
 #include <QVariant>
 #include <QVBoxLayout>
+#include <QWindow>
 #include <QWidget>
 
 #ifdef Q_OS_ANDROID
@@ -1077,8 +1078,13 @@ void MapEditorController::attach(MainWindow* window)
 			createMobileGUI();
 			compass_display = new CompassDisplay(map_widget->parentWidget());
 			compass_display->setVisible(false);
-			gnss_status_overlay =
-			  new GnssStatusOverlay(map_widget->parentWidget());
+			gnss_status_overlay = new GnssStatusOverlay(
+#if defined(Q_OS_IOS)
+			  window
+#else
+			  map_widget->parentWidget()
+#endif
+			);
 			gnss_status_overlay->setVisible(false);
 			connect(gnss_status_overlay, &GnssStatusOverlay::clicked,
 			        this, [this] {
@@ -4287,12 +4293,38 @@ void MapEditorController::positionGnssStatusOverlay()
 	if (!gnss_status_overlay || !map_widget)
 		return;
 	auto size = gnss_status_overlay->sizeHint();
+#if defined(Q_OS_IOS)
+	// In portrait, use the otherwise empty app surface beside the Dynamic
+	// Island. QWindow reports the top exclusion accurately across iPhone sizes;
+	// the capsule is deliberately narrower than one half of Blueberry's top
+	// region. Landscape falls back to the map corner below the toolbar.
+	if (auto* host_window = window->windowHandle())
+	{
+		auto safe = host_window->safeAreaMargins();
+		if (safe.top() >= size.height())
+		{
+			auto left = std::max(0, window->width() - size.width()
+			                              - qRound(Util::mmToPixelLogical(1.5)));
+			auto top = std::max(0, (safe.top() - size.height()) / 2);
+			gnss_status_overlay->setGeometry(left, top,
+			                                 size.width(), size.height());
+			gnss_status_overlay->raise();
+			return;
+		}
+	}
+	auto map_origin = map_widget->mapTo(window, QPoint(0, 0));
+	auto left = std::max(map_origin.x(),
+	                     map_origin.x() + map_widget->width() - size.width());
+	gnss_status_overlay->setGeometry(left, map_origin.y(),
+	                                 size.width(), size.height());
+#else
 	auto top = top_action_bar && top_action_bar->isVisible()
 	           && top_action_bar->parentWidget() == map_widget
 	         ? top_action_bar->height() : 0;
 	auto left = std::max(0, map_widget->width() - size.width());
 	gnss_status_overlay->setGeometry(
 	  left, top, size.width(), size.height());
+#endif
 	gnss_status_overlay->raise();
 }
 

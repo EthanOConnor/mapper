@@ -29,6 +29,7 @@ Q_OBJECT
 private slots:
 	void overlayDistinguishesLinkFromPosition();
 	void detailPanelDiagnosesAndReconfigures();
+	void settingsPageProvidesMapIndependentPreflight();
 };
 
 #endif

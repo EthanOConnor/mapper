@@ -147,8 +147,15 @@ void GnssStatusOverlay::updateState(const GnssState& state)
 
 QSize GnssStatusOverlay::sizeHint() const
 {
+#if defined(Q_OS_IOS)
+	// Fits in one side of the portrait Dynamic Island/status region on current
+	// iPhones. The tap opens the full, deliberately roomy diagnostics sheet.
+	auto w = qRound(Util::mmToPixelLogical(23.0));
+	auto h = qRound(Util::mmToPixelLogical(6.5));
+#else
 	auto w = qRound(Util::mmToPixelLogical(64.0));
 	auto h = qRound(Util::mmToPixelLogical(15.0));
+#endif
 	return QSize(w, h);
 }
 
@@ -158,6 +165,76 @@ void GnssStatusOverlay::paintEvent(QPaintEvent*)
 	painter.setRenderHint(QPainter::Antialiasing);
 
 	auto mm = [](qreal v) { return Util::mmToPixelLogical(v); };
+
+#if defined(Q_OS_IOS)
+	{
+	const auto& position = m_state.solution.position;
+	const bool connected = transportConnected(m_state.transportState);
+	const bool hasBytes = m_state.receiverBytesReceived > 0;
+	const bool freshPosition = m_state.solution.hasFreshPosition;
+	QColor healthColor;
+	QString text;
+	if (!connected)
+	{
+		healthColor = QColor(0xEF, 0x53, 0x50);
+		text = tr("GNSS off");
+	}
+	else if (!hasBytes)
+	{
+		healthColor = QColor(0xFF, 0xA7, 0x26);
+		text = tr("No data");
+	}
+	else if (!freshPosition)
+	{
+		healthColor = QColor(0xFF, 0xC1, 0x07);
+		text = m_state.protocol == GnssProtocol::Unknown
+		     ? tr("Data?") : tr("No fix");
+	}
+	else
+	{
+		healthColor = fixBadgeColor(position.fixType);
+		text = fixBadgeText(position.fixType);
+		if (std::isfinite(position.hAccuracyP95))
+			text += position.hAccuracyP95 < 10.0f
+			      ? tr("  %1m").arg(position.hAccuracyP95, 0, 'f', 2)
+			      : tr("  %1m").arg(position.hAccuracyP95, 0, 'f', 1);
+	}
+
+	QRectF bounds(QPointF(0, 0), QSizeF(size()));
+	bounds.adjust(mm(0.25), mm(0.25), -mm(0.25), -mm(0.25));
+	painter.setPen(QPen(QColor(255, 255, 255, 32), mm(0.18)));
+	painter.setBrush(QColor(12, 16, 22, 238));
+	painter.drawRoundedRect(bounds, bounds.height() / 2.0, bounds.height() / 2.0);
+
+	const auto dotDiameter = mm(2.2);
+	QRectF dot(bounds.left() + mm(1.25),
+	           bounds.center().y() - dotDiameter / 2.0,
+	           dotDiameter, dotDiameter);
+	painter.setPen(Qt::NoPen);
+	painter.setBrush(healthColor);
+	painter.drawEllipse(dot);
+
+	QFont compactFont = font();
+	compactFont.setPixelSize(qRound(mm(3.0)));
+	compactFont.setBold(true);
+	painter.setFont(compactFont);
+	painter.setPen(Qt::white);
+	QRectF textRect(dot.right() + mm(1.0), bounds.top(),
+	                bounds.right() - dot.right() - mm(2.4), bounds.height());
+	painter.drawText(textRect, Qt::AlignLeft | Qt::AlignVCenter,
+	                 QFontMetricsF(compactFont).elidedText(
+	                   text, Qt::ElideRight, textRect.width()));
+
+	QFont chevronFont = compactFont;
+	chevronFont.setBold(false);
+	painter.setFont(chevronFont);
+	painter.setPen(QColor(220, 226, 234));
+	QRectF chevronRect(bounds.right() - mm(2.4), bounds.top(),
+	                   mm(1.6), bounds.height());
+	painter.drawText(chevronRect, Qt::AlignCenter, QStringLiteral("›"));
+	return;
+	}
+#endif
 
 	auto const margin = mm(1.0);
 	auto const padding = mm(1.4);

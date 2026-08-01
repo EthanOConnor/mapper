@@ -112,6 +112,8 @@ public:
 
 	/// Start the NTRIP client if one is configured.
 	void startNtrip();
+	/// Stop and remove the configured NTRIP client.
+	void clearNtripClient();
 
 signals:
 	/// Emitted when a new position fix is available.

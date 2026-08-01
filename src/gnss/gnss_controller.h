@@ -47,6 +47,9 @@ public:
 	void chooseExternalReceiver(QWidget* parent);
 	void disconnectExternal();
 	void useNtripProfile(const QString& name);
+	/// Apply correction settings to the application-wide session. This is used
+	/// by GNSS Settings preflight as well as by map-window controls.
+	void configureNtrip(bool enabled, const QString& profile_name);
 
 signals:
 	void sessionChanged(OpenOrienteering::GnssSession* session);

@@ -28,6 +28,7 @@
 
 #include "gnss/gnss_state.h"
 #include "gnss/ui/gnss_detail_panel.h"
+#include "gnss/ui/gnss_settings_page.h"
 #include "gnss/ui/gnss_status_overlay.h"
 
 using namespace OpenOrienteering;
@@ -104,6 +105,50 @@ void GnssUiTest::detailPanelDiagnosesAndReconfigures()
 	QTest::mouseClick(settings, Qt::LeftButton);
 	QCOMPARE(receiverRequested.count(), 1);
 	QCOMPARE(settingsRequested.count(), 1);
+}
+
+
+void GnssUiTest::settingsPageProvidesMapIndependentPreflight()
+{
+	GnssSettingsPage page;
+	auto* title = page.findChild<QLabel*>(QStringLiteral("gnssPreflightTitle"));
+	auto* detail = page.findChild<QLabel*>(QStringLiteral("gnssPreflightDetail"));
+	auto* receiver = page.findChild<QLabel*>(QStringLiteral("gnssPreflightReceiver"));
+	auto* corrections = page.findChild<QLabel*>(QStringLiteral("gnssPreflightCorrections"));
+	auto* start = page.findChild<QPushButton*>(QStringLiteral("gnssPreflightStart"));
+	auto* disconnect = page.findChild<QPushButton*>(QStringLiteral("gnssPreflightDisconnect"));
+	QVERIFY(title);
+	QVERIFY(detail);
+	QVERIFY(receiver);
+	QVERIFY(corrections);
+	QVERIFY(start);
+	QVERIFY(disconnect);
+	QVERIFY(start->minimumHeight() > 0);
+
+	GnssState state;
+	state.transportState = GnssTransportState::Connected;
+	state.correctionState = GnssCorrectionState::Flowing;
+	state.ntripBytesReceived = 4096;
+	state.ntripBytesSentToReceiver = 3072;
+	page.updatePreflightState(state);
+	QVERIFY(title->text().contains(QStringLiteral("no receiver data"),
+	                               Qt::CaseInsensitive));
+	QVERIFY(receiver->text().contains(QStringLiteral("no bytes"),
+	                                  Qt::CaseInsensitive));
+	QVERIFY(corrections->text().contains(QStringLiteral("3072")));
+	QVERIFY(disconnect->isEnabled());
+
+	state.receiverBytesReceived = 2048;
+	state.protocol = GnssProtocol::UBX;
+	state.solution.hasFreshPosition = true;
+	state.solution.position.fixType = GnssFixType::RtkFixed;
+	state.solution.position.hAccuracyP95 = 0.03f;
+	state.solution.position.satellitesUsed = 18;
+	page.updatePreflightState(state);
+	QVERIFY(title->text().contains(QStringLiteral("RTK fixed")));
+	QVERIFY(detail->text().contains(QStringLiteral("track recording"),
+	                                Qt::CaseInsensitive));
+	QVERIFY(receiver->text().contains(QStringLiteral("UBX")));
 }
 
 
