@@ -76,8 +76,22 @@ VelloCanvas::~VelloCanvas()
 void VelloCanvas::setFrame(render::FramePacketPtr frame, render::Color background)
 {
 	frame_ = std::move(frame);
+	content_frame_ = frame_;
 	background_ = background;
 	submitCurrentFrame();
+}
+
+void VelloCanvas::setCameraFrame(render::FramePacketPtr frame)
+{
+	frame_ = std::move(frame);
+	if (!frame_ || surface_state_.phase != SurfacePhase::Exposed)
+		return;
+	if (!renderer_->submitCamera(
+		frame_->id, frame_->view, surface_state_, background_))
+	{
+		qFatal("Vello latest-camera channel rejected a valid frame");
+	}
+	completion_timer_.start();
 }
 
 std::optional<render::VelloFrameResult> VelloCanvas::takeResult()
@@ -329,7 +343,11 @@ void VelloCanvas::submitCurrentFrame()
 {
 	if (!frame_ || surface_state_.phase != SurfacePhase::Exposed)
 		return;
-	if (!renderer_->submit(frame_, surface_state_, background_))
+	auto const accepted = frame_ != content_frame_
+	                    ? renderer_->submitCamera(
+	                          frame_->id, frame_->view, surface_state_, background_)
+	                    : renderer_->submit(frame_, surface_state_, background_);
+	if (!accepted)
 		qFatal("Vello latest-wins frame channel rejected a valid frame");
 	completion_timer_.start();
 }
@@ -349,6 +367,8 @@ void VelloCanvas::pollResults()
 		switch (result->completion.status)
 		{
 		case render::FrameStatus::Presented:
+			if (renderer_->contentPending())
+				return;
 			completion_timer_.stop();
 			retry_timer_.stop();
 			return;

@@ -24,6 +24,7 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -77,7 +78,8 @@ struct RasterTemplateTile
 		QTransform image_to_map = {},
 		bool has_image_to_map = false,
 		std::shared_ptr<RasterMemoryLease> pixel_memory = {},
-		RasterMemoryReserver reserve_render_memory = {})
+		RasterMemoryReserver reserve_render_memory = {},
+		std::optional<bool> opaque = {})
 	 : image(std::move(image))
 	 , template_rect(std::move(template_rect))
 	 , source_rect(std::move(source_rect))
@@ -88,6 +90,7 @@ struct RasterTemplateTile
 	 , has_image_to_map(has_image_to_map)
 	 , pixel_memory(std::move(pixel_memory))
 	 , reserve_render_memory(std::move(reserve_render_memory))
+	 , opaque(opaque)
 	{}
 
 	QImage image;
@@ -100,6 +103,8 @@ struct RasterTemplateTile
 	bool has_image_to_map = false;
 	std::shared_ptr<RasterMemoryLease> pixel_memory;
 	RasterMemoryReserver reserve_render_memory;
+	/** Known alpha coverage avoids a second full-image scan at admission. */
+	std::optional<bool> opaque;
 };
 
 

@@ -442,7 +442,8 @@ void TemplateLayerPlannerTest::boundsImageAdmissionAndPreservesVelloIdentity()
 		QCOMPARE(imageCommandCount(first.below_map.front()), std::size_t(192));
 		auto const frame = frameFor(*snapshot, frame_planner, std::move(first));
 		QVERIFY(renderer.submit(frame, surface));
-		QCOMPARE(renderer.cachedImageCount(), std::size_t(192));
+		QTRY_COMPARE_WITH_TIMEOUT(
+			renderer.cachedImageCount(), std::size_t(192), 2000);
 	}
 
 	auto second = template_planner.plan(map, view, { -256, -8, 512, 16 }, 1);
@@ -454,7 +455,8 @@ void TemplateLayerPlannerTest::boundsImageAdmissionAndPreservesVelloIdentity()
 	{
 		auto const frame = frameFor(*snapshot, frame_planner, std::move(second));
 		QVERIFY(renderer.submit(frame, surface));
-		QCOMPARE(renderer.cachedImageCount(), std::size_t(200));
+		QTRY_COMPARE_WITH_TIMEOUT(
+			renderer.cachedImageCount(), std::size_t(200), 2000);
 	}
 
 	auto third = template_planner.plan(map, view, { -256, -8, 512, 16 }, 1);

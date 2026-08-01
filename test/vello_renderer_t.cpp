@@ -234,15 +234,58 @@ void VelloRendererTest::typedEncoderRetainsImmutableScenes()
 	render::VelloRenderer renderer;
 	QVERIFY(renderer.setSurface(surface));
 	QVERIFY(renderer.submit(first, surface));
-	QCOMPARE(renderer.encodedSceneCount(), std::size_t(1));
-	QCOMPARE(renderer.cachedSceneCount(), std::size_t(1));
+	QTRY_COMPARE_WITH_TIMEOUT(renderer.encodedSceneCount(), std::size_t(1), 2000);
+	QTRY_COMPARE_WITH_TIMEOUT(renderer.cachedSceneCount(), std::size_t(1), 2000);
 
 	auto second = std::make_shared<render::FramePacket>(*first);
 	second->id = 2;
 	second->view.world_to_viewport.dx = 3;
 	QVERIFY(renderer.submit(second, surface));
+	QTRY_VERIFY_WITH_TIMEOUT(!renderer.contentPending(), 2000);
 	QCOMPARE(renderer.encodedSceneCount(), std::size_t(1));
 	QCOMPARE(renderer.cachedSceneCount(), std::size_t(1));
+}
+
+void VelloRendererTest::contentEncodingIsAsynchronous()
+{
+	auto pixels = std::make_shared<std::vector<std::uint8_t>>();
+	auto invalid_image = std::make_shared<const render::ImageData>(render::ImageData {
+		2, 2, 8, std::move(pixels), {}
+	});
+	render::RenderIRBuilder builder(91, { 0, 0, 32, 32 });
+	builder.drawImage(std::move(invalid_image), { 0, 0, 32, 32 });
+	auto frame = std::make_shared<render::FramePacket>();
+	frame->id = 91;
+	frame->revision = 91;
+	frame->view = { 32, 32, 1, {} };
+	frame->vector_passes.push_back({ builder.finish() });
+
+	presentation::NativeSurfaceState surface;
+	surface.sequence = 1;
+	surface.phase = presentation::SurfacePhase::Exposed;
+	surface.native.window = 1;
+	surface.physical_width = 32;
+	surface.physical_height = 32;
+
+	render::VelloRenderer renderer;
+	QVERIFY(renderer.setSurface(surface));
+	// Invalid immutable pixels fail in the staging thread. submit() itself must
+	// remain a non-blocking mailbox operation and therefore succeeds here.
+	QVERIFY(renderer.submit(frame, surface));
+	std::optional<render::VelloFrameResult> result;
+	QElapsedTimer elapsed;
+	elapsed.start();
+	while (!result && elapsed.elapsed() < 2000)
+	{
+		result = renderer.takeResult();
+		QTest::qWait(5);
+	}
+	QVERIFY2(result, renderer.lastError().c_str());
+	QCOMPARE(result->completion.frame_id, frame->id);
+	QCOMPARE(result->completion.status, render::FrameStatus::Failed);
+	QVERIFY(QString::fromStdString(renderer.lastError()).contains(
+		QStringLiteral("invalid immutable image")));
+	QVERIFY(!renderer.contentPending());
 }
 
 void VelloRendererTest::missingNativeTargetIsRetriable()
@@ -397,6 +440,41 @@ void VelloRendererTest::affineImageSourceCropMatchesReference()
 	QVERIFY(difference.mean_channel_delta < 3.2);
 	QVERIFY(difference.high_delta_pixels
 	        < 2 * (actual.width() + actual.height()));
+}
+
+void VelloRendererTest::premultipliedImageMatchesReference()
+{
+	constexpr auto width = std::uint32_t(4);
+	constexpr auto height = std::uint32_t(4);
+	auto pixels = std::make_shared<std::vector<std::uint8_t>>(
+		std::size_t(width * height * 4));
+	for (auto index = std::size_t(0); index < pixels->size(); index += 4)
+	{
+		(*pixels)[index + 0] = 96;
+		(*pixels)[index + 1] = 32;
+		(*pixels)[index + 2] = 16;
+		(*pixels)[index + 3] = 128;
+	}
+	auto image = std::make_shared<const render::ImageData>(render::ImageData {
+		width, height, width * 4, std::move(pixels), {},
+		render::ImageAlphaType::Premultiplied,
+	});
+	render::RenderIRBuilder builder(46, { 0, 0, 32, 32 });
+	builder.drawImage(std::move(image), { 8, 8, 16, 16 });
+	auto frame = std::make_shared<render::FramePacket>();
+	frame->id = 11;
+	frame->revision = 46;
+	frame->view = { 32, 32, 1, {} };
+	frame->vector_passes.push_back({ builder.finish() });
+
+	render::VelloRenderer renderer;
+	auto const rendered = renderer.renderOffscreen(frame);
+	QVERIFY2(rendered, renderer.lastError().c_str());
+	auto const actual = imageFromVello(*rendered);
+	auto const expected = referenceImage(*frame);
+	auto const difference = compareImages(actual, expected);
+	QVERIFY(difference.mean_channel_delta < 1.5);
+	QVERIFY(difference.high_delta_pixels < actual.width() + actual.height());
 }
 
 void VelloRendererTest::miterLimitOneMatchesReference()

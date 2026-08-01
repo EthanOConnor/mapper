@@ -38,6 +38,7 @@
 #include <QPointF>
 #include <QString>
 #include <QTimer>
+#include <QWheelEvent>
 
 #include "core/map.h"
 #include "core/map_color.h"
@@ -405,6 +406,33 @@ void ToolsTest::panDefersTemplateSceneIntegration()
 
 	QTest::mouseRelease(
 		editor.map_widget, Qt::LeftButton, {}, QPoint(140, 120));
+	QTRY_VERIFY_WITH_TIMEOUT(
+		raster_ptr->collection_count > resting_collections, 1000);
+}
+
+void ToolsTest::wheelDefersTemplateSceneIntegrationUntilIdle()
+{
+	auto* map = new Map;
+	auto raster = std::make_unique<FrameContextRasterTemplate>(map);
+	auto* raster_ptr = raster.get();
+	map->addTemplate(0, std::move(raster));
+	TestMapEditor editor(map);
+	editor.map_widget->resize(320, 240);
+	auto* view = editor.map_widget->getMapView();
+	view->setTemplateVisibility(raster_ptr, { 1, true });
+	QTRY_VERIFY_WITH_TIMEOUT(raster_ptr->collection_count > 0, 1000);
+	auto const resting_collections = raster_ptr->collection_count;
+
+	auto const position = QPointF(160, 120);
+	QWheelEvent wheel(
+		position,
+		QPointF(editor.map_widget->mapToGlobal(position.toPoint())),
+		{}, { 0, 120 }, Qt::NoButton, Qt::NoModifier,
+		Qt::ScrollUpdate, false);
+	QApplication::sendEvent(editor.map_widget, &wheel);
+	map->setTemplateAreaDirty(raster_ptr, QRectF(-10, -10, 20, 20), 0);
+	QTest::qWait(60);
+	QCOMPARE(raster_ptr->collection_count, resting_collections);
 	QTRY_VERIFY_WITH_TIMEOUT(
 		raster_ptr->collection_count > resting_collections, 1000);
 }

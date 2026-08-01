@@ -176,4 +176,28 @@ FramePacketPtr FramePlanner::plan(const FrameRequest& request)
 	return frame;
 }
 
+FramePacketPtr FramePlanner::cameraFrame(FrameView view, Revision content_revision)
+{
+	if (next_frame_id_ == std::numeric_limits<FrameId>::max())
+		qFatal("Renderer frame id space exhausted");
+	auto const& transform = view.world_to_viewport;
+	if (content_revision == 0
+	    || !std::isfinite(view.device_pixel_ratio)
+	    || view.device_pixel_ratio <= 0
+	    || !std::isfinite(transform.m11)
+	    || !std::isfinite(transform.m12)
+	    || !std::isfinite(transform.m21)
+	    || !std::isfinite(transform.m22)
+	    || !std::isfinite(transform.dx)
+	    || !std::isfinite(transform.dy))
+	{
+		qFatal("Invalid renderer camera request");
+	}
+	auto frame = std::make_shared<FramePacket>();
+	frame->id = next_frame_id_++;
+	frame->revision = content_revision;
+	frame->view = view;
+	return frame;
+}
+
 }  // namespace OpenOrienteering::render

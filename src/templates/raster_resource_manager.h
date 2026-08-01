@@ -150,6 +150,15 @@ public:
 	int activeCount(Lane lane) const;
 	std::size_t pendingCount(Lane lane) const;
 
+	/**
+	 * Brackets latency-critical camera interaction. Decode/warp work continues,
+	 * but new admission is reduced to one low-QoS worker until interaction ends.
+	 * Calls must be balanced on the manager thread.
+	 */
+	void beginInteraction();
+	void endInteraction();
+	bool interactionActive() const;
+
 private:
 	using SharedState = Owner::SharedState;
 	std::shared_ptr<SharedState> state_;

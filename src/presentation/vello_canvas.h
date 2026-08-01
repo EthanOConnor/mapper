@@ -41,6 +41,8 @@ public:
 		render::FramePacketPtr frame,
 		render::Color background = { 65535, 65535, 65535, 65535 }
 	);
+	/** Updates only the camera over the most recently completed content generation. */
+	void setCameraFrame(render::FramePacketPtr frame);
 	std::optional<render::VelloFrameResult> takeResult();
 	const std::optional<render::VelloFrameResult>& lastResult() const noexcept;
 	const render::FramePacketPtr& currentFrame() const noexcept;
@@ -60,6 +62,7 @@ private:
 	QWidget* container_ = nullptr;
 	std::unique_ptr<render::VelloRenderer> renderer_;
 	render::FramePacketPtr frame_;
+	render::FramePacketPtr content_frame_;
 	render::Color background_ { 65535, 65535, 65535, 65535 };
 	NativeSurfaceState surface_state_;
 	QTimer completion_timer_;

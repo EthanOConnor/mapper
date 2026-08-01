@@ -160,8 +160,11 @@ struct RasterResourceManager::Owner::SharedState
 	void dispatchLocked(Lane lane_id)
 	{
 		auto& lane = laneState(lane_id);
+		auto const active_limit = interaction_depth > 0 && lane_id == Lane::Decode
+		                        ? 1
+		                        : lane.pool.maxThreadCount();
 		while (!shutting_down
-		       && lane.active < lane.pool.maxThreadCount()
+		       && lane.active < active_limit
 		       && lane.outstanding < max_outstanding_per_lane)
 		{
 			auto selected = chooseNextLocked(lane_id, lane);
@@ -192,6 +195,32 @@ struct RasterResourceManager::Owner::SharedState
 				}
 				self->finish(std::move(job), std::move(completion));
 			});
+		}
+	}
+
+	void beginInteraction()
+	{
+		std::lock_guard lock(mutex);
+		if (interaction_depth == std::numeric_limits<int>::max())
+			qFatal("Raster interaction depth exhausted");
+		if (interaction_depth++ == 0)
+		{
+			blocking.pool.setServiceLevel(QThread::QualityOfService::Eco);
+			decode.pool.setServiceLevel(QThread::QualityOfService::Eco);
+		}
+	}
+
+	void endInteraction()
+	{
+		std::lock_guard lock(mutex);
+		if (interaction_depth <= 0)
+			qFatal("Unbalanced raster interaction boundary");
+		if (--interaction_depth == 0)
+		{
+			blocking.pool.setServiceLevel(QThread::QualityOfService::Auto);
+			decode.pool.setServiceLevel(QThread::QualityOfService::Auto);
+			dispatchLocked(Lane::BlockingIo);
+			dispatchLocked(Lane::Decode);
 		}
 	}
 
@@ -286,6 +315,7 @@ struct RasterResourceManager::Owner::SharedState
 	std::size_t max_pending_per_owner = 128;
 	std::size_t max_pending_per_lane = 2048;
 	std::size_t max_outstanding_per_lane = 128;
+	int interaction_depth = 0;
 	bool shutting_down = false;
 };
 
@@ -504,6 +534,24 @@ std::size_t RasterResourceManager::pendingCount(Lane lane) const
 {
 	std::lock_guard lock(state_->mutex);
 	return state_->laneState(lane).pending.size();
+}
+
+void RasterResourceManager::beginInteraction()
+{
+	Q_ASSERT(QThread::currentThread() == thread());
+	state_->beginInteraction();
+}
+
+void RasterResourceManager::endInteraction()
+{
+	Q_ASSERT(QThread::currentThread() == thread());
+	state_->endInteraction();
+}
+
+bool RasterResourceManager::interactionActive() const
+{
+	std::lock_guard lock(state_->mutex);
+	return state_->interaction_depth > 0;
 }
 
 }  // namespace OpenOrienteering

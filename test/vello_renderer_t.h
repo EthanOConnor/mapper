@@ -16,10 +16,12 @@ Q_OBJECT
 private slots:
 	void initTestCase();
 	void typedEncoderRetainsImmutableScenes();
+	void contentEncodingIsAsynchronous();
 	void missingNativeTargetIsRetriable();
 	void offscreenGpuMatchesReference();
 	void cubicBezierRemainsCurvedOnGpu();
 	void affineImageSourceCropMatchesReference();
+	void premultipliedImageMatchesReference();
 	void miterLimitOneMatchesReference();
 	void selectionHandleGlyphsSurviveHighDpi();
 	void mapCorpusMatchesReference();

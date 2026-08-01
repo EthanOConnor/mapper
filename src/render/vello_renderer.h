@@ -54,6 +54,15 @@ public:
 	bool submit(const FramePacketPtr& frame,
 	            const presentation::NativeSurfaceState& surface,
 	            Color background = { 65535, 65535, 65535, 65535 });
+	/**
+	 * Presents the latest completely encoded content with a newer camera.
+	 * This never waits for content encoding or image retention.
+	 */
+	bool submitCamera(
+		FrameId frame_id,
+		const FrameView& view,
+		const presentation::NativeSurfaceState& surface,
+		Color background = { 65535, 65535, 65535, 65535 });
 	std::optional<VelloImage> renderOffscreen(
 		const FramePacketPtr& frame,
 		Color background = { 65535, 65535, 65535, 65535 }
@@ -63,6 +72,7 @@ public:
 	std::size_t cachedSceneCount() const noexcept;
 	std::size_t encodedSceneCount() const noexcept;
 	std::size_t cachedImageCount() const noexcept;
+	bool contentPending() const noexcept;
 
 private:
 	class Impl;

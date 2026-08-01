@@ -427,6 +427,34 @@ private slots:
 			std::size_t(0), 1000);
 	}
 
+	void interactionReducesDecodeAdmissionWithoutStoppingWork()
+	{
+		RasterResourceManager manager({ 1, 3 });
+		auto owner = manager.createOwner(3);
+		QSemaphore started;
+		QSemaphore gate;
+		WorkDrain drain(manager, { &owner }, { &gate });
+
+		manager.beginInteraction();
+		QVERIFY(manager.interactionActive());
+		for (int index = 0; index < 3; ++index)
+		{
+			QVERIFY(manager.submit(
+				owner, Lane::Decode, Priority::Visible, this,
+				gatedWork(started, gate)));
+		}
+		QVERIFY(started.tryAcquire(1, 1000));
+		QVERIFY(!started.tryAcquire(1, 100));
+		QCOMPARE(manager.activeCount(Lane::Decode), 1);
+
+		manager.endInteraction();
+		QVERIFY(!manager.interactionActive());
+		QVERIFY(started.tryAcquire(2, 1000));
+		QCOMPARE(manager.activeCount(Lane::Decode), 3);
+		gate.release(3);
+		QTRY_COMPARE_WITH_TIMEOUT(manager.activeCount(Lane::Decode), 0, 1000);
+	}
+
 	void exceptionReleasesSlotAndCompletionUsesManagerThread()
 	{
 		RasterResourceManager manager({ 1, 1 });

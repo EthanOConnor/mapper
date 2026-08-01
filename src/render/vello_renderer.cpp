@@ -7,9 +7,14 @@
 #include "render/vello_renderer.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
+#include <condition_variable>
+#include <deque>
 #include <limits>
+#include <mutex>
 #include <stdexcept>
+#include <thread>
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
@@ -177,9 +182,64 @@ public:
 		std::shared_ptr<const RetainedImage> retained;
 	};
 
+	struct PreparedPass
+	{
+		std::shared_ptr<const Retained> scene;
+		BlendMode blend = BlendMode::SourceOver;
+		double opacity = 1;
+		bool isolated = false;
+		VectorPass::Space space = VectorPass::Space::World;
+	};
+
+	struct PreparedGeneration
+	{
+		Revision revision = 0;
+		/** Keeps immutable IR, image storage, and raster accounting leases alive. */
+		FramePacketPtr source;
+		std::vector<PreparedPass> passes;
+	};
+
+	struct ViewSubmission
+	{
+		FrameId frame_id = 0;
+		FrameView view;
+		presentation::NativeSurfaceState surface;
+		Color background;
+	};
+
+	struct EncodeRequest
+	{
+		FramePacketPtr frame;
+		ViewSubmission view;
+		std::uint64_t serial = 0;
+	};
+
+	struct PresentationRequest
+	{
+		ViewSubmission view;
+		std::shared_ptr<const PreparedGeneration> generation;
+	};
+
 	Impl()
 	 : renderer(ffi::new_renderer())
+	 , encoder_thread([this] { encodeLoop(); })
+	 , presenter_thread([this] { presentLoop(); })
 	{}
+
+	~Impl()
+	{
+		{
+			std::lock_guard lock(state_mutex);
+			stopping = true;
+			pending_encode.reset();
+			pending_presentation.reset();
+		}
+		state_changed.notify_all();
+		if (encoder_thread.joinable())
+			encoder_thread.join();
+		if (presenter_thread.joinable())
+			presenter_thread.join();
+	}
 
 	std::shared_ptr<const RetainedImage> retainImage(
 		const std::shared_ptr<const ImageData>& image)
@@ -201,9 +261,11 @@ public:
 		auto const bytes = image->bytes();
 		auto retained = std::make_shared<RetainedImage>(ffi::new_retained_image(
 			rust::Slice<const std::uint8_t> { bytes.data(), bytes.size() },
-			image->width, image->height, image->bytes_per_row
+			image->width, image->height, image->bytes_per_row,
+			image->alpha_type == ImageAlphaType::Premultiplied ? 1 : 0
 		));
 		images.emplace(image.get(), ImageCacheEntry { image, retained });
+		cached_image_count.store(images.size(), std::memory_order_relaxed);
 		return retained;
 	}
 
@@ -318,18 +380,36 @@ public:
 			throw std::logic_error("Vello scene encoding violated the immutable IR contract");
 		}
 		scenes.emplace(ir.get(), CacheEntry { ir, retained });
-		++encoded_scene_count;
+		cached_scene_count.store(scenes.size(), std::memory_order_relaxed);
+		encoded_scene_count.fetch_add(1, std::memory_order_relaxed);
 		return retained;
 	}
 
-	rust::Box<ffi::FrameBuilder> buildFrame(const FramePacket& frame,
-	                                      std::uint32_t width,
-	                                      std::uint32_t height,
-	                                      double device_pixel_ratio,
-	                                      std::uint64_t surface_sequence,
-	                                      Color background)
+	std::shared_ptr<const PreparedGeneration> encodeGeneration(const FramePacketPtr& frame)
 	{
-		auto world_transform = frame.view.world_to_viewport;
+		auto generation = std::make_shared<PreparedGeneration>();
+		generation->revision = frame->revision;
+		generation->source = frame;
+		generation->passes.reserve(frame->vector_passes.size());
+		for (auto const& pass : frame->vector_passes)
+		{
+			if (!pass.scene)
+				continue;
+			generation->passes.push_back({
+				encode(pass.scene), pass.blend, pass.opacity, pass.isolated, pass.space,
+			});
+		}
+		cached_scene_count.store(scenes.size(), std::memory_order_relaxed);
+		cached_image_count.store(images.size(), std::memory_order_relaxed);
+		return generation;
+	}
+
+	rust::Box<ffi::FrameBuilder> buildFrame(
+		const PreparedGeneration& generation,
+		const ViewSubmission& submission)
+	{
+		auto world_transform = submission.view.world_to_viewport;
+		auto const device_pixel_ratio = submission.surface.device_pixel_ratio;
 		world_transform.m11 *= device_pixel_ratio;
 		world_transform.m12 *= device_pixel_ratio;
 		world_transform.m21 *= device_pixel_ratio;
@@ -341,21 +421,18 @@ public:
 		};
 
 		ffi::FrameHeader header;
-		header.frame_id = frame.id;
-		header.revision = frame.revision;
-		header.surface_sequence = surface_sequence;
-		header.width = width;
-		header.height = height;
+		header.frame_id = submission.frame_id;
+		header.revision = generation.revision;
+		header.surface_sequence = submission.surface.sequence;
+		header.width = submission.surface.physical_width;
+		header.height = submission.surface.physical_height;
 		header.world_to_surface = ffiTransform(world_transform);
-		header.background = ffiColor(background);
+		header.background = ffiColor(submission.background);
 		auto request = ffi::new_frame(header);
-		for (auto const& pass : frame.vector_passes)
+		for (auto const& pass : generation.passes)
 		{
-			if (!pass.scene)
-				continue;
-			auto const retained = encode(pass.scene);
 			ffi::frame_add_pass(
-				*request, *retained->scene, ffiBlend(pass.blend), pass.opacity, pass.isolated,
+				*request, *pass.scene->scene, ffiBlend(pass.blend), pass.opacity, pass.isolated,
 				ffiTransform(pass.space == VectorPass::Space::World
 				             ? world_transform : viewport_transform)
 			);
@@ -363,10 +440,181 @@ public:
 		return request;
 	}
 
+	bool queueContent(
+		const FramePacketPtr& frame,
+		const presentation::NativeSurfaceState& surface,
+		Color background)
+	{
+		std::lock_guard lock(state_mutex);
+		if (stopping || latest_content_serial == std::numeric_limits<std::uint64_t>::max())
+			return false;
+		ViewSubmission view { frame->id, frame->view, surface, background };
+		latest_view = view;
+		content_pending.store(true, std::memory_order_release);
+		pending_encode = EncodeRequest { frame, view, ++latest_content_serial };
+		state_changed.notify_all();
+		return true;
+	}
+
+	bool queueCamera(
+		FrameId frame_id,
+		const FrameView& view,
+		const presentation::NativeSurfaceState& surface,
+		Color background)
+	{
+		std::lock_guard lock(state_mutex);
+		if (stopping)
+			return false;
+		latest_view = ViewSubmission { frame_id, view, surface, background };
+		if (auto generation = completed_generation)
+			pending_presentation = PresentationRequest { *latest_view, std::move(generation) };
+		state_changed.notify_all();
+		return true;
+	}
+
+	void encodeLoop()
+	{
+		for (;;)
+		{
+			EncodeRequest request;
+			{
+				std::unique_lock lock(state_mutex);
+				state_changed.wait(lock, [this] { return stopping || pending_encode.has_value(); });
+				if (stopping)
+					return;
+				request = std::move(*pending_encode);
+				pending_encode.reset();
+			}
+
+			try
+			{
+				std::shared_ptr<const PreparedGeneration> generation;
+				{
+					std::lock_guard lock(encode_mutex);
+					generation = encodeGeneration(request.frame);
+				}
+				std::lock_guard lock(state_mutex);
+				if (stopping)
+					return;
+				// Never flash an obsolete partially staged generation. The newer
+				// request remains queued and benefits from the warmed retained cache.
+				if (request.serial != latest_content_serial)
+					continue;
+				{
+					std::lock_guard error_lock(error_mutex);
+					encoder_error.clear();
+				}
+				completed_generation = generation;
+				content_pending.store(false, std::memory_order_release);
+				auto const view = latest_view.value_or(request.view);
+				pending_presentation = PresentationRequest { view, std::move(generation) };
+				state_changed.notify_all();
+			}
+			catch (const std::exception& error)
+			{
+				if (markFailedIfCurrent(request.serial))
+					pushFailure(request.view, error.what());
+			}
+			catch (...)
+			{
+				if (markFailedIfCurrent(request.serial))
+					pushFailure(request.view, "Vello content encoding failed");
+			}
+		}
+	}
+
+	void presentLoop()
+	{
+		for (;;)
+		{
+			PresentationRequest request;
+			{
+				std::unique_lock lock(state_mutex);
+				state_changed.wait(lock, [this] {
+					return stopping || pending_presentation.has_value();
+				});
+				if (stopping)
+					return;
+				request = std::move(*pending_presentation);
+				pending_presentation.reset();
+			}
+			try
+			{
+				auto frame = buildFrame(*request.generation, request.view);
+				if (!ffi::renderer_submit(*renderer, std::move(frame)))
+					pushFailure(request.view, "Vello render thread rejected a prepared frame");
+			}
+			catch (const std::exception& error)
+			{
+				pushFailure(request.view, error.what());
+			}
+			catch (...)
+			{
+				pushFailure(request.view, "Vello frame presentation failed");
+			}
+		}
+	}
+
+	void pushFailure(const ViewSubmission& view, std::string message)
+	{
+		{
+			std::lock_guard lock(error_mutex);
+			encoder_error = std::move(message);
+		}
+		std::lock_guard lock(failure_mutex);
+		if (failures.size() == 64)
+			failures.pop_front();
+		failures.push_back({
+			{ view.frame_id, FrameStatus::Failed },
+			0,
+			view.surface.sequence,
+			0,
+		});
+	}
+
+	bool markFailedIfCurrent(std::uint64_t serial)
+	{
+		std::lock_guard lock(state_mutex);
+		if (serial != latest_content_serial)
+			return false;
+		content_pending.store(false, std::memory_order_release);
+		return true;
+	}
+
+	std::optional<VelloFrameResult> takeFailure()
+	{
+		std::lock_guard lock(failure_mutex);
+		if (failures.empty())
+			return {};
+		auto result = failures.front();
+		failures.pop_front();
+		return result;
+	}
+
 	rust::Box<ffi::Renderer> renderer;
+	std::mutex encode_mutex;
 	std::unordered_map<const RenderIR*, CacheEntry> scenes;
 	std::unordered_map<const ImageData*, ImageCacheEntry> images;
-	std::size_t encoded_scene_count = 0;
+	std::atomic_size_t cached_scene_count { 0 };
+	std::atomic_size_t cached_image_count { 0 };
+	std::atomic_size_t encoded_scene_count { 0 };
+	std::atomic_bool content_pending { false };
+	std::shared_ptr<const PreparedGeneration> completed_generation;
+
+	std::mutex state_mutex;
+	std::condition_variable state_changed;
+	std::optional<EncodeRequest> pending_encode;
+	std::optional<PresentationRequest> pending_presentation;
+	std::optional<ViewSubmission> latest_view;
+	std::uint64_t latest_content_serial = 0;
+	bool stopping = false;
+	std::thread encoder_thread;
+	std::thread presenter_thread;
+
+	std::mutex failure_mutex;
+	std::deque<VelloFrameResult> failures;
+	mutable std::mutex error_mutex;
+	std::string encoder_error;
 };
 
 VelloRenderer::VelloRenderer()
@@ -393,11 +641,31 @@ bool VelloRenderer::submit(const FramePacketPtr& frame,
 	{
 		return false;
 	}
-	auto request = impl_->buildFrame(
-		*frame, surface.physical_width, surface.physical_height,
-		surface.device_pixel_ratio, surface.sequence, background
-	);
-	return ffi::renderer_submit(*impl_->renderer, std::move(request));
+	return impl_->queueContent(frame, surface, background);
+}
+
+bool VelloRenderer::submitCamera(
+	FrameId frame_id,
+	const FrameView& view,
+	const presentation::NativeSurfaceState& surface,
+	Color background)
+{
+	auto const& transform = view.world_to_viewport;
+	if (frame_id == 0
+	    || !std::isfinite(view.device_pixel_ratio)
+	    || view.device_pixel_ratio <= 0
+	    || !std::isfinite(transform.m11) || !std::isfinite(transform.m12)
+	    || !std::isfinite(transform.m21) || !std::isfinite(transform.m22)
+	    || !std::isfinite(transform.dx) || !std::isfinite(transform.dy)
+	    || !std::isfinite(surface.device_pixel_ratio)
+	    || surface.device_pixel_ratio <= 0
+	    || surface.phase != presentation::SurfacePhase::Exposed
+	    || surface.sequence == 0 || surface.physical_width == 0
+	    || surface.physical_height == 0)
+	{
+		return false;
+	}
+	return impl_->queueCamera(frame_id, view, surface, background);
 }
 
 std::optional<VelloImage> VelloRenderer::renderOffscreen(
@@ -423,9 +691,17 @@ std::optional<VelloImage> VelloRenderer::renderOffscreen(
 	}
 	auto const width = std::uint32_t(physical_width);
 	auto const height = std::uint32_t(physical_height);
-	auto request = impl_->buildFrame(
-		*frame, width, height, frame->view.device_pixel_ratio, 0, background
-	);
+	presentation::NativeSurfaceState surface;
+	surface.phase = presentation::SurfacePhase::Exposed;
+	surface.physical_width = width;
+	surface.physical_height = height;
+	surface.device_pixel_ratio = frame->view.device_pixel_ratio;
+	Impl::ViewSubmission view { frame->id, frame->view, surface, background };
+	rust::Box<ffi::FrameBuilder> request = [&] {
+		std::lock_guard lock(impl_->encode_mutex);
+		auto generation = impl_->encodeGeneration(frame);
+		return impl_->buildFrame(*generation, view);
+	}();
 	auto pixels = ffi::renderer_render_offscreen(*impl_->renderer, std::move(request));
 	auto const expected_size = std::size_t(width) * std::size_t(height) * 4;
 	if (pixels.size() != expected_size)
@@ -439,6 +715,8 @@ std::optional<VelloImage> VelloRenderer::renderOffscreen(
 
 std::optional<VelloFrameResult> VelloRenderer::takeResult()
 {
+	if (auto failure = impl_->takeFailure())
+		return failure;
 	auto const result = ffi::renderer_try_take_result(*impl_->renderer);
 	if (result.status == 0)
 		return std::nullopt;
@@ -452,23 +730,33 @@ std::optional<VelloFrameResult> VelloRenderer::takeResult()
 
 std::string VelloRenderer::lastError() const
 {
+	{
+		std::lock_guard lock(impl_->error_mutex);
+		if (!impl_->encoder_error.empty())
+			return impl_->encoder_error;
+	}
 	auto const error = ffi::renderer_last_error(*impl_->renderer);
 	return { error.data(), error.size() };
 }
 
 std::size_t VelloRenderer::cachedSceneCount() const noexcept
 {
-	return impl_->scenes.size();
+	return impl_->cached_scene_count.load(std::memory_order_relaxed);
 }
 
 std::size_t VelloRenderer::encodedSceneCount() const noexcept
 {
-	return impl_->encoded_scene_count;
+	return impl_->encoded_scene_count.load(std::memory_order_relaxed);
 }
 
 std::size_t VelloRenderer::cachedImageCount() const noexcept
 {
-	return impl_->images.size();
+	return impl_->cached_image_count.load(std::memory_order_relaxed);
+}
+
+bool VelloRenderer::contentPending() const noexcept
+{
+	return impl_->content_pending.load(std::memory_order_acquire);
 }
 
 }  // namespace OpenOrienteering::render

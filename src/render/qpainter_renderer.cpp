@@ -259,8 +259,11 @@ void QPainterRenderer::render(QPainter& painter, const RenderIR& ir,
 				{
 					return;
 				}
+				auto const format = op.image->alpha_type == ImageAlphaType::Premultiplied
+				                  ? QImage::Format_RGBA8888_Premultiplied
+				                  : QImage::Format_RGBA8888;
 				QImage image(bytes.data(), int(op.image->width), int(op.image->height),
-				             qsizetype(op.image->bytes_per_row), QImage::Format_RGBA8888);
+				             qsizetype(op.image->bytes_per_row), format);
 				auto const source = toQRectF(op.source).intersected(
 					QRectF(0, 0, image.width(), image.height())
 				);

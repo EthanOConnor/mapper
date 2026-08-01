@@ -109,11 +109,30 @@ a viewport-sized CPU mosaic.
 Decoded straight-RGBA tile storage is shared directly into the immutable render
 snapshot. The planner retains the source `QImage` backing store and its memory
 lease instead of copying every admitted tile into a second C++ byte vector;
-Vello then creates and caches the one backend-owned image resource. New image
+premultiplied atlases retain that representation through both QPainter and
+Vello rather than being unpremultiplied on the UI thread. Vello then creates
+and caches the one backend-owned image resource. New image
 admission is bounded by both bytes and resource count, and the per-frame budget
 is divided across visible raster layers. Multiple active sources therefore make
 progress together rather than template-list order allowing one source to
 monopolize a sequence of intermediate frames.
+
+Camera presentation and content generation have separate latest-wins paths.
+A resting frame covers an overscanned world rectangle. During drag, pinch,
+wheel and momentum settling, input publishes only a constant-size camera
+packet over the last completely encoded generation. Tile-demand planning and
+new raster admission resume at the 120 ms idle boundary. Existing HTTP,
+decode and warp jobs continue, but new decode/warp admission is reduced to one
+low-QoS worker while the camera is active so memory-bandwidth work cannot
+starve pointer delivery.
+
+New immutable scenes and backend image resources are encoded on a bounded
+content-staging thread. A separate presenter applies the newest camera to the
+last completed retained generation, so even a large atlas upload cannot hold a
+later camera transform behind it. Only the newest requested content generation
+is published; superseded encodes may warm retained caches but are never
+flashed. Publication swaps the complete generation atomically before the
+existing Rust Vello render thread performs GPU rendering and presentation.
 
 Independent translucent tiles would blend their shared edges more than once.
 A translucent screen window is therefore composed once into a retained

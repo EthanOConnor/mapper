@@ -37,6 +37,8 @@ public:
 	/** Plans a frame which has no document map pass (for example an empty-map help view). */
 	FramePacketPtr plan(const FrameRequest& request);
 	FramePacketPtr plan(const MapRenderSnapshot& snapshot, const FrameRequest& request);
+	/** Identifies a camera-only presentation over the last completed content generation. */
+	FramePacketPtr cameraFrame(FrameView view, Revision content_revision);
 
 private:
 	FrameId next_frame_id_ = 1;

@@ -2914,11 +2914,12 @@ bool OnlineRasterTemplate::appendOpaquePatch(const VisualTile& visual, QRectF so
 		quint64(visual.tile->image.cacheKey()),
 		false,
 		visual.provisional,
-			*transform,
-			true,
-			visual.tile->memory,
-			std::move(reserve_render_memory),
-		});
+		*transform,
+		true,
+		visual.tile->memory,
+		std::move(reserve_render_memory),
+		visual.tile->opaque,
+	});
 	return true;
 }
 
@@ -3814,6 +3815,7 @@ bool OnlineRasterTemplate::appendTransparentAtlas(const TileWindow& window,
 				-> std::shared_ptr<RasterMemoryLease> {
 				return reserveRetainedMemory(bytes);
 			},
+			false,
 		});
 		retained_access_ = nextRetainedAccess();
 		return true;
@@ -3836,6 +3838,7 @@ bool OnlineRasterTemplate::appendTransparentAtlas(const TileWindow& window,
 				-> std::shared_ptr<RasterMemoryLease> {
 				return reserveRetainedMemory(bytes);
 			},
+			false,
 		});
 	return true;
 }
@@ -3891,6 +3894,7 @@ bool OnlineRasterTemplate::appendPreparedOutputAtlases(
 					return {};
 				return render_memory;
 			},
+			false,
 		});
 	}
 	retained_access_ = nextRetainedAccess();

@@ -146,6 +146,7 @@ mod ffi {
             width: u32,
             height: u32,
             stride: u32,
+            alpha_type: u8,
         ) -> Box<RetainedImage>;
         fn scene_draw_image(
             scene: &mut SceneBuilder,
@@ -489,6 +490,7 @@ fn new_retained_image(
     width: u32,
     height: u32,
     stride: u32,
+    alpha_type: u8,
 ) -> Box<RetainedImage> {
     let Some(row_bytes) = width.checked_mul(4) else {
         return Box::new(RetainedImage { image: None });
@@ -521,7 +523,11 @@ fn new_retained_image(
         image: Some(ImageData {
             data: Blob::from(pixels),
             format: ImageFormat::Rgba8,
-            alpha_type: ImageAlphaType::Alpha,
+            alpha_type: if alpha_type == 1 {
+                ImageAlphaType::AlphaPremultiplied
+            } else {
+                ImageAlphaType::Alpha
+            },
             width,
             height,
         }),

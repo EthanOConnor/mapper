@@ -319,6 +319,24 @@ void FramePipelineTest::packetIsCompleteAndMonotonic()
 	QVERIFY(!renderFrame(*fixture, *overprint).isNull());
 }
 
+void FramePipelineTest::cameraPacketIsConstantSizeAndMonotonic()
+{
+	auto fixture = makeFixture(example(QStringLiteral("complete map.omap")));
+	QVERIFY(fixture);
+	auto const snapshot = fixture->map.publishRenderSnapshot();
+	render::FramePlanner planner;
+	auto const content = planner.plan(
+		*snapshot, { fixture->view, fixture->render_request, false });
+	auto camera_view = fixture->view;
+	camera_view.world_to_viewport.dx += 17;
+	auto const camera = planner.cameraFrame(camera_view, content->revision);
+	QCOMPARE(camera->id, content->id + 1);
+	QCOMPARE(camera->revision, content->revision);
+	QCOMPARE(camera->view.world_to_viewport.dx,
+	         camera_view.world_to_viewport.dx);
+	QVERIFY(camera->vector_passes.empty());
+}
+
 void FramePipelineTest::qpainterConsumesTheFrameContract()
 {
 	auto fixture = makeFixture(example(QStringLiteral("complete map.omap")));

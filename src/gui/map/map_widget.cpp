@@ -62,6 +62,7 @@
 #include "render/qt_render_bridge.h"
 #include "render/template_layer_planner.h"
 #include "presentation/vello_canvas.h"
+#include "templates/raster_resource_manager.h"
 #include "gui/touch_cursor.h"
 #include "gui/map/map_editor_activity.h"
 #include "gui/widgets/action_grid_bar.h"
@@ -155,20 +156,44 @@ MapWidget::MapWidget(bool show_help, QWidget* parent)
 		zoom_limit_feedback = ZoomLimitFeedback::None;
 		updateZoomDisplay();
 	});
+	camera_idle_timer.setSingleShot(true);
+	camera_idle_timer.setInterval(120);
+	connect(&camera_idle_timer, &QTimer::timeout,
+	        this, &MapWidget::finishCameraInteraction);
+	render_context_timer.setSingleShot(true);
+	connect(&render_context_timer, &QTimer::timeout,
+	        this, &MapWidget::publishRenderContext);
+	template_admission_timer.setSingleShot(true);
+	template_admission_timer.setInterval(24);
+	connect(&template_admission_timer, &QTimer::timeout, this, [this] {
+		if (!cameraInteractionActive() && template_refresh_deferred)
+			scheduleFrameUpdate();
+	});
 }
 
 MapWidget::~MapWidget()
 {
-	// nothing, not inlined
+	if (camera_interaction_registered)
+		RasterResourceManager::instance().endInteraction();
 }
 
 void MapWidget::setMapView(MapView* view)
 {
 	if (this->view != view)
 	{
+		camera_idle_timer.stop();
+		render_context_timer.stop();
+		template_admission_timer.stop();
+		render_context_update_scheduled = false;
+		if (camera_interaction_registered)
+		{
+			RasterResourceManager::instance().endInteraction();
+			camera_interaction_registered = false;
+		}
 		template_layer_planner.clear();
 		retained_template_layers = {};
 		retained_template_layers_valid = false;
+		retained_content_frame.reset();
 		template_refresh_deferred = false;
 		if (this->view)
 		{
@@ -218,15 +243,14 @@ void MapWidget::setMapView(MapView* view)
 			connect(map, &Map::drawingUpdateRequested,
 			        this, &MapWidget::updateDrawing);
 			connect(map, &Map::templateAreaDirty,
-			        this, [this](Template* temp, const QRectF& map_rect, int pixel_border) {
+			        this, [this](Template* temp, const QRectF&, int) {
 				if (this->view->isTemplateVisible(temp))
 				{
+					template_refresh_deferred = true;
 					if (transformInteractionActive())
-					{
-						template_refresh_deferred = true;
 						return;
-					}
-					markTemplateAreaDirty(this->view->calculateViewBoundingBox(map_rect), pixel_border);
+					if (!template_admission_timer.isActive())
+						template_admission_timer.start();
 				}
 			});
 			connect(map, &Map::objectAreaDirty,
@@ -434,15 +458,26 @@ void MapWidget::observeTemplate(Template* temp)
 
 void MapWidget::scheduleRenderContextUpdate()
 {
-	if (!view || render_context_update_scheduled)
+	if (!view)
 		return;
 
 	render_context_update_scheduled = true;
-	QTimer::singleShot(0, this, &MapWidget::publishRenderContext);
+	if (cameraInteractionActive())
+	{
+		// Existing network/decode work continues, but recomputing tile demand is
+		// admitted only at the idle boundary. Pointer delivery therefore cannot
+		// be interrupted by source-specific window planning.
+		return;
+	}
+	else
+	{
+		render_context_timer.start(0);
+	}
 }
 
 void MapWidget::publishRenderContext()
 {
+	render_context_timer.stop();
 	render_context_update_scheduled = false;
 	if (!view || view->areAllTemplatesHidden())
 		return;
@@ -468,8 +503,53 @@ ViewRenderContext MapWidget::currentViewRenderContext() const
 
 bool MapWidget::transformInteractionActive() const
 {
-	return dragging || pinching || current_pressed_buttons != 0
+	return cameraInteractionActive() || current_pressed_buttons != 0
 	       || !pan_offset.isNull();
+}
+
+bool MapWidget::cameraInteractionActive() const noexcept
+{
+	return camera_interaction_registered;
+}
+
+void MapWidget::beginCameraInteraction()
+{
+	camera_idle_timer.stop();
+	if (render_context_timer.isActive())
+		render_context_timer.stop();
+	if (camera_interaction_registered)
+		return;
+	camera_interaction_registered = true;
+	RasterResourceManager::instance().beginInteraction();
+}
+
+void MapWidget::settleCameraInteraction()
+{
+	if (!camera_interaction_registered)
+		return;
+	if (dragging || pinching || !pan_offset.isNull())
+		return;
+	camera_idle_timer.start();
+}
+
+void MapWidget::finishCameraInteraction()
+{
+	if (!camera_interaction_registered)
+		return;
+	if (dragging || pinching || !pan_offset.isNull())
+	{
+		camera_idle_timer.start();
+		return;
+	}
+	camera_interaction_registered = false;
+	RasterResourceManager::instance().endInteraction();
+	auto const content_refresh_needed =
+		render_context_update_scheduled || template_refresh_deferred;
+	if (render_context_update_scheduled)
+		render_context_timer.start(0);
+	// Admit the newest complete content generation once, at the idle boundary.
+	if (content_refresh_needed)
+		scheduleFrameUpdate();
 }
 
 void MapWidget::viewChanged(MapView::ChangeFlags changes)
@@ -536,6 +616,10 @@ void MapWidget::visibilityChanged(MapView::VisibilityFeature feature, bool activ
 void MapWidget::setPanOffset(const QPoint& offset)
 {
 	pan_offset = offset;
+	if (!pan_offset.isNull())
+		beginCameraInteraction();
+	else
+		settleCameraInteraction();
 	scheduleRenderContextUpdate();
 	scheduleFrameUpdate();
 }
@@ -545,6 +629,7 @@ void MapWidget::startDragging(const QPoint& cursor_pos)
 	Q_ASSERT(!dragging);
 	Q_ASSERT(!pinching);
 	dragging = true;
+	beginCameraInteraction();
 	drag_start_pos = cursor_pos;
 	normal_cursor  = cursor();
 	setCursor(Qt::ClosedHandCursor);
@@ -562,6 +647,7 @@ void MapWidget::finishDragging(const QPoint& cursor_pos)
 	dragging = false;
 	view->finishPanning(cursor_pos - drag_start_pos);
 	setCursor(normal_cursor);
+	settleCameraInteraction();
 }
 
 void MapWidget::cancelDragging()
@@ -569,6 +655,7 @@ void MapWidget::cancelDragging()
 	dragging = false;
 	view->setPanOffset(QPoint());
 	setCursor(normal_cursor);
+	settleCameraInteraction();
 }
 
 qreal MapWidget::startPinching(const QPoint& center)
@@ -576,6 +663,7 @@ qreal MapWidget::startPinching(const QPoint& center)
 	Q_ASSERT(!dragging);
 	Q_ASSERT(!pinching);
 	pinching = true;
+	beginCameraInteraction();
 	drag_start_pos  = center;
 	pinching_center = center;
 	pinching_factor = 1.0;
@@ -622,6 +710,7 @@ void MapWidget::finishPinching(const QPoint& center)
 	// A clamped zoom is intentionally a MapView no-op, so synchronize the
 	// indicator explicitly instead of relying on viewChanged().
 	updateZoomDisplay();
+	settleCameraInteraction();
 }
 
 void MapWidget::cancelPinching()
@@ -631,6 +720,7 @@ void MapWidget::cancelPinching()
 	clearZoomLimitFeedback();
 	updateZoomDisplay();
 	scheduleFrameUpdate();
+	settleCameraInteraction();
 }
 
 void MapWidget::showZoomLimitFeedback(ZoomLimitFeedback limit)
@@ -1010,6 +1100,11 @@ bool MapWidget::event(QEvent* event)
 	}
 	switch (event->type())
 	{
+	case QEvent::NativeGesture:
+		beginCameraInteraction();
+		settleCameraInteraction();
+		break;
+
 	case QEvent::Gesture:
 		gestureEvent(static_cast<QGestureEvent*>(event));
 		return event->isAccepted();
@@ -1116,7 +1211,7 @@ void MapWidget::renderFrame()
 	// A frame and its template resources must use the same view generation.
 	// View changes coalesce both updates through zero-delay timers, so consume
 	// any pending template context before collecting raster layers.
-	if (render_context_update_scheduled)
+	if (render_context_update_scheduled && !cameraInteractionActive())
 		publishRenderContext();
 	if (overlay_revision == std::numeric_limits<render::Revision>::max())
 		qFatal("Map viewport revision space exhausted");
@@ -1140,9 +1235,9 @@ void MapWidget::renderFrame()
 			render::VectorPass::Space::Viewport,
 		});
 		auto frame = frame_planner.plan(request);
-		vello_canvas->setFrame(
-			std::move(frame), render::fromQColor(QColor(Qt::gray))
-		);
+		retained_content_frame = frame;
+		retained_background = render::fromQColor(QColor(Qt::gray));
+		vello_canvas->setFrame(std::move(frame), retained_background);
 		return;
 	}
 
@@ -1169,12 +1264,33 @@ void MapWidget::renderFrame()
 		y_axis.x() - origin.x(), y_axis.y() - origin.y(),
 		origin.x(), origin.y(),
 	};
+	auto const frame_view = render::FrameView {
+		std::uint32_t(std::max(0, width())),
+		std::uint32_t(std::max(0, height())),
+		std::max(1.0, double(devicePixelRatioF())),
+		world_to_viewport,
+	};
+	if (cameraInteractionActive() && retained_content_frame)
+	{
+		// Input publishes only a tiny latest-camera packet. The presenter applies
+		// it to the last completely encoded overscanned generation even while a
+		// newer LiDAR generation is still being staged.
+		auto frame = frame_planner.cameraFrame(
+			frame_view, retained_content_frame->revision);
+		vello_canvas->setCameraFrame(std::move(frame));
+		return;
+	}
 
 	auto const map_view_rect = view->calculateViewedRect(viewportToView(rect()));
+	auto const content_map_rect = map_view_rect.adjusted(
+		-map_view_rect.width() * 0.5,
+		-map_view_rect.height() * 0.5,
+		map_view_rect.width() * 0.5,
+		map_view_rect.height() * 0.5);
 	RenderConfig::Options options(RenderConfig::Screen | RenderConfig::HelperSymbols);
 	auto const map_visibility = view->effectiveMapVisibility();
 	auto const render_request = render::RenderRequest {
-		render::fromQRectF(map_view_rect),
+		render::fromQRectF(content_map_rect),
 		view->calculateFinalZoomFactor() * (pinching ? pinching_factor : 1),
 		options,
 		map_visibility.visible ? double(map_visibility.opacity) : 0,
@@ -1196,7 +1312,7 @@ void MapWidget::renderFrame()
 		else
 		{
 			template_layers = template_layer_planner.plan(
-				*map, *view, render::fromQRectF(map_view_rect),
+				*map, *view, render::fromQRectF(content_map_rect),
 				render_request.scaling, true
 			);
 			retained_template_layers = template_layers;
@@ -1237,12 +1353,7 @@ void MapWidget::renderFrame()
 	auto overlay = overlay_scene_builder.finish();
 
 	render::FrameRequest frame_request {
-		{
-			std::uint32_t(std::max(0, width())),
-			std::uint32_t(std::max(0, height())),
-			std::max(1.0, double(devicePixelRatioF())),
-			world_to_viewport,
-		},
+		frame_view,
 		render_request,
 		false,
 	};
@@ -1253,7 +1364,7 @@ void MapWidget::renderFrame()
 	if (view->isGridVisible())
 	{
 		frame_request.above_map.push_back({
-			map->getGrid().buildRenderIR(map_view_rect, map, render_request.scaling,
+			map->getGrid().buildRenderIR(content_map_rect, map, render_request.scaling,
 			                             overlay_revision++),
 		});
 	}
@@ -1269,14 +1380,16 @@ void MapWidget::renderFrame()
 	});
 	auto const snapshot = map->publishRenderSnapshot();
 	auto frame = frame_planner.plan(*snapshot, frame_request);
-	vello_canvas->setFrame(
-		std::move(frame),
-		render::fromQColor(
-			show_help && no_contents ? QColor(Qt::gray) : QColor(Qt::white)
-		)
-	);
+	retained_content_frame = frame;
+	retained_background = render::fromQColor(
+		show_help && no_contents ? QColor(Qt::gray) : QColor(Qt::white));
+	vello_canvas->setFrame(std::move(frame), retained_background);
 	if (!template_layers.complete && template_layers.newly_resident_images > 0)
-		scheduleFrameUpdate();
+	{
+		template_refresh_deferred = true;
+		if (!template_admission_timer.isActive())
+			template_admission_timer.start();
+	}
 }
 
 void MapWidget::resizeEvent(QResizeEvent* event)
@@ -1394,17 +1507,22 @@ void MapWidget::mouseReleaseEvent(QMouseEvent* event)
 {
 	current_pressed_buttons = event->buttons();
 	last_mouse_release_time = QTime::currentTime();
-	if (!transformInteractionActive() && template_refresh_deferred)
-		scheduleFrameUpdate();
 	if (touch_cursor && tool && tool->usesTouchCursor())
 	{
 		auto translation = touch_cursor->mouseReleaseEvent(*event);
 		dispatchTouchCursorEvent(translation, event, *this, [this](QMouseEvent* translated) {
 			_mouseReleaseEvent(translated);
 		});
+		settleCameraInteraction();
 		return;
 	}
 	_mouseReleaseEvent(event);
+	settleCameraInteraction();
+	if (!transformInteractionActive() && template_refresh_deferred
+	    && !template_admission_timer.isActive())
+	{
+		template_admission_timer.start();
+	}
 }
 
 void MapWidget::_mouseReleaseEvent(QMouseEvent* event)
@@ -1454,6 +1572,7 @@ void MapWidget::wheelEvent(QWheelEvent* event)
 	{
 		if (view)
 		{
+			beginCameraInteraction();
 			auto const old_zoom = view->getZoom();
 			auto degrees = vertical_delta / 8.0;
 			auto num_steps = degrees / 15.0;
@@ -1498,6 +1617,7 @@ void MapWidget::wheelEvent(QWheelEvent* event)
 				mouse_event.setTimestamp(event->timestamp());
 				tool->mouseMoveEvent(&mouse_event, view->viewToMapF(cursor_pos_view), this);
 			}
+			settleCameraInteraction();
 		}
 		
 		event->accept();

@@ -174,7 +174,8 @@ std::shared_ptr<const ImageData> snapshotImage(
 	if (reserve_memory && !memory)
 		return {};
 
-	if (source.format() == QImage::Format_RGBA8888)
+	if (source.format() == QImage::Format_RGBA8888
+	    || source.format() == QImage::Format_RGBA8888_Premultiplied)
 	{
 		auto retained = std::make_shared<const QImage>(source);
 		auto keepalive = std::make_shared<SnapshotKeepalive>(SnapshotKeepalive {
@@ -188,6 +189,9 @@ std::shared_ptr<const ImageData> snapshotImage(
 			reinterpret_cast<const std::uint8_t*>(retained->constBits()),
 			std::size_t(retained->bytesPerLine()) * std::size_t(retained->height()),
 			std::move(keepalive),
+			source.format() == QImage::Format_RGBA8888_Premultiplied
+				? ImageAlphaType::Premultiplied
+				: ImageAlphaType::Straight,
 		});
 	}
 
@@ -268,6 +272,7 @@ struct SourceTile
 	QImage image;
 	std::shared_ptr<RasterMemoryLease> pixel_memory;
 	RasterMemoryReserver reserve_render_memory;
+	std::optional<bool> opaque;
 };
 
 struct RasterMosaic
@@ -651,6 +656,7 @@ private:
 				tile.image,
 				tile.pixel_memory,
 				tile.reserve_render_memory,
+				tile.opaque,
 			});
 		}
 
@@ -680,7 +686,9 @@ private:
 		auto const has_transparency = std::ranges::any_of(
 			source_images,
 			[this](auto const& tile) {
-				return !isOpaque(tile.key.image, tile.image);
+				return tile.opaque
+				     ? !*tile.opaque
+				     : !isOpaque(tile.key.image, tile.image);
 			}
 		);
 		// A partially available translucent replacement cannot be layered over

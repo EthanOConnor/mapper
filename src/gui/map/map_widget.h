@@ -419,6 +419,10 @@ private:
 	ViewRenderContext currentViewRenderContext() const;
 	void observeTemplate(Template* temp);
 	bool transformInteractionActive() const;
+	bool cameraInteractionActive() const noexcept;
+	void beginCameraInteraction();
+	void settleCameraInteraction();
+	void finishCameraInteraction();
 	
 	/**
 	 * Updates the content of the zoom display.
@@ -454,10 +458,14 @@ private:
 	QPoint pinching_center;
 	ZoomLimitFeedback zoom_limit_feedback = ZoomLimitFeedback::None;
 	QTimer zoom_limit_feedback_timer;
+	QTimer camera_idle_timer;
+	QTimer render_context_timer;
+	QTimer template_admission_timer;
 	bool frame_update_scheduled = false;
 	bool render_context_update_scheduled;
 	bool retained_template_layers_valid = false;
 	bool template_refresh_deferred = false;
+	bool camera_interaction_registered = false;
 	
 	// Panning (operation)
 	QPoint pan_offset;
@@ -465,6 +473,8 @@ private:
 	render::FramePlanner frame_planner;
 	render::TemplateLayerPlanner template_layer_planner;
 	render::TemplateLayerPlan retained_template_layers;
+	render::FramePacketPtr retained_content_frame;
+	render::Color retained_background { 65535, 65535, 65535, 65535 };
 	render::OverlaySceneBuilder overlay_scene_builder;
 	presentation::VelloCanvas* vello_canvas;
 	render::Revision overlay_revision = 1;

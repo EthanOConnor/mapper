@@ -16,6 +16,7 @@ Q_OBJECT
 private slots:
 	void initTestCase();
 	void packetIsCompleteAndMonotonic();
+	void cameraPacketIsConstantSizeAndMonotonic();
 	void qpainterConsumesTheFrameContract();
 	void overprintingUsesIsolatedPasses();
 	void viewportOverlayUsesTheSharedFrameContract();
