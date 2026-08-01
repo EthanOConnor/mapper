@@ -1387,11 +1387,20 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            --draft \
-            --generate-notes \
-            --verify-tag \
-            --repo "$GITHUB_REPOSITORY"
+          release_state="$(gh release view "$GITHUB_REF_NAME" \
+            --json isDraft \
+            --jq .isDraft \
+            --repo "$GITHUB_REPOSITORY" 2>/dev/null || true)"
+          if [[ -z "$release_state" ]]; then
+            gh release create "$GITHUB_REF_NAME" \
+              --draft \
+              --generate-notes \
+              --verify-tag \
+              --repo "$GITHUB_REPOSITORY"
+          elif [[ "$release_state" != true ]]; then
+            echo "refusing to replace assets on a published release" >&2
+            exit 1
+          fi
           find release-assets -type f -exec \
-            gh release upload "$GITHUB_REF_NAME" {} \
-              --repo "$GITHUB_REPOSITORY" +
+            gh release upload "$GITHUB_REF_NAME" \
+              --repo "$GITHUB_REPOSITORY" --clobber {} +
