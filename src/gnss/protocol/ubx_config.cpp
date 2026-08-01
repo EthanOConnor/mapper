@@ -150,34 +150,44 @@ QVector<QByteArray> UbxConfig::buildInitSequence()
 	QVector<QByteArray> sequence;
 
 	// Use CFG-VALSET (modern key-value config, works on F9P and X20P).
-	// Target UART1 explicitly — this is the port the ArduSimple BLE bridge
-	// connects to. Legacy CFG-MSG sets the "current port" which may not be
-	// UART1 when commands arrive via BLE.
+	// Configure both receiver UARTs. ArduSimple-compatible NUS bridges can be
+	// wired to either UART through the XBee socket, and u-blox defaults leave
+	// UART2's navigation output disabled. Configuring UART1 alone therefore
+	// produces a deceptively healthy BLE/NTRIP connection with no position
+	// stream when the bridge is on UART2. The changes are RAM-only and leave
+	// the receiver's existing NMEA settings intact.
 	//
 	// Config keys from u-blox F9 HPG 1.51 / X20 HPG 2.02 interface descriptions.
 	// Layer = 0x01 (RAM only, self-healing on power cycle).
 
 	QVector<CfgKeyValue> items;
-	items.reserve(16);
+	items.reserve(20);
 
-	// --- Enable UBX output on UART1 ---
+	// --- Enable UBX output on both possible bridge UARTs ---
 	items.append({0x10740001, u1(1)});  // CFG-UART1OUTPROT-UBX = true
+	items.append({0x10760001, u1(1)});  // CFG-UART2OUTPROT-UBX = true
 
-	// --- Primary messages: every epoch on UART1 ---
+	// --- Primary messages: every epoch on UART1 and UART2 ---
 	items.append({0x20910007, u1(1)});  // CFG-MSGOUT-UBX_NAV_PVT_UART1 = 1
+	items.append({0x20910008, u1(1)});  // CFG-MSGOUT-UBX_NAV_PVT_UART2 = 1
 	items.append({0x20910034, u1(1)});  // CFG-MSGOUT-UBX_NAV_HPPOSLLH_UART1 = 1
-	items.append({0x20910085, u1(1)});  // CFG-MSGOUT-UBX_NAV_COV_UART1 = 1
+	items.append({0x20910035, u1(1)});  // CFG-MSGOUT-UBX_NAV_HPPOSLLH_UART2 = 1
+	items.append({0x20910084, u1(1)});  // CFG-MSGOUT-UBX_NAV_COV_UART1 = 1
+	items.append({0x20910085, u1(1)});  // CFG-MSGOUT-UBX_NAV_COV_UART2 = 1
 	items.append({0x20910039, u1(1)});  // CFG-MSGOUT-UBX_NAV_DOP_UART1 = 1
+	items.append({0x2091003a, u1(1)});  // CFG-MSGOUT-UBX_NAV_DOP_UART2 = 1
 	items.append({0x2091001b, u1(1)});  // CFG-MSGOUT-UBX_NAV_STATUS_UART1 = 1
+	items.append({0x2091001c, u1(1)});  // CFG-MSGOUT-UBX_NAV_STATUS_UART2 = 1
 
-	// --- Diagnostic messages: every 5th epoch on UART1 ---
+	// --- Diagnostic messages: every 5th epoch on both UARTs ---
 	items.append({0x20910016, u1(5)});  // CFG-MSGOUT-UBX_NAV_SAT_UART1 = 5
+	items.append({0x20910017, u1(5)});  // CFG-MSGOUT-UBX_NAV_SAT_UART2 = 5
 
-	// --- Accept RTCM3 corrections on UART1 (BLE bridge forwards these) ---
+	// --- Accept RTCM3 corrections and UBX commands on either bridge UART ---
 	items.append({0x10730004, u1(1)});  // CFG-UART1INPROT-RTCM3X = true
-
-	// --- Accept UBX commands on UART1 ---
+	items.append({0x10750004, u1(1)});  // CFG-UART2INPROT-RTCM3X = true
 	items.append({0x10730001, u1(1)});  // CFG-UART1INPROT-UBX = true
+	items.append({0x10750001, u1(1)});  // CFG-UART2INPROT-UBX = true
 
 	sequence.append(buildCfgValset(items, 0x01));  // RAM layer
 

@@ -36,8 +36,9 @@ struct GnssState;
 /**
  * A slide-up detail panel showing full GNSS information.
  *
- * Covers the bottom ~40% of the screen when shown. Displays position,
- * satellite, quality, correction, and receiver information from GnssState.
+ * Covers most of the screen when shown. Leads with a plain-language health
+ * diagnosis and reconfiguration actions, followed by position, correction,
+ * receiver-traffic, and protocol details from GnssState.
  */
 class GnssDetailPanel : public QWidget
 {
@@ -54,6 +55,8 @@ signals:
 	void ntripProfileChangeRequested(const QString& profileName);
 	void disconnectRequested();
 	void connectRequested();
+	void receiverChangeRequested();
+	void settingsRequested();
 	void rawCaptureActionRequested();
 
 protected:
@@ -62,6 +65,14 @@ protected:
 
 private:
 	void setupUi();
+
+	// At-a-glance summary
+	QLabel* status_summary_label;
+	QLabel* status_detail_label;
+	QLabel* receiver_health_label;
+	QLabel* correction_health_label;
+	QPushButton* change_receiver_button;
+	QPushButton* settings_button;
 
 	// Position section
 	QLabel* fix_time_label;
@@ -102,6 +113,9 @@ private:
 	// Receiver section
 	QLabel* device_name_label;
 	QLabel* connection_type_label;
+	QLabel* receiver_data_label;
+	QLabel* receiver_protocol_label;
+	QLabel* receiver_last_data_label;
 	QPushButton* connect_button;
 };
 

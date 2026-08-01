@@ -28,10 +28,12 @@
 
 #include "gnss/gnss_observation.h"
 #include "gnss/gnss_position.h"
+#include "gnss/gnss_session.h"
 #include "gnss/gnss_state.h"
 #include "gnss/correction/ntrip_client.h"
 #include "gnss/correction/ntrip_profile.h"
 #include "gnss/protocol/ubx_parser.h"
+#include "gnss/protocol/ubx_config.h"
 #include "gnss/protocol/ubx_messages.h"
 #include "gnss/protocol/nmea_parser.h"
 #include "gnss/protocol/protocol_detector.h"
@@ -529,6 +531,56 @@ void GnssProtocolTest::ubxResyncAfterGarbage()
 
 	QCOMPARE(spy.count(), 1);
 	QVERIFY(parser.stats().syncResyncCount > 0);
+}
+
+
+void GnssProtocolTest::ubxInitConfiguresBothReceiverUarts()
+{
+	auto sequence = UbxConfig::buildInitSequence();
+	QVERIFY(sequence.size() >= 2);
+	const auto& frame = sequence.constFirst();
+	QCOMPARE(static_cast<std::uint8_t>(frame[2]), UbxConfig::kClassCfg);
+	QCOMPARE(static_cast<std::uint8_t>(frame[3]), UbxConfig::kIdCfgValset);
+
+	QSet<std::uint32_t> keys;
+	// Every item in this initialization request is a U1 configuration item.
+	for (int offset = 10; offset + 4 < frame.size() - 2; offset += 5)
+	{
+		auto key = static_cast<std::uint32_t>(static_cast<std::uint8_t>(frame[offset]))
+		         | static_cast<std::uint32_t>(static_cast<std::uint8_t>(frame[offset + 1])) << 8
+		         | static_cast<std::uint32_t>(static_cast<std::uint8_t>(frame[offset + 2])) << 16
+		         | static_cast<std::uint32_t>(static_cast<std::uint8_t>(frame[offset + 3])) << 24;
+		keys.insert(key);
+	}
+
+	for (auto key : {
+	       0x10740001u, 0x10760001u,  // UBX output protocol, UART1/2
+	       0x20910007u, 0x20910008u,  // NAV-PVT, UART1/2
+	       0x20910034u, 0x20910035u,  // NAV-HPPOSLLH, UART1/2
+	       0x20910084u, 0x20910085u,  // NAV-COV, UART1/2
+	       0x20910039u, 0x2091003au,  // NAV-DOP, UART1/2
+	       0x2091001bu, 0x2091001cu,  // NAV-STATUS, UART1/2
+	       0x20910016u, 0x20910017u,  // NAV-SAT, UART1/2
+	       0x10730004u, 0x10750004u,  // RTCM input, UART1/2
+	       0x10730001u, 0x10750001u,  // UBX input, UART1/2
+	     })
+		QVERIFY2(keys.contains(key), qPrintable(QStringLiteral("Missing key 0x%1").arg(key, 8, 16, QLatin1Char('0'))));
+}
+
+
+void GnssProtocolTest::sessionReportsRawReceiverTrafficBeforePositionParsing()
+{
+	GnssSession session;
+	QSignalSpy stateSpy(&session, &GnssSession::stateChanged);
+	QByteArray undecodable(16, '\x55');
+	session.feedData(undecodable);
+
+	QCOMPARE(session.currentState().transportState, GnssTransportState::Connected);
+	QCOMPARE(session.currentState().receiverBytesReceived, qint64(16));
+	QVERIFY(session.currentState().lastReceiverDataTime.isValid());
+	QCOMPARE(session.currentState().protocol, GnssProtocol::Unknown);
+	QVERIFY(!session.currentState().solution.hasFreshPosition);
+	QVERIFY(stateSpy.count() >= 2);
 }
 
 

@@ -214,6 +214,12 @@ void GnssSession::connectNtripSignals()
 
 void GnssSession::onTransportDataReceived(const QByteArray& data)
 {
+	if (data.isEmpty())
+		return;
+
+	const auto nowMs = QDateTime::currentMSecsSinceEpoch();
+	m_state.receiverBytesReceived += data.size();
+	m_state.lastReceiverDataTime = QDateTime::fromMSecsSinceEpoch(nowMs, QTimeZone::UTC);
 	appendRawEntry('R', data);
 
 	// Raw logging
@@ -236,6 +242,13 @@ void GnssSession::onTransportDataReceived(const QByteArray& data)
 			m_ubxParser->addData(m_detectionBuffer);
 			m_nmeaParser->addData(m_detectionBuffer);
 			m_detectionBuffer.clear();
+			m_lastReceiverStateEmitMs = nowMs;
+			emitStateChanged();
+		}
+		else if (m_lastReceiverStateEmitMs == 0)
+		{
+			m_lastReceiverStateEmitMs = nowMs;
+			emitStateChanged();
 		}
 		return;
 	}
@@ -244,6 +257,13 @@ void GnssSession::onTransportDataReceived(const QByteArray& data)
 	// Protocol detection is informational (for UI display), not routing.
 	m_ubxParser->addData(data);
 	m_nmeaParser->addData(data);
+	// Raw-data-only streams must still become visible to diagnostics, but do
+	// not repaint the UI for every BLE notification.
+	if (nowMs - m_lastReceiverStateEmitMs >= 500)
+	{
+		m_lastReceiverStateEmitMs = nowMs;
+		emitStateChanged();
+	}
 }
 
 
@@ -428,10 +448,17 @@ void GnssSession::onNtripCorrectionData(const QByteArray& data)
 	// Forward corrections to the receiver
 	if (m_transport && m_transport->state() == GnssTransport::State::Connected)
 	{
-		appendRawEntry('T', data);
-		m_transport->write(data);
-		if (m_ntrip)
+		if (m_transport->write(data) && m_ntrip)
+		{
+			appendRawEntry('T', data);
 			m_ntrip->addBytesSentToReceiver(data.size());
+		}
+		else
+			m_state.ntripBytesDroppedToReceiver += data.size();
+	}
+	else
+	{
+		m_state.ntripBytesDroppedToReceiver += data.size();
 	}
 
 	m_state.lastCorrectionTime = QDateTime::currentDateTimeUtc();
@@ -516,6 +543,7 @@ void GnssSession::resetSessionState()
 	m_protocolDetected = false;
 	m_detectedProtocol = GnssProtocol::Unknown;
 	m_detectionBuffer.clear();
+	m_lastReceiverStateEmitMs = 0;
 	m_fusion.reset();
 	m_ubxParser->reset();
 	m_nmeaParser->reset();
@@ -707,8 +735,14 @@ void GnssSession::configureReceiver()
 	auto commands = UbxConfig::buildInitSequence();
 	for (const auto& cmd : commands)
 	{
-		appendRawEntry('W', cmd);  // W = config write to receiver
-		m_transport->write(cmd);
+		if (!m_transport->write(cmd))
+		{
+			emit errorOccurred(
+			  tr("Receiver configuration"),
+			  tr("Bluetooth output queue could not accept the receiver configuration"));
+			break;
+		}
+		appendRawEntry('W', cmd);  // W = config write queued to receiver
 	}
 }
 

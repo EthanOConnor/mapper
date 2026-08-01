@@ -182,6 +182,7 @@ private:
 	bool m_protocolDetected = false;
 	GnssProtocol m_detectedProtocol = GnssProtocol::Unknown;
 	QByteArray m_detectionBuffer;
+	qint64 m_lastReceiverStateEmitMs = 0;
 
 	// Raw data ring buffer for diagnostics dump
 	struct RawEntry {

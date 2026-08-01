@@ -100,6 +100,8 @@ struct GnssState
 	GnssTransportState transportState = GnssTransportState::Disconnected;
 	QString deviceName;       ///< e.g. "u-blox ZED-F9P"
 	QString transportType;    ///< e.g. "BLE", "TCP"
+	qint64 receiverBytesReceived = 0;  ///< Raw bytes delivered by the receiver transport
+	QDateTime lastReceiverDataTime;   ///< Last raw receiver byte arrival
 
 	// -- Protocol --
 	GnssProtocol protocol = GnssProtocol::Unknown;
@@ -116,6 +118,7 @@ struct GnssState
 	int     ggaSentCount       = 0;
 	qint64  ntripBytesReceived = 0;
 	qint64  ntripBytesSentToReceiver = 0;
+	qint64  ntripBytesDroppedToReceiver = 0;
 
 	// -- Reference frame (from NTRIP sourcetable or manual config) --
 	QString referenceFrame;   ///< e.g. "ITRF2020", "ETRS89"

@@ -46,6 +46,8 @@ private slots:
 	void ubxPartialFrame();
 	void ubxBadChecksum();
 	void ubxResyncAfterGarbage();
+	void ubxInitConfiguresBothReceiverUarts();
+	void sessionReportsRawReceiverTrafficBeforePositionParsing();
 
 	// NMEA parser tests
 	void nmeaGgaParsing();

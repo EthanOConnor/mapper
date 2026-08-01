@@ -123,6 +123,7 @@
 #include "gui/imagery/imagery_network_permissions_dialog.h"
 #include "gui/imagery/online_imagery_dialog.h"
 #include "gui/main_window.h"
+#include "gui/settings_dialog.h"
 #include "gui/print_widget.h"
 #include "gui/simple_course_dialog.h"
 #include "gui/text_browser_dialog.h"
@@ -1099,6 +1100,24 @@ void MapEditorController::attach(MainWindow* window)
 				connect(panel, &GnssDetailPanel::connectRequested,
 				        this, [this] {
 					GnssController::instance().connectExternal(getWindow());
+				});
+				connect(panel, &GnssDetailPanel::receiverChangeRequested,
+				        this, [this, panel] {
+					panel->hide();
+					QTimer::singleShot(0, this, [this, panel] {
+						deletePopupWidget(panel);
+						GnssController::instance().chooseExternalReceiver(getWindow());
+					});
+				});
+				connect(panel, &GnssDetailPanel::settingsRequested,
+				        this, [this, panel] {
+					panel->hide();
+					QTimer::singleShot(0, this, [this, panel] {
+						deletePopupWidget(panel);
+						SettingsDialog dialog(getWindow());
+						dialog.selectPage(tr("GNSS"));
+						dialog.exec();
+					});
 				});
 				connect(panel,
 				        &GnssDetailPanel::rawCaptureActionRequested,

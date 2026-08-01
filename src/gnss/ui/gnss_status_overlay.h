@@ -38,8 +38,8 @@ namespace OpenOrienteering {
 /**
  * A compact transparent overlay widget showing GNSS status at a glance.
  *
- * Displays fix type, P95 accuracy, correction state, and transport state
- * as a horizontal bar. Intended as a sibling of MapWidget with
+ * Displays an explicit position-health summary plus receiver and correction
+ * state. Intended as a sibling of MapWidget with
  * WA_NoSystemBackground, following the same pattern as CompassDisplay.
  *
  * Tapping the overlay emits clicked() to open the GNSS detail panel.
@@ -62,10 +62,7 @@ protected:
 	void mousePressEvent(QMouseEvent* event) override;
 
 private:
-	GnssFixType m_fixType = GnssFixType::NoFix;
-	float m_accuracyP95 = NAN;
-	GnssCorrectionState m_correctionState = GnssCorrectionState::Disabled;
-	GnssTransportState m_transportState = GnssTransportState::Disconnected;
+	GnssState m_state;
 };
 
 

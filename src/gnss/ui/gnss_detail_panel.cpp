@@ -20,12 +20,15 @@
 
 #include "gnss_detail_panel.h"
 
+#include <algorithm>
 #include <cmath>
 
 #include <QComboBox>
+#include <QColor>
 #include <QEvent>
 #include <QFont>
 #include <QFormLayout>
+#include <QFrame>
 #include <QLabel>
 #include <QPalette>
 #include <QPushButton>
@@ -196,7 +199,7 @@ QSize GnssDetailPanel::sizeHint() const
 	if (screen)
 	{
 		auto geom = screen->availableGeometry();
-		return { geom.width(), static_cast<int>(geom.height() * 0.4) };
+		return { geom.width(), static_cast<int>(geom.height() * 0.78) };
 	}
 	return { 360, 480 };
 }
@@ -219,9 +222,82 @@ void GnssDetailPanel::setupUi()
 	auto* content_widget = new QWidget();
 	auto* form = new QFormLayout(content_widget);
 	form->setFieldGrowthPolicy(QFormLayout::ExpandingFieldsGrow);
+	form->setRowWrapPolicy(QFormLayout::WrapLongRows);
+	form->setHorizontalSpacing(qRound(Util::mmToPixelLogical(3.0)));
+	form->setVerticalSpacing(qRound(Util::mmToPixelLogical(1.7)));
+	form->setContentsMargins(qRound(Util::mmToPixelLogical(4.0)),
+	                         qRound(Util::mmToPixelLogical(3.0)),
+	                         qRound(Util::mmToPixelLogical(4.0)),
+	                         qRound(Util::mmToPixelLogical(6.0)));
+
+	// --- At-a-glance health ---
+	auto* summary_card = new QFrame();
+	summary_card->setObjectName(QStringLiteral("gnssSummaryCard"));
+	summary_card->setStyleSheet(QStringLiteral(
+	  "QFrame#gnssSummaryCard { background: #16202b; border-radius: 12px; }"
+	  "QFrame#gnssSummaryCard QLabel { color: white; background: transparent; }"));
+	auto* summary_layout = new QVBoxLayout(summary_card);
+	summary_layout->setContentsMargins(qRound(Util::mmToPixelLogical(4.0)),
+	                                  qRound(Util::mmToPixelLogical(3.0)),
+	                                  qRound(Util::mmToPixelLogical(4.0)),
+	                                  qRound(Util::mmToPixelLogical(3.0)));
+	summary_layout->setSpacing(qRound(Util::mmToPixelLogical(1.2)));
+	status_summary_label = new QLabel(tr("GNSS is not connected"));
+	status_summary_label->setObjectName(QStringLiteral("gnssStatusSummary"));
+	auto summary_font = status_summary_label->font();
+	summary_font.setBold(true);
+	summary_font.setPointSizeF(std::max(14.0, summary_font.pointSizeF() + 3.0));
+	status_summary_label->setFont(summary_font);
+	status_summary_label->setWordWrap(true);
+	status_detail_label = new QLabel(tr("Connect a receiver to use live position and track recording."));
+	status_detail_label->setObjectName(QStringLiteral("gnssStatusDetail"));
+	status_detail_label->setWordWrap(true);
+	auto detail_font = status_detail_label->font();
+	detail_font.setPointSizeF(std::max(11.0, detail_font.pointSizeF() + 1.0));
+	status_detail_label->setFont(detail_font);
+	receiver_health_label = new QLabel();
+	correction_health_label = new QLabel();
+	receiver_health_label->setObjectName(QStringLiteral("gnssReceiverHealth"));
+	correction_health_label->setObjectName(QStringLiteral("gnssCorrectionHealth"));
+	receiver_health_label->setWordWrap(true);
+	correction_health_label->setWordWrap(true);
+	summary_layout->addWidget(status_summary_label);
+	summary_layout->addWidget(status_detail_label);
+	summary_layout->addSpacing(qRound(Util::mmToPixelLogical(1.0)));
+	summary_layout->addWidget(receiver_health_label);
+	summary_layout->addWidget(correction_health_label);
+	form->addRow(summary_card);
+
+	auto* action_row = new QWidget();
+	auto* action_layout = new QHBoxLayout(action_row);
+	action_layout->setContentsMargins(0, 0, 0, 0);
+	action_layout->setSpacing(qRound(Util::mmToPixelLogical(2.0)));
+	change_receiver_button = new QPushButton(tr("Change receiver"));
+	settings_button = new QPushButton(tr("GNSS settings"));
+	connect_button = new QPushButton(tr("Connect"));
+	change_receiver_button->setObjectName(QStringLiteral("gnssChangeReceiver"));
+	settings_button->setObjectName(QStringLiteral("gnssSettings"));
+	connect_button->setObjectName(QStringLiteral("gnssConnect"));
+	for (auto* button : {change_receiver_button, settings_button, connect_button})
+		button->setMinimumHeight(qRound(Util::mmToPixelLogical(10.0)));
+	action_layout->addWidget(change_receiver_button);
+	action_layout->addWidget(settings_button);
+	action_layout->addWidget(connect_button);
+	form->addRow(action_row);
+	connect(change_receiver_button, &QPushButton::clicked,
+	        this, &GnssDetailPanel::receiverChangeRequested);
+	connect(settings_button, &QPushButton::clicked,
+	        this, &GnssDetailPanel::settingsRequested);
+	connect(connect_button, &QPushButton::clicked, this, [this]() {
+		if (connect_button->text() == tr("Disconnect"))
+			emit disconnectRequested();
+		else
+			emit connectRequested();
+	});
 
 	// --- Position section ---
-	form->addRow(Util::Headline::create(tr("Position")));
+	form->addItem(Util::SpacerItem::create(this));
+	form->addRow(Util::Headline::create(tr("Position details")));
 
 	fix_time_label = new QLabel(QStringLiteral("--"));
 	form->addRow(tr("Fix time:"), fix_time_label);
@@ -299,7 +375,7 @@ void GnssDetailPanel::setupUi()
 	form->addRow(tr("Data rate:"), correction_rate_label);
 
 	ntrip_bytes_label = new QLabel(QStringLiteral("--"));
-	form->addRow(tr("Bytes (rx/tx):"), ntrip_bytes_label);
+	form->addRow(tr("Caster / queued / dropped:"), ntrip_bytes_label);
 
 	gga_count_label = new QLabel(QStringLiteral("--"));
 	form->addRow(tr("GGA sent:"), gga_count_label);
@@ -316,14 +392,12 @@ void GnssDetailPanel::setupUi()
 	connection_type_label = new QLabel(QStringLiteral("--"));
 	form->addRow(tr("Connection:"), connection_type_label);
 
-	connect_button = new QPushButton(tr("Connect"));
-	form->addRow(connect_button);
-	connect(connect_button, &QPushButton::clicked, this, [this]() {
-		if (connect_button->text() == tr("Disconnect"))
-			emit disconnectRequested();
-		else
-			emit connectRequested();
-	});
+	receiver_data_label = new QLabel(QStringLiteral("--"));
+	form->addRow(tr("Receiver traffic:"), receiver_data_label);
+	receiver_protocol_label = new QLabel(QStringLiteral("--"));
+	form->addRow(tr("Position protocol:"), receiver_protocol_label);
+	receiver_last_data_label = new QLabel(QStringLiteral("--"));
+	form->addRow(tr("Last receiver data:"), receiver_last_data_label);
 
 	// --- Messages section ---
 	form->addRow(Util::Headline::create(tr("Messages")));
@@ -363,6 +437,63 @@ void GnssDetailPanel::updateState(const GnssState& state)
 {
 	const auto& solution = state.solution;
 	const auto& pos = solution.position;
+	const auto connected = state.transportState == GnssTransportState::Connected;
+	const auto has_receiver_data = state.receiverBytesReceived > 0;
+	const auto has_position = solution.hasFreshPosition;
+	auto healthHtml = [](const QColor& color, const QString& text) {
+		return QStringLiteral("<span style='color:%1'>●</span>&nbsp; %2")
+		       .arg(color.name(), text.toHtmlEscaped());
+	};
+
+	if (!connected)
+	{
+		status_summary_label->setText(tr("Receiver disconnected"));
+		status_detail_label->setText(
+		  tr("Live location and track recording are paused."));
+	}
+	else if (!has_receiver_data)
+	{
+		status_summary_label->setText(tr("Connected, but no position data"));
+		status_detail_label->setText(
+		  tr("Bluetooth is ready, but Mapper has not received bytes from the receiver. Check the receiver port or choose another receiver."));
+	}
+	else if (!has_position && state.protocol == GnssProtocol::Unknown)
+	{
+		status_summary_label->setText(tr("Receiver data is not recognized"));
+		status_detail_label->setText(
+		  tr("Bytes are arriving, but they are not a supported UBX or NMEA position stream."));
+	}
+	else if (!has_position)
+	{
+		status_summary_label->setText(tr("Waiting for a usable position fix"));
+		status_detail_label->setText(
+		  tr("Receiver messages are arriving, but they do not currently contain a valid location."));
+	}
+	else
+	{
+		status_summary_label->setText(fixTypeString(pos.fixType));
+		QStringList facts;
+		if (std::isfinite(pos.hAccuracyP95))
+			facts.append(tr("%1 m horizontal accuracy (P95)").arg(pos.hAccuracyP95, 0, 'f', 2));
+		facts.append(tr("%1 satellites used").arg(pos.satellitesUsed));
+		status_detail_label->setText(facts.join(QStringLiteral(" · ")));
+	}
+
+	receiver_health_label->setText(healthHtml(
+	  has_position ? QColor(0x4C, 0xAF, 0x50)
+	               : connected ? QColor(0xFF, 0xA7, 0x26) : QColor(0xEF, 0x53, 0x50),
+	  !connected ? tr("Receiver link disconnected")
+	             : !has_receiver_data ? tr("Receiver linked; no data stream")
+	             : has_position ? tr("Position stream active")
+	                            : tr("Receiver data active; position unavailable")));
+	correction_health_label->setText(healthHtml(
+	  state.correctionState == GnssCorrectionState::Flowing
+	    ? QColor(0x4C, 0xAF, 0x50)
+	    : state.correctionState == GnssCorrectionState::Connecting
+	      || state.correctionState == GnssCorrectionState::Reconnecting
+	      || state.correctionState == GnssCorrectionState::Connected
+	        ? QColor(0xFF, 0xA7, 0x26) : QColor(0x9E, 0x9E, 0x9E),
+	  tr("Corrections: %1").arg(correctionStateString(state.correctionState))));
 
 	// Position section
 	if (pos.timestamp.isValid())
@@ -470,8 +601,9 @@ void GnssDetailPanel::updateState(const GnssState& state)
 	        : QString::number(static_cast<double>(pos.correctionAge), 'f', 1) + QLatin1String("s"));
 	correction_rate_label->setText(formatDataRate(state.correctionDataRate));
 
-	// Bytes received from caster / sent to receiver
-	if (state.ntripBytesReceived > 0 || state.ntripBytesSentToReceiver > 0)
+	// Bytes received from caster / accepted by transport / rejected by queue.
+	if (state.ntripBytesReceived > 0 || state.ntripBytesSentToReceiver > 0
+	    || state.ntripBytesDroppedToReceiver > 0)
 	{
 		auto fmtBytes = [](qint64 b) -> QString {
 			if (b >= 1024 * 1024)
@@ -481,7 +613,8 @@ void GnssDetailPanel::updateState(const GnssState& state)
 			return QString::number(b) + QLatin1String(" B");
 		};
 		ntrip_bytes_label->setText(fmtBytes(state.ntripBytesReceived)
-		    + QLatin1String(" / ") + fmtBytes(state.ntripBytesSentToReceiver));
+		    + QLatin1String(" / ") + fmtBytes(state.ntripBytesSentToReceiver)
+		    + QLatin1String(" / ") + fmtBytes(state.ntripBytesDroppedToReceiver));
 	}
 	else
 	{
@@ -520,10 +653,24 @@ void GnssDetailPanel::updateState(const GnssState& state)
 	// Receiver section
 	device_name_label->setText(state.deviceName.isEmpty() ? QStringLiteral("--") : state.deviceName);
 	connection_type_label->setText(state.transportType.isEmpty() ? QStringLiteral("--") : state.transportType);
+	receiver_data_label->setText(
+	  state.receiverBytesReceived > 0
+	    ? tr("%1 bytes received").arg(state.receiverBytesReceived)
+	    : tr("No bytes received"));
+	switch (state.protocol) {
+	case GnssProtocol::UBX: receiver_protocol_label->setText(QStringLiteral("UBX")); break;
+	case GnssProtocol::NMEA: receiver_protocol_label->setText(QStringLiteral("NMEA")); break;
+	case GnssProtocol::Mixed: receiver_protocol_label->setText(tr("UBX + NMEA")); break;
+	case GnssProtocol::Unknown: receiver_protocol_label->setText(tr("Not detected")); break;
+	}
+	receiver_last_data_label->setText(
+	  state.lastReceiverDataTime.isValid()
+	    ? state.lastReceiverDataTime.toLocalTime().toString(QStringLiteral("HH:mm:ss.zzz"))
+	    : QStringLiteral("--"));
 
-	bool connected = (state.transportState == GnssTransportState::Connected
-	                  || state.transportState == GnssTransportState::Reconnecting);
-	connect_button->setText(connected ? tr("Disconnect") : tr("Connect"));
+	bool connection_active = connected
+	                      || state.transportState == GnssTransportState::Reconnecting;
+	connect_button->setText(connection_active ? tr("Disconnect") : tr("Connect"));
 }
 
 
