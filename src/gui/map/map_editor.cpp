@@ -722,6 +722,7 @@ void MapEditorController::showPopupWidget(QWidget* child_widget, const QString& 
 	auto* popup = mobile_mode ? make_mobile_popup() : make_desktop_popup();
 	popup->setGeometry(calculate_geometry(popup->sizeHint()));
 	popup->show();
+	popup->raise();
 }
 
 void MapEditorController::deletePopupWidget(QWidget* child_widget)
@@ -1145,7 +1146,7 @@ void MapEditorController::attach(MainWindow* window)
 					    : path);
 				});
 				showPopupWidget(panel, tr("GNSS details"));
-			});
+			}, Qt::QueuedConnection);
 		}
 		else
 		{
@@ -4304,7 +4305,7 @@ void MapEditorController::positionGnssStatusOverlay()
 		if (safe.top() >= size.height())
 		{
 			auto left = std::max(0, window->width() - size.width()
-			                              - qRound(Util::mmToPixelLogical(3.0)));
+			                              - qRound(Util::mmToPixelLogical(6.0)));
 			auto top = std::max(0, (safe.top() - size.height()) / 2);
 			gnss_status_overlay->setGeometry(left, top,
 			                                 size.width(), size.height());

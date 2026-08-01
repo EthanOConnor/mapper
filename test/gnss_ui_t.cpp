@@ -70,6 +70,9 @@ void GnssUiTest::overlayDistinguishesLinkFromPosition()
 	QTest::mouseClick(&overlay, Qt::LeftButton, Qt::NoModifier,
 	                  overlay.rect().center());
 	QCOMPARE(clicked.count(), 1);
+	QEvent touchBegin(QEvent::TouchBegin);
+	QVERIFY(overlay.event(&touchBegin));
+	QCOMPARE(clicked.count(), 2);
 	QEvent touchEnd(QEvent::TouchEnd);
 	QVERIFY(overlay.event(&touchEnd));
 	QCOMPARE(clicked.count(), 2);

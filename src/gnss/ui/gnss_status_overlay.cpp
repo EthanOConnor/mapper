@@ -154,10 +154,11 @@ void GnssStatusOverlay::updateState(const GnssState& state)
 QSize GnssStatusOverlay::sizeHint() const
 {
 #if defined(Q_OS_IOS)
-	// Fits in one side of the portrait Dynamic Island/status region on current
-	// iPhones. The tap opens the full, deliberately roomy diagnostics sheet.
-	auto w = qRound(Util::mmToPixelLogical(25.0));
-	auto h = qRound(Util::mmToPixelLogical(7.5));
+	// Large enough to read and acquire one-handed while still fitting beside
+	// the portrait Dynamic Island on current iPhones. This is also the touch
+	// target, so do not shrink it back to a decorative status badge.
+	auto w = qRound(Util::mmToPixelLogical(31.0));
+	auto h = qRound(Util::mmToPixelLogical(11.0));
 #else
 	auto w = qRound(Util::mmToPixelLogical(64.0));
 	auto h = qRound(Util::mmToPixelLogical(15.0));
@@ -170,16 +171,29 @@ bool GnssStatusOverlay::event(QEvent* event)
 	// iOS does not always synthesize a mouse press for a QWidget occupying the
 	// top safe-area/status region. Accept native touch delivery explicitly so
 	// the capsule remains a dependable route to diagnostics.
-	if (event->type() == QEvent::TouchBegin
-	    || event->type() == QEvent::TouchUpdate)
+	if (event->type() == QEvent::TouchBegin)
+	{
+		// Qt/iOS can cancel a touch sequence in the status/safe-area region
+		// before delivering TouchEnd. Activate once on acquisition instead of
+		// making the diagnostics route depend on that unreliable final event.
+		event->accept();
+		if (!m_touchActivationSent)
+		{
+			m_touchActivationSent = true;
+			emit clicked();
+		}
+		return true;
+	}
+	if (event->type() == QEvent::TouchUpdate)
 	{
 		event->accept();
 		return true;
 	}
-	if (event->type() == QEvent::TouchEnd)
+	if (event->type() == QEvent::TouchEnd
+	    || event->type() == QEvent::TouchCancel)
 	{
+		m_touchActivationSent = false;
 		event->accept();
-		emit clicked();
 		return true;
 	}
 	return QWidget::event(event);
@@ -240,8 +254,8 @@ void GnssStatusOverlay::paintEvent(QPaintEvent*)
 	painter.setBrush(QColor(12, 16, 22, 238));
 	painter.drawRoundedRect(bounds, bounds.height() / 2.0, bounds.height() / 2.0);
 
-	const auto dotDiameter = mm(2.2);
-	QRectF dot(bounds.left() + mm(1.25),
+	const auto dotDiameter = mm(2.8);
+	QRectF dot(bounds.left() + mm(1.6),
 	           bounds.center().y() - dotDiameter / 2.0,
 	           dotDiameter, dotDiameter);
 	painter.setPen(Qt::NoPen);
@@ -249,12 +263,12 @@ void GnssStatusOverlay::paintEvent(QPaintEvent*)
 	painter.drawEllipse(dot);
 
 	QFont compactFont = font();
-	compactFont.setPixelSize(qRound(mm(3.0)));
+	compactFont.setPixelSize(qRound(mm(3.6)));
 	compactFont.setBold(true);
 	painter.setFont(compactFont);
 	painter.setPen(Qt::white);
-	QRectF textRect(dot.right() + mm(1.0), bounds.top(),
-	                bounds.right() - dot.right() - mm(2.4), bounds.height());
+	QRectF textRect(dot.right() + mm(1.2), bounds.top(),
+	                bounds.right() - dot.right() - mm(3.0), bounds.height());
 	painter.drawText(textRect, Qt::AlignLeft | Qt::AlignVCenter,
 	                 QFontMetricsF(compactFont).elidedText(
 	                   text, Qt::ElideRight, textRect.width()));
@@ -263,8 +277,8 @@ void GnssStatusOverlay::paintEvent(QPaintEvent*)
 	chevronFont.setBold(false);
 	painter.setFont(chevronFont);
 	painter.setPen(QColor(220, 226, 234));
-	QRectF chevronRect(bounds.right() - mm(2.4), bounds.top(),
-	                   mm(1.6), bounds.height());
+	QRectF chevronRect(bounds.right() - mm(2.9), bounds.top(),
+	                   mm(2.0), bounds.height());
 	painter.drawText(chevronRect, Qt::AlignCenter, QStringLiteral("›"));
 	return;
 	}

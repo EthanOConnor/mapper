@@ -65,6 +65,7 @@ protected:
 
 private:
 	GnssState m_state;
+	bool m_touchActivationSent = false;
 };
 
 
