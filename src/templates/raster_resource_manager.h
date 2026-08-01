@@ -152,7 +152,7 @@ public:
 
 	/**
 	 * Brackets latency-critical camera interaction. Decode/warp work continues,
-	 * but new admission is reduced to one low-QoS worker until interaction ends.
+	 * but new admission is reduced to two low-QoS workers until interaction ends.
 	 * Calls must be balanced on the manager thread.
 	 */
 	void beginInteraction();

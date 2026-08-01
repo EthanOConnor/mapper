@@ -163,6 +163,10 @@ MapWidget::MapWidget(bool show_help, QWidget* parent)
 	render_context_timer.setSingleShot(true);
 	connect(&render_context_timer, &QTimer::timeout,
 	        this, &MapWidget::publishRenderContext);
+	coverage_context_timer.setSingleShot(true);
+	coverage_context_timer.setInterval(72);
+	connect(&coverage_context_timer, &QTimer::timeout,
+	        this, &MapWidget::publishCoverageRenderContext);
 	template_admission_timer.setSingleShot(true);
 	template_admission_timer.setInterval(24);
 	connect(&template_admission_timer, &QTimer::timeout, this, [this] {
@@ -183,6 +187,7 @@ void MapWidget::setMapView(MapView* view)
 	{
 		camera_idle_timer.stop();
 		render_context_timer.stop();
+		coverage_context_timer.stop();
 		template_admission_timer.stop();
 		render_context_update_scheduled = false;
 		if (camera_interaction_registered)
@@ -464,14 +469,30 @@ void MapWidget::scheduleRenderContextUpdate()
 	render_context_update_scheduled = true;
 	if (cameraInteractionActive())
 	{
-		// Existing network/decode work continues, but recomputing tile demand is
-		// admitted only at the idle boundary. Pointer delivery therefore cannot
-		// be interrupted by source-specific window planning.
+		// Exact demand and scene admission wait for idle, while a bounded cadence
+		// primes a tiny overview around the moving camera.
+		if (!coverage_context_timer.isActive())
+			coverage_context_timer.start();
 		return;
 	}
 	else
 	{
 		render_context_timer.start(0);
+	}
+}
+
+void MapWidget::publishCoverageRenderContext()
+{
+	if (!cameraInteractionActive() || !view || view->areAllTemplatesHidden())
+		return;
+	auto context = currentViewRenderContext();
+	context.demand = ViewRenderContext::Demand::Coverage;
+	auto* map = view->getMap();
+	for (int i = 0; i < map->getNumTemplates(); ++i)
+	{
+		auto* temp = map->getTemplate(i);
+		if (temp->getTemplateState() == Template::Loaded && view->isTemplateVisible(temp))
+			temp->updateRenderContext(context);
 	}
 }
 
@@ -542,6 +563,7 @@ void MapWidget::finishCameraInteraction()
 		return;
 	}
 	camera_interaction_registered = false;
+	coverage_context_timer.stop();
 	RasterResourceManager::instance().endInteraction();
 	auto const content_refresh_needed =
 		render_context_update_scheduled || template_refresh_deferred;

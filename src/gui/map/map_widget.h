@@ -416,6 +416,7 @@ private:
 
 	void scheduleRenderContextUpdate();
 	void publishRenderContext();
+	void publishCoverageRenderContext();
 	ViewRenderContext currentViewRenderContext() const;
 	void observeTemplate(Template* temp);
 	bool transformInteractionActive() const;
@@ -460,6 +461,7 @@ private:
 	QTimer zoom_limit_feedback_timer;
 	QTimer camera_idle_timer;
 	QTimer render_context_timer;
+	QTimer coverage_context_timer;
 	QTimer template_admission_timer;
 	bool frame_update_scheduled = false;
 	bool render_context_update_scheduled;

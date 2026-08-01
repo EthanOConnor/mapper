@@ -1212,6 +1212,30 @@ OnlineRasterTemplate::TileWindow OnlineRasterTemplate::withOverscan(TileWindow w
 	return window;
 }
 
+OnlineRasterTemplate::TileWindow OnlineRasterTemplate::coverageWindow(
+	const TileWindow& window, qint64 maximum_tiles) const
+{
+	if (!source_ || window.isEmpty() || maximum_tiles <= 0)
+		return {};
+	for (auto zoom = window.zoom; zoom >= source_->min_zoom; --zoom)
+	{
+		auto const shift = window.zoom - zoom;
+		auto candidate = TileWindow {
+			zoom,
+			window.min_column >> shift,
+			window.max_column >> shift,
+			window.min_row >> shift,
+			window.max_row >> shift,
+		};
+		if (auto const count = tileCount(candidate);
+		    count && *count <= maximum_tiles)
+		{
+			return candidate;
+		}
+	}
+	return {};
+}
+
 std::optional<qint64> OnlineRasterTemplate::tileCount(const TileWindow& window) const noexcept
 {
 	auto const width = window.width();
@@ -1303,6 +1327,8 @@ void OnlineRasterTemplate::updateRenderContext(const ViewRenderContext& context)
 		visible_map_rect = visible_map_rect.intersected(screen_bounds);
 	if (visible_map_rect.isEmpty())
 	{
+		if (context.demand == ViewRenderContext::Demand::Coverage)
+			return;
 		auto const replace_pending = !wanted_window_.isEmpty();
 		wanted_window_ = {};
 		queueWindow(wanted_window_, replace_pending);
@@ -1311,6 +1337,13 @@ void OnlineRasterTemplate::updateRenderContext(const ViewRenderContext& context)
 	auto const pixels_per_map_unit = Util::mmToPixelPhysical(context.view_zoom);
 	auto const zoom = chooseZoom(visible_map_rect, pixels_per_map_unit);
 	auto window = withOverscan(tileWindowForMapRect(visible_map_rect, zoom), 1);
+	if (context.demand == ViewRenderContext::Demand::Coverage)
+	{
+		// Camera interaction primes only a tiny overview. It neither changes the
+		// presented target nor cancels useful exact work already in flight.
+		queueWindow(coverageWindow(window, 4), false);
+		return;
+	}
 	auto const replace_pending = wanted_window_ != window;
 	wanted_window_ = window;
 	queueWindow(window, replace_pending);
@@ -2140,6 +2173,7 @@ void OnlineRasterTemplate::queueWindow(const TileWindow& window, bool replace_pe
 	QSet<OnlineRasterTileKey> planned;
 	auto const center_column = 0.5 * (window.min_column + window.max_column);
 	auto const center_row = 0.5 * (window.min_row + window.max_row);
+	auto const coverage = coverageWindow(window, 4);
 
 	auto plan = [this, &missing, &planned](const OnlineRasterTileKey& key,
 										   imagery::TileRequestPriority priority, double distance) {
@@ -2165,10 +2199,10 @@ void OnlineRasterTemplate::queueWindow(const TileWindow& window, bool replace_pe
 			OnlineRasterTileKey cached_key;
 			if (!bestCachedTile(key, &cached_key, nullptr))
 			{
-				for (int zoom = source_->min_zoom; zoom < key.zoom; ++zoom)
+				if (!coverage.isEmpty())
 				{
-					auto const shift = key.zoom - zoom;
-					plan({ zoom, column >> shift, row >> shift },
+					auto const shift = key.zoom - coverage.zoom;
+					plan({ coverage.zoom, column >> shift, row >> shift },
 						 imagery::TileRequestPriority::Coverage, distance);
 				}
 			}

@@ -84,8 +84,12 @@ public:
 		collected_without_context = false;
 	}
 
-	void updateRenderContext(const ViewRenderContext&) override
+	void updateRenderContext(const ViewRenderContext& context) override
 	{
+		if (context.demand == ViewRenderContext::Demand::Coverage)
+			++coverage_context_count;
+		else
+			++full_context_count;
 		if (armed)
 			context_seen = true;
 	}
@@ -114,6 +118,8 @@ public:
 	mutable bool collected = false;
 	mutable bool collected_without_context = false;
 	mutable int collection_count = 0;
+	int coverage_context_count = 0;
+	int full_context_count = 0;
 };
 
 QAction* actionWithText(QObject* parent, const QString& text)
@@ -393,6 +399,8 @@ void ToolsTest::panDefersTemplateSceneIntegration()
 	editor.editor->setTool(new PanTool(editor.editor, nullptr));
 	QTest::qWait(20);
 	auto const resting_collections = raster_ptr->collection_count;
+	auto const resting_coverage_contexts = raster_ptr->coverage_context_count;
+	auto const resting_full_contexts = raster_ptr->full_context_count;
 
 	QTest::mousePress(editor.map_widget, Qt::LeftButton, {}, QPoint(80, 120));
 	QMouseEvent move(
@@ -401,13 +409,16 @@ void ToolsTest::panDefersTemplateSceneIntegration()
 		Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
 	QApplication::sendEvent(editor.map_widget, &move);
 	map->setTemplateAreaDirty(raster_ptr, QRectF(-10, -10, 20, 20), 0);
-	QTest::qWait(20);
+	QTRY_VERIFY_WITH_TIMEOUT(
+		raster_ptr->coverage_context_count > resting_coverage_contexts, 1000);
 	QCOMPARE(raster_ptr->collection_count, resting_collections);
+	QCOMPARE(raster_ptr->full_context_count, resting_full_contexts);
 
 	QTest::mouseRelease(
 		editor.map_widget, Qt::LeftButton, {}, QPoint(140, 120));
 	QTRY_VERIFY_WITH_TIMEOUT(
 		raster_ptr->collection_count > resting_collections, 1000);
+	QVERIFY(raster_ptr->full_context_count > resting_full_contexts);
 }
 
 void ToolsTest::wheelDefersTemplateSceneIntegrationUntilIdle()

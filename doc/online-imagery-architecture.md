@@ -120,11 +120,15 @@ monopolize a sequence of intermediate frames.
 Camera presentation and content generation have separate latest-wins paths.
 A resting frame covers an overscanned world rectangle. During drag, pinch,
 wheel and momentum settling, input publishes only a constant-size camera
-packet over the last completely encoded generation. Tile-demand planning and
-new raster admission resume at the 120 ms idle boundary. Existing HTTP,
-decode and warp jobs continue, but new decode/warp admission is reduced to one
-low-QoS worker while the camera is active so memory-bandwidth work cannot
-starve pointer delivery.
+packet over the last completely encoded generation. Exact tile-demand planning
+and new scene admission resume at the 120 ms idle boundary. At a bounded 72 ms
+cadence, interaction may prime at most four tiles from the sharpest overview
+level that covers the moving view; it never mutates the presented target.
+Normal layer activation requests that same overview before native detail,
+without walking every intermediate pyramid level. Existing HTTP, decode and
+warp jobs continue, but new decode/warp admission is reduced to two low-QoS
+workers while the camera is active so useful coverage keeps arriving without
+letting memory-bandwidth work starve pointer delivery.
 
 New immutable scenes and backend image resources are encoded on a bounded
 content-staging thread. A separate presenter applies the newest camera to the

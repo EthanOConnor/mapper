@@ -321,6 +321,7 @@ class OnlineRasterTemplate final : public TemplateImage
 	int chooseZoom(const QRectF& map_rect, double pixels_per_map_unit,
 				   bool exact_output = false) const;
 	TileWindow withOverscan(TileWindow window, qint64 tiles) const;
+	TileWindow coverageWindow(const TileWindow& window, qint64 maximum_tiles) const;
 	std::optional<qint64> tileCount(const TileWindow& window) const noexcept;
 	bool workingSetFits(const TileWindow& window) const noexcept;
 	bool keyNeededForWindow(const OnlineRasterTileKey& key,

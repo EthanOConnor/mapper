@@ -744,6 +744,29 @@ class OnlineRasterTemplateTest : public QObject
 		QCOMPARE(invalidations, 0);
 	}
 
+	void coverageDemandPrimesOneBoundedOverviewLevel()
+	{
+		Map map;
+		georeferenceMap(map);
+		OnlineRasterTemplate online(snapshotFixture(), &map);
+		online.setTemplateState(Template::Unloaded);
+		QVERIFY2(online.loadTemplateFile(), qPrintable(online.errorString()));
+		auto const target = OnlineRasterTemplate::TileWindow { 2, 0, 3, 0, 3 };
+		auto const overview = online.coverageWindow(target, 4);
+		QCOMPARE(overview, (OnlineRasterTemplate::TileWindow { 1, 0, 1, 0, 1 }));
+
+		auto const visible = mapRectForWindow(online, target);
+		online.updateRenderContext({
+			visible, 1.0e8, ViewRenderContext::Demand::Coverage,
+		});
+		QVERIFY(online.wanted_window_.isEmpty());
+		auto const primed = online.queued_tiles_.size() + online.offline_tiles_.size();
+		QVERIFY(primed > 0);
+		QVERIFY(primed <= 4);
+		for (auto const& key : online.queued_tiles_)
+			QCOMPARE(key.zoom, overview.zoom);
+	}
+
 		void workingSetBudgetPreventsCacheChurn()
 		{
 		Map map;

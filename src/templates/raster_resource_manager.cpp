@@ -161,7 +161,7 @@ struct RasterResourceManager::Owner::SharedState
 	{
 		auto& lane = laneState(lane_id);
 		auto const active_limit = interaction_depth > 0 && lane_id == Lane::Decode
-		                        ? 1
+		                        ? std::min(2, lane.pool.maxThreadCount())
 		                        : lane.pool.maxThreadCount();
 		while (!shutting_down
 		       && lane.active < active_limit

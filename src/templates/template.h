@@ -62,8 +62,15 @@ class Object;
 /** Immutable view state published to template render sources. */
 struct ViewRenderContext
 {
+	enum class Demand
+	{
+		Full,
+		Coverage,
+	};
+
 	QRectF visible_map_rect;
 	double view_zoom = 1.0;
+	Demand demand = Demand::Full;
 };
 
 /** Status of exact resources required for print and export rendering. */
