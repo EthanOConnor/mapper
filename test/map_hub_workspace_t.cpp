@@ -895,11 +895,29 @@ void MapHubWorkspaceTest::relocatesStaleIosWorkspaceRoots() {
 
 void MapHubWorkspaceTest::preservesPublishedTileMatrixLimits() {
   QJsonArray limits{
-      QJsonObject{{QStringLiteral("tileMatrix"), QStringLiteral("12")},
-                  {QStringLiteral("minTileRow"), 1431},
-                  {QStringLiteral("maxTileRow"), 1432},
-                  {QStringLiteral("minTileCol"), 657},
-                  {QStringLiteral("maxTileCol"), 658}},
+      QJsonObject{{QStringLiteral("tileMatrix"), QStringLiteral("0")},
+                  {QStringLiteral("minTileRow"), 0},
+                  {QStringLiteral("maxTileRow"), 0},
+                  {QStringLiteral("minTileCol"), 0},
+                  {QStringLiteral("maxTileCol"), 0}},
+  };
+  QJsonObject matrix_set{
+      {QStringLiteral("id"), QStringLiteral("org.cascadeoc.native-epsg-6596")},
+      {QStringLiteral("crs"), QStringLiteral("EPSG:6596")},
+      {QStringLiteral("orderedAxes"),
+       QJsonArray{QStringLiteral("E"), QStringLiteral("N")}},
+      {QStringLiteral("tileMatrices"),
+       QJsonArray{QJsonObject{
+           {QStringLiteral("id"), QStringLiteral("0")},
+           {QStringLiteral("scaleDenominator"), 446.42857142857144},
+           {QStringLiteral("cellSize"), 0.125},
+           {QStringLiteral("pointOfOrigin"), QJsonArray{0.0, 262144.0}},
+           {QStringLiteral("cornerOfOrigin"), QStringLiteral("topLeft")},
+           {QStringLiteral("tileWidth"), 256},
+           {QStringLiteral("tileHeight"), 256},
+           {QStringLiteral("matrixWidth"), 1},
+           {QStringLiteral("matrixHeight"), 1},
+       }}},
   };
   QJsonObject manifest{
       {QStringLiteral("id"), QStringLiteral("project-id")},
@@ -914,9 +932,16 @@ void MapHubWorkspaceTest::preservesPublishedTileMatrixLimits() {
            {QStringLiteral("url_template"),
             QStringLiteral(
                 "https://maps.example.test/api/v1/tiles/{z}/{x}/{y}.png")},
-           {QStringLiteral("min_zoom"), 12},
-           {QStringLiteral("max_zoom"), 18},
+           {QStringLiteral("min_zoom"), 0},
+           {QStringLiteral("max_zoom"), 0},
            {QStringLiteral("tile_matrix_limits"), limits},
+           {QStringLiteral("tile_matrix_set"), matrix_set},
+           {QStringLiteral("category"), QStringLiteral("aerial")},
+           {QStringLiteral("date"), QStringLiteral("2021")},
+           {QStringLiteral("imagery_registration"),
+            QJsonObject{{QStringLiteral("id"),
+                         QStringLiteral("registration-id")},
+                        {QStringLiteral("check_rms_m"), 0.16}}},
            {QStringLiteral("source_raster"),
             QJsonObject{
                 {QStringLiteral("artifact_id"), QStringLiteral("artifact-id")},
@@ -938,6 +963,15 @@ void MapHubWorkspaceTest::preservesPublishedTileMatrixLimits() {
   auto source =
       document.value(QStringLiteral("sources")).toArray().at(0).toObject();
   QCOMPARE(source.value(QStringLiteral("tileMatrixLimits")).toArray(), limits);
+  QCOMPARE(source.value(QStringLiteral("tileMatrixSet")).toObject(),
+           matrix_set);
+  QVERIFY(!source.contains(QStringLiteral("tileMatrixSetURI")));
+  QCOMPARE(source.value(QStringLiteral("category")).toString(),
+           QStringLiteral("aerial"));
+  QCOMPARE(source.value(QStringLiteral("startDate")).toString(),
+           QStringLiteral("2021-01-01"));
+  QCOMPARE(source.value(QStringLiteral("endDate")).toString(),
+           QStringLiteral("2021-12-31"));
   auto source_raster = source.value(QStringLiteral("extensions"))
                            .toObject()
                            .value(QStringLiteral("org.cascadeoc.maphub"))
@@ -946,10 +980,21 @@ void MapHubWorkspaceTest::preservesPublishedTileMatrixLimits() {
                            .toObject();
   QCOMPARE(source_raster.value(QStringLiteral("crs")).toString(),
            QStringLiteral("EPSG:6596"));
+  auto imagery_registration = source.value(QStringLiteral("extensions"))
+                                  .toObject()
+                                  .value(QStringLiteral("org.cascadeoc.maphub"))
+                                  .toObject()
+                                  .value(QStringLiteral("imageryRegistration"))
+                                  .toObject();
+  QCOMPARE(imagery_registration.value(QStringLiteral("id")).toString(),
+           QStringLiteral("registration-id"));
   auto result = imagery::OicCatalogReader::read(
       QJsonDocument(document).toJson(QJsonDocument::Compact));
   QVERIFY(result.accepted());
-  QCOMPARE(result.supportedSourceCount(), qsizetype(1));
+  QVERIFY2(result.supportedSourceCount() == qsizetype(1),
+           qPrintable(result.diagnostics.isEmpty()
+                          ? QStringLiteral("No catalog diagnostic")
+                          : result.diagnostics.first().displayText()));
   QCOMPARE(result.catalog.sources.at(0).tile_limit_definitions.size(),
            qsizetype(1));
   QCOMPARE(result.catalog.sources.at(0)

@@ -76,14 +76,30 @@ QJsonObject MapHubImageryCatalog::catalogDocument(const QJsonObject &manifest,
         {QStringLiteral("type"), QStringLiteral("raster-tiles")},
         {QStringLiteral("tiles"), QJsonArray{template_text}},
         {QStringLiteral("scheme"), QStringLiteral("xyz")},
-        {QStringLiteral("tileMatrixSetURI"),
-         QStringLiteral("http://www.opengis.net/def/tilematrixset/OGC/1.0/"
-                        "WebMercatorQuad")},
         {QStringLiteral("minTileMatrix"),
          QString::number(layer.value(QStringLiteral("min_zoom")).toInt())},
         {QStringLiteral("maxTileMatrix"),
          QString::number(layer.value(QStringLiteral("max_zoom")).toInt(22))},
     };
+    auto tile_matrix_set = layer.value(QStringLiteral("tile_matrix_set"));
+    if (tile_matrix_set.isObject()) {
+      source.insert(QStringLiteral("tileMatrixSet"), tile_matrix_set);
+    } else {
+      source.insert(
+          QStringLiteral("tileMatrixSetURI"),
+          QStringLiteral("http://www.opengis.net/def/tilematrixset/OGC/1.0/"
+                         "WebMercatorQuad"));
+    }
+    auto category = layer.value(QStringLiteral("category")).toString();
+    if (!category.isEmpty())
+      source.insert(QStringLiteral("category"), category);
+    auto date = layer.value(QStringLiteral("date")).toString();
+    if (!date.isEmpty()) {
+      source.insert(QStringLiteral("startDate"),
+                    QStringLiteral("%1-01-01").arg(date));
+      source.insert(QStringLiteral("endDate"),
+                    QStringLiteral("%1-12-31").arg(date));
+    }
     auto attribution = layer.value(QStringLiteral("attribution")).toString();
     if (!attribution.isEmpty())
       source.insert(
@@ -94,12 +110,19 @@ QJsonObject MapHubImageryCatalog::catalogDocument(const QJsonObject &manifest,
     if (!tile_matrix_limits.isEmpty())
       source.insert(QStringLiteral("tileMatrixLimits"), tile_matrix_limits);
     auto source_raster = layer.value(QStringLiteral("source_raster")).toObject();
+    auto map_hub_extension = QJsonObject{};
     if (!source_raster.isEmpty())
+      map_hub_extension.insert(QStringLiteral("sourceRaster"), source_raster);
+    auto imagery_registration =
+        layer.value(QStringLiteral("imagery_registration")).toObject();
+    if (!imagery_registration.isEmpty())
+      map_hub_extension.insert(QStringLiteral("imageryRegistration"),
+                               imagery_registration);
+    if (!map_hub_extension.isEmpty())
       source.insert(
           QStringLiteral("extensions"),
           QJsonObject{{QStringLiteral("org.cascadeoc.maphub"),
-                       QJsonObject{{QStringLiteral("sourceRaster"),
-                                    source_raster}}}});
+                       map_hub_extension}});
     sources.append(source);
   }
   if (sources.isEmpty())
