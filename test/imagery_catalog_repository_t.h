@@ -20,6 +20,7 @@ private slots:
 	void offersPrivateNetworkApprovalAndRetries();
 	void offersApprovalForExactPrivateRedirectTarget();
 	void requiresHttpConsentAndCancels();
+	void installsGeneratedCatalogsAtomicallyWithoutDuplicates();
 };
 
 #endif

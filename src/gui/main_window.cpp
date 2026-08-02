@@ -70,6 +70,7 @@
 #include "collaboration/managed_map_workspace.h"
 #include "collaboration/map_hub_api_client.h"
 #include "collaboration/map_hub_credentials.h"
+#include "collaboration/map_hub_imagery_catalog.h"
 #include "collaboration/map_hub_read_only_document.h"
 #include "collaboration/map_hub_sync_controller.h"
 #include "collaboration/map_hub_workspace.h"
@@ -255,6 +256,7 @@ void MainWindow::applicationStateChanged()
 			map_hub_access_timer->start(0);
 		if (map_hub_sync)
 			map_hub_sync->applicationBecameActive();
+		QTimer::singleShot(0, this, &MainWindow::refreshMapHubImageryCatalog);
 	}
 	else if (map_hub_sync)
 	{
@@ -1490,6 +1492,7 @@ void MainWindow::configureMapHubSync()
 			map_hub_access_timer->stop();
 			map_hub_access_etag.clear();
 		}
+		QTimer::singleShot(0, this, &MainWindow::refreshMapHubImageryCatalog);
 		return;
 	}
 
@@ -1538,6 +1541,54 @@ void MainWindow::configureMapHubSync()
 				return false;
 			}
 			return true;
+		});
+	QTimer::singleShot(0, this, &MainWindow::refreshMapHubImageryCatalog);
+}
+
+
+void MainWindow::refreshMapHubImageryCatalog()
+{
+	if (map_hub_imagery_refresh_pending || currentPath().isEmpty())
+		return;
+	QString error;
+	auto const managed = ManagedMapWorkspace::loadForMap(currentPath(), &error);
+	auto const read_only = MapHubReadOnlyDocument::loadForMap(currentPath(), &error);
+	QString server_url;
+	QString project_id;
+	QString manifest_url;
+	if (managed.isValid())
+	{
+		server_url = managed.server_url;
+		project_id = managed.project_id;
+		manifest_url = managed.manifest_url;
+	}
+	else if (read_only.isValid())
+	{
+		server_url = read_only.server_url;
+		project_id = read_only.project_id;
+		manifest_url = read_only.manifest_url;
+	}
+	if (server_url.isEmpty() || project_id.isEmpty() || manifest_url.isEmpty())
+		return;
+	auto const credential = MapHubCredentials::readToken(server_url);
+	if (!credential.error.isEmpty() || credential.token.isEmpty())
+		return;
+
+	map_hub_imagery_refresh_pending = true;
+	auto* client = new MapHubApiClient(server_url, credential.token, this);
+	client->projectManifest(
+		project_id,
+		[this, client, manifest_url](
+			const QJsonObject& manifest,
+			const MapHubApiClient::Error& api_error) {
+			map_hub_imagery_refresh_pending = false;
+			client->deleteLater();
+			if (api_error)
+				return;
+			auto const result = MapHubImageryCatalog::install(
+				manifest, manifest_url);
+			if (!result.error.isEmpty())
+				showStatusBarMessage(result.error, 12000);
 		});
 }
 

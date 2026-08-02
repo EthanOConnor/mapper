@@ -19,6 +19,7 @@ private slots:
 	void catalogTooltipsEscapeRichText();
 	void stableHandlesDetectCatalogUpdates();
 	void invalidSourcesUseStableIndexIdentity();
+	void groupsMapHubAsFirstClassProvider();
 };
 
 #endif

@@ -143,6 +143,10 @@ public:
 
 	void reload();
 	OperationId readCatalogFile(const QString& path);
+	OperationId installCatalogBytes(
+		QByteArray bytes,
+		ImageryCatalogInstallMetadata metadata,
+		ImageryCatalogInstallOptions options = {});
 	OperationId fetchCatalog(
 		const ImageryCatalogFetchRequest& request);
 	OperationId installCandidate(

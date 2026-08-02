@@ -56,6 +56,7 @@ public:
                                 const QString &device_secret,
                                 JsonHandler handler);
   void library(JsonHandler handler);
+  void imageryCatalog(const QString &etag, SyncStateHandler handler);
   void projectManifest(const QString &project_id, JsonHandler handler);
   void openProject(const QString &project_id, JsonHandler handler);
   void createEditAccessRequest(const QString &project_id,

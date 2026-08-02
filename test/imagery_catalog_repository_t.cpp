@@ -617,4 +617,50 @@ void ImageryCatalogRepositoryTest::
 }
 
 
+void ImageryCatalogRepositoryTest::
+	installsGeneratedCatalogsAtomicallyWithoutDuplicates()
+{
+	QTemporaryDir directory;
+	QVERIFY(directory.isValid());
+	imagery::TileNetworkManager network(configFor(directory));
+	imagery::ImageryCatalogRepository repository(
+		directory.filePath(QStringLiteral("catalogs")), &network);
+	QSignalSpy operations(
+		&repository,
+		&imagery::ImageryCatalogRepository::operationFinished);
+	QSignalSpy snapshots(
+		&repository,
+		&imagery::ImageryCatalogRepository::snapshotChanged);
+	imagery::ImageryCatalogInstallMetadata metadata;
+	metadata.origin = QStringLiteral("https://maps.example.test/manifest");
+	metadata.final_url = metadata.origin;
+
+	auto const first_id = repository.installCatalogBytes(
+		catalogBytes(1), metadata);
+	QTRY_VERIFY_WITH_TIMEOUT(!operations.isEmpty(), 3000);
+	QCOMPARE(operations.last().at(0).toULongLong(), first_id);
+	QCOMPARE(operationResult(operations, operations.size() - 1).kind,
+	         imagery::ImageryCatalogOperationKind::Installed);
+	QTRY_VERIFY_WITH_TIMEOUT(!repository.snapshot()->catalogs.isEmpty(), 3000);
+	QCOMPARE(repository.snapshot()->catalogs.size(), 1);
+	auto const first_handle = repository.snapshot()->latestHandle(
+		QStringLiteral("org.example.repository"), QStringLiteral("aerial"));
+	QVERIFY(first_handle);
+
+	auto const operation_count = operations.size();
+	auto const snapshot_count = snapshots.size();
+	auto const second_id = repository.installCatalogBytes(
+		catalogBytes(2), metadata);
+	QTRY_VERIFY_WITH_TIMEOUT(operations.size() > operation_count, 3000);
+	QCOMPARE(operations.last().at(0).toULongLong(), second_id);
+	QTRY_VERIFY_WITH_TIMEOUT(snapshots.size() > snapshot_count, 3000);
+	QCOMPARE(repository.snapshot()->catalogs.size(), 1);
+	QCOMPARE(repository.snapshot()->catalogs.first().read_result.catalog.revision, 2);
+	auto const second_handle = repository.snapshot()->latestHandle(
+		QStringLiteral("org.example.repository"), QStringLiteral("aerial"));
+	QVERIFY(second_handle);
+	QVERIFY(*first_handle != *second_handle);
+}
+
+
 QTEST_GUILESS_MAIN(ImageryCatalogRepositoryTest)

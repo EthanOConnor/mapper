@@ -348,6 +348,59 @@ ImageryCatalogRepository::fetchCatalog(
 }
 
 
+ImageryCatalogRepository::OperationId
+ImageryCatalogRepository::installCatalogBytes(
+	QByteArray bytes,
+	ImageryCatalogInstallMetadata metadata,
+	ImageryCatalogInstallOptions options)
+{
+	Q_ASSERT(QThread::currentThread() == thread());
+	auto operation = std::make_shared<Operation>();
+	operation->id = nextOperationId();
+	operations_.insert(operation->id, operation);
+
+	QPointer<ImageryCatalogRepository> receiver(this);
+	auto const root = store_root_;
+	worker_pool_.start(
+		[receiver, operation, root, bytes = std::move(bytes),
+		 metadata = std::move(metadata), options]() mutable {
+			ImageryCatalogOperationResult result;
+			if (operation->cancelled.load())
+				return;
+			if (bytes.size() > OicCatalogReader::maximum_document_size)
+			{
+				result.kind = ImageryCatalogOperationKind::Failed;
+				result.error = ImageryCatalogRepository::tr(
+					"The catalog exceeds the %1 MiB safety limit.")
+					.arg(OicCatalogReader::maximum_document_size
+					     / (1024 * 1024));
+			}
+			else
+			{
+				auto read_result = OicCatalogReader::read(bytes);
+				result.catalog_id = read_result.catalog.id;
+				QString error;
+				ImageryCatalogStore store(root);
+				auto const success = store.install(
+					read_result, metadata, options, &error);
+				result.kind = success
+					? ImageryCatalogOperationKind::Installed
+					: ImageryCatalogOperationKind::Failed;
+				result.error = std::move(error);
+			}
+			QMetaObject::invokeMethod(
+				receiver,
+				[receiver, id = operation->id,
+				 result = std::move(result)]() mutable {
+					if (receiver)
+						receiver->complete(id, std::move(result));
+				},
+				Qt::QueuedConnection);
+		});
+	return operation->id;
+}
+
+
 void ImageryCatalogRepository::parseCandidate(
 	const std::shared_ptr<Operation>& operation,
 	QByteArray bytes,
