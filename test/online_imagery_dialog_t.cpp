@@ -10,6 +10,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QGroupBox>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
@@ -323,6 +324,32 @@ void OnlineImageryDialogTest::
 	QCOMPARE(
 		request.payload_kind,
 		imagery::NetworkPayloadKind::JsonDocument);
+}
+
+
+void OnlineImageryDialogTest::exposesMapHubProviderBeforeAdvancedPaths()
+{
+	QTemporaryDir directory;
+	QVERIFY(directory.isValid());
+	imagery::TileNetworkManager network(configFor(directory));
+	imagery::ImageryCatalogRepository repository(
+		directory.filePath(QStringLiteral("catalogs")), &network);
+	OnlineImageryDialog dialog(repository, network);
+	auto* provider = dialog.findChild<QGroupBox*>(
+		QStringLiteral("map_hub_imagery_provider"));
+	auto* status = dialog.findChild<QLabel*>(
+		QStringLiteral("map_hub_imagery_status"));
+	auto* refresh = dialog.findChild<QPushButton*>(
+		QStringLiteral("refresh_map_hub_imagery"));
+	auto* manual = dialog.findChild<QPushButton*>(
+		QStringLiteral("manual_source_button"));
+	QVERIFY(provider);
+	QVERIFY(status);
+	QVERIFY(refresh);
+	QVERIFY(manual);
+	QVERIFY(provider->isAncestorOf(status));
+	QVERIFY(status->text().contains(QStringLiteral("Map Hub")));
+	QVERIFY(manual->text().contains(QStringLiteral("URL")));
 }
 
 

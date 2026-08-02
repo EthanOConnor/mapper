@@ -2757,7 +2757,8 @@ void MapEditorController::addOnlineImageryClicked()
 		repository,
 		network,
 		window,
-		&permissions);
+		&permissions,
+		window->currentPath());
 	if (dialog.exec() != QDialog::Accepted)
 		return;
 

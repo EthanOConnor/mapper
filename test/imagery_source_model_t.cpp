@@ -370,4 +370,50 @@ void ImagerySourceModelTest::invalidSourcesUseStableIndexIdentity()
 }
 
 
+void ImagerySourceModelTest::groupsMapHubAsFirstClassProvider()
+{
+	QTemporaryDir directory;
+	QVERIFY(directory.isValid());
+	auto object = QJsonDocument::fromJson(
+		catalogBytes(1, QStringLiteral("King County LiDAR"))).object();
+	object.insert(
+		QStringLiteral("id"),
+		QStringLiteral("org.cascadeoc.maphub.project.11111111"));
+	object.insert(
+		QStringLiteral("name"),
+		QStringLiteral("Map Hub — Luther Burbank"));
+	auto const read = imagery::OicCatalogReader::read(
+		QJsonDocument(object).toJson(QJsonDocument::Compact));
+	QVERIFY(read.accepted());
+	imagery::ImageryCatalogStore store(
+		directory.filePath(QStringLiteral("catalogs")));
+	QString error;
+	QVERIFY2(store.install(read, QStringLiteral("https://maps.example.test/manifest"),
+	                       {}, {}, &error), qPrintable(error));
+
+	imagery::TileNetworkManager network(configFor(directory));
+	imagery::ImageryCatalogRepository repository(store.rootPath(), &network);
+	ImagerySourceModel model(repository);
+	QSignalSpy resets(&model, &QAbstractItemModel::modelReset);
+	repository.reload();
+	QTRY_VERIFY_WITH_TIMEOUT(!resets.isEmpty(), 3000);
+
+	QCOMPARE(model.rowCount(), 1);
+	auto const provider = model.index(0, 0);
+	QCOMPARE(model.data(provider).toString(), QStringLiteral("Map Hub"));
+	QCOMPARE(model.data(provider, ImagerySourceModel::NodeTypeRole).toInt(),
+	         int(ImagerySourceModel::NodeType::Provider));
+	QCOMPARE(model.rowCount(provider), 1);
+	auto const catalog = model.index(0, 0, provider);
+	QCOMPARE(model.data(catalog).toString(),
+	         QStringLiteral("Map Hub — Luther Burbank"));
+	QCOMPARE(model.rowCount(catalog), 2);
+	auto const handle = repository.snapshot()->latestHandle(
+		QStringLiteral("org.cascadeoc.maphub.project.11111111"),
+		QStringLiteral("aerial"));
+	QVERIFY(handle);
+	QVERIFY(model.indexForHandle(*handle).isValid());
+}
+
+
 QTEST_MAIN(ImagerySourceModelTest)

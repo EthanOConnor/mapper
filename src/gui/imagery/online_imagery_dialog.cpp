@@ -12,6 +12,7 @@
 #include "gui/imagery/online_imagery_dialog.h"
 
 #include <algorithm>
+#include <functional>
 
 #include <QComboBox>
 #include <QDialogButtonBox>
@@ -42,8 +43,14 @@
 #include "gui/imagery/catalog_manager_dialog.h"
 #include "gui/imagery/imagery_network_permissions_dialog.h"
 #include "gui/imagery/imagery_source_model.h"
+#include "collaboration/managed_map_workspace.h"
+#include "collaboration/map_hub_api_client.h"
+#include "collaboration/map_hub_credentials.h"
+#include "collaboration/map_hub_imagery_catalog.h"
+#include "collaboration/map_hub_read_only_document.h"
 #include "imagery/imagery_network_permissions.h"
 #include "imagery/tile_network_manager.h"
+#include "settings.h"
 
 namespace OpenOrienteering {
 
@@ -128,12 +135,14 @@ OnlineImageryDialog::OnlineImageryDialog(
 	imagery::ImageryCatalogRepository& repository,
 	imagery::TileNetworkManager& network,
 	QWidget* parent,
-	imagery::ImageryNetworkPermissions* permissions)
+	imagery::ImageryNetworkPermissions* permissions,
+	QString map_path)
  : QDialog(parent)
  , repository_(repository)
  , network_(network)
  , network_client_id_(
 	   imagery::TileNetworkManager::nextClientId())
+	, map_path_(std::move(map_path))
 {
 	setWindowTitle(tr("Add online imagery"));
 	resize(940, 640);
@@ -164,6 +173,18 @@ OnlineImageryDialog::OnlineImageryDialog(
 		QAbstractItemView::SingleSelection);
 	source_tree_->expandAll();
 
+	map_hub_status_ = new QLabel(this);
+	map_hub_status_->setObjectName(QStringLiteral("map_hub_imagery_status"));
+	map_hub_status_->setWordWrap(true);
+	map_hub_refresh_ = new QPushButton(tr("Refresh"), this);
+	map_hub_refresh_->setObjectName(QStringLiteral("refresh_map_hub_imagery"));
+	auto* map_hub_row = new QHBoxLayout();
+	map_hub_row->addWidget(map_hub_status_, 1);
+	map_hub_row->addWidget(map_hub_refresh_);
+	auto* map_hub_box = new QGroupBox(tr("Map Hub"), this);
+	map_hub_box->setObjectName(QStringLiteral("map_hub_imagery_provider"));
+	map_hub_box->setLayout(map_hub_row);
+
 	auto* manual_button = new QPushButton(
 		tr("Enter a tile or service URL…"),
 		this);
@@ -185,6 +206,7 @@ OnlineImageryDialog::OnlineImageryDialog(
 	auto* left = new QWidget(this);
 	auto* left_layout = new QVBoxLayout(left);
 	left_layout->setContentsMargins(0, 0, 0, 0);
+	left_layout->addWidget(map_hub_box);
 	left_layout->addWidget(search_);
 	left_layout->addWidget(source_tree_, 1);
 	left_layout->addWidget(manual_button);
@@ -371,6 +393,11 @@ OnlineImageryDialog::OnlineImageryDialog(
 	classify_timer_->setInterval(300);
 
 	connect(
+		map_hub_refresh_,
+		&QPushButton::clicked,
+		this,
+		&OnlineImageryDialog::refreshMapHub);
+	connect(
 		search_,
 		&QLineEdit::textChanged,
 		source_filter_,
@@ -437,6 +464,11 @@ OnlineImageryDialog::OnlineImageryDialog(
 		this,
 		&OnlineImageryDialog::updateCatalogSelectionAfterReload);
 	connect(
+		&repository_,
+		&imagery::ImageryCatalogRepository::operationFinished,
+		this,
+		&OnlineImageryDialog::onCatalogOperationFinished);
+	connect(
 		buttons_,
 		&QDialogButtonBox::rejected,
 		this,
@@ -479,6 +511,51 @@ OnlineImageryDialog::OnlineImageryDialog(
 			&OnlineImageryDialog::scheduleManualClassification);
 	}
 
+	QString context_error;
+	auto const managed = map_path_.isEmpty()
+		? ManagedMapWorkspace {}
+		: ManagedMapWorkspace::loadForMap(map_path_, &context_error);
+	auto const read_only = map_path_.isEmpty()
+		? MapHubReadOnlyDocument {}
+		: MapHubReadOnlyDocument::loadForMap(map_path_, &context_error);
+	if (managed.isValid())
+	{
+		map_hub_server_url_ = managed.server_url;
+		map_hub_project_id_ = managed.project_id;
+		map_hub_project_title_ = managed.project_title;
+	}
+	else if (read_only.isValid())
+	{
+		map_hub_server_url_ = read_only.server_url;
+		map_hub_project_id_ = read_only.project_id;
+		map_hub_project_title_ = read_only.project_title;
+	}
+	if (!map_hub_project_id_.isEmpty())
+	{
+		map_hub_status_->setText(
+			tr("Authorized Map Hub imagery, including %1")
+				.arg(map_hub_project_title_));
+	}
+	else
+	{
+		map_hub_server_url_ = Settings::getInstance()
+			.getSetting(Settings::MapHub_ServerUrl).toString().trimmed();
+		map_hub_status_->setText(tr(
+			"Imagery authorized for your connected Map Hub account."));
+	}
+	if (!map_hub_server_url_.isEmpty()
+	    && !MapHubCredentials::readToken(map_hub_server_url_).token.isEmpty())
+	{
+		if (parent)
+			QTimer::singleShot(0, this, &OnlineImageryDialog::refreshMapHub);
+	}
+	else
+	{
+		map_hub_status_->setText(tr(
+			"Connect a Map Hub account to browse authorized imagery."));
+		map_hub_refresh_->setEnabled(false);
+	}
+
 	if (source_model_->rowCount() > 0)
 	{
 		source_tree_->setCurrentIndex(
@@ -488,6 +565,101 @@ OnlineImageryDialog::OnlineImageryDialog(
 	{
 		showManualPage();
 	}
+}
+
+
+void OnlineImageryDialog::refreshMapHub()
+{
+	if (map_hub_server_url_.isEmpty())
+		return;
+	if (map_hub_client_ || !map_hub_operations_.isEmpty())
+		return;
+	auto const credential = MapHubCredentials::readToken(map_hub_server_url_);
+	if (!credential.error.isEmpty() || credential.token.isEmpty())
+	{
+		map_hub_status_->setText(
+			credential.error.isEmpty()
+				? tr("Connect your Map Hub account to refresh imagery.")
+				: tr("Map Hub credential error: %1").arg(credential.error));
+		return;
+	}
+	map_hub_refresh_->setEnabled(false);
+	map_hub_status_->setText(tr("Refreshing authorized Map Hub imagery…"));
+	map_hub_client_ = new MapHubApiClient(
+		map_hub_server_url_, credential.token, this);
+	map_hub_client_->imageryCatalog(
+		map_hub_etag_,
+		[this](const QJsonObject& manifest, const QString& etag,
+		       bool not_modified, const MapHubApiClient::Error& error) {
+			auto* client = map_hub_client_;
+			map_hub_client_ = nullptr;
+			if (client)
+				client->deleteLater();
+			if (error)
+			{
+				map_hub_status_->setText(
+					tr("Map Hub imagery could not be refreshed: %1")
+						.arg(error.message));
+				map_hub_refresh_->setEnabled(true);
+				return;
+			}
+			if (!etag.isEmpty())
+				map_hub_etag_ = etag;
+			if (not_modified)
+			{
+				map_hub_status_->setText(tr("Map Hub imagery is up to date."));
+				map_hub_refresh_->setEnabled(true);
+				return;
+			}
+			auto endpoint = map_hub_server_url_;
+			while (endpoint.endsWith(QLatin1Char('/')))
+				endpoint.chop(1);
+			endpoint += QStringLiteral("/api/v1/imagery/catalog");
+			auto const result = MapHubImageryCatalog::installAuthorizedCatalog(
+				manifest, endpoint, &repository_);
+			if (!result.error.isEmpty())
+			{
+				map_hub_status_->setText(result.error);
+				map_hub_refresh_->setEnabled(true);
+				return;
+			}
+			if (result.operation_ids.isEmpty())
+			{
+				map_hub_status_->setText(
+					result.installed_sources > 0
+						? tr("Map Hub imagery is up to date.")
+						: tr("No imagery layers are currently available to this account."));
+				map_hub_refresh_->setEnabled(true);
+				return;
+			}
+			map_hub_operation_error_.clear();
+			for (auto const id : result.operation_ids)
+				map_hub_operations_.insert(id);
+		});
+}
+
+
+void OnlineImageryDialog::onCatalogOperationFinished(
+	imagery::ImageryCatalogRepository::OperationId id,
+	const imagery::ImageryCatalogOperationResult& result)
+{
+	if (!map_hub_operations_.remove(id))
+		return;
+	if (result.kind == imagery::ImageryCatalogOperationKind::Failed)
+		map_hub_operation_error_ = result.error;
+	if (!map_hub_operations_.isEmpty())
+		return;
+	map_hub_refresh_->setEnabled(true);
+	if (map_hub_operation_error_.isEmpty())
+	{
+		map_hub_status_->setText(tr("Map Hub imagery is up to date."));
+		select_map_hub_after_refresh_ = true;
+	}
+	else
+		map_hub_status_->setText(
+			tr("Map Hub imagery could not be installed: %1")
+				.arg(map_hub_operation_error_));
+	source_tree_->expandAll();
 }
 
 
@@ -985,6 +1157,18 @@ void OnlineImageryDialog::clearSelectedSource()
 void OnlineImageryDialog::updateCatalogSelectionAfterReload()
 {
 	source_tree_->expandAll();
+	if (select_map_hub_after_refresh_ && !selected_handle_
+	    && manual_url_->text().trimmed().isEmpty())
+	{
+		select_map_hub_after_refresh_ = false;
+		auto const index = firstMapHubSourceIndex();
+		if (index.isValid())
+		{
+			auto const proxy = source_filter_->mapFromSource(index);
+			source_tree_->setCurrentIndex(proxy);
+			selectCatalogIndex(proxy);
+		}
+	}
 	if (!selected_handle_)
 		return;
 	auto const snapshot = repository_.snapshot();
@@ -1039,6 +1223,34 @@ void OnlineImageryDialog::updateCatalogSelectionAfterReload()
 			   "Review the updated source before adding it."),
 			QStyle::SP_MessageBoxWarning);
 	}
+}
+
+
+QModelIndex OnlineImageryDialog::firstMapHubSourceIndex() const
+{
+	std::function<QModelIndex(const QModelIndex&)> first_source =
+		[this, &first_source](const QModelIndex& parent) -> QModelIndex {
+			for (int row = 0; row < source_model_->rowCount(parent); ++row)
+			{
+				auto const index = source_model_->index(row, 0, parent);
+				if (source_model_->sourceHandle(index)
+				    && source_model_->data(
+					    index, ImagerySourceModel::SupportedRole).toBool())
+					return index;
+				auto const nested = first_source(index);
+				if (nested.isValid())
+					return nested;
+			}
+			return {};
+		};
+	for (int row = 0; row < source_model_->rowCount(); ++row)
+	{
+		auto const root = source_model_->index(row, 0);
+		if (source_model_->data(root, ImagerySourceModel::NodeTypeRole).toInt()
+		    == int(ImagerySourceModel::NodeType::Provider))
+			return first_source(root);
+	}
+	return {};
 }
 
 

@@ -15,6 +15,7 @@
 #include <optional>
 
 #include <QDialog>
+#include <QSet>
 #include <QStyle>
 #include <QUrl>
 
@@ -37,6 +38,8 @@ class OnlineImageryDialogTest;
 
 namespace OpenOrienteering {
 
+class MapHubApiClient;
+
 namespace imagery {
 class ImageryNetworkPermissions;
 }
@@ -52,7 +55,8 @@ public:
 		imagery::ImageryCatalogRepository& repository,
 		imagery::TileNetworkManager& network,
 		QWidget* parent = nullptr,
-		imagery::ImageryNetworkPermissions* permissions = nullptr);
+		imagery::ImageryNetworkPermissions* permissions = nullptr,
+		QString map_path = {});
 	~OnlineImageryDialog() override;
 
 	const imagery::ResolvedImagerySource& selectedSource() const;
@@ -76,9 +80,14 @@ private:
 		const imagery::TileNetworkResult& result);
 	void approvePrivateDiscoveryOrigin();
 	void updateCatalogSelectionAfterReload();
+	QModelIndex firstMapHubSourceIndex() const;
 	void importCatalog();
 	void manageCatalogs();
 	void manageNetworkPermissions();
+	void refreshMapHub();
+	void onCatalogOperationFinished(
+		imagery::ImageryCatalogRepository::OperationId id,
+		const imagery::ImageryCatalogOperationResult& result);
 	void acceptSelection();
 	void setStatus(
 		const QString& text,
@@ -102,11 +111,22 @@ private:
 	imagery::ManualImageryDiscoveryResult manual_result_;
 	std::optional<imagery::ImagerySourceHandle> selected_handle_;
 	std::optional<imagery::ResolvedImagerySource> selected_source_;
+	QString map_path_;
+	QString map_hub_server_url_;
+	QString map_hub_project_id_;
+	QString map_hub_project_title_;
+	MapHubApiClient* map_hub_client_ = nullptr;
+	QSet<imagery::ImageryCatalogRepository::OperationId> map_hub_operations_;
+	QString map_hub_operation_error_;
+	QString map_hub_etag_;
+	bool select_map_hub_after_refresh_ = false;
 
 	ImagerySourceModel* source_model_ = nullptr;
 	QSortFilterProxyModel* source_filter_ = nullptr;
 	QLineEdit* search_ = nullptr;
 	QTreeView* source_tree_ = nullptr;
+	QLabel* map_hub_status_ = nullptr;
+	QPushButton* map_hub_refresh_ = nullptr;
 	QStackedWidget* pages_ = nullptr;
 
 	QLabel* detail_title_ = nullptr;
