@@ -26,13 +26,11 @@
 #include <QObject>
 #include <QSize>
 #include <QTimer>
-#include <QWidget>
+#include <QToolButton>
 
 #include "gnss/gnss_state.h"
 
-class QMouseEvent;
 class QPaintEvent;
-class QEvent;
 
 namespace OpenOrienteering {
 
@@ -46,7 +44,7 @@ namespace OpenOrienteering {
  *
  * Tapping the overlay emits clicked() to open the GNSS detail panel.
  */
-class GnssStatusOverlay : public QWidget
+class GnssStatusOverlay : public QToolButton
 {
 	Q_OBJECT
 public:
@@ -56,19 +54,13 @@ public:
 	void updateState(const GnssState& state);
 	QSize sizeHint() const override;
 
-signals:
-	void clicked();  // emitted on tap to open detail panel
-
 protected:
-	bool event(QEvent* event) override;
 	void paintEvent(QPaintEvent* event) override;
-	void mousePressEvent(QMouseEvent* event) override;
 
 private:
 	void repaintLatestState();
 
 	GnssState m_state;
-	bool m_touchActivationSent = false;
 	bool m_repaintPending = false;
 	QTimer m_repaintTimer;
 };

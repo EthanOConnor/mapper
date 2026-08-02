@@ -1099,8 +1099,8 @@ void MapEditorController::attach(MainWindow* window)
 			gnss_status_overlay->setObjectName(
 			  QStringLiteral("gnssMapStatusControl"));
 			gnss_status_overlay->setVisible(false);
-			connect(gnss_status_overlay, &GnssStatusOverlay::clicked,
-			        this, [this] {
+			connect(gnss_status_overlay, &QToolButton::clicked,
+			        this, [this](bool) {
 				qInfo("GNSS details panel requested");
 				auto& controller = GnssController::instance();
 				auto* session = controller.session();

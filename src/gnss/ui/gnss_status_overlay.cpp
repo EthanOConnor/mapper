@@ -23,10 +23,8 @@
 
 #include <QColor>
 #include <QDebug>
-#include <QEvent>
 #include <QFont>
 #include <QFontMetricsF>
-#include <QMouseEvent>
 #include <QPainter>
 #include <QPen>
 #include <QRectF>
@@ -117,11 +115,16 @@ QString correctionSummary(GnssCorrectionState state)
 
 
 GnssStatusOverlay::GnssStatusOverlay(QWidget* parent)
- : QWidget(parent)
+ : QToolButton(parent)
 {
 	setAttribute(Qt::WA_NoSystemBackground, true);
-	setAttribute(Qt::WA_AcceptTouchEvents, true);
+	setAutoRaise(true);
+	setCheckable(false);
+	setFocusPolicy(Qt::NoFocus);
 	setCursor(Qt::PointingHandCursor);
+	connect(this, &QToolButton::clicked, this, [] {
+		qInfo("GNSS status control activated (button)");
+	});
 	m_repaintTimer.setInterval(1000);
 	m_repaintTimer.setSingleShot(true);
 	connect(&m_repaintTimer, &QTimer::timeout, this, [this] {
@@ -185,40 +188,6 @@ QSize GnssStatusOverlay::sizeHint() const
 	auto h = qRound(Util::mmToPixelLogical(15.0));
 #endif
 	return QSize(w, h);
-}
-
-bool GnssStatusOverlay::event(QEvent* event)
-{
-	// iOS does not always synthesize a mouse press for a QWidget occupying the
-	// top safe-area/status region. Accept native touch delivery explicitly so
-	// the capsule remains a dependable route to diagnostics.
-	if (event->type() == QEvent::TouchBegin)
-	{
-		// Qt/iOS can cancel a touch sequence in the status/safe-area region
-		// before delivering TouchEnd. Activate once on acquisition instead of
-		// making the diagnostics route depend on that unreliable final event.
-		event->accept();
-		if (!m_touchActivationSent)
-		{
-			m_touchActivationSent = true;
-			qInfo("GNSS status control activated (touch)");
-			emit clicked();
-		}
-		return true;
-	}
-	if (event->type() == QEvent::TouchUpdate)
-	{
-		event->accept();
-		return true;
-	}
-	if (event->type() == QEvent::TouchEnd
-	    || event->type() == QEvent::TouchCancel)
-	{
-		m_touchActivationSent = false;
-		event->accept();
-		return true;
-	}
-	return QWidget::event(event);
 }
 
 void GnssStatusOverlay::paintEvent(QPaintEvent*)
@@ -426,13 +395,5 @@ void GnssStatusOverlay::paintEvent(QPaintEvent*)
 	painter.drawLine(QPointF(chevronX, cy),
 	                 QPointF(chevronX - mm(1.2), cy + mm(1.7)));
 }
-
-void GnssStatusOverlay::mousePressEvent(QMouseEvent* event)
-{
-	event->accept();
-	qInfo("GNSS status control activated (mouse)");
-	emit clicked();
-}
-
 
 }  // namespace OpenOrienteering
