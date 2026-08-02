@@ -25,6 +25,7 @@
 
 #include <QObject>
 #include <QSize>
+#include <QTimer>
 #include <QWidget>
 
 #include "gnss/gnss_state.h"
@@ -64,8 +65,12 @@ protected:
 	void mousePressEvent(QMouseEvent* event) override;
 
 private:
+	void repaintLatestState();
+
 	GnssState m_state;
 	bool m_touchActivationSent = false;
+	bool m_repaintPending = false;
+	QTimer m_repaintTimer;
 };
 
 

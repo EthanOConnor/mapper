@@ -22,6 +22,7 @@
 #include <cmath>
 
 #include <QColor>
+#include <QDebug>
 #include <QEvent>
 #include <QFont>
 #include <QFontMetricsF>
@@ -121,6 +122,15 @@ GnssStatusOverlay::GnssStatusOverlay(QWidget* parent)
 	setAttribute(Qt::WA_NoSystemBackground, true);
 	setAttribute(Qt::WA_AcceptTouchEvents, true);
 	setCursor(Qt::PointingHandCursor);
+	m_repaintTimer.setInterval(1000);
+	m_repaintTimer.setSingleShot(true);
+	connect(&m_repaintTimer, &QTimer::timeout, this, [this] {
+		if (!m_repaintPending)
+			return;
+		m_repaintPending = false;
+		repaintLatestState();
+		m_repaintTimer.start();
+	});
 }
 
 GnssStatusOverlay::~GnssStatusOverlay()
@@ -146,6 +156,17 @@ void GnssStatusOverlay::updateState(const GnssState& state)
 	setAccessibleDescription(tr("Tap for GNSS status and configuration"));
 	setToolTip(accessible + QStringLiteral(". ")
 	           + tr("Tap for status and configuration."));
+	if (m_repaintTimer.isActive())
+	{
+		m_repaintPending = true;
+		return;
+	}
+	repaintLatestState();
+	m_repaintTimer.start();
+}
+
+void GnssStatusOverlay::repaintLatestState()
+{
 	update();
 	if (auto* p = parentWidget())
 		p->update(geometry());
@@ -180,6 +201,7 @@ bool GnssStatusOverlay::event(QEvent* event)
 		if (!m_touchActivationSent)
 		{
 			m_touchActivationSent = true;
+			qInfo("GNSS status control activated (touch)");
 			emit clicked();
 		}
 		return true;
@@ -408,6 +430,7 @@ void GnssStatusOverlay::paintEvent(QPaintEvent*)
 void GnssStatusOverlay::mousePressEvent(QMouseEvent* event)
 {
 	event->accept();
+	qInfo("GNSS status control activated (mouse)");
 	emit clicked();
 }
 

@@ -46,6 +46,7 @@
 #include <QDialog>
 #include <QDir>
 #include <QDockWidget>
+#include <QDebug>
 #include <QEvent>
 #include <QFileInfo>
 #include <QFlags>
@@ -225,8 +226,28 @@ namespace {
 		placeholder->setAttribute(Qt::WA_NoSystemBackground, true);
 		child->setAutoFillBackground(true);
 		
-		auto geometry = window->geometry();
-		splitter->setGeometry(geometry);
+		auto update_geometry = [window, splitter] {
+			auto geometry = window->rect();
+#if defined(Q_OS_IOS)
+			if (auto* host_window = window->windowHandle())
+				geometry = geometry.marginsRemoved(
+				  host_window->safeAreaMargins());
+#endif
+			splitter->setGeometry(geometry);
+		};
+		update_geometry();
+		if (auto* host_window = window->windowHandle())
+		{
+			QObject::connect(host_window, &QWindow::widthChanged,
+			                 splitter, [update_geometry](int) { update_geometry(); });
+			QObject::connect(host_window, &QWindow::heightChanged,
+			                 splitter, [update_geometry](int) { update_geometry(); });
+#if defined(Q_OS_IOS)
+			QObject::connect(host_window, &QWindow::safeAreaMarginsChanged,
+			                 splitter, [update_geometry](QMargins) { update_geometry(); });
+#endif
+		}
+		auto geometry = splitter->geometry();
 		if (geometry.height() > geometry.width())
 		{
 			splitter->setOrientation(Qt::Vertical);
@@ -1080,18 +1101,17 @@ void MapEditorController::attach(MainWindow* window)
 			compass_display = new CompassDisplay(map_widget->parentWidget());
 			compass_display->setVisible(false);
 			gnss_status_overlay = new GnssStatusOverlay(
-#if defined(Q_OS_IOS)
-			  window
-#else
-			  map_widget->parentWidget()
-#endif
-			);
+			  map_widget->parentWidget());
 			gnss_status_overlay->setVisible(false);
 			connect(gnss_status_overlay, &GnssStatusOverlay::clicked,
 			        this, [this] {
+				qInfo("GNSS details panel requested");
 				auto* session = GnssController::instance().session();
 				if (!session)
+				{
+					qInfo("GNSS details panel unavailable: no active session");
 					return;
+				}
 				auto* panel = new GnssDetailPanel();
 				panel->updateState(session->currentState());
 				panel->setRawCaptureActive(session->rawCaptureEnabled());
@@ -1146,6 +1166,7 @@ void MapEditorController::attach(MainWindow* window)
 					    : path);
 				});
 				showPopupWidget(panel, tr("GNSS details"));
+				qInfo("GNSS details panel shown");
 			}, Qt::QueuedConnection);
 		}
 		else
@@ -2863,7 +2884,46 @@ void MapEditorController::reopenTemplateClicked()
 
 void MapEditorController::templateAvailabilityChanged()
 {
-	// Nothing
+	if (!template_window_act || !map)
+		return;
+
+	bool has_missing_template = false;
+	for (auto i = 0; i < map->getNumTemplates(); ++i)
+	{
+		if (map->getTemplate(i)->getTemplateState() == Template::Invalid)
+		{
+			has_missing_template = true;
+			break;
+		}
+	}
+
+	template_window_act->setToolTip(
+	  has_missing_template
+	    ? tr("Templates — one or more layers need attention")
+	    : tr("Template setup window"));
+
+	if (!top_action_bar)
+		return;
+	auto* button = top_action_bar->getButtonForAction(template_window_act);
+	if (!button)
+		return;
+
+	button->setAccessibleDescription(
+	  has_missing_template
+	    ? tr("One or more template layers are unavailable. Tap to manage templates.")
+	    : QString{});
+	button->setStyleSheet(
+	  has_missing_template
+	    ? QStringLiteral(
+	        "QToolButton {"
+	        " border: 3px solid #e6ad16;"
+	        " border-radius: 9px;"
+	        " background-color: rgba(255, 193, 7, 44);"
+	        "}"
+	        "QToolButton:pressed {"
+	        " background-color: rgba(255, 193, 7, 86);"
+	        "}")
+	    : QString{});
 }
 
 void MapEditorController::closedTemplateAvailabilityChanged()
@@ -4295,28 +4355,16 @@ void MapEditorController::positionGnssStatusOverlay()
 		return;
 	auto size = gnss_status_overlay->sizeHint();
 #if defined(Q_OS_IOS)
-	// In portrait, use the otherwise empty app surface beside the Dynamic
-	// Island. QWindow reports the top exclusion accurately across iPhone sizes;
-	// the capsule is deliberately narrower than one half of Blueberry's top
-	// region. Landscape falls back to the map corner below the toolbar.
-	if (auto* host_window = window->windowHandle())
-	{
-		auto safe = host_window->safeAreaMargins();
-		if (safe.top() >= size.height())
-		{
-			auto left = std::max(0, window->width() - size.width()
-			                              - qRound(Util::mmToPixelLogical(6.0)));
-			auto top = std::max(0, (safe.top() - size.height()) / 2);
-			gnss_status_overlay->setGeometry(left, top,
-			                                 size.width(), size.height());
-			gnss_status_overlay->raise();
-			return;
-		}
-	}
-	auto map_origin = map_widget->mapTo(window, QPoint(0, 0));
+	// Keep the control in the central widget's ordinary UIKit/Qt interaction
+	// layer. A child of MapWidget is hidden behind the native render surface;
+	// the window's top safe area is visible but owned by iOS for hit testing.
+	auto* host = gnss_status_overlay->parentWidget();
+	auto map_origin = map_widget->mapTo(host, QPoint(0, 0));
 	auto left = std::max(map_origin.x(),
-	                     map_origin.x() + map_widget->width() - size.width());
-	gnss_status_overlay->setGeometry(left, map_origin.y(),
+	                     map_origin.x() + map_widget->width() - size.width()
+	                       - qRound(Util::mmToPixelLogical(6.0)));
+	auto top = map_origin.y() + qRound(Util::mmToPixelLogical(1.0));
+	gnss_status_overlay->setGeometry(left, top,
 	                                 size.width(), size.height());
 #else
 	auto top = top_action_bar && top_action_bar->isVisible()
@@ -4682,6 +4730,8 @@ void MapEditorController::setMapAndView(Map* map, MapView* map_view)
 	connect(map, &Map::objectSelectionChanged, this, &MapEditorController::objectSelectionChanged);
 	connect(map, &Map::templateAdded, this, &MapEditorController::templateAdded);
 	connect(map, &Map::templateDeleted, this, &MapEditorController::templateDeleted);
+	connect(map, &Map::templateChanged,
+	        this, &MapEditorController::templateAvailabilityChanged);
 	connect(map, &Map::closedTemplateAvailabilityChanged, this, &MapEditorController::closedTemplateAvailabilityChanged);
 	connect(map, &Map::spotColorPresenceChanged, this, &MapEditorController::spotColorPresenceChanged);
 	connect(map, &Map::currentMapPartChanged, this, &MapEditorController::updateMapPartsUI);
