@@ -53,6 +53,7 @@ private slots:
 	/** Tests various modes of Map::importMap(). */
 	void importTest_data();
 	void importTest();
+	void localMapImportUsesPaperCoordinates();
 	
 	/** Tests hasAlpha() functions. */
 	void hasAlpha();
