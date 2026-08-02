@@ -514,6 +514,7 @@ public slots:
 	
 	/** Enables or disables GPS display. */
 	void enableGPSDisplay(bool enable);
+	void refreshGnssStatusOverlay();
 	void positionGnssStatusOverlay();
 	/** Returns whether location updates and their visible UI are active. */
 	bool isGPSDisplayEnabled() const;

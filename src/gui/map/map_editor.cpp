@@ -1056,22 +1056,13 @@ void MapEditorController::attach(MainWindow* window)
 		auto& gnss_controller = GnssController::instance();
 		connect(&gnss_controller, &GnssController::sessionChanged, this,
 		        [this](GnssSession* session) {
+			refreshGnssStatusOverlay();
 			if (!gps_display || !gps_display_action
 			    || !gps_display_action->isChecked()
 			    || !Settings::getInstance().positionSource()
 			          .startsWith(QLatin1String("external_")))
 				return;
 			gps_display->setGnssSession(session);
-			if (gnss_status_overlay && session)
-			{
-				connect(session, &GnssSession::stateChanged,
-				        gnss_status_overlay,
-				        &GnssStatusOverlay::updateState,
-				        Qt::UniqueConnection);
-				gnss_status_overlay->updateState(session->currentState());
-				gnss_status_overlay->show();
-				positionGnssStatusOverlay();
-			}
 		});
 		connect(&gnss_controller, &GnssController::internalLocationRequested,
 		        this, [this] {
@@ -1080,7 +1071,7 @@ void MapEditorController::attach(MainWindow* window)
 				return;
 			gps_display->setGnssSession(nullptr);
 			if (gnss_status_overlay)
-				gnss_status_overlay->hide();
+				refreshGnssStatusOverlay();
 			gps_display->startUpdates();
 		});
 		connect(&gnss_controller, &GnssController::connectionCancelled,
@@ -1100,33 +1091,56 @@ void MapEditorController::attach(MainWindow* window)
 			createMobileGUI();
 			compass_display = new CompassDisplay(map_widget->parentWidget());
 			compass_display->setVisible(false);
-			gnss_status_overlay = new GnssStatusOverlay(
-			  map_widget->parentWidget());
+			// Keep the status control in the main window's UIKit-backed widget
+			// layer. This lets it occupy the Dynamic Island shoulder while still
+			// receiving ordinary Qt touch events, independently of the native map
+			// render surface and the toolbar layout.
+			gnss_status_overlay = new GnssStatusOverlay(window);
+			gnss_status_overlay->setObjectName(
+			  QStringLiteral("gnssMapStatusControl"));
 			gnss_status_overlay->setVisible(false);
 			connect(gnss_status_overlay, &GnssStatusOverlay::clicked,
 			        this, [this] {
 				qInfo("GNSS details panel requested");
-				auto* session = GnssController::instance().session();
-				if (!session)
-				{
-					qInfo("GNSS details panel unavailable: no active session");
-					return;
-				}
+				auto& controller = GnssController::instance();
+				auto* session = controller.session();
 				auto* panel = new GnssDetailPanel();
-				panel->updateState(session->currentState());
-				panel->setRawCaptureActive(session->rawCaptureEnabled());
-				connect(session, &GnssSession::stateChanged,
-				        panel, &GnssDetailPanel::updateState);
+				panel->updateState(session ? session->currentState() : GnssState{});
+				panel->setRawCaptureActive(
+				  session && session->rawCaptureEnabled());
+				if (session)
+					connect(session, &GnssSession::stateChanged,
+					        panel, &GnssDetailPanel::updateState);
+				connect(&controller, &GnssController::sessionChanged,
+				        panel, [panel](GnssSession* new_session) {
+					panel->updateState(new_session
+					                   ? new_session->currentState()
+					                   : GnssState{});
+					panel->setRawCaptureActive(
+					  new_session && new_session->rawCaptureEnabled());
+					if (new_session)
+						connect(new_session, &GnssSession::stateChanged,
+						        panel, &GnssDetailPanel::updateState,
+						        Qt::UniqueConnection);
+				});
 				connect(panel,
 				        &GnssDetailPanel::ntripProfileChangeRequested,
-				        &GnssController::instance(),
+				        &controller,
 				        &GnssController::useNtripProfile);
 				connect(panel, &GnssDetailPanel::disconnectRequested,
-				        &GnssController::instance(),
+				        &controller,
 				        &GnssController::disconnectExternal);
 				connect(panel, &GnssDetailPanel::connectRequested,
 				        this, [this] {
-					GnssController::instance().connectExternal(getWindow());
+					if (!Settings::getInstance().positionSource()
+					          .startsWith(QLatin1String("external_")))
+						Settings::getInstance().setPositionSource(
+						  QStringLiteral("external_ble"));
+					if (gps_display_action
+					    && !gps_display_action->isChecked())
+						enableGPSDisplay(true);
+					else
+						GnssController::instance().connectExternal(getWindow());
 				});
 				connect(panel, &GnssDetailPanel::receiverChangeRequested,
 				        this, [this, panel] {
@@ -1148,17 +1162,25 @@ void MapEditorController::attach(MainWindow* window)
 				});
 				connect(panel,
 				        &GnssDetailPanel::rawCaptureActionRequested,
-				        this, [session, panel] {
-					if (!session->rawCaptureEnabled())
+				        this, [panel] {
+					auto* active_session =
+					  GnssController::instance().session();
+					if (!active_session)
 					{
-						session->setRawCaptureEnabled(true);
+						panel->setDumpStatus(
+						  tr("Connect a receiver before capturing GNSS traffic."));
+						return;
+					}
+					if (!active_session->rawCaptureEnabled())
+					{
+						active_session->setRawCaptureEnabled(true);
 						panel->setRawCaptureActive(true);
 						panel->setDumpStatus(
 						  tr("Capturing recent GNSS traffic."));
 						return;
 					}
-					auto path = session->dumpRawBuffer();
-					session->setRawCaptureEnabled(false);
+					auto path = active_session->dumpRawBuffer();
+					active_session->setRawCaptureEnabled(false);
 					panel->setRawCaptureActive(false);
 					panel->setDumpStatus(
 					  path.isEmpty()
@@ -1168,6 +1190,21 @@ void MapEditorController::attach(MainWindow* window)
 				showPopupWidget(panel, tr("GNSS details"));
 				qInfo("GNSS details panel shown");
 			}, Qt::QueuedConnection);
+			refreshGnssStatusOverlay();
+#if defined(Q_OS_IOS)
+			if (auto* host_window = window->windowHandle())
+			{
+				connect(host_window, &QWindow::widthChanged,
+				        gnss_status_overlay,
+				        [this](int) { positionGnssStatusOverlay(); });
+				connect(host_window, &QWindow::heightChanged,
+				        gnss_status_overlay,
+				        [this](int) { positionGnssStatusOverlay(); });
+				connect(host_window, &QWindow::safeAreaMarginsChanged,
+				        gnss_status_overlay,
+				        [this](QMargins) { positionGnssStatusOverlay(); });
+			}
+#endif
 		}
 		else
 		{
@@ -4142,17 +4179,7 @@ void MapEditorController::enableGPSDisplay(bool enable)
 			auto& controller = GnssController::instance();
 			controller.connectExternal(window);
 			gps_display->setGnssSession(controller.session());
-			if (gnss_status_overlay && controller.session())
-			{
-				connect(controller.session(), &GnssSession::stateChanged,
-				        gnss_status_overlay,
-				        &GnssStatusOverlay::updateState,
-				        Qt::UniqueConnection);
-				gnss_status_overlay->updateState(
-				  controller.session()->currentState());
-				gnss_status_overlay->show();
-				positionGnssStatusOverlay();
-			}
+			refreshGnssStatusOverlay();
 		}
 		else
 		{
@@ -4255,8 +4282,7 @@ void MapEditorController::enableGPSDisplay(bool enable)
 		gps_display->stopUpdates();
 		gps_display->setGnssSession(nullptr);
 		GnssController::instance().disconnectExternal();
-		if (gnss_status_overlay)
-			gnss_status_overlay->hide();
+		refreshGnssStatusOverlay();
 		
 		delete gps_track_recorder;
 		gps_track_recorder = nullptr;
@@ -4273,6 +4299,27 @@ void MapEditorController::enableGPSDisplay(bool enable)
 	gps_temporary_point_act->setEnabled(enable);
 	gps_temporary_path_act->setEnabled(enable);
 	updateDrawPointGPSAvailability();
+}
+
+void MapEditorController::refreshGnssStatusOverlay()
+{
+	if (!gnss_status_overlay)
+		return;
+
+	auto* session = GnssController::instance().session();
+	if (session)
+	{
+		connect(session, &GnssSession::stateChanged,
+		        gnss_status_overlay, &GnssStatusOverlay::updateState,
+		        Qt::UniqueConnection);
+		gnss_status_overlay->updateState(session->currentState());
+	}
+	else
+	{
+		gnss_status_overlay->updateState(GnssState{});
+	}
+	gnss_status_overlay->show();
+	positionGnssStatusOverlay();
 }
 
 bool MapEditorController::isGPSDisplayEnabled() const
@@ -4355,17 +4402,24 @@ void MapEditorController::positionGnssStatusOverlay()
 		return;
 	auto size = gnss_status_overlay->sizeHint();
 #if defined(Q_OS_IOS)
-	// Keep the control in the central widget's ordinary UIKit/Qt interaction
-	// layer. A child of MapWidget is hidden behind the native render surface;
-	// the window's top safe area is visible but owned by iOS for hit testing.
+	// Center the capsule vertically in the top safe area and anchor it in the
+	// right Dynamic Island shoulder. Its parent is MainWindow, not MapWidget,
+	// so the native map surface cannot obscure it or take its touch events.
 	auto* host = gnss_status_overlay->parentWidget();
-	auto map_origin = map_widget->mapTo(host, QPoint(0, 0));
-	auto left = std::max(map_origin.x(),
-	                     map_origin.x() + map_widget->width() - size.width()
-	                       - qRound(Util::mmToPixelLogical(6.0)));
-	auto top = map_origin.y() + qRound(Util::mmToPixelLogical(1.0));
+	QMargins safe_area;
+	if (auto* host_window = window->windowHandle())
+		safe_area = host_window->safeAreaMargins();
+	const auto shoulder_inset = qRound(Util::mmToPixelLogical(6.0));
+	auto right = host->width() - safe_area.right() - shoulder_inset;
+	auto left = std::max(safe_area.left(), right - size.width());
+	auto top = safe_area.top() > size.height()
+	         ? (safe_area.top() - size.height()) / 2
+	         : qRound(Util::mmToPixelLogical(1.0));
 	gnss_status_overlay->setGeometry(left, top,
 	                                 size.width(), size.height());
+	qInfo().nospace() << "GNSS status control positioned at "
+	                  << gnss_status_overlay->geometry()
+	                  << " with safe area " << safe_area;
 #else
 	auto top = top_action_bar && top_action_bar->isVisible()
 	           && top_action_bar->parentWidget() == map_widget

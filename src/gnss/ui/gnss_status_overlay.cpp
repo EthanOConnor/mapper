@@ -178,8 +178,8 @@ QSize GnssStatusOverlay::sizeHint() const
 	// Large enough to read and acquire one-handed while still fitting beside
 	// the portrait Dynamic Island on current iPhones. This is also the touch
 	// target, so do not shrink it back to a decorative status badge.
-	auto w = qRound(Util::mmToPixelLogical(31.0));
-	auto h = qRound(Util::mmToPixelLogical(11.0));
+	auto w = qRound(Util::mmToPixelLogical(33.0));
+	auto h = qRound(Util::mmToPixelLogical(11.5));
 #else
 	auto w = qRound(Util::mmToPixelLogical(64.0));
 	auto h = qRound(Util::mmToPixelLogical(15.0));
