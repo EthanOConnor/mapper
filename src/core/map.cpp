@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <type_traits>
 #include <utility>
@@ -84,6 +85,15 @@ QPointer<QTranslator> map_symbol_translator{};
 namespace {
 
 // ### Misc ###
+
+bool isRepresentableMapCoord(const MapCoordF& coord)
+{
+	constexpr auto minimum = std::numeric_limits<qint32>::lowest() / 1000.0;
+	constexpr auto maximum = std::numeric_limits<qint32>::max() / 1000.0;
+	return qIsFinite(coord.x()) && qIsFinite(coord.y())
+	       && coord.x() >= minimum && coord.x() <= maximum
+	       && coord.y() >= minimum && coord.y() <= maximum;
+}
 
 /** A record of information about the mapping of a color in a source MapColorSet
  *  to a color in a destination MapColorSet.
@@ -618,27 +628,38 @@ QHash<const Symbol*, Symbol*> Map::importMap(
 	QTransform q_transform;
 	if (mode.testFlag(GeorefImport))
 	{
-		/// \todo Test and review import of georeferenced and non-georeferenced maps, in all combinations.
 		/// \todo Handle rotation of patterns and text, cf. Object::transform.
 		const auto& georef = getGeoreferencing();
 		const auto& other_georef = imported_map.getGeoreferencing();
-		const auto src_origin = MapCoordF { other_georef.getMapRefPoint() };
-		
-		bool ok0, ok1, ok2;
-		PassPointList passpoints;
-		passpoints.resize(3);
-		passpoints[0].src_coords  = src_origin;
-		passpoints[0].dest_coords = georef.toMapCoordF(&other_georef, passpoints[0].src_coords, &ok0);
-		passpoints[1].src_coords  = src_origin + MapCoordF { 128.0, 0.0 }; // 128 mm off horizontally
-		passpoints[1].dest_coords = georef.toMapCoordF(&other_georef, passpoints[1].src_coords, &ok1);
-		passpoints[2].src_coords  = src_origin + MapCoordF { 0.0, 128.0 }; // 128 mm off vertically
-		passpoints[2].dest_coords = georef.toMapCoordF(&other_georef, passpoints[2].src_coords, &ok2);
-		if (ok0 && ok1 && ok2
-		    && !passpoints.estimateNonIsometricSimilarityTransform(&q_transform))
+
+		// A local map has no relationship to the destination CRS. Treat its
+		// coordinates as paper coordinates so that ordinary symbol/object maps can
+		// be imported and positioned by the user. Feeding local projected values
+		// into a geospatial destination can otherwise create an enormous or
+		// non-finite transform and overflow MapCoord.
+		if (georef.getState() == Georeferencing::Geospatial
+		    && other_georef.getState() == Georeferencing::Geospatial)
 		{
-			/// \todo proper error message
-			qDebug("Failed to calculate transformation");
-			q_transform.reset();
+			const auto src_origin = MapCoordF { other_georef.getMapRefPoint() };
+
+			bool ok0, ok1, ok2;
+			PassPointList passpoints;
+			passpoints.resize(3);
+			passpoints[0].src_coords  = src_origin;
+			passpoints[0].dest_coords = georef.toMapCoordF(&other_georef, passpoints[0].src_coords, &ok0);
+			passpoints[1].src_coords  = src_origin + MapCoordF { 128.0, 0.0 }; // 128 mm off horizontally
+			passpoints[1].dest_coords = georef.toMapCoordF(&other_georef, passpoints[1].src_coords, &ok1);
+			passpoints[2].src_coords  = src_origin + MapCoordF { 0.0, 128.0 }; // 128 mm off vertically
+			passpoints[2].dest_coords = georef.toMapCoordF(&other_georef, passpoints[2].src_coords, &ok2);
+			if (!(ok0 && ok1 && ok2
+			      && isRepresentableMapCoord(passpoints[0].dest_coords)
+			      && isRepresentableMapCoord(passpoints[1].dest_coords)
+			      && isRepresentableMapCoord(passpoints[2].dest_coords)
+			      && passpoints.estimateNonIsometricSimilarityTransform(&q_transform)))
+			{
+				qWarning("Failed to calculate a representable georeferenced import transformation; using paper coordinates");
+				q_transform.reset();
+			}
 		}
 	}
 	

@@ -28,6 +28,7 @@
 #include "test_config.h"
 
 #include "global.h"
+#include "core/georeferencing.h"
 #include "core/map.h"
 #include "core/map_color.h"
 #include "core/map_printer.h" // IWYU pragma: keep
@@ -297,6 +298,37 @@ void MapTest::importTest()
 	auto symbol_map = map.importMap(imported_map, Map::CompleteImport, nullptr, -1, false);
 	QCOMPARE(map.getNumObjects(), original_size + imported_map.getNumObjects());
 	QCOMPARE(symbol_map.size(), imported_map.getNumSymbols());
+}
+
+
+void MapTest::localMapImportUsesPaperCoordinates()
+{
+	Map imported_map;
+	Georeferencing local_georef;
+	local_georef.setScaleDenominator(4000);
+	imported_map.setGeoreferencing(local_georef);
+
+	auto* symbol = new PointSymbol();
+	imported_map.addSymbol(symbol, 0);
+	auto* object = new PointObject(symbol);
+	object->setPosition(MapCoord{15.0, 5.5});
+	imported_map.addObject(object);
+
+	Map destination;
+	Georeferencing web_mercator_georef;
+	web_mercator_georef.setScaleDenominator(4000);
+	QVERIFY(web_mercator_georef.setProjectedCRS(
+	        QStringLiteral("EPSG:3857"),
+	        QStringLiteral("+init=epsg:3857")));
+	web_mercator_georef.setProjectedRefPoint(
+	        QPointF{-13606211.511168, 6038983.930504});
+	destination.setGeoreferencing(web_mercator_georef);
+
+	destination.importMap(imported_map, Map::CompleteImport, nullptr, -1, false);
+	QCOMPARE(destination.getNumObjects(), 1);
+	const auto* imported_object = destination.getPart(0)->getObject(0)->asPoint();
+	QVERIFY(imported_object);
+	QCOMPARE(imported_object->getCoordF(), MapCoordF(15.0, 5.5));
 }
 
 
