@@ -36,6 +36,7 @@
 #include <QMouseEvent>
 #include <QPoint>
 #include <QPointF>
+#include <QStackedWidget>
 #include <QString>
 #include <QTimer>
 #include <QWheelEvent>
@@ -49,6 +50,7 @@
 #include "core/symbols/line_symbol.h"
 #include "core/symbols/point_symbol.h"
 #include "global.h"
+#include "settings.h"
 #include "gui/main_window.h"
 #include "gui/map/map_editor.h"
 #include "gui/map/map_find_feature.h"
@@ -306,6 +308,37 @@ void ToolsTest::framePublishesTemplateContextBeforeRasterCollection()
 	view->setZoom(view->getZoom() * std::sqrt(2.0));
 	QTRY_VERIFY_WITH_TIMEOUT(raster_ptr->collected, 1000);
 	QVERIFY(!raster_ptr->collected_without_context);
+}
+
+void ToolsTest::mobileSecondaryPagesReplaceMapSurface()
+{
+	auto& settings = Settings::getInstance();
+	const auto previous_touch_mode = settings.touchModeEnabled();
+	settings.setTouchModeEnabled(true);
+	{
+		auto* map = new Map;
+		map->addSymbol(new PointSymbol, 0);
+		TestMapEditor editor(map); // taking ownership
+		auto* pages = editor.window->findChild<QStackedWidget*>(
+		  QStringLiteral("mobileEditorPages"));
+		QVERIFY(pages);
+		QCOMPARE(pages->currentWidget()->objectName(), QString{});
+
+		editor.editor->mobileSymbolSelectorClicked();
+		QCOMPARE(pages->currentWidget()->objectName(),
+		         QStringLiteral("mobileSymbolPage"));
+		QVERIFY(pages->currentWidget() != editor.map_widget);
+
+		editor.editor->mobileSymbolSelectorFinished();
+		QCOMPARE(pages->currentIndex(), 0);
+		editor.editor->showMobileGnssDetails();
+		QCOMPARE(pages->currentWidget()->objectName(),
+		         QStringLiteral("mobileGnssPage"));
+		editor.editor->showMobileMapPage();
+		QCOMPARE(pages->currentIndex(), 0);
+	}
+	QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+	settings.setTouchModeEnabled(previous_touch_mode);
 }
 
 

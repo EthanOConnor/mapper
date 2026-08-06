@@ -10,6 +10,7 @@
 
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QHash>
 #include <QJsonDocument>
 #include <QTemporaryDir>
@@ -635,6 +636,7 @@ void MapHubProtocolFixtureTest::
   workspace.status = QStringLiteral("active");
 
   quint64 revision = 1;
+  bool working_copy_committed = false;
   MapHubSyncController controller;
   controller.configure(
       workspace, &map, [&revision] { return revision; },
@@ -648,9 +650,16 @@ void MapHubProtocolFixtureTest::
         }
         *saved_revision = revision;
         return true;
+      },
+      [&working_copy_committed](const QString &snapshot_path,
+                                qint64 expected_size, QString *error) {
+        Q_UNUSED(error)
+        working_copy_committed = QFileInfo(snapshot_path).size() == expected_size;
+        return working_copy_committed;
       });
   QVERIFY2(controller.state() != MapHubSyncController::State::ActionRequired,
            qPrintable(controller.stateText()));
+  QVERIFY(working_copy_committed);
   QString error;
   const auto staged = MapHubSyncQueue::load(workspace.workspace_id, &error);
   QVERIFY2(staged.isValid(), qPrintable(error));

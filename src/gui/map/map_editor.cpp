@@ -76,6 +76,7 @@
 #include <QPoint>
 #include <QPointer>
 #include <QPointF>
+#include <QPushButton>
 #include <QRect>
 #include <QRectF>
 #include <QSettings>
@@ -87,6 +88,7 @@
 #include <QSizePolicy>
 #include <QSplitter>
 #include <QStatusBar>
+#include <QStackedWidget>
 #include <QStringList>
 #include <QToolBar>
 #include <QToolButton>
@@ -345,6 +347,23 @@ bool isReadOnlySafeTool(const MapEditorTool* tool)
 	return !tool || tool->toolType() == MapEditorTool::Pan
 	       || tool->toolType() == MapEditorTool::BoxZoom
 	       || qobject_cast<const SketchTool*>(tool);
+}
+
+void keepMobilePageInsideSafeArea(MainWindow* window, QWidget* page,
+                                  QVBoxLayout* layout)
+{
+	auto apply_margins = [layout](const QMargins& safe_area) {
+		layout->setContentsMargins(
+		  safe_area.left() + 12,
+		  safe_area.top() + 8,
+		  safe_area.right() + 12,
+		  safe_area.bottom() + 8);
+	};
+	auto* host_window = window ? window->windowHandle() : nullptr;
+	apply_margins(host_window ? host_window->safeAreaMargins() : QMargins{});
+	if (host_window)
+		QObject::connect(host_window, &QWindow::safeAreaMarginsChanged,
+		                 page, apply_margins);
 }
 
 }  // namespace
@@ -1100,96 +1119,8 @@ void MapEditorController::attach(MainWindow* window)
 			  QStringLiteral("gnssMapStatusControl"));
 			gnss_status_overlay->setVisible(false);
 			connect(gnss_status_overlay, &QToolButton::clicked,
-			        this, [this](bool) {
-				qInfo("GNSS details panel requested");
-				auto& controller = GnssController::instance();
-				auto* session = controller.session();
-				auto* panel = new GnssDetailPanel();
-				panel->updateState(session ? session->currentState() : GnssState{});
-				panel->setRawCaptureActive(
-				  session && session->rawCaptureEnabled());
-				if (session)
-					connect(session, &GnssSession::stateChanged,
-					        panel, &GnssDetailPanel::updateState);
-				connect(&controller, &GnssController::sessionChanged,
-				        panel, [panel](GnssSession* new_session) {
-					panel->updateState(new_session
-					                   ? new_session->currentState()
-					                   : GnssState{});
-					panel->setRawCaptureActive(
-					  new_session && new_session->rawCaptureEnabled());
-					if (new_session)
-						connect(new_session, &GnssSession::stateChanged,
-						        panel, &GnssDetailPanel::updateState,
-						        Qt::UniqueConnection);
-				});
-				connect(panel,
-				        &GnssDetailPanel::ntripProfileChangeRequested,
-				        &controller,
-				        &GnssController::useNtripProfile);
-				connect(panel, &GnssDetailPanel::disconnectRequested,
-				        &controller,
-				        &GnssController::disconnectExternal);
-				connect(panel, &GnssDetailPanel::connectRequested,
-				        this, [this] {
-					if (!Settings::getInstance().positionSource()
-					          .startsWith(QLatin1String("external_")))
-						Settings::getInstance().setPositionSource(
-						  QStringLiteral("external_ble"));
-					if (gps_display_action
-					    && !gps_display_action->isChecked())
-						enableGPSDisplay(true);
-					else
-						GnssController::instance().connectExternal(getWindow());
-				});
-				connect(panel, &GnssDetailPanel::receiverChangeRequested,
-				        this, [this, panel] {
-					panel->hide();
-					QTimer::singleShot(0, this, [this, panel] {
-						deletePopupWidget(panel);
-						GnssController::instance().chooseExternalReceiver(getWindow());
-					});
-				});
-				connect(panel, &GnssDetailPanel::settingsRequested,
-				        this, [this, panel] {
-					panel->hide();
-					QTimer::singleShot(0, this, [this, panel] {
-						deletePopupWidget(panel);
-						SettingsDialog dialog(getWindow());
-						dialog.selectPage(tr("GNSS"));
-						dialog.exec();
-					});
-				});
-				connect(panel,
-				        &GnssDetailPanel::rawCaptureActionRequested,
-				        this, [panel] {
-					auto* active_session =
-					  GnssController::instance().session();
-					if (!active_session)
-					{
-						panel->setDumpStatus(
-						  tr("Connect a receiver before capturing GNSS traffic."));
-						return;
-					}
-					if (!active_session->rawCaptureEnabled())
-					{
-						active_session->setRawCaptureEnabled(true);
-						panel->setRawCaptureActive(true);
-						panel->setDumpStatus(
-						  tr("Capturing recent GNSS traffic."));
-						return;
-					}
-					auto path = active_session->dumpRawBuffer();
-					active_session->setRawCaptureEnabled(false);
-					panel->setRawCaptureActive(false);
-					panel->setDumpStatus(
-					  path.isEmpty()
-					    ? tr("No GNSS traffic was captured.")
-					    : path);
-				});
-				showPopupWidget(panel, tr("GNSS details"));
-				qInfo("GNSS details panel shown");
-			}, Qt::QueuedConnection);
+			        this, &MapEditorController::showMobileGnssDetails,
+			        Qt::QueuedConnection);
 			refreshGnssStatusOverlay();
 #if defined(Q_OS_IOS)
 			if (auto* host_window = window->windowHandle())
@@ -1233,7 +1164,30 @@ void MapEditorController::attach(MainWindow* window)
 		// Create/show the dock widgets
 		if (mobile_mode)
 		{
-			createSymbolWidget(window);
+			mobile_symbol_page = new QWidget(mobile_page_stack);
+			mobile_symbol_page->setObjectName(
+			  QStringLiteral("mobileSymbolPage"));
+			auto* symbol_page_layout = new QVBoxLayout(mobile_symbol_page);
+			keepMobilePageInsideSafeArea(
+			  window, mobile_symbol_page, symbol_page_layout);
+			symbol_page_layout->setSpacing(8);
+			auto* symbol_header = new QHBoxLayout;
+			auto* symbol_title = new QLabel(tr("Choose symbol"), mobile_symbol_page);
+			auto title_font = symbol_title->font();
+			title_font.setBold(true);
+			title_font.setPointSizeF(std::max(17.0, title_font.pointSizeF() + 3.0));
+			symbol_title->setFont(title_font);
+			auto* symbol_done = new QPushButton(tr("Done"), mobile_symbol_page);
+			symbol_done->setMinimumHeight(44);
+			symbol_header->addWidget(symbol_title);
+			symbol_header->addStretch();
+			symbol_header->addWidget(symbol_done);
+			symbol_page_layout->addLayout(symbol_header);
+			createSymbolWidget(mobile_symbol_page);
+			symbol_page_layout->addWidget(symbol_widget, 1);
+			mobile_page_stack->addWidget(mobile_symbol_page);
+			connect(symbol_done, &QPushButton::clicked,
+			        this, &MapEditorController::mobileSymbolSelectorFinished);
 
 			// Activate the map view pan tool
 			pan_act->setChecked(true);
@@ -2113,7 +2067,11 @@ void MapEditorController::createMobileGUI()
 	layout->addWidget(map_widget, 1);
 	layout->addWidget(bottom_action_bar);
 	container_widget->setLayout(layout);
-	window->setCentralWidget(container_widget);
+	mobile_map_page = container_widget;
+	mobile_page_stack = new QStackedWidget(window);
+	mobile_page_stack->setObjectName(QStringLiteral("mobileEditorPages"));
+	mobile_page_stack->addWidget(mobile_map_page);
+	window->setCentralWidget(mobile_page_stack);
 	top_action_bar->show();
 	top_action_bar->raise();
 	show_top_bar_button->hide();
@@ -2143,6 +2101,11 @@ void MapEditorController::detach()
 	compass_display = nullptr;
 	delete gps_marker_display;
 	gps_marker_display = nullptr;
+	mobile_gnss_panel = nullptr;
+	mobile_gnss_page = nullptr;
+	mobile_symbol_page = nullptr;
+	mobile_map_page = nullptr;
+	mobile_page_stack = nullptr;
 	
 	find_feature.reset(nullptr);
 	sketch_feature.reset(nullptr);
@@ -4189,7 +4152,7 @@ void MapEditorController::enableGPSDisplay(bool enable)
 		}
 		
 		// Create gps_track_recorder if we can determine a template track filename
-		constexpr int gps_track_draw_update_interval = 10 * 1000; // in milliseconds
+		constexpr int gps_track_draw_update_interval = 1000; // in milliseconds
 		if (! window->currentPath().isEmpty())
 		{
 			// Find or create a template for the track with a specific name
@@ -4268,14 +4231,31 @@ void MapEditorController::enableGPSDisplay(bool enable)
 					track->unloadTemplateFile();
 					track->loadTemplateFile();
 				}
-				map->addTemplate(template_index, std::unique_ptr<Template>{track});
-				// When the map is saved, the new track must be saved even if it is empty.
-				track->setHasUnsavedChanges(true);
+				else if (!track->writeTemplateFile(gpx_file_path))
+				{
+					QMessageBox::warning(
+					  window, tr("GPS track not created"),
+					  tr("Mapper could not create the live GPS track file. "
+					     "Your position can still be shown, but this session "
+					     "will not be recorded."));
+					delete track;
+					track = nullptr;
+				}
+				if (track)
+				{
+					track->setHasUnsavedChanges(false);
+					map->addTemplate(
+					  template_index, std::unique_ptr<Template>{track});
+				}
 			}
 			
-			main_view->setTemplateVisibility(track, visibility);
-			
-			gps_track_recorder = new GPSTrackRecorder(gps_display, track, gps_track_draw_update_interval, map_widget);
+			if (track)
+			{
+				main_view->setTemplateVisibility(track, visibility);
+				track->setTemplateAreaDirty();
+				gps_track_recorder = new GPSTrackRecorder(
+				  gps_display, track, gps_track_draw_update_interval, map_widget);
+			}
 		}
 	}
 	else
@@ -4319,8 +4299,12 @@ void MapEditorController::refreshGnssStatusOverlay()
 	{
 		gnss_status_overlay->updateState(GnssState{});
 	}
-	gnss_status_overlay->show();
-	positionGnssStatusOverlay();
+	const auto map_page_active = !mobile_mode || !mobile_page_stack
+	                          || mobile_page_stack->currentWidget()
+	                             == mobile_map_page;
+	gnss_status_overlay->setVisible(map_page_active);
+	if (map_page_active)
+		positionGnssStatusOverlay();
 }
 
 bool MapEditorController::isGPSDisplayEnabled() const
@@ -4494,18 +4478,151 @@ void MapEditorController::showTopActionBar()
 
 void MapEditorController::mobileSymbolSelectorClicked()
 {
-	// NOTE: this does not handle window resizes, however it is assumed that in
-	// mobile mode there is no window, instead the application is running fullscreen.
-	symbol_widget->setGeometry(window->rect());
-	symbol_widget->raise();
+	if (!mobile_page_stack || !mobile_symbol_page || !symbol_widget)
+		return;
+	if (show_top_bar_button)
+		show_top_bar_button->hide();
+	if (gnss_status_overlay)
+		gnss_status_overlay->hide();
 	symbol_widget->show();
+	mobile_page_stack->setCurrentWidget(mobile_symbol_page);
 	connect(symbol_widget, &SymbolWidget::selectedSymbolsChanged, this, &MapEditorController::mobileSymbolSelectorFinished);
 }
 
 void MapEditorController::mobileSymbolSelectorFinished()
 {
+	if (!symbol_widget)
+		return;
 	disconnect(symbol_widget, &SymbolWidget::selectedSymbolsChanged, this, &MapEditorController::mobileSymbolSelectorFinished);
-	symbol_widget->hide();
+	showMobileMapPage();
+}
+
+void MapEditorController::showMobileMapPage()
+{
+	if (!mobile_page_stack || !mobile_map_page)
+		return;
+	mobile_page_stack->setCurrentWidget(mobile_map_page);
+	if (show_top_bar_button)
+		show_top_bar_button->setVisible(top_action_bar && !top_action_bar->isVisible());
+	refreshGnssStatusOverlay();
+	positionGnssStatusOverlay();
+}
+
+void MapEditorController::showMobileGnssDetails()
+{
+	if (!mobile_page_stack || !mobile_map_page)
+		return;
+	qInfo("GNSS details screen requested");
+	if (!mobile_gnss_page)
+	{
+		mobile_gnss_page = new QWidget(mobile_page_stack);
+		mobile_gnss_page->setObjectName(QStringLiteral("mobileGnssPage"));
+		auto* page_layout = new QVBoxLayout(mobile_gnss_page);
+		keepMobilePageInsideSafeArea(window, mobile_gnss_page, page_layout);
+		page_layout->setSpacing(8);
+		auto* header = new QHBoxLayout;
+		auto* title = new QLabel(tr("GNSS receiver"), mobile_gnss_page);
+		auto title_font = title->font();
+		title_font.setBold(true);
+		title_font.setPointSizeF(std::max(17.0, title_font.pointSizeF() + 3.0));
+		title->setFont(title_font);
+		auto* done = new QPushButton(tr("Done"), mobile_gnss_page);
+		done->setMinimumHeight(44);
+		header->addWidget(title);
+		header->addStretch();
+		header->addWidget(done);
+		page_layout->addLayout(header);
+
+		mobile_gnss_panel = new GnssDetailPanel(mobile_gnss_page);
+		page_layout->addWidget(mobile_gnss_panel, 1);
+		mobile_page_stack->addWidget(mobile_gnss_page);
+		connect(done, &QPushButton::clicked,
+		        this, &MapEditorController::showMobileMapPage);
+
+		auto& controller = GnssController::instance();
+		connect(&controller, &GnssController::sessionChanged,
+		        mobile_gnss_panel,
+		        [panel = mobile_gnss_panel](GnssSession* session) {
+			panel->updateState(session ? session->currentState() : GnssState{});
+			panel->setRawCaptureActive(
+			  session && session->rawCaptureEnabled());
+			if (session)
+				connect(session, &GnssSession::stateChanged,
+				        panel, &GnssDetailPanel::updateState,
+				        Qt::UniqueConnection);
+		});
+		connect(mobile_gnss_panel,
+		        &GnssDetailPanel::ntripProfileChangeRequested,
+		        &controller, &GnssController::useNtripProfile);
+		connect(mobile_gnss_panel, &GnssDetailPanel::disconnectRequested,
+		        &controller, &GnssController::disconnectExternal);
+		connect(mobile_gnss_panel, &GnssDetailPanel::connectRequested,
+		        this, [this] {
+			if (!Settings::getInstance().positionSource()
+			      .startsWith(QLatin1String("external_")))
+				Settings::getInstance().setPositionSource(
+				  QStringLiteral("external_ble"));
+			if (gps_display_action && !gps_display_action->isChecked())
+				enableGPSDisplay(true);
+			else
+				GnssController::instance().connectExternal(getWindow());
+		});
+		connect(mobile_gnss_panel, &GnssDetailPanel::receiverChangeRequested,
+		        this, [this] {
+			showMobileMapPage();
+			QTimer::singleShot(0, this, [this] {
+				GnssController::instance().chooseExternalReceiver(getWindow());
+			});
+		});
+		connect(mobile_gnss_panel, &GnssDetailPanel::settingsRequested,
+		        this, [this] {
+			showMobileMapPage();
+			QTimer::singleShot(0, this, [this] {
+				SettingsDialog dialog(getWindow());
+				dialog.selectPage(tr("GNSS"));
+				dialog.exec();
+			});
+		});
+		connect(mobile_gnss_panel,
+		        &GnssDetailPanel::rawCaptureActionRequested,
+		        this, [panel = mobile_gnss_panel] {
+			auto* session = GnssController::instance().session();
+			if (!session)
+			{
+				panel->setDumpStatus(
+				  tr("Connect a receiver before capturing GNSS traffic."));
+				return;
+			}
+			if (!session->rawCaptureEnabled())
+			{
+				session->setRawCaptureEnabled(true);
+				panel->setRawCaptureActive(true);
+				panel->setDumpStatus(tr("Capturing recent GNSS traffic."));
+				return;
+			}
+			const auto path = session->dumpRawBuffer();
+			session->setRawCaptureEnabled(false);
+			panel->setRawCaptureActive(false);
+			panel->setDumpStatus(path.isEmpty()
+			                       ? tr("No GNSS traffic was captured.")
+			                       : path);
+		});
+	}
+
+	auto* session = GnssController::instance().session();
+	mobile_gnss_panel->updateState(
+	  session ? session->currentState() : GnssState{});
+	mobile_gnss_panel->setRawCaptureActive(
+	  session && session->rawCaptureEnabled());
+	if (session)
+		connect(session, &GnssSession::stateChanged,
+		        mobile_gnss_panel, &GnssDetailPanel::updateState,
+		        Qt::UniqueConnection);
+	if (show_top_bar_button)
+		show_top_bar_button->hide();
+	if (gnss_status_overlay)
+		gnss_status_overlay->hide();
+	mobile_page_stack->setCurrentWidget(mobile_gnss_page);
 }
 
 void MapEditorController::updateMapPartsUI()
@@ -4798,7 +4915,9 @@ void MapEditorController::setMapAndView(Map* map, MapView* map_view)
 	{
 		delete symbol_widget;
 		symbol_widget = nullptr;
-		createSymbolWidget();
+		createSymbolWidget(mobile_mode ? mobile_symbol_page : nullptr);
+		if (mobile_symbol_page && mobile_symbol_page->layout())
+			mobile_symbol_page->layout()->addWidget(symbol_widget);
 	}
 	
 	if (window)

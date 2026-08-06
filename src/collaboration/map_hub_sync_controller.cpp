@@ -399,7 +399,9 @@ MapHubSyncController::~MapHubSyncController() = default;
 void MapHubSyncController::configure(const ManagedMapWorkspace &new_workspace,
                                      Map *new_map,
                                      RevisionProvider new_revision_provider,
-                                     SnapshotProvider new_snapshot_provider) {
+                                     SnapshotProvider new_snapshot_provider,
+                                     WorkingCopyCommitter
+                                         new_working_copy_committer) {
   clear();
   if (!new_workspace.isValid() || !new_map || !new_revision_provider ||
       !new_snapshot_provider)
@@ -408,6 +410,7 @@ void MapHubSyncController::configure(const ManagedMapWorkspace &new_workspace,
   map = new_map;
   revision_provider = std::move(new_revision_provider);
   snapshot_provider = std::move(new_snapshot_provider);
+  working_copy_committer = std::move(new_working_copy_committer);
   observed_revision = revision_provider();
   operation_store = std::make_unique<MapHubOperationStore>();
   QString operation_error;
@@ -570,6 +573,7 @@ void MapHubSyncController::clear() {
   workspace = {};
   revision_provider = {};
   snapshot_provider = {};
+  working_copy_committer = {};
   observed_revision = 0;
   staged_revision = 0;
   semantic_revision = 0;
@@ -782,16 +786,17 @@ bool MapHubSyncController::stageSnapshotNow(bool resume_after_inbox) {
     setState(State::ActionRequired, queue_error);
     return false;
   }
-  // A connected workspace is an autosaved working copy. Keep the ordinary
-  // .omap path crash-consistent with the content-addressed recovery snapshot;
-  // immutable Map Hub history is still created only by an explicit checkpoint.
-  if (!copyFileAtomically(pending.snapshot_path, workspace.local_map_path,
-                          pending.size_bytes)) {
-    setState(State::ActionRequired,
-             tr("Your edit is preserved in Map Hub recovery storage, but "
-                "Mapper could not update the working .omap file"));
-    return false;
-  }
+  // A connected workspace is an autosaved working copy. On iOS the active
+  // document must be committed through UIDocument; replacing its path directly
+  // is reported back to Mapper as an external edit. The durable operation log
+  // and content-addressed snapshot remain authoritative if this best-effort
+  // presentation update has to wait for a provider conflict to be resolved.
+  QString working_copy_error;
+  const auto working_copy_saved = commitWorkingCopy(
+      pending.snapshot_path, pending.size_bytes, &working_copy_error);
+  if (!working_copy_saved && !working_copy_error.isEmpty())
+    qWarning("Map Hub working copy update deferred: %s",
+             qUtf8Printable(working_copy_error));
   if (!upload_pending)
     MapHubSyncQueue::pruneSnapshots(workspace.workspace_id,
                                     pending.snapshot_path, nullptr,
@@ -1812,8 +1817,9 @@ void MapHubSyncController::uploadPendingSnapshot() {
         saveWorkspace();
         if (revision_provider && revision_provider() == pending.map_revision &&
             operation_store && operation_store->pendingCount() == 0) {
-          if (copyFileAtomically(pending.snapshot_path,
-                                 workspace.local_map_path, pending.size_bytes))
+          QString working_copy_error;
+          if (commitWorkingCopy(pending.snapshot_path, pending.size_bytes,
+                                &working_copy_error))
             MapHubSyncQueue::remove(workspace.workspace_id);
         }
         setState(State::Synced, tr("Connected editing ready"));
@@ -2402,6 +2408,20 @@ bool MapHubSyncController::saveWorkspace() {
   setState(State::ActionRequired,
            tr("Could not update Map Hub sync metadata: %1").arg(error));
   return false;
+}
+
+bool MapHubSyncController::commitWorkingCopy(const QString &snapshot_path,
+                                             qint64 expected_size,
+                                             QString *error) {
+  if (error)
+    error->clear();
+  if (working_copy_committer)
+    return working_copy_committer(snapshot_path, expected_size, error);
+  const auto committed = copyFileAtomically(
+      snapshot_path, workspace.local_map_path, expected_size);
+  if (!committed && error)
+    *error = tr("Mapper could not update the working .omap file");
+  return committed;
 }
 
 } // namespace OpenOrienteering

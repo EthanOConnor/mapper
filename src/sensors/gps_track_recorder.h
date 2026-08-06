@@ -39,18 +39,21 @@ class GPSTrackRecorder : public QObject
 Q_OBJECT
 public:
 	GPSTrackRecorder(GPSDisplay* gps_display, TemplateTrack* target_template, int draw_update_interval_milliseconds = -1, MapWidget* widget = nullptr);
+	~GPSTrackRecorder() override;
 
 public slots:
 	void newPosition(double latitude, double longitude, double altitude, float accuracy);
 	void positionUpdatesInterrupted();
 	void templateDeleted(int pos, const OpenOrienteering::Template* old_temp);
 	void drawUpdate();
+	void persistUpdate();
 	
 private:
 	GPSDisplay* gps_display;
 	TemplateTrack* target_template;
 	MapWidget* widget;
 	QTimer draw_update_timer;
+	QTimer persist_timer;
 	bool track_changed_since_last_update;
 	bool is_active;
 };

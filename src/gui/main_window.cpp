@@ -1541,7 +1541,76 @@ void MainWindow::configureMapHubSync()
 				return false;
 			}
 			return true;
-		});
+		},
+#if defined(Q_OS_IOS)
+		[this](const QString& snapshot_path, qint64 expected_size,
+		       QString* error) {
+			if (error)
+				error->clear();
+			if (snapshot_path.isEmpty()
+			    || QFileInfo(snapshot_path).size() != expected_size)
+			{
+				if (error)
+					*error = tr("The connected-editing recovery snapshot did not verify.");
+				return false;
+			}
+			if (!presents_document || presented_document_deleted
+			    || provider_document_transaction_active
+			    || external_change_pending
+			    || AppleDocumentAccess::hasPresentedDocumentConflict())
+			{
+				if (error)
+					*error = tr("The document provider has a pending change.");
+				return false;
+			}
+
+			const auto transaction_token = presented_document_token;
+			const auto transaction_path = currentPath();
+			const auto transaction_generation =
+				presented_document_change_generation;
+			QByteArray receipt;
+			QString provider_error;
+			if (!AppleDocumentAccess::capturePresentedDocumentWriteReceipt(
+			      transaction_path, false, &receipt, &provider_error))
+			{
+				if (error)
+					*error = provider_error;
+				return false;
+			}
+
+			QString coordinated_path;
+			bool saved = false;
+			{
+				QScopedValueRollback<bool> transaction_guard{
+					provider_document_transaction_active, true};
+				saved = AppleDocumentAccess::writePresentedDocument(
+					transaction_path, snapshot_path, receipt, 0,
+					&coordinated_path, &provider_error);
+			}
+			replayPendingPresentedDocumentEvents();
+			const auto committed_path = coordinated_path.isEmpty()
+			                          ? transaction_path
+			                          : DocumentPath::canonical(coordinated_path);
+			const auto stable = saved
+			                    && presented_document_token == transaction_token
+			                    && presents_document
+			                    && !presented_document_deleted
+			                    && currentPath() == transaction_path
+			                    && committed_path == transaction_path
+			                    && presented_document_change_generation
+			                       == transaction_generation;
+			if (!stable && error)
+			{
+				*error = provider_error.isEmpty()
+				       ? tr("The document provider changed during autosave.")
+				       : provider_error;
+			}
+			return stable;
+		}
+#else
+		MapHubSyncController::WorkingCopyCommitter{}
+#endif
+	);
 	QTimer::singleShot(0, this, &MainWindow::refreshMapHubImageryCatalog);
 }
 

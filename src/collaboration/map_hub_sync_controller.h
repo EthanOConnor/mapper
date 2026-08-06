@@ -54,13 +54,16 @@ public:
   using RevisionProvider = std::function<quint64()>;
   using SnapshotProvider = std::function<bool(
       const QString &destination, quint64 *staged_revision, QString *error)>;
+  using WorkingCopyCommitter = std::function<bool(
+      const QString &snapshot_path, qint64 expected_size, QString *error)>;
 
   explicit MapHubSyncController(QObject *parent = nullptr);
   ~MapHubSyncController() override;
 
   void configure(const ManagedMapWorkspace &workspace, Map *map,
                  RevisionProvider revision_provider,
-                 SnapshotProvider snapshot_provider);
+                 SnapshotProvider snapshot_provider,
+                 WorkingCopyCommitter working_copy_committer = {});
   void clear();
   void applicationBecameActive();
   void applicationWillResignActive();
@@ -97,6 +100,8 @@ private:
   void retryWork();
   void setState(State state, const QString &text);
   bool saveWorkspace();
+  bool commitWorkingCopy(const QString &snapshot_path, qint64 expected_size,
+                         QString *error = nullptr);
   bool editable() const;
   bool enqueueOperations(QVector<MapHubEditOperation> operations,
                          QString *error);
@@ -122,6 +127,7 @@ private:
   QVector<QMetaObject::Connection> entity_connections;
   RevisionProvider revision_provider;
   SnapshotProvider snapshot_provider;
+  WorkingCopyCommitter working_copy_committer;
   QTimer *watch_timer;
   QTimer *snapshot_idle_timer;
   QTimer *snapshot_max_timer;
