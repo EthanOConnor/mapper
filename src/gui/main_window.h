@@ -357,6 +357,9 @@ public slots:
 	bool openMapHubReadOnly(const QString& source_path,
 	                       const MapHubReadOnlyDocument& document);
 
+	/** Fork the current immutable Map Hub revision into an ordinary local map. */
+	void openMapHubLocalCopy();
+
 	/** Persist native edit-access state for the current read-only map. */
 	void updateMapHubReadOnlyAccess(const QString& project_id,
 	                                const QJsonObject& request);
@@ -634,6 +637,7 @@ private:
 	MapHubSyncController* map_hub_sync = nullptr;
 	QLabel* map_hub_sync_label = nullptr;
 	bool map_hub_read_only = false;
+	bool map_hub_local_copy_in_progress = false;
 	bool map_hub_imagery_refresh_pending = false;
 	QLabel* status_label;
 	Toast* toast = nullptr;

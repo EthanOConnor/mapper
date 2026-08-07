@@ -57,6 +57,7 @@
 #include "gui/map/map_editor.h"
 #include "gui/map/map_find_feature.h"
 #include "gui/map/map_widget.h"
+#include "gui/widgets/symbol_widget.h"
 #include "templates/template_image.h"
 #include "tools/edit_point_tool.h"
 #include "tools/edit_tool.h"
@@ -347,8 +348,19 @@ void ToolsTest::mobileSecondaryPagesReplaceMapSurface()
 		editor.editor->showMobileMapPage();
 		QCOMPARE(pages->currentIndex(), 0);
 
+		auto* symbol_widget = editor.window->findChild<SymbolWidget*>();
+		QVERIFY(symbol_widget);
+		symbol_widget->selectSingleSymbol(map->getSymbol(0));
 		editor.editor->setReadOnly(true);
 		QVERIFY(symbol_button->isEnabled());
+		auto* draw_point = editor.editor->getAction("drawpoint");
+		QVERIFY(draw_point);
+		QVERIFY(draw_point->isEnabled());
+		QVERIFY(!draw_point->isChecked());
+		draw_point->trigger();
+		QCoreApplication::processEvents();
+		QCOMPARE(editor.editor->getTool()->toolType(), MapEditorTool::Pan);
+		QVERIFY(!draw_point->isChecked());
 		symbol_button->click();
 		QCOMPARE(pages->currentWidget()->objectName(),
 		         QStringLiteral("mobileSymbolPage"));
@@ -356,6 +368,10 @@ void ToolsTest::mobileSecondaryPagesReplaceMapSurface()
 		  QStringLiteral("mobileSymbolReadOnlyLabel"));
 		QVERIFY(read_only_label);
 		QVERIFY(read_only_label->isVisible());
+		QVERIFY(read_only_label->text().contains(
+		  QStringLiteral("href=\"map-hub\"")));
+		QVERIFY(read_only_label->text().contains(
+		  QStringLiteral("href=\"local-copy\"")));
 		editor.editor->mobileSymbolSelectorFinished();
 		QCOMPARE(pages->currentIndex(), 0);
 	}

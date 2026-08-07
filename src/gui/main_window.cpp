@@ -144,7 +144,12 @@ MainWindow::MainWindow(bool as_main_window, QWidget* parent, Qt::WindowFlags fla
 	map_hub_sync_label->setTextFormat(Qt::RichText);
 	map_hub_sync_label->setOpenExternalLinks(false);
 	connect(map_hub_sync_label, &QLabel::linkActivated, this,
-	        [this] { showMapHub(); });
+	        [this](const QString& link) {
+		        if (link == QLatin1String("local-copy"))
+			        openMapHubLocalCopy();
+		        else
+			        showMapHub();
+	        });
 	statusBar()->addPermanentWidget(map_hub_sync_label);
 	statusBar()->setSizeGripEnabled(as_main_window);
 	updateToastEnabled();
@@ -1476,7 +1481,8 @@ void MainWindow::configureMapHubSync()
 			action = tr("Start editing");
 		}
 		map_hub_sync_label->setText(
-		  tr("%1 · <a href=\"map-hub\">%2</a>")
+		  tr("%1 · <a href=\"map-hub\">%2</a> · "
+		     "<a href=\"local-copy\">Open local copy</a>")
 		    .arg(state.toHtmlEscaped(), action.toHtmlEscaped()));
 		map_hub_sync_label->setToolTip(
 		  tr("This verified Map Hub revision cannot be changed locally."));
@@ -3316,7 +3322,7 @@ bool MainWindow::save()
 
 bool MainWindow::saveTo(const QString &path, const FileFormat& format)
 {
-	if (map_hub_read_only)
+	if (map_hub_read_only && !map_hub_local_copy_in_progress)
 	{
 		QMessageBox::information(
 		  this, tr("Read-only Map Hub map"),
@@ -4045,7 +4051,7 @@ bool MainWindow::exportPresentedDocument(
 
 bool MainWindow::showSaveAsDialog()
 {
-	if (map_hub_read_only)
+	if (map_hub_read_only && !map_hub_local_copy_in_progress)
 	{
 		QMessageBox::information(
 		  this, tr("Read-only Map Hub map"),
@@ -4182,6 +4188,23 @@ bool MainWindow::showSaveAsDialog()
 		path = format->fixupExtension(path);
 #endif
 	return saveTo(path, *format);
+}
+
+void MainWindow::openMapHubLocalCopy()
+{
+	if (!map_hub_read_only || map_hub_local_copy_in_progress)
+		return;
+
+	map_hub_local_copy_in_progress = true;
+	auto reset = qScopeGuard(
+	  [this] { map_hub_local_copy_in_progress = false; });
+	if (showSaveAsDialog())
+	{
+		showStatusBarMessage(
+		  tr("Opened an independent local copy. Map Hub will not receive "
+		     "changes from this file."),
+		  8000);
+	}
 }
 
 void MainWindow::toggleFullscreenMode()

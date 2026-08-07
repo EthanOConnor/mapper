@@ -492,7 +492,11 @@ void MapEditorController::setReadOnly(bool value)
 		setEditorActivity(nullptr);
 		setOverrideTool(nullptr);
 		if (!isReadOnlySafeTool(current_tool))
+		{
+			if (current_tool && current_tool->toolAction())
+				current_tool->toolAction()->setChecked(false);
 			setTool(new PanTool(this, pan_act));
+		}
 	}
 
 	if (symbol_widget)
@@ -526,8 +530,26 @@ void MapEditorController::setTool(MapEditorTool* new_tool)
 {
 	if (read_only && !isReadOnlySafeTool(new_tool))
 	{
+		const QPointer<QAction> blocked_action =
+		  new_tool ? new_tool->toolAction() : nullptr;
+		const QPointer<QAction> active_action =
+		  current_tool ? current_tool->toolAction() : nullptr;
+		if (blocked_action)
+			blocked_action->setChecked(false);
+		if (active_action)
+			active_action->setChecked(true);
+		QTimer::singleShot(0, this, [blocked_action, active_action] {
+			if (blocked_action)
+				blocked_action->setChecked(false);
+			if (active_action)
+				active_action->setChecked(true);
+		});
 		if (new_tool)
 			new_tool->deleteLater();
+		window->showStatusBarMessage(
+		  tr("Read-only Map Hub map — request edit access or open a local "
+		     "copy to use map-editing tools."),
+		  6000);
 		return;
 	}
 
@@ -571,8 +593,26 @@ void MapEditorController::setOverrideTool(MapEditorTool* new_override_tool)
 {
 	if (read_only && !isReadOnlySafeTool(new_override_tool))
 	{
+		const QPointer<QAction> blocked_action =
+		  new_override_tool ? new_override_tool->toolAction() : nullptr;
+		const QPointer<QAction> active_action =
+		  current_tool ? current_tool->toolAction() : nullptr;
+		if (blocked_action)
+			blocked_action->setChecked(false);
+		if (active_action)
+			active_action->setChecked(true);
+		QTimer::singleShot(0, this, [blocked_action, active_action] {
+			if (blocked_action)
+				blocked_action->setChecked(false);
+			if (active_action)
+				active_action->setChecked(true);
+		});
 		if (new_override_tool)
 			new_override_tool->deleteLater();
+		window->showStatusBarMessage(
+		  tr("Read-only Map Hub map — request edit access or open a local "
+		     "copy to use map-editing tools."),
+		  6000);
 		return;
 	}
 
@@ -1208,13 +1248,25 @@ void MapEditorController::attach(MainWindow* window)
 			symbol_header->addWidget(symbol_done);
 			symbol_page_layout->addLayout(symbol_header);
 			mobile_symbol_read_only_label = new QLabel(
-			  tr("Read-only map — browse symbols here. Request edit access "
-			     "to draw map objects."),
+			  tr("Read-only map — browse symbols here. "
+			     "<a href=\"map-hub\">Request edit access</a> or "
+			     "<a href=\"local-copy\">open a local copy</a> to draw map "
+			     "objects."),
 			  mobile_symbol_page);
 			mobile_symbol_read_only_label->setObjectName(
 			  QStringLiteral("mobileSymbolReadOnlyLabel"));
 			mobile_symbol_read_only_label->setWordWrap(true);
+			mobile_symbol_read_only_label->setTextFormat(Qt::RichText);
+			mobile_symbol_read_only_label->setOpenExternalLinks(false);
 			mobile_symbol_read_only_label->setVisible(read_only);
+			connect(
+			  mobile_symbol_read_only_label, &QLabel::linkActivated, this,
+			  [this](const QString& link) {
+				  if (link == QLatin1String("local-copy"))
+					  this->window->openMapHubLocalCopy();
+				  else
+					  this->window->showMapHub();
+			  });
 			symbol_page_layout->addWidget(mobile_symbol_read_only_label);
 			createSymbolWidget(mobile_symbol_page);
 			symbol_page_layout->addWidget(symbol_widget, 1);
@@ -1285,12 +1337,6 @@ QAction* MapEditorController::newToolAction(const char* id, const QString &tr_te
 	if (whats_this_link) action->setWhatsThis(Util::makeWhatThis(whats_this_link));
 	if (receiver) QObject::connect(action, SIGNAL(activated()), receiver, slot);
 	actionsById[id] = action;
-	const auto action_id = QByteArray(id);
-	connect(action, &QAction::changed, this, [this, action, action_id] {
-		if (read_only && !isReadOnlySafeAction(action_id)
-		    && action->isEnabled())
-			action->setEnabled(false);
-	});
 	return action;
 }
 
@@ -4992,7 +5038,8 @@ void MapEditorController::enforceReadOnlyActions()
 
 	for (auto it = actionsById.cbegin(); it != actionsById.cend(); ++it)
 	{
-		if (!isReadOnlySafeAction(it.key()))
+		if (!isReadOnlySafeAction(it.key())
+		    && !qobject_cast<MapEditorToolAction*>(it.value()))
 			it.value()->setEnabled(false);
 	}
 	if (mappart_add_act)
