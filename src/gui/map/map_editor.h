@@ -908,6 +908,7 @@ private:
 	QAction* mobile_symbol_selector_action;
 	QMenu* mobile_symbol_button_menu;
 	QToolButton* mobile_symbol_details_button = nullptr;
+	QLabel* mobile_symbol_read_only_label = nullptr;
 	QStackedWidget* mobile_page_stack = nullptr;
 	QWidget* mobile_map_page = nullptr;
 	QWidget* mobile_symbol_page = nullptr;

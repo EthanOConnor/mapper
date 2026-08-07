@@ -496,10 +496,16 @@ void MapEditorController::setReadOnly(bool value)
 	}
 
 	if (symbol_widget)
-		symbol_widget->setEnabled(!read_only && !editing_in_progress);
+		symbol_widget->setEnabled(!editing_in_progress
+		                          && (!read_only || mobile_mode));
 	if (mobile_symbol_selector_action)
-		mobile_symbol_selector_action->setEnabled(!read_only
-		                                          && !editing_in_progress);
+		mobile_symbol_selector_action->setEnabled(!editing_in_progress);
+	if (mobile_symbol_read_only_label)
+		mobile_symbol_read_only_label->setVisible(read_only);
+	if (mobile_symbol_details_button)
+		mobile_symbol_details_button->setEnabled(
+		  !read_only && !editing_in_progress && symbol_widget
+		  && symbol_widget->getSingleSelectedSymbol());
 	if (color_dock_widget && color_dock_widget->widget())
 		color_dock_widget->widget()->setEnabled(!read_only
 		                                        && !editing_in_progress);
@@ -623,9 +629,14 @@ void MapEditorController::setEditingInProgress(bool value)
 		// Widgets
 		map_widget->setGesturesEnabled(!editing_in_progress);
 		Q_ASSERT(symbol_widget);
-		symbol_widget->setEnabled(!editing_in_progress);
+		symbol_widget->setEnabled(!editing_in_progress
+		                          && (!read_only || mobile_mode));
 		if (isInMobileMode())
 			mobile_symbol_selector_action->setEnabled(!editing_in_progress);
+		if (mobile_symbol_details_button)
+			mobile_symbol_details_button->setEnabled(
+			  !read_only && !editing_in_progress
+			  && symbol_widget->getSingleSelectedSymbol());
 		if (color_dock_widget)
 			color_dock_widget->widget()->setEnabled(!editing_in_progress);
 		if (mappart_selector_box)
@@ -1196,6 +1207,15 @@ void MapEditorController::attach(MainWindow* window)
 			symbol_header->addWidget(mobile_symbol_details_button);
 			symbol_header->addWidget(symbol_done);
 			symbol_page_layout->addLayout(symbol_header);
+			mobile_symbol_read_only_label = new QLabel(
+			  tr("Read-only map — browse symbols here. Request edit access "
+			     "to draw map objects."),
+			  mobile_symbol_page);
+			mobile_symbol_read_only_label->setObjectName(
+			  QStringLiteral("mobileSymbolReadOnlyLabel"));
+			mobile_symbol_read_only_label->setWordWrap(true);
+			mobile_symbol_read_only_label->setVisible(read_only);
+			symbol_page_layout->addWidget(mobile_symbol_read_only_label);
 			createSymbolWidget(mobile_symbol_page);
 			symbol_page_layout->addWidget(symbol_widget, 1);
 			mobile_page_stack->addWidget(mobile_symbol_page);
@@ -4499,7 +4519,9 @@ void MapEditorController::mobileSymbolSelectorClicked()
 		gnss_status_overlay->hide();
 	symbol_widget->show();
 	mobile_page_stack->setCurrentWidget(mobile_symbol_page);
-	connect(symbol_widget, &SymbolWidget::selectedSymbolsChanged, this, &MapEditorController::mobileSymbolSelectorFinished);
+	if (!read_only)
+		connect(symbol_widget, &SymbolWidget::selectedSymbolsChanged, this,
+		        &MapEditorController::mobileSymbolSelectorFinished);
 }
 
 void MapEditorController::mobileSymbolSelectorFinished()
@@ -4973,8 +4995,6 @@ void MapEditorController::enforceReadOnlyActions()
 		if (!isReadOnlySafeAction(it.key()))
 			it.value()->setEnabled(false);
 	}
-	if (mobile_symbol_selector_action)
-		mobile_symbol_selector_action->setEnabled(false);
 	if (mappart_add_act)
 		mappart_add_act->setEnabled(false);
 	if (mappart_rename_act)

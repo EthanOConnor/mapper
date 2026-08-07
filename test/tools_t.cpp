@@ -32,6 +32,7 @@
 #include <QApplication>
 #include <QDialog>
 #include <QEvent>
+#include <QLabel>
 #include <QListWidget>
 #include <QMouseEvent>
 #include <QPoint>
@@ -344,6 +345,18 @@ void ToolsTest::mobileSecondaryPagesReplaceMapSurface()
 		QCOMPARE(pages->currentWidget()->objectName(),
 		         QStringLiteral("mobileGnssPage"));
 		editor.editor->showMobileMapPage();
+		QCOMPARE(pages->currentIndex(), 0);
+
+		editor.editor->setReadOnly(true);
+		QVERIFY(symbol_button->isEnabled());
+		symbol_button->click();
+		QCOMPARE(pages->currentWidget()->objectName(),
+		         QStringLiteral("mobileSymbolPage"));
+		auto* read_only_label = editor.window->findChild<QLabel*>(
+		  QStringLiteral("mobileSymbolReadOnlyLabel"));
+		QVERIFY(read_only_label);
+		QVERIFY(read_only_label->isVisible());
+		editor.editor->mobileSymbolSelectorFinished();
 		QCOMPARE(pages->currentIndex(), 0);
 	}
 	QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
