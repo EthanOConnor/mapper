@@ -1179,8 +1179,21 @@ void MapEditorController::attach(MainWindow* window)
 			symbol_title->setFont(title_font);
 			auto* symbol_done = new QPushButton(tr("Done"), mobile_symbol_page);
 			symbol_done->setMinimumHeight(44);
+			mobile_symbol_details_button = new QToolButton(mobile_symbol_page);
+			mobile_symbol_details_button->setObjectName(
+			  QStringLiteral("mobileSymbolDetailsButton"));
+			mobile_symbol_details_button->setIcon(
+			  ActionIcon::fromName(u"three-dots"));
+			mobile_symbol_details_button->setToolTip(tr("Symbol details"));
+			mobile_symbol_details_button->setAutoRaise(true);
+			mobile_symbol_details_button->setMinimumSize(44, 44);
+			mobile_symbol_details_button->setMenu(mobile_symbol_button_menu);
+			mobile_symbol_details_button->setPopupMode(
+			  QToolButton::InstantPopup);
+			mobile_symbol_details_button->setEnabled(false);
 			symbol_header->addWidget(symbol_title);
 			symbol_header->addStretch();
+			symbol_header->addWidget(mobile_symbol_details_button);
 			symbol_header->addWidget(symbol_done);
 			symbol_page_layout->addLayout(symbol_header);
 			createSymbolWidget(mobile_symbol_page);
@@ -1979,7 +1992,7 @@ void MapEditorController::createMobileGUI()
 	// Right side
 	bottom_action_bar->addActionAtEnd(mobile_symbol_selector_action, 0, 1, 2, 2);
 	auto* button = bottom_action_bar->getButtonForAction(mobile_symbol_selector_action);
-	button->setPopupMode(QToolButton::DelayedPopup);
+	button->setObjectName(QStringLiteral("mobileSymbolPickerButton"));
 	
 	col = 2;
 	bottom_action_bar->addActionAtEnd(draw_point_act, 0, col);
@@ -2988,8 +3001,6 @@ void MapEditorController::selectedSymbolsChanged()
 	
 	if (mobile_mode)
 	{
-		auto* symbol_button = bottom_action_bar->getButtonForAction(mobile_symbol_selector_action);
-		        
 		// (Re-)create the mobile_symbol_selector_action icon
 		QSize icon_size = bottom_action_bar->getIconSize(2, 2);
 		QPixmap pixmap(icon_size);
@@ -3007,7 +3018,8 @@ void MapEditorController::selectedSymbolsChanged()
 				tr("Multiple\nsymbols\nselected");
 			painter.drawText(pixmap.rect(), Qt::AlignCenter, text);
 			
-			symbol_button->setMenu(nullptr);
+			if (mobile_symbol_details_button)
+				mobile_symbol_details_button->setEnabled(false);
 		}
 		else //if (symbol_widget->getNumSelectedSymbols() == 1)
 		{
@@ -3028,7 +3040,8 @@ void MapEditorController::selectedSymbolsChanged()
 			}
 			pixmap = QPixmap::fromImage(image);
 			
-			symbol_button->setMenu(mobile_symbol_button_menu);
+			if (mobile_symbol_details_button)
+				mobile_symbol_details_button->setEnabled(!read_only);
 			const auto actions = mobile_symbol_button_menu->actions();
 			int i = 0;
 			actions[i]->setText(symbol->getNumberAndPlainTextName());

@@ -39,6 +39,7 @@
 #include <QStackedWidget>
 #include <QString>
 #include <QTimer>
+#include <QToolButton>
 #include <QWheelEvent>
 
 #include "core/map.h"
@@ -319,12 +320,20 @@ void ToolsTest::mobileSecondaryPagesReplaceMapSurface()
 		auto* map = new Map;
 		map->addSymbol(new PointSymbol, 0);
 		TestMapEditor editor(map); // taking ownership
+		editor.window->resize(844, 390);
+		editor.window->show();
+		QCoreApplication::processEvents();
 		auto* pages = editor.window->findChild<QStackedWidget*>(
 		  QStringLiteral("mobileEditorPages"));
+		auto* symbol_button = editor.window->findChild<QToolButton*>(
+		  QStringLiteral("mobileSymbolPickerButton"));
 		QVERIFY(pages);
+		QVERIFY(symbol_button);
+		QVERIFY(symbol_button->isEnabled());
+		QVERIFY(!symbol_button->menu());
 		QCOMPARE(pages->currentWidget()->objectName(), QString{});
 
-		editor.editor->mobileSymbolSelectorClicked();
+		symbol_button->click();
 		QCOMPARE(pages->currentWidget()->objectName(),
 		         QStringLiteral("mobileSymbolPage"));
 		QVERIFY(pages->currentWidget() != editor.map_widget);
