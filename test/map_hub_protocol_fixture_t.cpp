@@ -6,17 +6,30 @@
 
 #include "map_hub_protocol_fixture_t.h"
 
+#include <algorithm>
+#include <functional>
+
 #include <QtTest>
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QHash>
+#include <QHostAddress>
+#include <QJsonArray>
 #include <QJsonDocument>
+#include <QPointer>
+#include <QRegularExpression>
+#include <QStandardPaths>
+#include <QTcpServer>
+#include <QTcpSocket>
 #include <QTemporaryDir>
+#include <QTimer>
 #include <QUuid>
 #include <QXmlStreamReader>
 
 #include "collaboration/managed_map_workspace.h"
+#include "collaboration/map_hub_credentials.h"
 #include "collaboration/map_hub_edit_transaction.h"
 #include "collaboration/map_hub_entity_index.h"
 #include "collaboration/map_hub_operation_store.h"
@@ -33,6 +46,178 @@
 #include "undo/undo.h"
 
 using namespace OpenOrienteering;
+
+namespace {
+
+class FixtureHttpServer final : public QObject {
+public:
+  using Handler = std::function<void(const QByteArray &, QTcpSocket *)>;
+
+  FixtureHttpServer() {
+    connect(&server, &QTcpServer::newConnection, this, [this] {
+      while (auto *socket = server.nextPendingConnection()) {
+        connect(socket, &QTcpSocket::disconnected, socket,
+                &QObject::deleteLater);
+        connect(socket, &QTcpSocket::readyRead, socket,
+                [this, socket, bytes = QByteArray{}, handled = false]() mutable {
+                  if (handled)
+                    return;
+                  bytes.append(socket->readAll());
+                  const auto header_end = bytes.indexOf("\r\n\r\n");
+                  if (header_end < 0)
+                    return;
+                  const QRegularExpression length_pattern(
+                      QStringLiteral("(?im)^Content-Length:\\s*(\\d+)\\s*$"));
+                  const auto match = length_pattern.match(
+                      QString::fromLatin1(bytes.left(header_end)));
+                  const auto content_length =
+                      match.hasMatch() ? match.captured(1).toLongLong() : 0;
+                  if (bytes.size() < header_end + 4 + content_length)
+                    return;
+                  handled = true;
+                  if (handler)
+                    handler(bytes, socket);
+                });
+      }
+    });
+  }
+
+  bool start() { return server.listen(QHostAddress::LocalHost); }
+  QString url() const {
+    return QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort());
+  }
+  QString errorString() const { return server.errorString(); }
+  void setHandler(Handler new_handler) { handler = std::move(new_handler); }
+
+  static void respond(QTcpSocket *socket, int status,
+                      const QByteArray &body = {},
+                      const QByteArray &extra_headers = {}) {
+    const auto reason = status == 304 ? QByteArrayLiteral("Not Modified")
+                                      : QByteArrayLiteral("OK");
+    socket->write(QByteArray("HTTP/1.1 ") + QByteArray::number(status) +
+                  QByteArray(" ") + reason +
+                  QByteArray("\r\nContent-Type: application/json\r\n") +
+                  extra_headers +
+                  QByteArray("Content-Length: ") +
+                  QByteArray::number(body.size()) +
+                  QByteArray("\r\nConnection: close\r\n\r\n") + body);
+    socket->disconnectFromHost();
+  }
+
+private:
+  QTcpServer server;
+  Handler handler;
+};
+
+QJsonObject requestBody(const QByteArray &request) {
+  const auto header_end = request.indexOf("\r\n\r\n");
+  if (header_end < 0)
+    return {};
+  return QJsonDocument::fromJson(request.mid(header_end + 4)).object();
+}
+
+ManagedMapWorkspace fixtureWorkspace(const QString &map_path,
+                                     const QString &server_url,
+                                     const QString &workspace_id) {
+  ManagedMapWorkspace workspace;
+  workspace.local_map_path = map_path;
+  workspace.server_url = server_url;
+  workspace.project_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+  workspace.work_package_id =
+      QUuid::createUuid().toString(QUuid::WithoutBraces);
+  workspace.workspace_id = workspace_id;
+  workspace.base_revision_id =
+      QUuid::createUuid().toString(QUuid::WithoutBraces);
+  workspace.active_revision_id = workspace.base_revision_id;
+  workspace.project_revision_id =
+      QUuid::createUuid().toString(QUuid::WithoutBraces);
+  workspace.stream_protocol = QStringLiteral("oom-map-ops/1");
+  workspace.stream_head_hash = QString(64, QLatin1Char('0'));
+  workspace.minimum_available_sequence = 1;
+  workspace.status = QStringLiteral("active");
+  workspace.sync_etag = QStringLiteral("\"fixture-v1\"");
+  return workspace;
+}
+
+QByteArray syncStateResponse(const ManagedMapWorkspace &workspace,
+                             const QString &status,
+                             const QJsonArray &presence = {},
+                             int presence_ttl_seconds = 90) {
+  const QJsonObject response{
+      {QStringLiteral("canonical_json"), QStringLiteral("oom-json/1")},
+      {QStringLiteral("protocol"), QStringLiteral("oom-map-ops/1")},
+      {QStringLiteral("server_time"),
+       QStringLiteral("2026-08-10T20:00:00Z")},
+      {QStringLiteral("sync"),
+       QJsonObject{{QStringLiteral("poll_after_ms"), 30'000},
+                   {QStringLiteral("idle_poll_after_ms"), 120'000},
+                   {QStringLiteral("presence_ttl_seconds"),
+                    presence_ttl_seconds}}},
+      {QStringLiteral("presence"), presence},
+      {QStringLiteral("workspace"),
+       QJsonObject{{QStringLiteral("status"), status}}},
+      {QStringLiteral("workspace_revision"),
+       QJsonObject{{QStringLiteral("id"), workspace.active_revision_id}}},
+      {QStringLiteral("project_revision"),
+       QJsonObject{{QStringLiteral("id"), workspace.project_revision_id}}},
+      {QStringLiteral("stream"),
+       QJsonObject{{QStringLiteral("head_sequence"), 0},
+                   {QStringLiteral("head_hash"),
+                    QString(64, QLatin1Char('0'))},
+                   {QStringLiteral("minimum_available_sequence"), 1},
+                   {QStringLiteral("initial_snapshot_required"), true},
+                   {QStringLiteral("uncompacted_operations"), 0},
+                   {QStringLiteral("compaction_recommended"), false},
+                   {QStringLiteral("compaction_required"), false}}},
+      {QStringLiteral("lease"),
+       QJsonObject{{QStringLiteral("valid"), true},
+                   {QStringLiteral("expires_at"),
+                    QStringLiteral("2026-08-11T20:00:00Z")}}},
+  };
+  return QJsonDocument(response).toJson(QJsonDocument::Compact);
+}
+
+} // namespace
+
+void MapHubProtocolFixtureTest::initTestCase() {
+  QCoreApplication::setOrganizationName(QStringLiteral("OpenOrienteeringTest"));
+  QCoreApplication::setApplicationName(
+      QStringLiteral("MapperMapHubProtocolFixtureTest"));
+  QStandardPaths::setTestModeEnabled(true);
+}
+
+void MapHubProtocolFixtureTest::operationStoreHonorsRequestedClientIdentity() {
+  QTemporaryDir directory;
+  QVERIFY(directory.isValid());
+  const auto prior_root = qgetenv("MAPPER_MAP_HUB_SYNC_ROOT");
+  qputenv("MAPPER_MAP_HUB_SYNC_ROOT", directory.path().toUtf8());
+  const auto workspace_id =
+      QStringLiteral("60000000-0000-4000-8000-000000000090");
+  const auto client_instance_id =
+      QStringLiteral("40000000-0000-4000-8000-000000000090");
+  const auto other_client_instance_id =
+      QStringLiteral("40000000-0000-4000-8000-000000000099");
+
+  QString error;
+  MapHubOperationStore store;
+  QVERIFY2(store.open(workspace_id, client_instance_id, &error),
+           qPrintable(error));
+  QCOMPARE(store.state(&error).client_instance_id, client_instance_id);
+  QVERIFY2(error.isEmpty(), qPrintable(error));
+  store.close();
+
+  QVERIFY(!store.open(workspace_id, other_client_instance_id, &error));
+  QVERIFY(!error.isEmpty());
+  error.clear();
+  QVERIFY2(store.open(workspace_id, client_instance_id, &error),
+           qPrintable(error));
+  QCOMPARE(store.state(&error).client_instance_id, client_instance_id);
+
+  if (prior_root.isNull())
+    qunsetenv("MAPPER_MAP_HUB_SYNC_ROOT");
+  else
+    qputenv("MAPPER_MAP_HUB_SYNC_ROOT", prior_root);
+}
 
 void MapHubProtocolFixtureTest::rejectsMalformedEntityIndexes() {
   MapHubEntityIndex index;
@@ -660,7 +845,11 @@ void MapHubProtocolFixtureTest::
   QCOMPARE(staged.base_stream_hash, QString(64, QLatin1Char('0')));
 
   map.getPart(0)->setName(QStringLiteral("Renamed field sheet"));
+  QCoreApplication::processEvents();
+  QCOMPARE(controller.pendingOperationCount(), 1);
   map.addSymbol(new PointSymbol(), map.getNumSymbols());
+  QCoreApplication::processEvents();
+  QCOMPARE(controller.pendingOperationCount(), 2);
   controller.clear();
 
   MapHubOperationStore store;
@@ -802,6 +991,1016 @@ void MapHubProtocolFixtureTest::controllerReplaysDurableRemoteInbox() {
   QVERIFY(verified.unappliedTransactions(&error).isEmpty());
   QVERIFY2(error.isEmpty(), qPrintable(error));
 
+  if (prior_sync_root.isNull())
+    qunsetenv("MAPPER_MAP_HUB_SYNC_ROOT");
+  else
+    qputenv("MAPPER_MAP_HUB_SYNC_ROOT", prior_sync_root);
+  if (prior_workspace_root.isNull())
+    qunsetenv("MAPPER_MANAGED_WORKSPACE_ROOT");
+  else
+    qputenv("MAPPER_MANAGED_WORKSPACE_ROOT", prior_workspace_root);
+}
+
+void MapHubProtocolFixtureTest::controllerRestoresStickyUpstreamConflict() {
+  const QDir test_directory(QStringLiteral(MAPPER_TEST_SOURCE_DIR));
+  const auto source = test_directory.filePath(
+      QStringLiteral("data/map-hub-bootstrap-source.omap"));
+  Map map;
+  XMLFileImporter importer(source, &map, nullptr);
+  QVERIFY2(importer.doImport(), qPrintable(source));
+
+  QTemporaryDir directory;
+  QVERIFY(directory.isValid());
+  const auto prior_sync_root = qgetenv("MAPPER_MAP_HUB_SYNC_ROOT");
+  const auto prior_workspace_root = qgetenv("MAPPER_MANAGED_WORKSPACE_ROOT");
+  qputenv("MAPPER_MAP_HUB_SYNC_ROOT", directory.path().toUtf8());
+  qputenv("MAPPER_MANAGED_WORKSPACE_ROOT", directory.path().toUtf8());
+
+  const auto map_path =
+      directory.filePath(QStringLiteral("sticky-upstream-conflict.omap"));
+  XMLFileExporter initial_exporter(map_path, &map, nullptr);
+  QVERIFY(initial_exporter.doExport());
+
+  ManagedMapWorkspace workspace;
+  workspace.local_map_path = map_path;
+  workspace.server_url = QStringLiteral("https://maps.example.test");
+  workspace.project_id = QStringLiteral("60000000-0000-4000-8000-000000000061");
+  workspace.work_package_id =
+      QStringLiteral("60000000-0000-4000-8000-000000000062");
+  workspace.workspace_id =
+      QStringLiteral("60000000-0000-4000-8000-000000000063");
+  workspace.base_revision_id =
+      QStringLiteral("50000000-0000-4000-8000-000000000061");
+  workspace.active_revision_id = workspace.base_revision_id;
+  workspace.project_revision_id =
+      QStringLiteral("50000000-0000-4000-8000-000000000062");
+  workspace.stream_protocol = QStringLiteral("oom-map-ops/1");
+  workspace.initial_snapshot_required = true;
+  workspace.stream_head_hash = QString(64, QLatin1Char('0'));
+  workspace.minimum_available_sequence = 1;
+  workspace.status = QStringLiteral("active");
+  workspace.sync_problem = QStringLiteral("entity_conflict");
+
+  QString error;
+  QVERIFY2(ManagedMapWorkspace::save(workspace, &error), qPrintable(error));
+  const auto persisted = ManagedMapWorkspace::loadForMap(map_path, &error);
+  QVERIFY2(persisted.isValid(), qPrintable(error));
+  QCOMPARE(persisted.sync_problem, QStringLiteral("entity_conflict"));
+
+  quint64 revision = 1;
+  int snapshot_count = 0;
+  MapHubSyncController controller;
+  controller.configure(
+      persisted, &map, [&revision] { return revision; },
+      [&map, &revision, &snapshot_count](const QString &destination,
+                                         quint64 *saved_revision,
+                                         QString *snapshot_error) {
+        ++snapshot_count;
+        XMLFileExporter exporter(destination, &map, nullptr);
+        if (!exporter.doExport()) {
+          if (snapshot_error)
+            *snapshot_error = QStringLiteral("Test export failed.");
+          return false;
+        }
+        *saved_revision = revision;
+        return true;
+      });
+  QCOMPARE(controller.state(), MapHubSyncController::State::UpstreamChanged);
+  QCOMPARE(controller.managedWorkspace().sync_problem,
+           QStringLiteral("entity_conflict"));
+
+  const auto snapshots_after_restore = snapshot_count;
+  ++revision;
+  map.getPart(0)->setName(QStringLiteral("Locally edited after conflict"));
+  QCOMPARE(controller.state(), MapHubSyncController::State::UpstreamChanged);
+  controller.savedExplicitly();
+  QTRY_VERIFY_WITH_TIMEOUT(snapshot_count > snapshots_after_restore, 3000);
+  QCOMPARE(controller.state(), MapHubSyncController::State::UpstreamChanged);
+  QCOMPARE(controller.managedWorkspace().sync_problem,
+           QStringLiteral("entity_conflict"));
+
+  const auto saved = ManagedMapWorkspace::loadForMap(map_path, &error);
+  QVERIFY2(saved.isValid(), qPrintable(error));
+  QCOMPARE(saved.sync_problem, QStringLiteral("entity_conflict"));
+  controller.clear();
+
+  if (prior_sync_root.isNull())
+    qunsetenv("MAPPER_MAP_HUB_SYNC_ROOT");
+  else
+    qputenv("MAPPER_MAP_HUB_SYNC_ROOT", prior_sync_root);
+  if (prior_workspace_root.isNull())
+    qunsetenv("MAPPER_MANAGED_WORKSPACE_ROOT");
+  else
+    qputenv("MAPPER_MANAGED_WORKSPACE_ROOT", prior_workspace_root);
+}
+
+void MapHubProtocolFixtureTest::controllerRetriesRequiredWorkingCopyCommit() {
+  const QDir test_directory(QStringLiteral(MAPPER_TEST_SOURCE_DIR));
+  const auto source = test_directory.filePath(
+      QStringLiteral("data/map-hub-bootstrap-source.omap"));
+  Map map;
+  XMLFileImporter importer(source, &map, nullptr);
+  QVERIFY2(importer.doImport(), qPrintable(source));
+
+  QTemporaryDir directory;
+  QVERIFY(directory.isValid());
+  const auto prior_sync_root = qgetenv("MAPPER_MAP_HUB_SYNC_ROOT");
+  const auto prior_workspace_root = qgetenv("MAPPER_MANAGED_WORKSPACE_ROOT");
+  qputenv("MAPPER_MAP_HUB_SYNC_ROOT", directory.path().toUtf8());
+  qputenv("MAPPER_MANAGED_WORKSPACE_ROOT", directory.path().toUtf8());
+
+  ManagedMapWorkspace workspace;
+  workspace.local_map_path =
+      directory.filePath(QStringLiteral("provider-obligation.omap"));
+  XMLFileExporter initial_exporter(workspace.local_map_path, &map, nullptr);
+  QVERIFY(initial_exporter.doExport());
+  workspace.server_url =
+      QStringLiteral("https://provider-obligation.example.test");
+  workspace.project_id = QStringLiteral("60000000-0000-4000-8000-000000000071");
+  workspace.work_package_id =
+      QStringLiteral("60000000-0000-4000-8000-000000000072");
+  workspace.workspace_id =
+      QStringLiteral("60000000-0000-4000-8000-000000000073");
+  workspace.base_revision_id =
+      QStringLiteral("50000000-0000-4000-8000-000000000071");
+  workspace.active_revision_id = workspace.base_revision_id;
+  workspace.project_revision_id =
+      QStringLiteral("50000000-0000-4000-8000-000000000072");
+  workspace.stream_protocol = QStringLiteral("oom-map-ops/1");
+  workspace.minimum_available_sequence = 1;
+  workspace.status = QStringLiteral("active");
+
+  MapHubEditTransaction remote;
+  remote.client_instance_id =
+      QStringLiteral("40000000-0000-4000-8000-000000000071");
+  remote.client_sequence = 1;
+  remote.transaction_id =
+      QStringLiteral("40000000-0000-4000-8000-000000000072");
+  remote.expected_stream_hash = QString(64, QLatin1Char('0'));
+  remote.expected_workspace_revision_id = workspace.active_revision_id;
+  remote.expected_project_revision_id = workspace.project_revision_id;
+  remote.operations = {
+      {MapHubEditOperation::Kind::PutPart,
+       map.getPart(0)->persistentId(),
+       {},
+       {},
+       1,
+       QStringLiteral("Recovered before provider write")},
+  };
+  QString error;
+  MapHubCommittedTransaction committed;
+  committed.transaction = remote;
+  committed.stream_sequence = 1;
+  committed.payload_sha256 = remote.payloadSha256(&error);
+  committed.stream_hash = MapHubOperationStore::chainHash(
+      remote.expected_stream_hash, committed.payload_sha256);
+  committed.committed_at = QStringLiteral("2026-08-10T20:00:00+00:00");
+  {
+    MapHubOperationStore store;
+    QVERIFY2(store.open(workspace.workspace_id, &error), qPrintable(error));
+    QVERIFY2(store.seedInitialProjection(map, &error), qPrintable(error));
+    QVERIFY2(store.rebaseOnto({committed}, &error), qPrintable(error));
+    QCOMPARE(store.unappliedTransactions(&error).size(), 1);
+  }
+  workspace.stream_head_sequence = committed.stream_sequence;
+  workspace.stream_head_hash = committed.stream_hash;
+
+  quint64 revision = 1;
+  bool provider_available = false;
+  int commit_attempts = 0;
+  QStringList attempted_paths;
+  QVector<qint64> attempted_sizes;
+  MapHubSyncController controller;
+  QSignalSpy states(&controller, &MapHubSyncController::stateChanged);
+  QVERIFY(states.isValid());
+  controller.configure(
+      workspace, &map, [&revision] { return revision; },
+      [&map, &revision](const QString &destination, quint64 *saved_revision,
+                        QString *snapshot_error) {
+        XMLFileExporter exporter(destination, &map, nullptr);
+        if (!exporter.doExport()) {
+          if (snapshot_error)
+            *snapshot_error = QStringLiteral("Test export failed.");
+          return false;
+        }
+        *saved_revision = revision;
+        return true;
+      },
+      [&provider_available, &commit_attempts, &attempted_paths,
+       &attempted_sizes](const QString &snapshot_path, qint64 expected_size,
+                         QString *commit_error) {
+        ++commit_attempts;
+        attempted_paths.push_back(snapshot_path);
+        attempted_sizes.push_back(expected_size);
+        if (provider_available)
+          return true;
+        if (commit_error)
+          *commit_error = QStringLiteral("The document provider is busy.");
+        return false;
+      });
+
+  QCOMPARE(commit_attempts, 1);
+  QCOMPARE(controller.state(), MapHubSyncController::State::ActionRequired);
+  QCOMPARE(controller.managedWorkspace().sync_problem,
+           QStringLiteral("working_copy_commit_required"));
+  const auto durable_draft =
+      MapHubSyncQueue::load(workspace.workspace_id, &error);
+  QVERIFY2(durable_draft.isValid(), qPrintable(error));
+  QCOMPARE(QFileInfo(attempted_paths.front()).canonicalFilePath(),
+           QFileInfo(durable_draft.snapshot_path).canonicalFilePath());
+  QCOMPARE(attempted_sizes.front(), durable_draft.size_bytes);
+  QVERIFY(QFileInfo::exists(durable_draft.snapshot_path));
+  for (const auto &event : std::as_const(states)) {
+    QVERIFY(event.at(0).toInt() !=
+            static_cast<int>(MapHubSyncController::State::Synced));
+  }
+  {
+    MapHubOperationStore store;
+    QVERIFY2(store.open(workspace.workspace_id, &error), qPrintable(error));
+    QCOMPARE(store.unappliedTransactions(&error).size(), 1);
+  }
+
+  provider_available = true;
+  controller.retryNow();
+  QTRY_COMPARE_WITH_TIMEOUT(commit_attempts, 2, 3000);
+  QCOMPARE(QFileInfo(attempted_paths.back()).canonicalFilePath(),
+           QFileInfo(durable_draft.snapshot_path).canonicalFilePath());
+  QCOMPARE(attempted_sizes.back(), durable_draft.size_bytes);
+  QTRY_VERIFY_WITH_TIMEOUT(
+      controller.state() != MapHubSyncController::State::ActionRequired, 3000);
+  QVERIFY(controller.managedWorkspace().sync_problem.isEmpty());
+  {
+    MapHubOperationStore store;
+    QVERIFY2(store.open(workspace.workspace_id, &error), qPrintable(error));
+    QVERIFY(store.unappliedTransactions(&error).isEmpty());
+  }
+  controller.clear();
+
+  if (prior_sync_root.isNull())
+    qunsetenv("MAPPER_MAP_HUB_SYNC_ROOT");
+  else
+    qputenv("MAPPER_MAP_HUB_SYNC_ROOT", prior_sync_root);
+  if (prior_workspace_root.isNull())
+    qunsetenv("MAPPER_MANAGED_WORKSPACE_ROOT");
+  else
+    qputenv("MAPPER_MANAGED_WORKSPACE_ROOT", prior_workspace_root);
+}
+
+void MapHubProtocolFixtureTest::
+    controllerDefersStructuralCapturePastRevisionIncrement() {
+  const QDir test_directory(QStringLiteral(MAPPER_TEST_SOURCE_DIR));
+  const auto source = test_directory.filePath(
+      QStringLiteral("data/map-hub-bootstrap-source.omap"));
+  Map map;
+  XMLFileImporter importer(source, &map, nullptr);
+  QVERIFY2(importer.doImport(), qPrintable(source));
+  QVERIFY(map.modificationRevision() > 0);
+
+  QTemporaryDir directory;
+  QVERIFY(directory.isValid());
+  const auto prior_sync_root = qgetenv("MAPPER_MAP_HUB_SYNC_ROOT");
+  const auto prior_workspace_root = qgetenv("MAPPER_MANAGED_WORKSPACE_ROOT");
+  qputenv("MAPPER_MAP_HUB_SYNC_ROOT", directory.path().toUtf8());
+  qputenv("MAPPER_MANAGED_WORKSPACE_ROOT", directory.path().toUtf8());
+
+  ManagedMapWorkspace workspace;
+  workspace.local_map_path =
+      directory.filePath(QStringLiteral("deferred-structure.omap"));
+  XMLFileExporter initial_exporter(workspace.local_map_path, &map, nullptr);
+  QVERIFY(initial_exporter.doExport());
+  map.setHasUnsavedChanges(false);
+  workspace.server_url = QStringLiteral("https://deferred.example.test");
+  workspace.project_id = QStringLiteral("60000000-0000-4000-8000-000000000081");
+  workspace.work_package_id =
+      QStringLiteral("60000000-0000-4000-8000-000000000082");
+  workspace.workspace_id =
+      QStringLiteral("60000000-0000-4000-8000-000000000083");
+  workspace.base_revision_id =
+      QStringLiteral("50000000-0000-4000-8000-000000000081");
+  workspace.active_revision_id = workspace.base_revision_id;
+  workspace.project_revision_id =
+      QStringLiteral("50000000-0000-4000-8000-000000000082");
+  workspace.stream_protocol = QStringLiteral("oom-map-ops/1");
+  workspace.initial_snapshot_required = true;
+  workspace.stream_head_hash = QString(64, QLatin1Char('0'));
+  workspace.minimum_available_sequence = 1;
+  workspace.status = QStringLiteral("active");
+
+  MapHubSyncController controller;
+  controller.configure(
+      workspace, &map, [&map] { return map.modificationRevision(); },
+      [&map](const QString &destination, quint64 *saved_revision,
+             QString *snapshot_error) {
+        XMLFileExporter exporter(destination, &map, nullptr);
+        if (!exporter.doExport()) {
+          if (snapshot_error)
+            *snapshot_error = QStringLiteral("Test export failed.");
+          return false;
+        }
+        *saved_revision = map.modificationRevision();
+        return true;
+      });
+  QVERIFY(!controller.managedWorkspace().checkpoint_required);
+  QCOMPARE(controller.pendingOperationCount(), 0);
+
+  const auto revision_before = map.modificationRevision();
+  quint64 revision_at_signal = 0;
+  bool signal_seen = false;
+  const auto signal_connection =
+      connect(&map, &Map::symbolAdded, &map,
+              [&map, &revision_at_signal, &signal_seen] {
+                signal_seen = true;
+                revision_at_signal = map.modificationRevision();
+              });
+  auto *added_symbol = new PointSymbol();
+  const auto added_symbol_id = added_symbol->persistentId();
+  map.addSymbol(added_symbol, map.getNumSymbols());
+
+  QVERIFY(signal_seen);
+  QCOMPARE(revision_at_signal, revision_before);
+  QVERIFY(map.modificationRevision() > revision_before);
+  QCOMPARE(controller.pendingOperationCount(), 0);
+
+  QCoreApplication::processEvents();
+  QCOMPARE(controller.pendingOperationCount(), 1);
+  QVERIFY(!controller.managedWorkspace().checkpoint_required);
+
+  // savedExplicitly() performs the same revision observation as the one-second
+  // watcher. The deferred semantic capture must already own this revision.
+  controller.savedExplicitly();
+  QVERIFY(!controller.managedWorkspace().checkpoint_required);
+
+  // Part add/move/delete uses Map's broad other-dirty bit, but the deferred
+  // part operation completely represents a single-revision part change.
+  const auto pending_before_part = controller.pendingOperationCount();
+  auto *added_part = new MapPart(QStringLiteral("Field sheet"), &map);
+  map.addPart(added_part, map.getNumParts());
+  QCoreApplication::processEvents();
+  QCOMPARE(controller.pendingOperationCount(), pending_before_part + 1);
+  QVERIFY(!controller.managedWorkspace().checkpoint_required);
+
+  // An unsupported map-notes revision immediately before the part signal
+  // makes the revision delta larger than one, so the same part operation must
+  // not hide the complete-map checkpoint obligation.
+  map.setMapNotes(QStringLiteral("Unstreamed field-work context"));
+  map.setOtherDirty();
+  const auto pending_before_mixed_part = controller.pendingOperationCount();
+  map.movePart(map.getNumParts() - 1, 0);
+  QCoreApplication::processEvents();
+  QCOMPARE(controller.pendingOperationCount(), pending_before_mixed_part + 1);
+  QVERIFY(controller.managedWorkspace().checkpoint_required);
+
+  // A single Change Scale command can contain both supported symbol puts and
+  // non-streamed object/georeferencing changes. Streaming the symbol portion
+  // must not misrepresent the complete compound revision as shared.
+  const auto pending_before_scale = controller.pendingOperationCount();
+  const auto scale_before = map.getScaleDenominator();
+  map.changeScale(scale_before + 1000, 1.0, {0, 0}, true, true, true, false);
+  QCoreApplication::processEvents();
+  QVERIFY(controller.pendingOperationCount() > pending_before_scale);
+  QVERIFY(controller.managedWorkspace().checkpoint_required);
+  const auto expected_pending = controller.pendingOperationCount();
+
+  disconnect(signal_connection);
+  controller.clear();
+
+  QString error;
+  MapHubOperationStore store;
+  QVERIFY2(store.open(workspace.workspace_id, &error), qPrintable(error));
+  const auto pending = store.pendingTransactions(&error);
+  QVERIFY2(error.isEmpty(), qPrintable(error));
+  QCOMPARE(pending.size(), expected_pending);
+  QCOMPARE(pending.front().operations.size(), 1);
+  QCOMPARE(pending.front().operations.front().kind,
+           MapHubEditOperation::Kind::PutSymbol);
+  QCOMPARE(pending.front().operations.front().entity_id, added_symbol_id);
+  QCOMPARE(pending.front().operations.front().expected_version, qint64(0));
+
+  if (prior_sync_root.isNull())
+    qunsetenv("MAPPER_MAP_HUB_SYNC_ROOT");
+  else
+    qputenv("MAPPER_MAP_HUB_SYNC_ROOT", prior_sync_root);
+  if (prior_workspace_root.isNull())
+    qunsetenv("MAPPER_MANAGED_WORKSPACE_ROOT");
+  else
+    qputenv("MAPPER_MANAGED_WORKSPACE_ROOT", prior_workspace_root);
+}
+
+void MapHubProtocolFixtureTest::controllerKeepsOutboxBackoffAcrossPollSuccess() {
+  const QDir test_directory(QStringLiteral(MAPPER_TEST_SOURCE_DIR));
+  const auto source = test_directory.filePath(
+      QStringLiteral("data/map-hub-bootstrap-source.omap"));
+  Map map;
+  XMLFileImporter importer(source, &map, nullptr);
+  QVERIFY2(importer.doImport(), qPrintable(source));
+
+  QTemporaryDir directory;
+  QVERIFY(directory.isValid());
+  FixtureHttpServer server;
+  if (!server.start())
+    QSKIP(qPrintable(server.errorString()));
+
+  const auto prior_sync_root = qgetenv("MAPPER_MAP_HUB_SYNC_ROOT");
+  const auto prior_workspace_root = qgetenv("MAPPER_MANAGED_WORKSPACE_ROOT");
+  qputenv("MAPPER_MAP_HUB_SYNC_ROOT", directory.path().toUtf8());
+  qputenv("MAPPER_MANAGED_WORKSPACE_ROOT", directory.path().toUtf8());
+
+  int sync_state_requests = 0;
+  int transaction_requests = 0;
+  bool return_retry_after = false;
+  server.setHandler([&](const QByteArray &request, QTcpSocket *socket) {
+    const auto request_line = request.left(request.indexOf("\r\n"));
+    if (request_line.contains("/sync-state ")) {
+      ++sync_state_requests;
+      FixtureHttpServer::respond(socket, 304);
+    } else if (request_line.contains("/transactions ")) {
+      ++transaction_requests;
+      FixtureHttpServer::respond(
+          socket, return_retry_after ? 429 : 503,
+          return_retry_after
+              ? QByteArrayLiteral(
+                    R"({"error":{"code":"rate_limited","message":"retry later"}})")
+              : QByteArrayLiteral(
+                    R"({"error":{"code":"network_error","message":"unexpected retry"}})"),
+          return_retry_after ? QByteArrayLiteral("Retry-After: 40\r\n")
+                             : QByteArray{});
+    } else {
+      FixtureHttpServer::respond(socket, 200, QByteArrayLiteral("{}"));
+    }
+  });
+
+  const auto map_path = directory.filePath(QStringLiteral("backoff.omap"));
+  XMLFileExporter initial_exporter(map_path, &map, nullptr);
+  QVERIFY(initial_exporter.doExport());
+  const auto workspace_id =
+      QUuid::createUuid().toString(QUuid::WithoutBraces);
+  auto workspace = fixtureWorkspace(map_path, server.url(), workspace_id);
+
+  QString error;
+  {
+    MapHubOperationStore store;
+    QVERIFY2(store.open(workspace_id, &error), qPrintable(error));
+    QVERIFY2(store.seedInitialProjection(map, &error), qPrintable(error));
+  }
+
+  MapHubSyncController controller;
+  QSignalSpy details(&controller, &MapHubSyncController::detailsChanged);
+  QVERIFY(details.isValid());
+  const auto configure = [&] {
+    controller.configure(
+        workspace, &map, [&map] { return map.modificationRevision(); },
+        [&map](const QString &destination, quint64 *saved_revision,
+               QString *snapshot_error) {
+          XMLFileExporter exporter(destination, &map, nullptr);
+          if (!exporter.doExport()) {
+            if (snapshot_error)
+              *snapshot_error = QStringLiteral("Test export failed.");
+            return false;
+          }
+          *saved_revision = map.modificationRevision();
+          return true;
+        });
+  };
+
+  // Queue one valid semantic transaction without credentials, then reopen its
+  // operation store to give that exact transaction a future retry deadline.
+  configure();
+  map.addSymbol(new PointSymbol(), map.getNumSymbols());
+  QCoreApplication::processEvents();
+  QCOMPARE(controller.pendingOperationCount(), 1);
+  controller.clear();
+  {
+    MapHubOperationStore store;
+    QVERIFY2(store.open(workspace_id, &error), qPrintable(error));
+    const auto pending = store.nextPending(&error);
+    QVERIFY2(pending.isValid(), qPrintable(error));
+    QVERIFY2(store.recordFailure(
+                 pending.client_sequence, QStringLiteral("network_error"),
+                 QStringLiteral("fixture backoff"),
+                 QDateTime::currentDateTimeUtc().addSecs(30), &error),
+             qPrintable(error));
+  }
+
+  const auto lease_key =
+      MapHubCredentials::workspaceLeaseKey(server.url(), workspace_id);
+  QVERIFY2(MapHubCredentials::writeToken(server.url(),
+                                         QStringLiteral("fixture-account")),
+           "Could not store fixture account token");
+  QVERIFY2(MapHubCredentials::writeToken(lease_key,
+                                         QStringLiteral("fixture-lease")),
+           "Could not store fixture lease token");
+
+  configure();
+  const auto details_before_not_modified = details.count();
+  QTRY_VERIFY_WITH_TIMEOUT(sync_state_requests > 0, 3000);
+  QTRY_VERIFY_WITH_TIMEOUT(details.count() > details_before_not_modified,
+                           3000);
+  QTest::qWait(300);
+  QCOMPARE(transaction_requests, 0);
+  QCOMPARE(controller.pendingOperationCount(), 1);
+  const auto controller_timers = controller.findChildren<QTimer *>();
+  const auto retry_deadline_survived = std::any_of(
+      controller_timers.cbegin(), controller_timers.cend(), [](QTimer *timer) {
+        return timer->isSingleShot() && timer->isActive() &&
+               timer->interval() > 25'000 && timer->interval() <= 30'000;
+      });
+  QVERIFY(retry_deadline_survived);
+
+  // An explicit user retry may bypass the old deadline, but the next 429 must
+  // persist the server's bounded Retry-After rather than a local ~5s jitter.
+  return_retry_after = true;
+  const auto retry_requested_at = QDateTime::currentDateTimeUtc();
+  controller.retryNow();
+  QTRY_COMPARE_WITH_TIMEOUT(transaction_requests, 1, 3000);
+  QTRY_COMPARE_WITH_TIMEOUT(controller.state(),
+                            MapHubSyncController::State::WaitingForNetwork,
+                            3000);
+  {
+    MapHubOperationStore store;
+    QVERIFY2(store.open(workspace_id, &error), qPrintable(error));
+    const auto pending = store.nextPending(&error);
+    QVERIFY2(pending.isValid(), qPrintable(error));
+    const auto server_delay =
+        retry_requested_at.secsTo(pending.next_attempt_at);
+    QVERIFY(server_delay >= 35);
+    QVERIFY(server_delay <= 40);
+  }
+
+  MapHubCredentials::removeWorkspaceLease(
+      server.url(), workspace_id,
+      controller.managedWorkspace().client_instance_id);
+  MapHubCredentials::removeToken(server.url());
+  controller.clear();
+  if (prior_sync_root.isNull())
+    qunsetenv("MAPPER_MAP_HUB_SYNC_ROOT");
+  else
+    qputenv("MAPPER_MAP_HUB_SYNC_ROOT", prior_sync_root);
+  if (prior_workspace_root.isNull())
+    qunsetenv("MAPPER_MANAGED_WORKSPACE_ROOT");
+  else
+    qputenv("MAPPER_MANAGED_WORKSPACE_ROOT", prior_workspace_root);
+}
+
+void MapHubProtocolFixtureTest::controllerCoalescesPresenceTransitions() {
+  const QDir test_directory(QStringLiteral(MAPPER_TEST_SOURCE_DIR));
+  const auto source = test_directory.filePath(
+      QStringLiteral("data/map-hub-bootstrap-source.omap"));
+  Map map;
+  XMLFileImporter importer(source, &map, nullptr);
+  QVERIFY2(importer.doImport(), qPrintable(source));
+
+  QTemporaryDir directory;
+  QVERIFY(directory.isValid());
+  FixtureHttpServer server;
+  if (!server.start())
+    QSKIP(qPrintable(server.errorString()));
+
+  const auto prior_sync_root = qgetenv("MAPPER_MAP_HUB_SYNC_ROOT");
+  const auto prior_workspace_root = qgetenv("MAPPER_MANAGED_WORKSPACE_ROOT");
+  qputenv("MAPPER_MAP_HUB_SYNC_ROOT", directory.path().toUtf8());
+  qputenv("MAPPER_MANAGED_WORKSPACE_ROOT", directory.path().toUtf8());
+
+  QStringList presence_states;
+  QPointer<QTcpSocket> first_ack_socket;
+  server.setHandler([&](const QByteArray &request, QTcpSocket *socket) {
+    const auto request_line = request.left(request.indexOf("\r\n"));
+    if (request_line.contains("/sync-state ")) {
+      FixtureHttpServer::respond(socket, 304);
+      return;
+    }
+    if (request_line.contains("/ack ")) {
+      presence_states.push_back(
+          requestBody(request)
+              .value(QStringLiteral("presence"))
+              .toObject()
+              .value(QStringLiteral("state"))
+              .toString());
+      if (presence_states.size() == 1) {
+        first_ack_socket = socket;
+        return;
+      }
+    }
+    FixtureHttpServer::respond(socket, 200, QByteArrayLiteral("{}"));
+  });
+
+  const auto map_path = directory.filePath(QStringLiteral("presence.omap"));
+  XMLFileExporter initial_exporter(map_path, &map, nullptr);
+  QVERIFY(initial_exporter.doExport());
+  const auto workspace_id =
+      QUuid::createUuid().toString(QUuid::WithoutBraces);
+  auto workspace = fixtureWorkspace(map_path, server.url(), workspace_id);
+
+  QString error;
+  {
+    MapHubOperationStore store;
+    QVERIFY2(store.open(workspace_id, &error), qPrintable(error));
+    QVERIFY2(store.seedInitialProjection(map, &error), qPrintable(error));
+  }
+  const auto lease_key =
+      MapHubCredentials::workspaceLeaseKey(server.url(), workspace_id);
+  QVERIFY2(MapHubCredentials::writeToken(server.url(),
+                                         QStringLiteral("fixture-account")),
+           "Could not store fixture account token");
+  QVERIFY2(MapHubCredentials::writeToken(lease_key,
+                                         QStringLiteral("fixture-lease")),
+           "Could not store fixture lease token");
+
+  MapHubSyncController controller;
+  controller.configure(
+      workspace, &map, [&map] { return map.modificationRevision(); },
+      [&map](const QString &destination, quint64 *saved_revision,
+             QString *snapshot_error) {
+        XMLFileExporter exporter(destination, &map, nullptr);
+        if (!exporter.doExport()) {
+          if (snapshot_error)
+            *snapshot_error = QStringLiteral("Test export failed.");
+          return false;
+        }
+        *saved_revision = map.modificationRevision();
+        return true;
+      });
+
+  controller.applicationBecameActive();
+  QTRY_COMPARE_WITH_TIMEOUT(presence_states.size(), 1, 3000);
+  QCOMPARE(presence_states.front(), QStringLiteral("editing"));
+  QVERIFY(first_ack_socket);
+
+  // The away request arrives while editing is still in flight. Completing the
+  // first request must immediately send the latest desired state.
+  controller.applicationWillResignActive();
+  FixtureHttpServer::respond(first_ack_socket, 200, QByteArrayLiteral("{}"));
+  QTRY_COMPARE_WITH_TIMEOUT(presence_states.size(), 2, 3000);
+  QCOMPARE(presence_states.back(), QStringLiteral("away"));
+
+  MapHubCredentials::removeWorkspaceLease(
+      server.url(), workspace_id,
+      controller.managedWorkspace().client_instance_id);
+  MapHubCredentials::removeToken(server.url());
+  controller.clear();
+  if (prior_sync_root.isNull())
+    qunsetenv("MAPPER_MAP_HUB_SYNC_ROOT");
+  else
+    qputenv("MAPPER_MAP_HUB_SYNC_ROOT", prior_sync_root);
+  if (prior_workspace_root.isNull())
+    qunsetenv("MAPPER_MANAGED_WORKSPACE_ROOT");
+  else
+    qputenv("MAPPER_MANAGED_WORKSPACE_ROOT", prior_workspace_root);
+}
+
+void MapHubProtocolFixtureTest::
+    controllerStagesCurrentRevisionBeforeRemoteTerminalStatus() {
+  const QDir test_directory(QStringLiteral(MAPPER_TEST_SOURCE_DIR));
+  const auto source = test_directory.filePath(
+      QStringLiteral("data/map-hub-bootstrap-source.omap"));
+  Map map;
+  XMLFileImporter importer(source, &map, nullptr);
+  QVERIFY2(importer.doImport(), qPrintable(source));
+
+  QTemporaryDir directory;
+  QVERIFY(directory.isValid());
+  FixtureHttpServer server;
+  if (!server.start())
+    QSKIP(qPrintable(server.errorString()));
+
+  const auto prior_sync_root = qgetenv("MAPPER_MAP_HUB_SYNC_ROOT");
+  const auto prior_workspace_root = qgetenv("MAPPER_MANAGED_WORKSPACE_ROOT");
+  qputenv("MAPPER_MAP_HUB_SYNC_ROOT", directory.path().toUtf8());
+  qputenv("MAPPER_MANAGED_WORKSPACE_ROOT", directory.path().toUtf8());
+
+  QPointer<QTcpSocket> sync_state_socket;
+  server.setHandler([&](const QByteArray &request, QTcpSocket *socket) {
+    const auto request_line = request.left(request.indexOf("\r\n"));
+    if (request_line.contains("/sync-state ") && !sync_state_socket) {
+      sync_state_socket = socket;
+      return;
+    }
+    FixtureHttpServer::respond(socket, 200, QByteArrayLiteral("{}"));
+  });
+
+  const auto map_path = directory.filePath(QStringLiteral("terminal.omap"));
+  XMLFileExporter initial_exporter(map_path, &map, nullptr);
+  QVERIFY(initial_exporter.doExport());
+  map.setHasUnsavedChanges(false);
+  const auto workspace_id =
+      QUuid::createUuid().toString(QUuid::WithoutBraces);
+  auto workspace = fixtureWorkspace(map_path, server.url(), workspace_id);
+
+  QString error;
+  {
+    MapHubOperationStore store;
+    QVERIFY2(store.open(workspace_id, &error), qPrintable(error));
+    QVERIFY2(store.seedInitialProjection(map, &error), qPrintable(error));
+  }
+  const auto lease_key =
+      MapHubCredentials::workspaceLeaseKey(server.url(), workspace_id);
+  QVERIFY2(MapHubCredentials::writeToken(server.url(),
+                                         QStringLiteral("fixture-account")),
+           "Could not store fixture account token");
+  QVERIFY2(MapHubCredentials::writeToken(lease_key,
+                                         QStringLiteral("fixture-lease")),
+           "Could not store fixture lease token");
+
+  MapHubSyncController controller;
+  QSignalSpy details(&controller, &MapHubSyncController::detailsChanged);
+  QVERIFY(details.isValid());
+  QString status_during_snapshot;
+  controller.configure(
+      workspace, &map, [&map] { return map.modificationRevision(); },
+      [&map, &controller,
+       &status_during_snapshot](const QString &destination,
+                                quint64 *saved_revision,
+                                QString *snapshot_error) {
+        status_during_snapshot = controller.managedWorkspace().status;
+        XMLFileExporter exporter(destination, &map, nullptr);
+        if (!exporter.doExport()) {
+          if (snapshot_error)
+            *snapshot_error = QStringLiteral("Test export failed.");
+          return false;
+        }
+        *saved_revision = map.modificationRevision();
+        return true;
+      });
+  QVERIFY(!controller.estimatedServerTime().isValid());
+  QTRY_VERIFY_WITH_TIMEOUT(sync_state_socket, 3000);
+
+  // This is deliberately a checkpoint-only edit with no structural operation
+  // signal. The remote transition arrives before the normal one-second
+  // observer or ten-second coalescing save can run.
+  const auto note = QStringLiteral("Durable before remote submission");
+  map.setMapNotes(note);
+  map.setOtherDirty();
+  const auto edited_revision = map.modificationRevision();
+  const QJsonArray collaborators{
+      QJsonObject{
+          {QStringLiteral("person_id"),
+           QStringLiteral("30000000-0000-4000-8000-000000000001")},
+          {QStringLiteral("client_instance_id"),
+           QStringLiteral("40000000-0000-4000-8000-000000000001")},
+          {QStringLiteral("display_name"), QStringLiteral("Expiry fixture")},
+          {QStringLiteral("last_seen_at"),
+           QStringLiteral("2026-08-10T20:00:00Z")},
+          {QStringLiteral("state"), QStringLiteral("editing")},
+          {QStringLiteral("applied_stream_sequence"), 0},
+          {QStringLiteral("is_current_user"), false},
+      },
+  };
+  FixtureHttpServer::respond(
+      sync_state_socket, 200,
+      syncStateResponse(workspace, QStringLiteral("submitted"), collaborators,
+                        1));
+
+  QTRY_COMPARE_WITH_TIMEOUT(controller.managedWorkspace().status,
+                            QStringLiteral("submitted"), 3000);
+  const auto first_estimated_server_time = controller.estimatedServerTime();
+  QVERIFY(first_estimated_server_time.isValid());
+  QCOMPARE(first_estimated_server_time.date(), QDate(2026, 8, 10));
+  QTest::qWait(20);
+  QVERIFY(controller.estimatedServerTime() > first_estimated_server_time);
+  QCOMPARE(controller.collaborators().size(), 1);
+  const auto details_before_presence_expiry = details.count();
+  QTRY_VERIFY_WITH_TIMEOUT(details.count() > details_before_presence_expiry,
+                           1800);
+  QVERIFY(controller.estimatedServerTime() >=
+          QDateTime::fromString(QStringLiteral("2026-08-10T20:00:01Z"),
+                                Qt::ISODate));
+  QCOMPARE(status_during_snapshot, QStringLiteral("active"));
+  const auto pending = MapHubSyncQueue::load(workspace_id, &error);
+  QVERIFY2(pending.isValid(), qPrintable(error));
+  QCOMPARE(pending.map_revision, edited_revision);
+  QVERIFY(QFileInfo::exists(pending.snapshot_path));
+
+  Map durable_working_copy;
+  XMLFileImporter durable_importer(map_path, &durable_working_copy, nullptr);
+  QVERIFY2(durable_importer.doImport(), qPrintable(map_path));
+  QCOMPARE(durable_working_copy.getMapNotes(), note);
+
+  MapHubCredentials::removeWorkspaceLease(
+      server.url(), workspace_id,
+      controller.managedWorkspace().client_instance_id);
+  MapHubCredentials::removeToken(server.url());
+  controller.clear();
+  QVERIFY(!controller.estimatedServerTime().isValid());
+  if (prior_sync_root.isNull())
+    qunsetenv("MAPPER_MAP_HUB_SYNC_ROOT");
+  else
+    qputenv("MAPPER_MAP_HUB_SYNC_ROOT", prior_sync_root);
+  if (prior_workspace_root.isNull())
+    qunsetenv("MAPPER_MANAGED_WORKSPACE_ROOT");
+  else
+    qputenv("MAPPER_MANAGED_WORKSPACE_ROOT", prior_workspace_root);
+}
+
+void MapHubProtocolFixtureTest::controllerKeepsWorkspaceMetadataFailureSticky() {
+  const QDir test_directory(QStringLiteral(MAPPER_TEST_SOURCE_DIR));
+  const auto source = test_directory.filePath(
+      QStringLiteral("data/map-hub-bootstrap-source.omap"));
+  Map map;
+  XMLFileImporter importer(source, &map, nullptr);
+  QVERIFY2(importer.doImport(), qPrintable(source));
+
+  QTemporaryDir directory;
+  QVERIFY(directory.isValid());
+  const auto prior_sync_root = qgetenv("MAPPER_MAP_HUB_SYNC_ROOT");
+  const auto prior_workspace_root = qgetenv("MAPPER_MANAGED_WORKSPACE_ROOT");
+  qputenv("MAPPER_MAP_HUB_SYNC_ROOT", directory.path().toUtf8());
+  qputenv("MAPPER_MANAGED_WORKSPACE_ROOT", directory.path().toUtf8());
+
+  const auto map_path = directory.filePath(QStringLiteral("metadata.omap"));
+  XMLFileExporter initial_exporter(map_path, &map, nullptr);
+  QVERIFY(initial_exporter.doExport());
+  map.setHasUnsavedChanges(false);
+  const auto workspace_id =
+      QUuid::createUuid().toString(QUuid::WithoutBraces);
+  auto workspace = fixtureWorkspace(
+      map_path, QStringLiteral("https://metadata.example.test"), workspace_id);
+
+  QString error;
+  {
+    MapHubOperationStore store;
+    QVERIFY2(store.open(workspace_id, &error), qPrintable(error));
+    QVERIFY2(store.seedInitialProjection(map, &error), qPrintable(error));
+  }
+
+  MapHubSyncController controller;
+  controller.configure(
+      workspace, &map, [&map] { return map.modificationRevision(); },
+      [&map](const QString &destination, quint64 *saved_revision,
+             QString *snapshot_error) {
+        XMLFileExporter exporter(destination, &map, nullptr);
+        if (!exporter.doExport()) {
+          if (snapshot_error)
+            *snapshot_error = QStringLiteral("Test export failed.");
+          return false;
+        }
+        *saved_revision = map.modificationRevision();
+        return true;
+      });
+
+  const auto blocked_root = directory.filePath(QStringLiteral("not-a-root"));
+  QFile blocker(blocked_root);
+  QVERIFY(blocker.open(QIODevice::WriteOnly));
+  QVERIFY(blocker.write("blocked") > 0);
+  blocker.close();
+  qputenv("MAPPER_MANAGED_WORKSPACE_ROOT", blocked_root.toUtf8());
+
+  map.setMapNotes(QStringLiteral("Metadata must remain sticky"));
+  map.setOtherDirty();
+  controller.savedExplicitly();
+  QCOMPARE(controller.state(), MapHubSyncController::State::ActionRequired);
+  QCOMPARE(controller.managedWorkspace().sync_problem,
+           QStringLiteral("workspace_metadata"));
+  QVERIFY(controller.managedWorkspace().checkpoint_required);
+  const auto metadata_error_text = controller.stateText();
+  QVERIFY(metadata_error_text.contains(QStringLiteral("metadata"),
+                                       Qt::CaseInsensitive));
+
+  // A later checkpoint/snapshot state cannot mask the failed sidecar write.
+  QCoreApplication::processEvents();
+  QCOMPARE(controller.state(), MapHubSyncController::State::ActionRequired);
+  QCOMPARE(controller.stateText(), metadata_error_text);
+  QCOMPARE(controller.managedWorkspace().sync_problem,
+           QStringLiteral("workspace_metadata"));
+
+  qputenv("MAPPER_MANAGED_WORKSPACE_ROOT", directory.path().toUtf8());
+  controller.retryNow();
+  QVERIFY(controller.managedWorkspace().sync_problem.isEmpty());
+  QCOMPARE(controller.state(), MapHubSyncController::State::CheckpointNeeded);
+  const auto persisted = ManagedMapWorkspace::loadForMap(map_path, &error);
+  QVERIFY2(persisted.isValid(), qPrintable(error));
+  QVERIFY(persisted.sync_problem.isEmpty());
+  QVERIFY(persisted.checkpoint_required);
+
+  controller.clear();
+  if (prior_sync_root.isNull())
+    qunsetenv("MAPPER_MAP_HUB_SYNC_ROOT");
+  else
+    qputenv("MAPPER_MAP_HUB_SYNC_ROOT", prior_sync_root);
+  if (prior_workspace_root.isNull())
+    qunsetenv("MAPPER_MANAGED_WORKSPACE_ROOT");
+  else
+    qputenv("MAPPER_MANAGED_WORKSPACE_ROOT", prior_workspace_root);
+}
+
+void MapHubProtocolFixtureTest::
+    controllerKeepsInboxUntilAppliedReceiptPersists() {
+  const QDir test_directory(QStringLiteral(MAPPER_TEST_SOURCE_DIR));
+  const auto source = test_directory.filePath(
+      QStringLiteral("data/map-hub-bootstrap-source.omap"));
+  Map map;
+  XMLFileImporter importer(source, &map, nullptr);
+  QVERIFY2(importer.doImport(), qPrintable(source));
+
+  QTemporaryDir directory;
+  QVERIFY(directory.isValid());
+  const auto prior_sync_root = qgetenv("MAPPER_MAP_HUB_SYNC_ROOT");
+  const auto prior_workspace_root = qgetenv("MAPPER_MANAGED_WORKSPACE_ROOT");
+  qputenv("MAPPER_MAP_HUB_SYNC_ROOT", directory.path().toUtf8());
+  qputenv("MAPPER_MANAGED_WORKSPACE_ROOT", directory.path().toUtf8());
+
+  const auto map_path =
+      directory.filePath(QStringLiteral("durable-inbox-receipt.omap"));
+  XMLFileExporter initial_exporter(map_path, &map, nullptr);
+  QVERIFY(initial_exporter.doExport());
+  map.setHasUnsavedChanges(false);
+  const auto workspace_id =
+      QStringLiteral("60000000-0000-4000-8000-000000000091");
+  const auto client_instance_id =
+      QStringLiteral("40000000-0000-4000-8000-000000000091");
+  auto workspace = fixtureWorkspace(
+      map_path, QStringLiteral("https://inbox-receipt.example.test"),
+      workspace_id);
+  workspace.client_instance_id = client_instance_id;
+
+  MapHubEditTransaction remote;
+  remote.client_instance_id =
+      QStringLiteral("40000000-0000-4000-8000-000000000092");
+  remote.client_sequence = 1;
+  remote.transaction_id =
+      QStringLiteral("40000000-0000-4000-8000-000000000093");
+  remote.expected_stream_hash = QString(64, QLatin1Char('0'));
+  remote.expected_workspace_revision_id = workspace.active_revision_id;
+  remote.expected_project_revision_id = workspace.project_revision_id;
+  remote.operations = {
+      {MapHubEditOperation::Kind::PutPart,
+       map.getPart(0)->persistentId(),
+       {},
+       {},
+       1,
+       QStringLiteral("Applied receipt must persist first")},
+  };
+  QString error;
+  MapHubCommittedTransaction committed;
+  committed.transaction = remote;
+  committed.stream_sequence = 1;
+  committed.payload_sha256 = remote.payloadSha256(&error);
+  committed.stream_hash = MapHubOperationStore::chainHash(
+      remote.expected_stream_hash, committed.payload_sha256);
+  committed.committed_at = QStringLiteral("2026-08-10T20:00:00+00:00");
+  {
+    MapHubOperationStore store;
+    QVERIFY2(store.open(workspace_id, client_instance_id, &error),
+             qPrintable(error));
+    QVERIFY2(store.seedInitialProjection(map, &error), qPrintable(error));
+    QVERIFY2(store.rebaseOnto({committed}, &error), qPrintable(error));
+    QCOMPARE(store.unappliedTransactions(&error).size(), 1);
+  }
+  workspace.stream_head_sequence = committed.stream_sequence;
+  workspace.stream_head_hash = committed.stream_hash;
+  QVERIFY2(ManagedMapWorkspace::save(workspace, &error), qPrintable(error));
+
+  // Make only the sidecar root unwritable. The working copy and private
+  // content-addressed snapshot still commit successfully before the receipt.
+  const auto blocked_root = directory.filePath(QStringLiteral("not-a-root"));
+  QFile blocker(blocked_root);
+  QVERIFY(blocker.open(QIODevice::WriteOnly));
+  QVERIFY(blocker.write("blocked") > 0);
+  blocker.close();
+  qputenv("MAPPER_MANAGED_WORKSPACE_ROOT", blocked_root.toUtf8());
+
+  MapHubSyncController controller;
+  controller.configure(
+      workspace, &map, [&map] { return map.modificationRevision(); },
+      [&map](const QString &destination, quint64 *saved_revision,
+             QString *snapshot_error) {
+        XMLFileExporter exporter(destination, &map, nullptr);
+        if (!exporter.doExport()) {
+          if (snapshot_error)
+            *snapshot_error = QStringLiteral("Test export failed.");
+          return false;
+        }
+        *saved_revision = map.modificationRevision();
+        return true;
+      });
+  QCOMPARE(controller.state(), MapHubSyncController::State::ActionRequired);
+  QCOMPARE(controller.managedWorkspace().sync_problem,
+           QStringLiteral("workspace_metadata"));
+
+  // This is the crash-safety invariant: until the applied sequence reaches
+  // the sidecar, the durable inbox remains available for idempotent replay.
+  {
+    MapHubOperationStore store;
+    QVERIFY2(store.open(workspace_id, client_instance_id, &error),
+             qPrintable(error));
+    QCOMPARE(store.unappliedTransactions(&error).size(), 1);
+  }
+  qputenv("MAPPER_MANAGED_WORKSPACE_ROOT", directory.path().toUtf8());
+  const auto before_retry = ManagedMapWorkspace::loadForMap(map_path, &error);
+  QVERIFY2(before_retry.isValid(), qPrintable(error));
+  QCOMPARE(before_retry.applied_stream_sequence, qint64(0));
+
+  controller.retryNow();
+  {
+    MapHubOperationStore store;
+    QVERIFY2(store.open(workspace_id, client_instance_id, &error),
+             qPrintable(error));
+    QVERIFY(store.unappliedTransactions(&error).isEmpty());
+  }
+  const auto after_retry = ManagedMapWorkspace::loadForMap(map_path, &error);
+  QVERIFY2(after_retry.isValid(), qPrintable(error));
+  QCOMPARE(after_retry.applied_stream_sequence, committed.stream_sequence);
+  QVERIFY(after_retry.sync_problem.isEmpty());
+
+  controller.clear();
   if (prior_sync_root.isNull())
     qunsetenv("MAPPER_MAP_HUB_SYNC_ROOT");
   else

@@ -44,6 +44,12 @@ using namespace OpenOrienteering;
 
 namespace {
 
+QByteArray requestHeader(const char *name, const QString &value) {
+  QByteArray header(name);
+  header.append(value.toUtf8());
+  return header;
+}
+
 class DeviceAuthorizationServer final : public QObject {
 public:
   DeviceAuthorizationServer() {
@@ -182,6 +188,8 @@ void MapHubWorkspaceTest::workspaceSyncStateDecodesBoundedZstd() {
 
   const auto workspace_id =
       QStringLiteral("60000000-0000-4000-8000-000000000081");
+  const auto client_instance_id =
+      QStringLiteral("40000000-0000-4000-8000-000000000081");
   const QByteArray json =
       "{\"protocol\":\"oom-map-ops/1\",\"stream\":{\"head_sequence\":0}}";
   QString compression_error;
@@ -222,7 +230,7 @@ void MapHubWorkspaceTest::workspaceSyncStateDecodesBoundedZstd() {
   MapHubApiClient::Error corrupt_error;
   client.workspaceSyncState(
       workspace_id, QStringLiteral("\"sync-v0\""),
-      QStringLiteral("fixture-lease"),
+      QStringLiteral("fixture-lease"), client_instance_id,
       [&](const QJsonObject &state, const QString &etag, bool not_modified,
           const MapHubApiClient::Error &error) {
         QVERIFY2(!error, qPrintable(error.message));
@@ -250,6 +258,252 @@ void MapHubWorkspaceTest::workspaceSyncStateDecodesBoundedZstd() {
   QVERIFY(requests[0].toLower().contains(
       "if-none-match: \"sync-v0\""));
   QVERIFY(requests[0].contains("X-Editing-Lease: fixture-lease"));
+  const QByteArray client_instance_header =
+      QByteArray("X-Mapper-Client-Instance: ") + client_instance_id.toUtf8();
+  QVERIFY(requests[0].contains(client_instance_header));
+  QVERIFY(requests[0].contains(requestHeader(
+      "X-Editing-Client-Instance: ", client_instance_id)));
+}
+
+void MapHubWorkspaceTest::preservesStructuredApiErrorDetails() {
+  QTcpServer server;
+  if (!server.listen(QHostAddress::LocalHost))
+    QSKIP("The test sandbox does not permit a loopback listener");
+
+  const QByteArray response_body =
+      R"({"error":{"code":"collaborators_active","message":"Other Mapper sessions must finish or leave before submitting","details":{"sessions":[{"person_id":"10000000-0000-4000-8000-000000000001","display_name":"A Mapper","expires_at":"2026-08-11T20:00:00Z"}]}}})";
+  connect(&server, &QTcpServer::newConnection, this, [&] {
+    auto *socket = server.nextPendingConnection();
+    connect(socket, &QTcpSocket::readyRead, socket,
+            [socket, response_body, bytes = QByteArray{},
+             responded = false]() mutable {
+      if (responded)
+        return;
+      bytes.append(socket->readAll());
+      if (!bytes.contains("\r\n\r\n"))
+        return;
+      responded = true;
+      socket->write(
+          QByteArray("HTTP/1.1 409 Conflict\r\nContent-Type: "
+                     "application/json\r\nContent-Length: ") +
+          QByteArray::number(response_body.size()) +
+          QByteArray("\r\nConnection: close\r\n\r\n") + response_body);
+      socket->disconnectFromHost();
+    });
+  });
+
+  MapHubApiClient client(
+      QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort()),
+      QStringLiteral("test-token"));
+  QEventLoop loop;
+  MapHubApiClient::Error callback_error;
+  client.health([&](const QJsonObject &,
+                    const MapHubApiClient::Error &error) {
+    callback_error = error;
+    loop.quit();
+  });
+  QTimer::singleShot(5000, &loop, &QEventLoop::quit);
+  loop.exec();
+
+  QCOMPARE(callback_error.http_status, 409);
+  QCOMPARE(callback_error.code, QStringLiteral("collaborators_active"));
+  QCOMPARE(callback_error.message,
+           QStringLiteral("Other Mapper sessions must finish or leave before "
+                          "submitting"));
+  const auto sessions =
+      callback_error.details.value(QStringLiteral("sessions")).toArray();
+  QCOMPARE(sessions.size(), 1);
+  QCOMPARE(sessions.first()
+               .toObject()
+               .value(QStringLiteral("display_name"))
+               .toString(),
+           QStringLiteral("A Mapper"));
+}
+
+void MapHubWorkspaceTest::releaseLeaseIsIdempotent() {
+  QTcpServer server;
+  if (!server.listen(QHostAddress::LocalHost))
+    QSKIP("The test sandbox does not permit a loopback listener");
+
+  const auto workspace_id =
+      QStringLiteral("60000000-0000-4000-8000-000000000082");
+  const auto client_instance_id =
+      QStringLiteral("40000000-0000-4000-8000-000000000082");
+  const QByteArray response_body =
+      QByteArray("{\"released_at\":\"2026-08-10T20:00:00+00:00\","
+                 "\"workspace_id\":\"") +
+      workspace_id.toUtf8() + QByteArray("\"}");
+  QList<QByteArray> requests;
+  connect(&server, &QTcpServer::newConnection, this, [&] {
+    auto *socket = server.nextPendingConnection();
+    connect(socket, &QTcpSocket::readyRead, this,
+            [&, socket, bytes = QByteArray{}, responded = false]() mutable {
+              if (responded)
+                return;
+              bytes.append(socket->readAll());
+              const auto header_end = bytes.indexOf("\r\n\r\n");
+              if (header_end < 0)
+                return;
+              const QRegularExpression length_pattern(
+                  QStringLiteral("(?im)^Content-Length:\\s*(\\d+)\\s*$"));
+              const auto match = length_pattern.match(
+                  QString::fromLatin1(bytes.left(header_end)));
+              const auto content_length =
+                  match.hasMatch() ? match.captured(1).toLongLong() : 0;
+              if (bytes.size() < header_end + 4 + content_length)
+                return;
+              responded = true;
+              requests.push_back(bytes);
+              socket->write(
+                  QByteArray("HTTP/1.1 200 OK\r\nContent-Type: "
+                             "application/json\r\nContent-Length: ") +
+                  QByteArray::number(response_body.size()) +
+                  QByteArray("\r\nConnection: close\r\n\r\n") + response_body);
+              socket->disconnectFromHost();
+            });
+  });
+
+  MapHubApiClient client(
+      QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort()),
+      QStringLiteral("test-token"));
+  QEventLoop loop;
+  MapHubApiClient::Error callback_error;
+  QJsonObject first_response;
+  QJsonObject replay_response;
+  bool completed = false;
+  client.releaseLease(
+      workspace_id, client_instance_id,
+      QStringLiteral("fixture-release-lease"),
+      [&](const QJsonObject &released,
+          const MapHubApiClient::Error &release_error) {
+        callback_error = release_error;
+        if (release_error) {
+          loop.quit();
+          return;
+        }
+        first_response = released;
+        client.releaseLease(
+            workspace_id, client_instance_id,
+            QStringLiteral("fixture-release-lease"),
+            [&](const QJsonObject &replayed,
+                const MapHubApiClient::Error &replay_error) {
+              callback_error = replay_error;
+              replay_response = replayed;
+              completed = true;
+              loop.quit();
+            });
+      });
+  QTimer::singleShot(5000, &loop, &QEventLoop::quit);
+  loop.exec();
+
+  QVERIFY2(completed, "Lease-release replay timed out");
+  QVERIFY2(!callback_error, qPrintable(callback_error.message));
+  QCOMPARE(replay_response, first_response);
+  QCOMPARE(requests.size(), 2);
+  const QByteArray request_line = QByteArray("POST /api/v1/workspaces/") +
+                                  workspace_id.toUtf8() +
+                                  QByteArray("/release HTTP/1.1");
+  for (const auto &request : std::as_const(requests)) {
+    QVERIFY(request.startsWith(request_line));
+    QVERIFY(request.contains(
+        "X-Editing-Lease: fixture-release-lease\r\n"));
+    QVERIFY(request.contains(requestHeader("X-Editing-Client-Instance: ",
+                                           client_instance_id)));
+    QVERIFY(request.contains(requestHeader("X-Mapper-Client-Instance: ",
+                                           client_instance_id)));
+  }
+}
+
+void MapHubWorkspaceTest::acknowledgementCarriesOptionalPresence() {
+  QTcpServer server;
+  if (!server.listen(QHostAddress::LocalHost))
+    QSKIP("The test sandbox does not permit a loopback listener");
+
+  const auto workspace_id =
+      QStringLiteral("60000000-0000-4000-8000-000000000083");
+  const auto client_instance_id =
+      QStringLiteral("40000000-0000-4000-8000-000000000083");
+  QByteArray request_bytes;
+  connect(&server, &QTcpServer::newConnection, this, [&] {
+    auto *socket = server.nextPendingConnection();
+    connect(socket, &QTcpSocket::readyRead, this, [&, socket] {
+      request_bytes.append(socket->readAll());
+      const auto header_end = request_bytes.indexOf("\r\n\r\n");
+      if (header_end < 0)
+        return;
+      const QRegularExpression length_pattern(
+          QStringLiteral("(?im)^Content-Length:\\s*(\\d+)\\s*$"));
+      const auto match = length_pattern.match(
+          QString::fromLatin1(request_bytes.left(header_end)));
+      if (!match.hasMatch() ||
+          request_bytes.size() <
+              header_end + 4 + match.captured(1).toLongLong())
+        return;
+      const QByteArray response_body =
+          QByteArray("{\"applied_stream_sequence\":12,"
+                     "\"client_instance_id\":\"") +
+          client_instance_id.toUtf8() +
+          QByteArray("\",\"head_sequence\":12,"
+                     "\"protocol\":\"oom-map-ops/1\"}");
+      socket->write(
+          QByteArray("HTTP/1.1 200 OK\r\nContent-Type: "
+                     "application/json\r\nContent-Length: ") +
+          QByteArray::number(response_body.size()) +
+          QByteArray("\r\nConnection: close\r\n\r\n") + response_body);
+      socket->disconnectFromHost();
+    });
+  });
+
+  const QJsonObject acknowledgement{
+      {QStringLiteral("protocol"), QStringLiteral("oom-map-ops/1")},
+      {QStringLiteral("client_instance_id"), client_instance_id},
+      {QStringLiteral("applied_stream_sequence"), 12},
+      {QStringLiteral("presence"),
+       QJsonObject{{QStringLiteral("state"), QStringLiteral("away")},
+                   {QStringLiteral("device_name"),
+                    QStringLiteral("Mapper on macOS")}}},
+  };
+  MapHubApiClient client(
+      QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort()),
+      QStringLiteral("test-token"));
+  QEventLoop loop;
+  MapHubApiClient::Error callback_error;
+  bool completed = false;
+  client.acknowledgeWorkspaceOperations(
+      workspace_id, acknowledgement, client_instance_id,
+      QStringLiteral("fixture-ack-lease"),
+      [&](const QJsonObject &, const MapHubApiClient::Error &error) {
+        callback_error = error;
+        completed = true;
+        loop.quit();
+      });
+  QTimer::singleShot(5000, &loop, &QEventLoop::quit);
+  loop.exec();
+
+  QVERIFY2(completed, "Workspace acknowledgement timed out");
+  QVERIFY2(!callback_error, qPrintable(callback_error.message));
+  const auto header_end = request_bytes.indexOf("\r\n\r\n");
+  QVERIFY(header_end >= 0);
+  const QByteArray request_line = QByteArray("POST /api/v1/workspaces/") +
+                                  workspace_id.toUtf8() +
+                                  QByteArray("/ack HTTP/1.1");
+  QVERIFY(request_bytes.startsWith(request_line));
+  QVERIFY(request_bytes.contains("X-Editing-Lease: fixture-ack-lease\r\n"));
+  QVERIFY(request_bytes.contains(requestHeader(
+      "X-Editing-Client-Instance: ", client_instance_id)));
+  QVERIFY(request_bytes.contains(requestHeader(
+      "X-Mapper-Client-Instance: ", client_instance_id)));
+  QJsonParseError parse_error;
+  const auto sent = QJsonDocument::fromJson(
+      request_bytes.mid(header_end + 4), &parse_error);
+  QCOMPARE(parse_error.error, QJsonParseError::NoError);
+  QCOMPARE(sent.object(), acknowledgement);
+  QCOMPARE(sent.object()
+               .value(QStringLiteral("presence"))
+               .toObject()
+               .value(QStringLiteral("state"))
+               .toString(),
+           QStringLiteral("away"));
 }
 
 void MapHubWorkspaceTest::initTestCase() {
@@ -293,6 +547,35 @@ void MapHubWorkspaceTest::storesMacCredentialsInOwnerOnlyFile() {
   auto removed = MapHubCredentials::removeToken(server);
   QVERIFY2(removed, qPrintable(removed.error));
   QVERIFY(!QFileInfo::exists(path));
+
+  const auto lease_server =
+      QStringLiteral("https://lease-%1.example.test")
+          .arg(QUuid::createUuid().toString(QUuid::Id128));
+  const auto workspace_id =
+      QUuid::createUuid().toString(QUuid::WithoutBraces);
+  const auto client_instance_id =
+      QUuid::createUuid().toString(QUuid::WithoutBraces);
+  const auto legacy_key =
+      MapHubCredentials::workspaceLeaseKey(lease_server, workspace_id);
+  const auto scoped_key = MapHubCredentials::workspaceLeaseKey(
+      lease_server, workspace_id, client_instance_id);
+  QVERIFY(!scoped_key.isEmpty());
+  QVERIFY(MapHubCredentials::workspaceLeaseKey(lease_server, workspace_id, {})
+              .isEmpty());
+  auto legacy_stored =
+      MapHubCredentials::writeToken(legacy_key, QStringLiteral("old-lease"));
+  QVERIFY2(legacy_stored, qPrintable(legacy_stored.error));
+  const auto migrated = MapHubCredentials::readWorkspaceLease(
+      lease_server, workspace_id, client_instance_id);
+  QVERIFY2(migrated, qPrintable(migrated.error));
+  QCOMPARE(migrated.token, QStringLiteral("old-lease"));
+  QCOMPARE(MapHubCredentials::readToken(scoped_key).token,
+           QStringLiteral("old-lease"));
+  QVERIFY(MapHubCredentials::readToken(legacy_key).token.isEmpty());
+  const auto lease_removed = MapHubCredentials::removeWorkspaceLease(
+      lease_server, workspace_id, client_instance_id);
+  QVERIFY2(lease_removed, qPrintable(lease_removed.error));
+  QVERIFY(MapHubCredentials::readToken(scoped_key).token.isEmpty());
 #endif
 }
 
@@ -313,8 +596,10 @@ void MapHubWorkspaceTest::recordRoundTripsWithoutSecrets() {
   original.project_title = QStringLiteral("Kelsey Creek + Wilburton");
   original.work_package_id = QStringLiteral("package-id");
   original.workspace_id = QStringLiteral("workspace-id");
+  original.assignment_id = QStringLiteral("assignment-id");
   original.base_revision_id = QStringLiteral("revision-id");
   original.base_sha256 = QString(64, QLatin1Char('a'));
+  original.checkpoint_required = true;
   original.exclusive_editing = true;
   original.lease_expires_at = QDateTime::currentDateTimeUtc().addSecs(3600);
   QString error;
@@ -323,11 +608,18 @@ void MapHubWorkspaceTest::recordRoundTripsWithoutSecrets() {
   QVERIFY2(loaded.isValid(), qPrintable(error));
   QCOMPARE(loaded.project_id, original.project_id);
   QCOMPARE(loaded.base_sha256, original.base_sha256);
+  QCOMPARE(loaded.checkpoint_required, true);
   QCOMPARE(loaded.exclusive_editing, true);
   const auto found = ManagedMapWorkspace::findForWorkspace(
-      original.server_url, original.workspace_id, &error);
+      QStringLiteral("HTTPS://MAPS.EXAMPLE.TEST:443/"),
+      original.workspace_id, &error);
   QVERIFY2(found.isValid(), qPrintable(error));
   QCOMPARE(QFileInfo(found.local_map_path).canonicalFilePath(),
+           QFileInfo(original.local_map_path).canonicalFilePath());
+  const auto assignment = ManagedMapWorkspace::findForAssignment(
+      original.server_url, original.assignment_id, &error);
+  QVERIFY2(assignment.isValid(), qPrintable(error));
+  QCOMPARE(QFileInfo(assignment.local_map_path).canonicalFilePath(),
            QFileInfo(original.local_map_path).canonicalFilePath());
 
   QFile record(ManagedMapWorkspace::recordPathForMap(map_path));
@@ -340,6 +632,69 @@ void MapHubWorkspaceTest::recordRoundTripsWithoutSecrets() {
   QVERIFY(!record.permissions().testFlag(QFileDevice::ReadGroup));
   QVERIFY(!record.permissions().testFlag(QFileDevice::ReadOther));
 #endif
+}
+
+void MapHubWorkspaceTest::findsNewestValidAssignmentWorkspace() {
+  QTemporaryDir directory;
+  QVERIFY(directory.isValid());
+  const auto server = QStringLiteral("https://assignment-%1.example.test")
+                          .arg(QUuid::createUuid().toString(QUuid::Id128));
+  const auto assignment_id =
+      QUuid::createUuid().toString(QUuid::WithoutBraces);
+
+  auto make_workspace = [&](ManagedMapWorkspace &workspace,
+                            const QString &name, int age_seconds,
+                            bool keep_file) {
+    workspace.local_map_path = directory.filePath(name);
+    QFile map(workspace.local_map_path);
+    QVERIFY(map.open(QIODevice::WriteOnly));
+    QCOMPARE(map.write("omap"), qint64(4));
+    map.close();
+    workspace.server_url = server;
+    workspace.project_id =
+        QUuid::createUuid().toString(QUuid::WithoutBraces);
+    workspace.work_package_id =
+        QUuid::createUuid().toString(QUuid::WithoutBraces);
+    workspace.workspace_id =
+        QUuid::createUuid().toString(QUuid::WithoutBraces);
+    workspace.assignment_id = assignment_id;
+    workspace.last_synced_at =
+        QDateTime::currentDateTimeUtc().addSecs(age_seconds);
+    QString error;
+    QVERIFY2(ManagedMapWorkspace::save(workspace, &error), qPrintable(error));
+    if (!keep_file)
+      QVERIFY(map.remove());
+  };
+
+  ManagedMapWorkspace older;
+  ManagedMapWorkspace newest;
+  ManagedMapWorkspace missing;
+  make_workspace(older, QStringLiteral("older.omap"), -120, true);
+  make_workspace(newest, QStringLiteral("newest.omap"), -30, true);
+  make_workspace(missing, QStringLiteral("missing.omap"), 60, false);
+  QString error;
+  const auto found = ManagedMapWorkspace::findForAssignment(
+      server + QLatin1Char('/'), assignment_id, &error);
+  QVERIFY2(found.isValid(), qPrintable(error));
+  QCOMPARE(QFileInfo(found.local_map_path).canonicalFilePath(),
+           QFileInfo(newest.local_map_path).canonicalFilePath());
+  QVERIFY(found.workspace_id != older.workspace_id);
+
+  newest.server_url = server + QLatin1Char('/');
+  QVERIFY2(ManagedMapWorkspace::save(newest, &error), qPrintable(error));
+  const auto reverse_found = ManagedMapWorkspace::findForAssignment(
+      server, assignment_id, &error);
+  QVERIFY2(reverse_found.isValid(), qPrintable(error));
+  QCOMPARE(QFileInfo(reverse_found.local_map_path).canonicalFilePath(),
+           QFileInfo(newest.local_map_path).canonicalFilePath());
+
+  error.clear();
+  auto other_origin = QUrl(server);
+  other_origin.setPort(444);
+  QVERIFY(!ManagedMapWorkspace::findForAssignment(
+               other_origin.toString(), assignment_id, &error)
+               .isValid());
+  QVERIFY(!error.isEmpty());
 }
 
 void MapHubWorkspaceTest::recordIsBoundToCanonicalMapPath() {
@@ -435,6 +790,30 @@ void MapHubWorkspaceTest::validatesServerTransport() {
       QUrl(QStringLiteral("https://maps.example.test/?token=secret"))));
   QVERIFY(!MapHubApiClient::isAcceptableServerUrl(
       QUrl(QStringLiteral("file:///tmp/map"))));
+
+  const auto canonical = MapHubApiClient::canonicalServerOrigin(
+      QStringLiteral("https://maps.example.test"));
+  QCOMPARE(canonical, QStringLiteral("https://maps.example.test"));
+  QCOMPARE(MapHubApiClient::canonicalServerOrigin(
+               QStringLiteral("HTTPS://MAPS.EXAMPLE.TEST:443/")),
+           canonical);
+  const auto workspace_id =
+      QStringLiteral("60000000-0000-4000-8000-000000000094");
+  const auto client_instance_id =
+      QStringLiteral("40000000-0000-4000-8000-000000000094");
+  QCOMPARE(MapHubCredentials::workspaceLeaseKey(
+               QStringLiteral("HTTPS://MAPS.EXAMPLE.TEST:443/"), workspace_id,
+               client_instance_id),
+           MapHubCredentials::workspaceLeaseKey(
+               canonical, workspace_id, client_instance_id));
+  QVERIFY(MapHubApiClient::canonicalServerOrigin(
+              QStringLiteral("https://maps.example.test:444/")) != canonical);
+  QVERIFY(MapHubApiClient::canonicalServerOrigin(
+              QStringLiteral("https://maps.example.test/api"))
+              .isEmpty());
+  QVERIFY(MapHubApiClient::canonicalServerOrigin(
+              QStringLiteral("http://maps.example.test/"))
+              .isEmpty());
 }
 
 void MapHubWorkspaceTest::identifiesMapperWorkspacePackageTypes() {
@@ -661,6 +1040,164 @@ void MapHubWorkspaceTest::editAccessUsesNativeIdempotentEndpoints() {
   QVERIFY(requests[2].contains(cancel_line));
 }
 
+void MapHubWorkspaceTest::assignmentStartCarriesStableClientIdentity() {
+  QTcpServer server;
+  if (!server.listen(QHostAddress::LocalHost))
+    QSKIP("The test sandbox does not permit a loopback listener");
+
+  QByteArray request_bytes;
+  connect(&server, &QTcpServer::newConnection, this, [&] {
+    auto *socket = server.nextPendingConnection();
+    connect(socket, &QTcpSocket::readyRead, this,
+            [&, socket, responded = false]() mutable {
+              if (responded)
+                return;
+              request_bytes.append(socket->readAll());
+              const auto header_end = request_bytes.indexOf("\r\n\r\n");
+              if (header_end < 0)
+                return;
+              const QRegularExpression length_pattern(
+                  QStringLiteral("(?im)^Content-Length:\\s*(\\d+)\\s*$"));
+              const auto match = length_pattern.match(
+                  QString::fromLatin1(request_bytes.left(header_end)));
+              const auto content_length =
+                  match.hasMatch() ? match.captured(1).toLongLong() : 0;
+              if (request_bytes.size() < header_end + 4 + content_length)
+                return;
+              responded = true;
+              const QByteArray body("{}");
+              socket->write(
+                  QByteArray("HTTP/1.1 200 OK\r\nContent-Type: "
+                             "application/json\r\nContent-Length: ") +
+                  QByteArray::number(body.size()) +
+                  QByteArray("\r\nConnection: close\r\n\r\n") + body);
+              socket->disconnectFromHost();
+            });
+  });
+
+  const auto assignment_id =
+      QStringLiteral("70000000-0000-4000-8000-000000000091");
+  const auto client_instance_id =
+      QStringLiteral("40000000-0000-4000-8000-000000000091");
+  MapHubApiClient client(
+      QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort()),
+      QStringLiteral("test-token"));
+  QEventLoop loop;
+  MapHubApiClient::Error callback_error;
+  bool completed = false;
+  client.startAssignment(
+      assignment_id, client_instance_id, QStringLiteral("retained-lease"),
+      [&](const QJsonObject &, const MapHubApiClient::Error &error) {
+        callback_error = error;
+        completed = true;
+        loop.quit();
+      });
+  QTimer::singleShot(5000, &loop, &QEventLoop::quit);
+  loop.exec();
+
+  QVERIFY2(completed, "Assignment-start request timed out");
+  QVERIFY2(!callback_error, qPrintable(callback_error.message));
+  QCOMPARE(request_bytes.left(request_bytes.indexOf("\r\n")),
+           QByteArray("POST /api/v1/assignments/") + assignment_id.toUtf8() +
+               QByteArray("/start HTTP/1.1"));
+  QByteArray client_header("X-Editing-Client-Instance: ");
+  client_header.append(client_instance_id.toUtf8());
+  client_header.append("\r\n");
+  QVERIFY(request_bytes.contains(client_header));
+  QVERIFY(request_bytes.contains("X-Editing-Lease: retained-lease\r\n"));
+  QVERIFY(request_bytes.contains(requestHeader(
+      "X-Mapper-Client-Instance: ", client_instance_id)));
+}
+
+void MapHubWorkspaceTest::leaseLifecycleCarriesStableClientIdentity() {
+  QTcpServer server;
+  if (!server.listen(QHostAddress::LocalHost))
+    QSKIP("The test sandbox does not permit a loopback listener");
+
+  QList<QByteArray> requests;
+  connect(&server, &QTcpServer::newConnection, this, [&] {
+    auto *socket = server.nextPendingConnection();
+    connect(socket, &QTcpSocket::readyRead, this,
+            [&, socket, bytes = QByteArray{}, responded = false]() mutable {
+              if (responded)
+                return;
+              bytes.append(socket->readAll());
+              const auto header_end = bytes.indexOf("\r\n\r\n");
+              if (header_end < 0)
+                return;
+              const QRegularExpression length_pattern(
+                  QStringLiteral("(?im)^Content-Length:\\s*(\\d+)\\s*$"));
+              const auto match = length_pattern.match(
+                  QString::fromLatin1(bytes.left(header_end)));
+              const auto content_length =
+                  match.hasMatch() ? match.captured(1).toLongLong() : 0;
+              if (bytes.size() < header_end + 4 + content_length)
+                return;
+              responded = true;
+              requests.push_back(bytes);
+              const QByteArray body("{}");
+              socket->write(
+                  QByteArray("HTTP/1.1 200 OK\r\nContent-Type: "
+                             "application/json\r\nContent-Length: ") +
+                  QByteArray::number(body.size()) +
+                  QByteArray("\r\nConnection: close\r\n\r\n") + body);
+              socket->disconnectFromHost();
+            });
+  });
+
+  const auto workspace_id =
+      QStringLiteral("60000000-0000-4000-8000-000000000092");
+  const auto revision_id =
+      QStringLiteral("50000000-0000-4000-8000-000000000092");
+  const auto client_instance_id =
+      QStringLiteral("40000000-0000-4000-8000-000000000092");
+  MapHubApiClient client(
+      QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort()),
+      QStringLiteral("test-token"));
+  QEventLoop loop;
+  MapHubApiClient::Error callback_error;
+  bool completed = false;
+  client.renewLease(
+      workspace_id, client_instance_id, QStringLiteral("lifecycle-lease"),
+      [&](const QJsonObject &, const MapHubApiClient::Error &renew_error) {
+        callback_error = renew_error;
+        if (renew_error) {
+          loop.quit();
+          return;
+        }
+        client.submitRevision(
+            revision_id, client_instance_id,
+            QStringLiteral("lifecycle-lease"),
+            [&](const QJsonObject &,
+                const MapHubApiClient::Error &submit_error) {
+              callback_error = submit_error;
+              completed = true;
+              loop.quit();
+            });
+      });
+  QTimer::singleShot(5000, &loop, &QEventLoop::quit);
+  loop.exec();
+
+  QVERIFY2(completed, "Lease lifecycle requests timed out");
+  QVERIFY2(!callback_error, qPrintable(callback_error.message));
+  QCOMPARE(requests.size(), 2);
+  QByteArray renew_line("POST /api/v1/workspaces/");
+  renew_line.append(workspace_id.toUtf8());
+  renew_line.append("/renew HTTP/1.1");
+  QByteArray submit_line("POST /api/v1/revisions/");
+  submit_line.append(revision_id.toUtf8());
+  submit_line.append("/submit HTTP/1.1");
+  QVERIFY(requests[0].startsWith(renew_line));
+  QVERIFY(requests[1].startsWith(submit_line));
+  for (const auto &request : std::as_const(requests)) {
+    QVERIFY(request.contains("X-Editing-Lease: lifecycle-lease\r\n"));
+    QVERIFY(request.contains(requestHeader("X-Editing-Client-Instance: ",
+                                           client_instance_id)));
+    QVERIFY(request.contains(requestHeader("X-Mapper-Client-Instance: ",
+                                           client_instance_id)));
+  }
+}
+
 void MapHubWorkspaceTest::verifiedDownloadRequiresBoundRevisionHeaders() {
   QTcpServer server;
   if (!server.listen(QHostAddress::LocalHost))
@@ -788,10 +1325,13 @@ void MapHubWorkspaceTest::checkpointCarriesStreamProjectionDigest() {
   MapHubApiClient client(
       QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort()),
       QStringLiteral("test-token"));
+  const auto client_instance_id =
+      QStringLiteral("40000000-0000-4000-8000-000000000051");
   client.checkpoint(
       QStringLiteral("60000000-0000-4000-8000-000000000001"), path,
       QStringLiteral("60000000-0000-4000-8000-000000000002"),
-      QStringLiteral("lease"), QStringLiteral("Checkpoint"),
+      client_instance_id, QStringLiteral("lease"),
+      QStringLiteral("Checkpoint"),
       QStringLiteral("Field edits"), QStringLiteral("fixture-key"), 42,
       QString(64, QLatin1Char('b')),
       QStringLiteral("60000000-0000-4000-8000-000000000003"),
@@ -807,6 +1347,10 @@ void MapHubWorkspaceTest::checkpointCarriesStreamProjectionDigest() {
   QVERIFY2(!callback_error, qPrintable(callback_error.message));
   QVERIFY(request_bytes.contains("Idempotency-Key: fixture-key"));
   QVERIFY(request_bytes.contains("X-Editing-Lease: lease"));
+  QVERIFY(request_bytes.contains(requestHeader(
+      "X-Editing-Client-Instance: ", client_instance_id)));
+  QVERIFY(request_bytes.contains(requestHeader(
+      "X-Mapper-Client-Instance: ", client_instance_id)));
   QVERIFY(request_bytes.contains("name=\"stream_sequence\""));
   QVERIFY(request_bytes.contains("\r\n\r\n42\r\n"));
   QVERIFY(request_bytes.contains("name=\"stream_hash\""));
@@ -883,6 +1427,12 @@ void MapHubWorkspaceTest::snapshotCompressesEntityIndex() {
   loop.exec();
   QVERIFY2(completed, "Snapshot request timed out");
   QVERIFY2(!callback_error, qPrintable(callback_error.message));
+  QVERIFY(request_bytes.contains(requestHeader(
+      "X-Editing-Client-Instance: ",
+      QStringLiteral("40000000-0000-4000-8000-000000000061"))));
+  QVERIFY(request_bytes.contains(requestHeader(
+      "X-Mapper-Client-Instance: ",
+      QStringLiteral("40000000-0000-4000-8000-000000000061"))));
   QVERIFY(request_bytes.contains("name=\"entity_index_content_encoding\""));
   QVERIFY(request_bytes.contains("\r\n\r\nzstd\r\n"));
   QVERIFY(!request_bytes.contains(QByteArray(1024, 'a')));
@@ -929,6 +1479,7 @@ void MapHubWorkspaceTest::transactionPostCompressesSemanticOperations() {
       QStringLiteral("test-token"));
   client.postWorkspaceTransaction(
       QStringLiteral("60000000-0000-4000-8000-000000000071"), canonical_json,
+      QStringLiteral("40000000-0000-4000-8000-000000000071"),
       QStringLiteral("lease"),
       [&](const QJsonObject &, const MapHubApiClient::Error &error) {
         callback_error = error;
@@ -941,6 +1492,12 @@ void MapHubWorkspaceTest::transactionPostCompressesSemanticOperations() {
   QVERIFY2(!callback_error, qPrintable(callback_error.message));
   QVERIFY(request_bytes.contains("Content-Encoding: zstd"));
   QVERIFY(request_bytes.contains("X-Editing-Lease: lease"));
+  QVERIFY(request_bytes.contains(requestHeader(
+      "X-Editing-Client-Instance: ",
+      QStringLiteral("40000000-0000-4000-8000-000000000071"))));
+  QVERIFY(request_bytes.contains(requestHeader(
+      "X-Mapper-Client-Instance: ",
+      QStringLiteral("40000000-0000-4000-8000-000000000071"))));
   QVERIFY(!request_bytes.contains(QByteArray(1024, 'x')));
 }
 

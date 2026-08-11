@@ -8,8 +8,10 @@
 
 #include <algorithm>
 #include <limits>
+#include <utility>
 
 #include <QCryptographicHash>
+#include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -19,6 +21,7 @@
 #include <QRandomGenerator>
 #include <QRegularExpression>
 #include <QSaveFile>
+#include <QSysInfo>
 #include <QTimer>
 #include <QUuid>
 #include <QXmlStreamReader>
@@ -46,6 +49,10 @@ namespace {
 constexpr auto snapshot_idle_ms = 10'000;
 constexpr auto snapshot_max_ms = 60'000;
 constexpr auto poll_active_ms = 30'000;
+constexpr auto poll_active_min_ms = 750;
+constexpr auto poll_active_max_ms = 60'000;
+constexpr auto poll_idle_min_ms = 2'000;
+constexpr auto poll_idle_max_ms = 300'000;
 
 bool validStreamHash(const QString &value) {
   static const QRegularExpression pattern(QStringLiteral("^[0-9a-f]{64}$"));
@@ -55,6 +62,35 @@ bool validStreamHash(const QString &value) {
 bool retryableRequestError(const MapHubApiClient::Error &error) {
   return error.http_status == 0 || error.http_status == 408 ||
          error.http_status == 429 || error.http_status >= 500;
+}
+
+bool isUpstreamProblem(const QString &code) {
+  return code == QLatin1String("entity_conflict") ||
+         code == QLatin1String("invalid_anchor") ||
+         code == QLatin1String("project_revision_advanced") ||
+         code == QLatin1String("stale_workspace_revision") ||
+         code == QLatin1String("workspace_advanced") ||
+         code == QLatin1String("project_advanced");
+}
+
+bool isTerminalWorkspaceStatus(const QString &status) {
+  return status == QLatin1String("submitted") ||
+         status == QLatin1String("complete") ||
+         status == QLatin1String("cancelled");
+}
+
+QString presenceDeviceName() {
+#if defined(Q_OS_IOS)
+  return QStringLiteral("Mapper on iOS");
+#elif defined(Q_OS_ANDROID)
+  return QStringLiteral("Mapper on Android");
+#elif defined(Q_OS_MACOS)
+  return QStringLiteral("Mapper on macOS");
+#elif defined(Q_OS_WIN)
+  return QStringLiteral("Mapper on Windows");
+#else
+  return QStringLiteral("Mapper on %1").arg(QSysInfo::productType());
+#endif
 }
 
 QString revisionId(const QJsonObject &object) {
@@ -373,12 +409,14 @@ MapHubSyncController::MapHubSyncController(QObject *parent)
     : QObject(parent), watch_timer(new QTimer(this)),
       snapshot_idle_timer(new QTimer(this)),
       snapshot_max_timer(new QTimer(this)), upload_idle_timer(new QTimer(this)),
-      retry_timer(new QTimer(this)), poll_timer(new QTimer(this)) {
+      retry_timer(new QTimer(this)), poll_timer(new QTimer(this)),
+      presence_expiry_timer(new QTimer(this)) {
   watch_timer->setInterval(1000);
   snapshot_idle_timer->setSingleShot(true);
   snapshot_max_timer->setSingleShot(true);
   upload_idle_timer->setSingleShot(true);
   retry_timer->setSingleShot(true);
+  presence_expiry_timer->setSingleShot(true);
   poll_timer->setInterval(poll_active_ms);
   connect(watch_timer, &QTimer::timeout, this,
           &MapHubSyncController::observeRevision);
@@ -392,6 +430,10 @@ MapHubSyncController::MapHubSyncController(QObject *parent)
           &MapHubSyncController::retryWork);
   connect(poll_timer, &QTimer::timeout, this,
           &MapHubSyncController::pollSyncState);
+  connect(presence_expiry_timer, &QTimer::timeout, this, [this] {
+    emit detailsChanged();
+    schedulePresenceExpiry();
+  });
 }
 
 MapHubSyncController::~MapHubSyncController() = default;
@@ -399,15 +441,32 @@ MapHubSyncController::~MapHubSyncController() = default;
 void MapHubSyncController::configure(const ManagedMapWorkspace &new_workspace,
                                      Map *new_map,
                                      RevisionProvider new_revision_provider,
-                                     SnapshotProvider new_snapshot_provider) {
-  clear();
+                                     SnapshotProvider new_snapshot_provider,
+                                     WorkingCopyCommitter
+                                         new_working_copy_committer) {
+  const auto refreshing_same_session =
+      workspace.isValid() && new_workspace.isValid() && map == new_map &&
+      MapHubApiClient::canonicalServerOrigin(workspace.server_url) ==
+          MapHubApiClient::canonicalServerOrigin(new_workspace.server_url) &&
+      workspace.workspace_id == new_workspace.workspace_id;
+  clearSession(!refreshing_same_session);
   if (!new_workspace.isValid() || !new_map || !new_revision_provider ||
       !new_snapshot_provider)
     return;
   workspace = new_workspace;
+  if (workspace.sync_problem == QLatin1String("workspace_metadata")) {
+    workspace_metadata_pending = true;
+    workspace_metadata_desired_stopped = false;
+    workspace_metadata_desired_problem.clear();
+  }
   map = new_map;
   revision_provider = std::move(new_revision_provider);
   snapshot_provider = std::move(new_snapshot_provider);
+  working_copy_committer = std::move(new_working_copy_committer);
+  application_active = true;
+  active_poll_interval_ms = poll_active_ms;
+  idle_poll_interval_ms = 120'000;
+  poll_timer->setInterval(active_poll_interval_ms);
   observed_revision = revision_provider();
   operation_store = std::make_unique<MapHubOperationStore>();
   QString operation_error;
@@ -417,7 +476,9 @@ void MapHubSyncController::configure(const ManagedMapWorkspace &new_workspace,
        workspace.initial_snapshot_required &&
        workspace.stream_head_sequence == 0);
   staged_revision = needs_initial_seed ? 0 : observed_revision;
-  if (!operation_store->open(workspace.workspace_id, &operation_error) ||
+  if (!operation_store->open(workspace.workspace_id,
+                             workspace.client_instance_id,
+                             &operation_error) ||
       (needs_initial_seed &&
        !operation_store->seedInitialProjection(*map, &operation_error))) {
     operation_store.reset();
@@ -515,7 +576,11 @@ void MapHubSyncController::configure(const ManagedMapWorkspace &new_workspace,
                             this, &MapHubSyncController::queueCommittedEdit);
   const auto structure_changed = [this] {
     if (!applying_remote_operations)
-      queueStructureChanges();
+      scheduleStructureChanges();
+  };
+  const auto checkpoint_changed = [this] {
+    if (!applying_remote_operations)
+      markCheckpointRequired();
   };
   entity_connections = {
       connect(map, &Map::mapPartAdded, this, structure_changed),
@@ -525,11 +590,29 @@ void MapHubSyncController::configure(const ManagedMapWorkspace &new_workspace,
       connect(map, &Map::symbolChanged, this, structure_changed),
       connect(map, &Map::symbolDeleted, this, structure_changed),
       connect(map, &Map::symbolMoved, this, structure_changed),
+      connect(map, &Map::colorAdded, this, checkpoint_changed),
+      connect(map, &Map::colorChanged, this, checkpoint_changed),
+      connect(map, &Map::colorDeleted, this, checkpoint_changed),
+      connect(map, &Map::templateAdded, this, checkpoint_changed),
+      connect(map, &Map::templateChanged, this, checkpoint_changed),
+      connect(map, &Map::templateMoved, this, checkpoint_changed),
+      connect(map, &Map::templateDeleted, this, checkpoint_changed),
+      connect(map, &Map::firstFrontTemplateChanged, this,
+              checkpoint_changed),
   };
   if (needs_projection_restore) {
     stopped_for_conflict = true;
     setState(State::ActionRequired,
              tr("Restoring this map's connected-editing history…"));
+  } else if (!workspace.sync_problem.isEmpty() &&
+             workspace.sync_problem != QLatin1String("compaction_required")) {
+    stopped_for_conflict = true;
+    setState(isUpstreamProblem(workspace.sync_problem)
+                 ? State::UpstreamChanged
+                 : State::ActionRequired,
+             isUpstreamProblem(workspace.sync_problem)
+                 ? tr("Upstream and local edits still need review")
+                 : tr("Map Hub synchronization still needs attention"));
   } else if (recovery_snapshot_ok || current_state != State::ActionRequired) {
     setState(State::Watching, tr("Map Hub connected"));
   }
@@ -537,9 +620,22 @@ void MapHubSyncController::configure(const ManagedMapWorkspace &new_workspace,
   poll_timer->start();
   QString queue_error;
   auto pending = MapHubSyncQueue::load(workspace.workspace_id, &queue_error);
-  if (!needs_projection_restore && pending.isValid()) {
+  if (!needs_projection_restore && pending.isValid() &&
+      workspace.sync_problem !=
+          QLatin1String("working_copy_commit_required")) {
     staged_revision = pending.map_revision;
     setState(State::SavedLocally, tr("Saved locally — waiting to sync"));
+  } else if (pending.isValid() &&
+             workspace.sync_problem ==
+                 QLatin1String("working_copy_commit_required")) {
+    // The private snapshot is durable, but the provider-visible document is
+    // still older. Keep the replay obligation live until the coordinated
+    // working-copy commit succeeds.
+    staged_revision = 0;
+    stopped_for_conflict = true;
+    setState(State::ActionRequired,
+             tr("Saved recovery copy needs permission to update this map"));
+    retry_timer->start(5000);
   } else if (!queue_error.isEmpty()) {
     setState(State::ActionRequired,
              tr("Map Hub recovery queue needs attention"));
@@ -552,14 +648,21 @@ void MapHubSyncController::configure(const ManagedMapWorkspace &new_workspace,
     upload_idle_timer->start(0);
 }
 
-void MapHubSyncController::clear() {
+void MapHubSyncController::clear() { clearSession(true); }
+
+void MapHubSyncController::clearSession(bool announce_away) {
+  if (announce_away)
+    sendFinalAwayHeartbeat();
+  ++session_generation;
   for (auto *timer : {watch_timer, snapshot_idle_timer, snapshot_max_timer,
-                      upload_idle_timer, retry_timer, poll_timer})
+                      upload_idle_timer, retry_timer, poll_timer,
+                      presence_expiry_timer})
     timer->stop();
-  if (request_client) {
-    request_client->deleteLater();
-    request_client = nullptr;
-  }
+  const auto clients =
+      findChildren<MapHubApiClient *>(QString{}, Qt::FindDirectChildrenOnly);
+  for (auto *client : clients)
+    delete client;
+  request_client = nullptr;
   QObject::disconnect(edit_connection);
   edit_connection = {};
   for (const auto &connection : entity_connections)
@@ -570,6 +673,7 @@ void MapHubSyncController::clear() {
   workspace = {};
   revision_provider = {};
   snapshot_provider = {};
+  working_copy_committer = {};
   observed_revision = 0;
   staged_revision = 0;
   semantic_revision = 0;
@@ -578,20 +682,165 @@ void MapHubSyncController::clear() {
   pull_pending = false;
   restore_pending = false;
   stopped_for_conflict = false;
+  acknowledgement_pending = false;
+  acknowledgement_dirty = false;
+  retry_outbox_now = false;
+  structure_change_pending = false;
   applying_remote_operations = false;
+  workspace_metadata_pending = false;
+  workspace_metadata_desired_stopped = false;
+  workspace_metadata_desired_problem.clear();
+  workspace_metadata_error_message.clear();
+  active_poll_interval_ms = poll_active_ms;
+  idle_poll_interval_ms = 120'000;
+  presence_ttl_seconds = 0;
+  server_time = {};
+  server_time_age.invalidate();
+  presence.clear();
   compaction_map.reset();
+  compaction_generation = 0;
+  compaction_workspace_id.clear();
   compaction_target_sequence = 0;
   compaction_target_hash.clear();
   compaction_file_path.clear();
   local_entities.clear();
   setState(State::Disconnected, {});
+  emit detailsChanged();
 }
 
 bool MapHubSyncController::editable() const {
-  return workspace.isValid() &&
-         workspace.status != QLatin1String("submitted") &&
-         workspace.status != QLatin1String("complete") &&
-         workspace.status != QLatin1String("cancelled");
+  return workspace.isValid() && !isTerminalWorkspaceStatus(workspace.status);
+}
+
+int MapHubSyncController::pendingOperationCount() const {
+  return operation_store ? operation_store->pendingCount() : 0;
+}
+
+QDateTime MapHubSyncController::estimatedServerTime() const {
+  if (!server_time.isValid() || !server_time_age.isValid())
+    return {};
+  return server_time.addMSecs(server_time_age.elapsed());
+}
+
+void MapHubSyncController::schedulePresenceExpiry() {
+  presence_expiry_timer->stop();
+  const auto now = estimatedServerTime();
+  if (!now.isValid() || presence_ttl_seconds <= 0 || presence.isEmpty())
+    return;
+
+  qint64 earliest_delay = std::numeric_limits<qint64>::max();
+  for (const auto &collaborator : std::as_const(presence)) {
+    if (!collaborator.last_seen_at.isValid())
+      continue;
+    // The UI treats age == TTL as fresh, so repaint immediately after that
+    // boundary. Already-expired entries need no further timer.
+    const auto expiry = collaborator.last_seen_at
+                            .addSecs(presence_ttl_seconds)
+                            .addMSecs(1);
+    const auto delay = now.msecsTo(expiry);
+    if (delay > 0)
+      earliest_delay = std::min(earliest_delay, delay);
+  }
+  if (earliest_delay == std::numeric_limits<qint64>::max())
+    return;
+
+  // A malformed future last-seen value must not suppress repaint forever.
+  // Normal entries fire exactly at expiry; future-skewed entries refresh at
+  // least once per presence TTL until a poll replaces them.
+  const auto bounded_delay = std::clamp<qint64>(
+      earliest_delay, 1,
+      std::max<qint64>(1000, qint64(presence_ttl_seconds) * 1000 + 1));
+  presence_expiry_timer->start(
+      int(std::min<qint64>(bounded_delay, std::numeric_limits<int>::max())));
+}
+
+bool MapHubSyncController::isCurrentSession(
+    quint64 generation, const QString &workspace_id) const {
+  return generation == session_generation && workspace.isValid() &&
+         workspace.workspace_id == workspace_id;
+}
+
+bool MapHubSyncController::isCurrentCompactionSession(
+    quint64 generation, const QString &workspace_id) const {
+  return isCurrentSession(generation, workspace_id) && upload_pending &&
+         request_client && compaction_generation == generation &&
+         compaction_workspace_id == workspace_id;
+}
+
+void MapHubSyncController::retryNow() {
+  if (!workspace.isValid())
+    return;
+  retry_timer->stop();
+  if (workspace_metadata_pending ||
+      workspace.sync_problem == QLatin1String("workspace_metadata")) {
+    const auto generation = session_generation;
+    const auto workspace_id = workspace.workspace_id;
+    if (!saveWorkspace() || !isCurrentSession(generation, workspace_id))
+      return;
+    emit detailsChanged();
+    if (workspace.sync_problem ==
+        QLatin1String("working_copy_commit_required")) {
+      retryWork();
+      return;
+    }
+    if (workspace.sync_problem ==
+        QLatin1String("snapshot_restore_required")) {
+      restoreProjection();
+      return;
+    }
+    QString inbox_error;
+    const auto durable_inbox =
+        operation_store
+            ? operation_store->unappliedTransactions(&inbox_error)
+            : QVector<MapHubCommittedTransaction>{};
+    if (!inbox_error.isEmpty()) {
+      setState(State::ActionRequired, inbox_error);
+      return;
+    }
+    if (!durable_inbox.isEmpty()) {
+      // A failed sidecar receipt deliberately leaves the inbox intact. Restage
+      // the exact current editor revision before deleting it, so Retry remains
+      // safe even if editing advanced after the metadata failure.
+      if (!stageSnapshotNow() ||
+          !isCurrentSession(generation, workspace_id))
+        return;
+    }
+    if (stopped_for_conflict) {
+      setState(State::ActionRequired,
+               tr("Map Hub synchronization still needs attention"));
+      return;
+    }
+    setState(workspace.checkpoint_required ? State::CheckpointNeeded
+                                           : State::Watching,
+             workspace.checkpoint_required
+                 ? tr("Map settings saved on this device — checkpoint to share")
+                 : tr("Map Hub metadata restored — checking for updates"));
+    pollSyncState();
+    if (workspace.initial_snapshot_required ||
+        workspace.compaction_recommended || workspace.compaction_required)
+      uploadPendingSnapshot();
+    else
+      drainOutbox();
+    return;
+  }
+  if (workspace.sync_problem ==
+      QLatin1String("working_copy_commit_required")) {
+    retryWork();
+    return;
+  }
+  if (workspace.sync_problem == QLatin1String("snapshot_restore_required")) {
+    restoreProjection();
+    return;
+  }
+  retry_outbox_now = true;
+  pollSyncState();
+  if (!stopped_for_conflict) {
+    if (workspace.initial_snapshot_required ||
+        workspace.compaction_recommended || workspace.compaction_required)
+      uploadPendingSnapshot();
+    else
+      drainOutbox();
+  }
 }
 
 bool MapHubSyncController::checkpointStreamHead(qint64 *sequence, QString *hash,
@@ -623,8 +872,11 @@ bool MapHubSyncController::checkpointStreamHead(qint64 *sequence, QString *hash,
 void MapHubSyncController::applicationBecameActive() {
   if (!workspace.isValid())
     return;
+  application_active = true;
+  poll_timer->setInterval(active_poll_interval_ms);
   watch_timer->start();
   poll_timer->start();
+  acknowledgeAppliedOperations();
   pollSyncState();
   if (workspace.initial_snapshot_required || workspace.compaction_recommended ||
       workspace.compaction_required)
@@ -636,9 +888,13 @@ void MapHubSyncController::applicationBecameActive() {
 void MapHubSyncController::applicationWillResignActive() {
   if (!workspace.isValid())
     return;
+  application_active = false;
+  watch_timer->stop();
+  poll_timer->setInterval(idle_poll_interval_ms);
   observeRevision();
   if (observed_revision != staged_revision)
     stageSnapshot();
+  acknowledgeAppliedOperations();
 }
 
 void MapHubSyncController::savedExplicitly() {
@@ -646,6 +902,50 @@ void MapHubSyncController::savedExplicitly() {
     return;
   observeRevision();
   scheduleSnapshot(true);
+}
+
+bool MapHubSyncController::ensureWorkingCopyDurableNow() {
+  if (!editable() || !revision_provider || !snapshot_provider)
+    return false;
+  const auto generation = session_generation;
+  const auto workspace_id = workspace.workspace_id;
+
+  // A structural signal is emitted before Map increments its revision. Flush
+  // that deferred capture now so the durable receipt covers both semantic
+  // operations and any checkpoint-only portion of this exact revision.
+  structure_change_pending = false;
+  if (!applying_remote_operations)
+    queueStructureChanges();
+  if (!isCurrentSession(generation, workspace_id))
+    return false;
+  observeRevision();
+  if (!isCurrentSession(generation, workspace_id))
+    return false;
+
+  // Provider coordination can replay document events. Retry a bounded number
+  // of times if that advances the map without replacing this session; success
+  // means the provider-visible working copy and private recovery receipt both
+  // name the exact current editor revision.
+  for (int attempt = 0; attempt < 3; ++attempt) {
+    const auto target_revision = revision_provider();
+    if (!target_revision)
+      return false;
+    if (observed_revision != target_revision) {
+      observed_revision = target_revision;
+      if (semantic_revision != target_revision)
+        queueStructureChanges();
+      if (!isCurrentSession(generation, workspace_id))
+        return false;
+    }
+    if (!stageSnapshotNow(false) ||
+        !isCurrentSession(generation, workspace_id))
+      return false;
+    const auto current_revision = revision_provider();
+    if (current_revision && current_revision == target_revision &&
+        staged_revision == target_revision)
+      return true;
+  }
+  return false;
 }
 
 void MapHubSyncController::observeRevision() {
@@ -675,9 +975,13 @@ bool MapHubSyncController::stageSnapshotNow(bool resume_after_inbox) {
   snapshot_max_timer->stop();
   if (!editable() || !snapshot_provider)
     return false;
+  const auto state_before_stage = current_state;
+  const auto generation = session_generation;
+  const auto workspace_id = workspace.workspace_id;
+  const auto provider = snapshot_provider;
   if (observed_revision == staged_revision)
     return finishDurableInbox(resume_after_inbox);
-  auto directory = MapHubSyncQueue::workspaceDirectory(workspace.workspace_id);
+  auto directory = MapHubSyncQueue::workspaceDirectory(workspace_id);
   if (!QDir().mkpath(directory)) {
     setState(State::ActionRequired,
              tr("Cannot create the Map Hub recovery folder"));
@@ -687,10 +991,14 @@ bool MapHubSyncController::stageSnapshotNow(bool resume_after_inbox) {
       QStringLiteral(".staged-%1.omap")
           .arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
   setState(State::SavingLocally, tr("Saving locally…"));
+  if (!isCurrentSession(generation, workspace_id))
+    return false;
   quint64 snapshot_revision = 0;
   QString snapshot_error;
-  if (!snapshot_provider(temporary_path, &snapshot_revision, &snapshot_error)) {
+  if (!provider(temporary_path, &snapshot_revision, &snapshot_error)) {
     QFile::remove(temporary_path);
+    if (!isCurrentSession(generation, workspace_id))
+      return false;
     // Editing operations temporarily prevent serialization. Retry without
     // surfacing a modal failure.
     snapshot_idle_timer->start(5000);
@@ -699,11 +1007,14 @@ bool MapHubSyncController::stageSnapshotNow(bool resume_after_inbox) {
                                   : snapshot_error);
     return false;
   }
+  if (!isCurrentSession(generation, workspace_id)) {
+    QFile::remove(temporary_path);
+    return false;
+  }
   QString hash_error;
   auto sha256 =
       MapHubApiClient::sha256ForFile(temporary_path, &hash_error).toLower();
-  auto final_path =
-      MapHubSyncQueue::snapshotPath(workspace.workspace_id, sha256);
+  auto final_path = MapHubSyncQueue::snapshotPath(workspace_id, sha256);
   if (sha256.isEmpty() || final_path.isEmpty()) {
     QFile::remove(temporary_path);
     setState(State::ActionRequired,
@@ -720,7 +1031,7 @@ bool MapHubSyncController::stageSnapshotNow(bool resume_after_inbox) {
     return false;
   }
   MapHubPendingDraft pending;
-  pending.workspace_id = workspace.workspace_id;
+  pending.workspace_id = workspace_id;
   pending.local_map_path = workspace.local_map_path;
   pending.snapshot_path = final_path;
   pending.sha256 = sha256;
@@ -751,7 +1062,7 @@ bool MapHubSyncController::stageSnapshotNow(bool resume_after_inbox) {
     const auto bytes = index.canonicalBytes(&queue_error);
     pending.entity_index_sha256 = index.sha256(&queue_error);
     pending.entity_index_path = MapHubSyncQueue::entityIndexPath(
-        workspace.workspace_id, pending.entity_index_sha256);
+        workspace_id, pending.entity_index_sha256);
     pending.base_stream_sequence = index.stream_sequence;
     pending.base_stream_hash = index.stream_hash;
     pending.client_instance_id = workspace.client_instance_id;
@@ -782,41 +1093,63 @@ bool MapHubSyncController::stageSnapshotNow(bool resume_after_inbox) {
     setState(State::ActionRequired, queue_error);
     return false;
   }
-  // A connected workspace is an autosaved working copy. Keep the ordinary
-  // .omap path crash-consistent with the content-addressed recovery snapshot;
-  // immutable Map Hub history is still created only by an explicit checkpoint.
-  if (!copyFileAtomically(pending.snapshot_path, workspace.local_map_path,
-                          pending.size_bytes)) {
-    setState(State::ActionRequired,
-             tr("Your edit is preserved in Map Hub recovery storage, but "
-                "Mapper could not update the working .omap file"));
+  // A connected workspace is an autosaved working copy. On iOS the active
+  // document must be committed through UIDocument; replacing its provider URL
+  // directly is reported back to Mapper as an external edit. The private
+  // operation log and content-addressed snapshot are durable, but their replay
+  // obligation must remain live until the provider-visible document catches
+  // up. Otherwise a later reopen could start from older bytes after the inbox
+  // was already marked applied.
+  if (!commitRequiredWorkingCopy(pending.snapshot_path, pending.size_bytes))
     return false;
-  }
+  if (!isCurrentSession(generation, workspace_id))
+    return false;
   if (!upload_pending)
-    MapHubSyncQueue::pruneSnapshots(workspace.workspace_id,
+    MapHubSyncQueue::pruneSnapshots(workspace_id,
                                     pending.snapshot_path, nullptr,
                                     pending.entity_index_path);
   staged_revision = snapshot_revision;
-  setState(State::SavedLocally, tr("Saved locally"));
-  if (pending.publish_snapshot)
-    QTimer::singleShot(0, this, &MapHubSyncController::uploadPendingSnapshot);
   // If editing advanced while serialization ran, immediately begin the next
   // coalescing window. The just-staged bytes remain a valid recovery point.
   observed_revision = revision_provider ? revision_provider() : staged_revision;
-  if (observed_revision != staged_revision)
+  const auto editing_advanced = observed_revision != staged_revision;
+  const auto preserve_synced_state =
+      state_before_stage == State::Synced && operation_store &&
+      operation_store->pendingCount() == 0 &&
+      !workspace.checkpoint_required && !workspace.initial_snapshot_required &&
+      !workspace.compaction_recommended && !workspace.compaction_required &&
+      !upload_pending && !pull_pending && workspace.sync_problem.isEmpty();
+  setState(preserve_synced_state
+               ? State::Synced
+               : (workspace.checkpoint_required ? State::CheckpointNeeded
+                                                : State::SavedLocally),
+           preserve_synced_state
+               ? tr("Synced to Map Hub")
+               : (workspace.checkpoint_required
+                      ? tr("Map settings saved locally — checkpoint to share")
+                      : tr("Saved locally")));
+  if (!isCurrentSession(generation, workspace_id))
+    return false;
+  if (pending.publish_snapshot)
+    QTimer::singleShot(0, this, [this, generation, workspace_id] {
+      if (isCurrentSession(generation, workspace_id))
+        uploadPendingSnapshot();
+    });
+  if (editing_advanced)
     scheduleSnapshot();
   return finishDurableInbox(resume_after_inbox);
 }
 
 bool MapHubSyncController::finishDurableInbox(bool resume_after_inbox) {
+  if (!workspace.isValid())
+    return false;
+  const auto generation = session_generation;
+  const auto workspace_id = workspace.workspace_id;
   QString inbox_error;
   const auto durable_inbox =
       operation_store ? operation_store->unappliedTransactions(&inbox_error)
                       : QVector<MapHubCommittedTransaction>{};
-  if (!inbox_error.isEmpty() ||
-      (!durable_inbox.isEmpty() &&
-       !operation_store->markTransactionsApplied(
-           durable_inbox.constLast().stream_sequence, &inbox_error))) {
+  if (!inbox_error.isEmpty()) {
     setState(State::ActionRequired,
              inbox_error.isEmpty()
                  ? tr("Could not finish the durable Map Hub replay")
@@ -824,14 +1157,31 @@ bool MapHubSyncController::finishDurableInbox(bool resume_after_inbox) {
     return false;
   }
   if (!durable_inbox.isEmpty()) {
-    workspace.applied_stream_sequence =
-        durable_inbox.constLast().stream_sequence;
-    saveWorkspace();
+    const auto applied_sequence = durable_inbox.constLast().stream_sequence;
+    workspace.applied_stream_sequence = applied_sequence;
+    // Persist the receipt before deleting the replay journal. If the sidecar
+    // write fails, a crash still leaves the inbox available for idempotent
+    // recovery instead of losing the only durable applied-sequence evidence.
+    if (!saveWorkspace())
+      return false;
+    if (!isCurrentSession(generation, workspace_id))
+      return false;
+    if (!operation_store->markTransactionsApplied(applied_sequence,
+                                                  &inbox_error)) {
+      setState(State::ActionRequired,
+               inbox_error.isEmpty()
+                   ? tr("Could not finish the durable Map Hub replay")
+                   : inbox_error);
+      return false;
+    }
     acknowledgeAppliedOperations();
     if (resume_after_inbox)
-      QTimer::singleShot(0, this, &MapHubSyncController::pullOperations);
+      QTimer::singleShot(0, this, [this, generation, workspace_id] {
+        if (isCurrentSession(generation, workspace_id))
+          pullOperations();
+      });
   }
-  return true;
+  return isCurrentSession(generation, workspace_id);
 }
 
 QHash<QString, MapHubSyncController::LocalEntity>
@@ -945,6 +1295,10 @@ void MapHubSyncController::queueStructureChanges() {
   if (!map || !operation_store || applying_remote_operations || !editable() ||
       workspace.sync_problem == QLatin1String("local_operation_queue"))
     return;
+  const auto colors_dirty = map->areColorsDirty();
+  const auto templates_dirty = map->areTemplatesDirty();
+  const auto other_dirty = map->isOtherDirty();
+  const auto current_revision = revision_provider ? revision_provider() : 0;
   const auto current = captureLocalEntities();
   QVector<MapHubEditOperation> operations;
 
@@ -1022,10 +1376,31 @@ void MapHubSyncController::queueStructureChanges() {
         {MapHubEditOperation::Kind::DeletePart, id, {}, {}, 0, {}});
 
   if (operations.isEmpty()) {
+    if (current_revision && semantic_revision != current_revision)
+      markCheckpointRequired();
     local_entities = current;
-    semantic_revision = revision_provider ? revision_provider() : 0;
+    semantic_revision = current_revision;
     return;
   }
+
+  // Map parts use the broad `other_dirty` bit even though their complete
+  // create/delete/reorder representation is in this batch. Suppress that one
+  // noisy checkpoint only when the deferred signal owns exactly the next map
+  // revision. A prior unsupported edit, compound change, explicit color or
+  // template change, or existing checkpoint obligation remains latched.
+  const auto contains_part_operation =
+      std::any_of(operations.cbegin(), operations.cend(), [](const auto &op) {
+        return op.kind == MapHubEditOperation::Kind::PutPart ||
+               op.kind == MapHubEditOperation::Kind::DeletePart;
+      });
+  const auto other_dirty_is_pure_part =
+      other_dirty && contains_part_operation && !colors_dirty &&
+      !templates_dirty && !workspace.checkpoint_required && current_revision &&
+      semantic_revision < std::numeric_limits<quint64>::max() &&
+      current_revision == semantic_revision + 1;
+  const auto needs_complete_checkpoint =
+      colors_dirty || templates_dirty ||
+      (other_dirty && !other_dirty_is_pure_part);
 
   // Structural changes are not represented by Mapper's object UndoSteps.
   // Bound each durable batch comfortably below the protocol's decoded limits.
@@ -1063,8 +1438,11 @@ void MapHubSyncController::queueStructureChanges() {
     offset += count;
   }
   local_entities = current;
-  semantic_revision = revision_provider ? revision_provider() : 0;
+  semantic_revision = current_revision;
   staged_revision = 0;
+  if (needs_complete_checkpoint)
+    markCheckpointRequired();
+  emit detailsChanged();
   setState(State::SavedLocally, tr("Saved locally"));
   upload_idle_timer->start(250);
 }
@@ -1077,7 +1455,10 @@ void MapHubSyncController::queueCommittedEdit(const UndoStep *step) {
   std::vector<UndoStep::EntityChange> changes;
   step->collectEntityChanges(changes);
   if (changes.empty()) {
-    semantic_revision = revision_provider ? revision_provider() : 0;
+    const auto revision = revision_provider ? revision_provider() : 0;
+    if (revision && semantic_revision != revision)
+      markCheckpointRequired();
+    semantic_revision = revision;
     return;
   }
   QString error;
@@ -1109,8 +1490,23 @@ void MapHubSyncController::queueCommittedEdit(const UndoStep *step) {
   refreshObjectCache(transaction.operations);
   semantic_revision = revision_provider ? revision_provider() : 0;
   staged_revision = 0;
+  emit detailsChanged();
   setState(State::SavedLocally, tr("Saved locally"));
   upload_idle_timer->start(250);
+}
+
+void MapHubSyncController::scheduleStructureChanges() {
+  if (structure_change_pending || !workspace.isValid())
+    return;
+  structure_change_pending = true;
+  const auto generation = session_generation;
+  const auto workspace_id = workspace.workspace_id;
+  QTimer::singleShot(0, this, [this, generation, workspace_id] {
+    structure_change_pending = false;
+    if (isCurrentSession(generation, workspace_id) &&
+        !applying_remote_operations)
+      queueStructureChanges();
+  });
 }
 
 void MapHubSyncController::drainOutbox() {
@@ -1119,26 +1515,29 @@ void MapHubSyncController::drainOutbox() {
   QString error;
   const auto pending = operation_store->nextPending(&error);
   if (!pending.isValid()) {
+    retry_outbox_now = false;
     if (!error.isEmpty())
       setState(State::ActionRequired, error);
     else
       setState(State::Synced, tr("Synced to Map Hub"));
     return;
   }
+  const auto bypass_backoff = std::exchange(retry_outbox_now, false);
   if (workspace.stream_protocol != QLatin1String("oom-map-ops/1")) {
     setState(State::SavedLocally, tr("Saved locally — preparing Map Hub sync"));
     return;
   }
   const auto now = QDateTime::currentDateTimeUtc();
-  if (pending.next_attempt_at.isValid() && pending.next_attempt_at > now) {
+  if (!bypass_backoff && pending.next_attempt_at.isValid() &&
+      pending.next_attempt_at > now) {
     retry_timer->start(
         std::max<qint64>(1, now.msecsTo(pending.next_attempt_at)));
     return;
   }
   auto account = MapHubCredentials::readToken(workspace.server_url);
-  auto lease =
-      MapHubCredentials::readToken(MapHubCredentials::workspaceLeaseKey(
-          workspace.server_url, workspace.workspace_id));
+  auto lease = MapHubCredentials::readWorkspaceLease(
+      workspace.server_url, workspace.workspace_id,
+      workspace.client_instance_id);
   if (!account || account.token.isEmpty() || !lease || lease.token.isEmpty()) {
     setState(State::ActionRequired,
              tr("Reopen this Map Hub map to renew its connection"));
@@ -1149,7 +1548,8 @@ void MapHubSyncController::drainOutbox() {
   upload_pending = true;
   setState(State::Syncing, tr("Syncing to Map Hub…"));
   request_client->postWorkspaceTransaction(
-      workspace.workspace_id, pending.canonical_json, lease.token,
+      workspace.workspace_id, pending.canonical_json,
+      workspace.client_instance_id, lease.token,
       [this, pending](const QJsonObject &response,
                       const MapHubApiClient::Error &request_error) {
         upload_pending = false;
@@ -1212,8 +1612,10 @@ void MapHubSyncController::drainOutbox() {
           const auto base_seconds = std::min(300, 5 * (1 << exponent));
           const auto jitter = QRandomGenerator::global()->bounded(
               std::max(1, base_seconds / 3));
-          const auto retry_at =
-              QDateTime::currentDateTimeUtc().addSecs(base_seconds + jitter);
+          const auto retry_at = request_error.retry_after.isValid()
+                                    ? request_error.retry_after
+                                    : QDateTime::currentDateTimeUtc().addSecs(
+                                          base_seconds + jitter);
           QString store_error;
           if (!operation_store->recordFailure(
                   pending.client_sequence, request_error.code,
@@ -1279,6 +1681,7 @@ void MapHubSyncController::drainOutbox() {
         workspace.last_synced_at = QDateTime::currentDateTimeUtc();
         workspace.sync_problem.clear();
         saveWorkspace();
+        emit detailsChanged();
         observed_revision = revision_provider ? revision_provider() : 0;
         if (!stageSnapshotNow(false))
           return;
@@ -1309,9 +1712,9 @@ void MapHubSyncController::preparePublishedCompaction() {
     return;
   }
   const auto account = MapHubCredentials::readToken(workspace.server_url);
-  const auto lease =
-      MapHubCredentials::readToken(MapHubCredentials::workspaceLeaseKey(
-          workspace.server_url, workspace.workspace_id));
+  const auto lease = MapHubCredentials::readWorkspaceLease(
+      workspace.server_url, workspace.workspace_id,
+      workspace.client_instance_id);
   if (!account || account.token.isEmpty() || !lease || lease.token.isEmpty()) {
     failPublishedCompaction(
         tr("Reopen this Map Hub map to renew its connection"), false);
@@ -1337,11 +1740,20 @@ void MapHubSyncController::preparePublishedCompaction() {
   request_client =
       new MapHubApiClient(workspace.server_url, account.token, this);
   upload_pending = true;
+  const auto generation = session_generation;
+  const auto workspace_id = workspace.workspace_id;
+  compaction_generation = generation;
+  compaction_workspace_id = workspace_id;
   setState(State::Syncing, tr("Reconstructing published Map Hub history…"));
+  if (!isCurrentCompactionSession(generation, workspace_id))
+    return;
 
-  const auto load_snapshot = [this](
-                                 const QString &path,
-                                 const MapHubApiClient::Error &download_error) {
+  const auto load_snapshot =
+      [this, generation, workspace_id](
+          const QString &path,
+          const MapHubApiClient::Error &download_error) {
+    if (!isCurrentCompactionSession(generation, workspace_id))
+      return;
     if (download_error) {
       failPublishedCompaction(download_error.message,
                               retryableRequestError(download_error));
@@ -1355,8 +1767,11 @@ void MapHubSyncController::preparePublishedCompaction() {
     }
     request_client->workspaceEntityIndex(
         QUrl(workspace.snapshot_entity_index_download_url),
-        [this](const QJsonObject &response,
-               const MapHubApiClient::Error &index_error) {
+        [this, generation, workspace_id](
+            const QJsonObject &response,
+            const MapHubApiClient::Error &index_error) {
+          if (!isCurrentCompactionSession(generation, workspace_id))
+            return;
           if (index_error) {
             failPublishedCompaction(index_error.message,
                                     retryableRequestError(index_error));
@@ -1387,10 +1802,11 @@ void MapHubSyncController::preparePublishedCompaction() {
                   tr("The Map Hub compaction head did not verify"), false);
               return;
             }
-            finishPublishedCompaction();
+            finishPublishedCompaction(generation, workspace_id);
           } else {
             pullPublishedCompactionTail(index.stream_sequence,
-                                        index.stream_hash);
+                                        index.stream_hash, generation,
+                                        workspace_id);
           }
         });
   };
@@ -1399,9 +1815,13 @@ void MapHubSyncController::preparePublishedCompaction() {
   if (QFileInfo::exists(compaction_file_path) &&
       MapHubApiClient::sha256ForFile(compaction_file_path, &hash_error) ==
           workspace.snapshot_sha256) {
-    QTimer::singleShot(0, this, [load_snapshot, path = compaction_file_path] {
-      load_snapshot(path, {});
-    });
+    QTimer::singleShot(
+        0, this,
+        [this, load_snapshot, path = compaction_file_path, generation,
+         workspace_id] {
+          if (isCurrentCompactionSession(generation, workspace_id))
+            load_snapshot(path, {});
+        });
   } else {
     QFile::remove(compaction_file_path);
     request_client->downloadArtifact(QUrl(workspace.snapshot_download_url),
@@ -1411,9 +1831,11 @@ void MapHubSyncController::preparePublishedCompaction() {
 }
 
 void MapHubSyncController::pullPublishedCompactionTail(
-    qint64 after_sequence, const QString &after_hash) {
-  if (!upload_pending || !request_client || !compaction_map ||
-      after_sequence < workspace.snapshot_stream_sequence ||
+    qint64 after_sequence, const QString &after_hash, quint64 generation,
+    const QString &workspace_id) {
+  if (!isCurrentCompactionSession(generation, workspace_id))
+    return;
+  if (!compaction_map || after_sequence < workspace.snapshot_stream_sequence ||
       after_sequence >= compaction_target_sequence ||
       !validStreamHash(after_hash)) {
     failPublishedCompaction(
@@ -1423,10 +1845,12 @@ void MapHubSyncController::pullPublishedCompactionTail(
   const auto limit =
       int(std::min<qint64>(256, compaction_target_sequence - after_sequence));
   request_client->workspaceOperations(
-      workspace.workspace_id, after_sequence, limit,
-      [this, after_sequence,
+      workspace_id, after_sequence, limit,
+      [this, generation, workspace_id, after_sequence,
        after_hash](const QJsonObject &response,
                    const MapHubApiClient::Error &request_error) {
+        if (!isCurrentCompactionSession(generation, workspace_id))
+          return;
         if (request_error) {
           if (request_error.code == QLatin1String("snapshot_required")) {
             workspace.sync_etag.clear();
@@ -1434,7 +1858,11 @@ void MapHubSyncController::pullPublishedCompactionTail(
             failPublishedCompaction(
                 tr("Map Hub advanced its retained snapshot; refreshing…"),
                 true);
-            QTimer::singleShot(0, this, &MapHubSyncController::pollSyncState);
+            QTimer::singleShot(0, this,
+                               [this, generation, workspace_id] {
+              if (isCurrentSession(generation, workspace_id))
+                pollSyncState();
+            });
           } else {
             failPublishedCompaction(request_error.message,
                                     retryableRequestError(request_error));
@@ -1506,15 +1934,18 @@ void MapHubSyncController::pullPublishedCompactionTail(
                 false);
             return;
           }
-          finishPublishedCompaction();
+          finishPublishedCompaction(generation, workspace_id);
         } else {
-          pullPublishedCompactionTail(sequence, hash);
+          pullPublishedCompactionTail(sequence, hash, generation,
+                                      workspace_id);
         }
       });
 }
 
-void MapHubSyncController::finishPublishedCompaction() {
-  if (!upload_pending || !request_client || !compaction_map || !operation_store)
+void MapHubSyncController::finishPublishedCompaction(
+    quint64 generation, const QString &workspace_id) {
+  if (!isCurrentCompactionSession(generation, workspace_id) ||
+      !compaction_map || !operation_store)
     return;
   QString error;
   const auto state = operation_store->state(&error);
@@ -1567,9 +1998,9 @@ void MapHubSyncController::finishPublishedCompaction() {
   compaction_file_path = final_path;
 
   const auto account = MapHubCredentials::readToken(workspace.server_url);
-  const auto lease =
-      MapHubCredentials::readToken(MapHubCredentials::workspaceLeaseKey(
-          workspace.server_url, workspace.workspace_id));
+  const auto lease = MapHubCredentials::readWorkspaceLease(
+      workspace.server_url, workspace.workspace_id,
+      workspace.client_instance_id);
   if (!account || account.token.isEmpty() || !lease || lease.token.isEmpty()) {
     failPublishedCompaction(
         tr("Reopen this Map Hub map to renew its connection"), false);
@@ -1579,17 +2010,21 @@ void MapHubSyncController::finishPublishedCompaction() {
                                      ? workspace.base_revision_id
                                      : workspace.active_revision_id;
   const auto idempotency_key = MapHubSyncQueue::idempotencyKey(
-      workspace.workspace_id, expected_revision, sha256,
+      workspace_id, expected_revision, sha256,
       compaction_target_sequence, compaction_target_hash, index_sha);
   setState(State::Syncing, tr("Compacting published Map Hub history…"));
+  if (!isCurrentCompactionSession(generation, workspace_id))
+    return;
   request_client->uploadWorkspaceSnapshot(
-      workspace.workspace_id, final_path, index_bytes,
+      workspace_id, final_path, index_bytes,
       compaction_target_sequence, compaction_target_hash, sha256, size_bytes,
       expected_revision, workspace.project_revision_id,
-      state.client_instance_id, lease.token, idempotency_key,
-      [this, sha256, size_bytes,
+      workspace.client_instance_id, lease.token, idempotency_key,
+      [this, generation, workspace_id, sha256, size_bytes,
        index_sha](const QJsonObject &response,
                   const MapHubApiClient::Error &request_error) {
+        if (!isCurrentCompactionSession(generation, workspace_id))
+          return;
         if (request_error) {
           failPublishedCompaction(request_error.message,
                                   retryableRequestError(request_error));
@@ -1636,7 +2071,7 @@ void MapHubSyncController::finishPublishedCompaction() {
         const auto completed_path = compaction_file_path;
         QString queue_error;
         const auto recovery =
-            MapHubSyncQueue::load(workspace.workspace_id, &queue_error);
+            MapHubSyncQueue::load(workspace_id, &queue_error);
         if (!recovery.isValid() || recovery.snapshot_path != completed_path)
           QFile::remove(completed_path);
         upload_pending = false;
@@ -1645,13 +2080,19 @@ void MapHubSyncController::finishPublishedCompaction() {
           request_client = nullptr;
         }
         compaction_map.reset();
+        compaction_generation = 0;
+        compaction_workspace_id.clear();
         compaction_target_sequence = 0;
         compaction_target_hash.clear();
         compaction_file_path.clear();
         setState(State::SavedLocally,
                  tr("Published history compacted — resuming sync"));
-        QTimer::singleShot(0, this, &MapHubSyncController::pollSyncState);
-        QTimer::singleShot(0, this, &MapHubSyncController::drainOutbox);
+        QTimer::singleShot(0, this, [this, generation, workspace_id] {
+          if (!isCurrentSession(generation, workspace_id))
+            return;
+          pollSyncState();
+          drainOutbox();
+        });
       });
 }
 
@@ -1663,15 +2104,19 @@ void MapHubSyncController::failPublishedCompaction(const QString &message,
     request_client = nullptr;
   }
   compaction_map.reset();
+  compaction_generation = 0;
+  compaction_workspace_id.clear();
   compaction_target_sequence = 0;
   compaction_target_hash.clear();
   compaction_file_path.clear();
   if (retryable) {
+    // Start before emitting stateChanged. A reentrant document switch calls
+    // clear(), which must be able to cancel this old session's retry.
+    retry_timer->start(5000);
     setState(State::WaitingForNetwork,
              message.isEmpty()
                  ? tr("Published history is safe — compaction will retry")
                  : message);
-    retry_timer->start(5000);
   } else {
     stopped_for_conflict = true;
     workspace.sync_problem = QStringLiteral("published_compaction_failed");
@@ -1719,9 +2164,9 @@ void MapHubSyncController::uploadPendingSnapshot() {
     return;
   }
   const auto account = MapHubCredentials::readToken(workspace.server_url);
-  const auto lease =
-      MapHubCredentials::readToken(MapHubCredentials::workspaceLeaseKey(
-          workspace.server_url, workspace.workspace_id));
+  const auto lease = MapHubCredentials::readWorkspaceLease(
+      workspace.server_url, workspace.workspace_id,
+      workspace.client_instance_id);
   if (!account || account.token.isEmpty() || !lease || lease.token.isEmpty()) {
     setState(State::ActionRequired,
              tr("Reopen this Map Hub map to renew its connection"));
@@ -1737,7 +2182,7 @@ void MapHubSyncController::uploadPendingSnapshot() {
       workspace.workspace_id, pending.snapshot_path, index_bytes,
       pending.base_stream_sequence, pending.base_stream_hash, pending.sha256,
       pending.size_bytes, pending.expected_workspace_revision_id,
-      pending.expected_project_revision_id, pending.client_instance_id,
+      pending.expected_project_revision_id, workspace.client_instance_id,
       lease.token, pending.idempotency_key,
       [this, pending](const QJsonObject &response,
                       const MapHubApiClient::Error &error) {
@@ -1812,9 +2257,10 @@ void MapHubSyncController::uploadPendingSnapshot() {
         saveWorkspace();
         if (revision_provider && revision_provider() == pending.map_revision &&
             operation_store && operation_store->pendingCount() == 0) {
-          if (copyFileAtomically(pending.snapshot_path,
-                                 workspace.local_map_path, pending.size_bytes))
-            MapHubSyncQueue::remove(workspace.workspace_id);
+          if (!commitRequiredWorkingCopy(pending.snapshot_path,
+                                         pending.size_bytes))
+            return;
+          MapHubSyncQueue::remove(workspace.workspace_id);
         }
         setState(State::Synced, tr("Connected editing ready"));
         QTimer::singleShot(0, this, &MapHubSyncController::pollSyncState);
@@ -1822,7 +2268,11 @@ void MapHubSyncController::uploadPendingSnapshot() {
 }
 
 void MapHubSyncController::retryWork() {
-  if (workspace.sync_problem == QLatin1String("snapshot_restore_required")) {
+  if (workspace.sync_problem ==
+      QLatin1String("working_copy_commit_required")) {
+    retryRequiredWorkingCopy();
+  } else if (workspace.sync_problem ==
+             QLatin1String("snapshot_restore_required")) {
     restoreProjection();
   } else if (workspace.initial_snapshot_required ||
              workspace.compaction_recommended || workspace.compaction_required)
@@ -1832,24 +2282,112 @@ void MapHubSyncController::retryWork() {
 }
 
 void MapHubSyncController::acknowledgeAppliedOperations() {
+  if (acknowledgement_pending) {
+    acknowledgement_dirty = true;
+    return;
+  }
   if (!operation_store || workspace.applied_stream_sequence < 0)
     return;
-  const auto lease =
-      MapHubCredentials::readToken(MapHubCredentials::workspaceLeaseKey(
-          workspace.server_url, workspace.workspace_id));
+  if (workspace.sync_problem ==
+      QLatin1String("working_copy_commit_required")) {
+    acknowledgement_dirty = true;
+    return;
+  }
+  const auto lease = MapHubCredentials::readWorkspaceLease(
+      workspace.server_url, workspace.workspace_id,
+      workspace.client_instance_id);
   const auto account = MapHubCredentials::readToken(workspace.server_url);
   const auto state = operation_store->state();
   if (!lease || lease.token.isEmpty() || !account || account.token.isEmpty() ||
+      state.client_instance_id.isEmpty()) {
+    acknowledgement_dirty = true;
+    return;
+  }
+  auto *client = new MapHubApiClient(workspace.server_url, account.token, this);
+  const auto generation = session_generation;
+  const auto workspace_id = workspace.workspace_id;
+  const auto applied_sequence = workspace.applied_stream_sequence;
+  const auto presence_state = application_active ? QStringLiteral("editing")
+                                                 : QStringLiteral("away");
+  acknowledgement_pending = true;
+  acknowledgement_dirty = false;
+  client->acknowledgeWorkspaceOperations(
+      workspace_id,
+      {{QStringLiteral("protocol"), QStringLiteral("oom-map-ops/1")},
+       {QStringLiteral("client_instance_id"), state.client_instance_id},
+       {QStringLiteral("applied_stream_sequence"),
+        applied_sequence},
+       {QStringLiteral("presence"),
+        QJsonObject{{QStringLiteral("state"), presence_state},
+                    {QStringLiteral("device_name"), presenceDeviceName()}}}},
+      workspace.client_instance_id, lease.token,
+      [this, client, generation, workspace_id, applied_sequence,
+       presence_state](const QJsonObject &,
+                       const MapHubApiClient::Error &error) {
+        if (!isCurrentSession(generation, workspace_id)) {
+          client->deleteLater();
+          return;
+        }
+        acknowledgement_pending = false;
+        client->deleteLater();
+        if (error) {
+          acknowledgement_dirty = true;
+          if (!retryableRequestError(error)) {
+            stopped_for_conflict = true;
+            workspace.sync_problem =
+                error.code.isEmpty()
+                    ? QStringLiteral("acknowledgement_failed")
+                    : error.code;
+            saveWorkspace();
+            setState(State::ActionRequired,
+                     error.message.isEmpty()
+                         ? tr("Map Hub could not confirm this editing session")
+                         : error.message);
+          }
+          return;
+        }
+
+        const auto desired_presence =
+            application_active ? QStringLiteral("editing")
+                               : QStringLiteral("away");
+        const auto needs_follow_up =
+            acknowledgement_dirty ||
+            workspace.applied_stream_sequence != applied_sequence ||
+            desired_presence != presence_state;
+        if (needs_follow_up)
+          acknowledgeAppliedOperations();
+      });
+}
+
+void MapHubSyncController::sendFinalAwayHeartbeat() {
+  if (!operation_store || !workspace.isValid() ||
+      workspace.applied_stream_sequence < 0 ||
+      !QCoreApplication::instance())
+    return;
+  const auto state = operation_store->state();
+  const auto lease = MapHubCredentials::readWorkspaceLease(
+      workspace.server_url, workspace.workspace_id,
+      workspace.client_instance_id);
+  const auto account = MapHubCredentials::readToken(workspace.server_url);
+  if (!lease || lease.token.isEmpty() || !account || account.token.isEmpty() ||
       state.client_instance_id.isEmpty())
     return;
-  auto *client = new MapHubApiClient(workspace.server_url, account.token, this);
+
+  // Controller-owned requests are cancelled below. Give this advisory final
+  // heartbeat application lifetime so a routine close leaves presence quickly
+  // without revoking the lease needed for seamless reopen.
+  auto *client = new MapHubApiClient(workspace.server_url, account.token,
+                                     QCoreApplication::instance());
   client->acknowledgeWorkspaceOperations(
       workspace.workspace_id,
       {{QStringLiteral("protocol"), QStringLiteral("oom-map-ops/1")},
        {QStringLiteral("client_instance_id"), state.client_instance_id},
        {QStringLiteral("applied_stream_sequence"),
-        workspace.applied_stream_sequence}},
-      lease.token,
+        workspace.applied_stream_sequence},
+       {QStringLiteral("presence"),
+        QJsonObject{{QStringLiteral("state"), QStringLiteral("away")},
+                    {QStringLiteral("device_name"), presenceDeviceName()}}}},
+      workspace.client_instance_id, lease.token,
       [client](const QJsonObject &, const MapHubApiClient::Error &) {
         client->deleteLater();
       });
@@ -1879,13 +2417,20 @@ void MapHubSyncController::restoreProjection() {
     return;
   }
   auto *client = new MapHubApiClient(workspace.server_url, account.token, this);
+  const auto generation = session_generation;
+  const auto workspace_id = workspace.workspace_id;
   workspace.sync_problem = QStringLiteral("snapshot_restore_required");
   saveWorkspace();
   restore_pending = true;
   client->workspaceEntityIndex(
       QUrl(workspace.snapshot_entity_index_download_url),
-      [this, client](const QJsonObject &response,
-                     const MapHubApiClient::Error &request_error) {
+      [this, client, generation, workspace_id](
+          const QJsonObject &response,
+          const MapHubApiClient::Error &request_error) {
+        if (!isCurrentSession(generation, workspace_id)) {
+          client->deleteLater();
+          return;
+        }
         restore_pending = false;
         client->deleteLater();
         if (request_error) {
@@ -1988,14 +2533,21 @@ void MapHubSyncController::pullOperations() {
   if (!account || account.token.isEmpty())
     return;
   auto *client = new MapHubApiClient(workspace.server_url, account.token, this);
+  const auto generation = session_generation;
+  const auto workspace_id = workspace.workspace_id;
   const auto requested_after = local_state.published_stream_sequence;
   const auto requested_hash = local_state.published_stream_hash;
   pull_pending = true;
   setState(State::Syncing, tr("Applying upstream changes…"));
   client->workspaceOperations(
-      workspace.workspace_id, requested_after, 256,
-      [this, client, requested_after, requested_hash](
+      workspace_id, requested_after, 256,
+      [this, client, generation, workspace_id, requested_after,
+       requested_hash](
           const QJsonObject &response, const MapHubApiClient::Error &error) {
+        if (!isCurrentSession(generation, workspace_id)) {
+          client->deleteLater();
+          return;
+        }
         pull_pending = false;
         restore_pending = false;
         client->deleteLater();
@@ -2139,6 +2691,7 @@ void MapHubSyncController::pullOperations() {
         workspace.last_synced_at = QDateTime::currentDateTimeUtc();
         workspace.sync_problem.clear();
         saveWorkspace();
+        emit detailsChanged();
         if (!stageSnapshotNow(false))
           return;
         if (has_more)
@@ -2155,18 +2708,31 @@ void MapHubSyncController::pollSyncState() {
   if (!account || account.token.isEmpty())
     return;
   auto *client = new MapHubApiClient(workspace.server_url, account.token, this);
-  const auto lease = MapHubCredentials::readToken(
-      MapHubCredentials::workspaceLeaseKey(workspace.server_url,
-                                           workspace.workspace_id));
+  const auto lease = MapHubCredentials::readWorkspaceLease(
+      workspace.server_url, workspace.workspace_id,
+      workspace.client_instance_id);
   const auto editing_lease = lease ? lease.token : QString{};
+  const auto generation = session_generation;
+  const auto workspace_id = workspace.workspace_id;
+  const auto client_instance_id = operation_store
+                                      ? operation_store->state().client_instance_id
+                                      : workspace.client_instance_id;
   poll_pending = true;
   client->workspaceSyncState(
-      workspace.workspace_id, workspace.sync_etag, editing_lease,
-      [this, client](const QJsonObject &response, const QString &etag,
-                     bool not_modified,
-                     const MapHubApiClient::Error &error) mutable {
+      workspace_id, workspace.sync_etag, editing_lease, client_instance_id,
+      [this, client, generation, workspace_id](
+          const QJsonObject &response, const QString &etag, bool not_modified,
+          const MapHubApiClient::Error &error) mutable {
+        if (!isCurrentSession(generation, workspace_id)) {
+          client->deleteLater();
+          return;
+        }
         poll_pending = false;
         client->deleteLater();
+        // Presence freshness advances even when sync state does not. Repaint
+        // on every completed poll so repeated errors and 304 responses cannot
+        // leave a stale collaborator list on screen.
+        emit detailsChanged();
         if (error) {
           if (!retryableRequestError(error)) {
             stopped_for_conflict = true;
@@ -2179,10 +2745,86 @@ void MapHubSyncController::pollSyncState() {
           }
           return;
         }
-        if (not_modified)
+        if (not_modified) {
+          acknowledgeAppliedOperations();
+          if (!stopped_for_conflict) {
+            if (operation_store && operation_store->pendingCount() > 0)
+              QTimer::singleShot(0, this,
+                                 &MapHubSyncController::drainOutbox);
+            else
+              setState(State::Synced, tr("Synced to Map Hub"));
+          }
           return;
+        }
         if (!etag.isEmpty())
           workspace.sync_etag = etag;
+
+        const auto response_server_time = QDateTime::fromString(
+            response.value(QStringLiteral("server_time")).toString(),
+            Qt::ISODate);
+        if (response_server_time.isValid()) {
+          server_time = response_server_time;
+          server_time_age.start();
+        }
+        const auto sync = response.value(QStringLiteral("sync")).toObject();
+        const auto suggested_active =
+            sync.value(QStringLiteral("poll_after_ms")).toInteger(-1);
+        const auto suggested_idle =
+            sync.value(QStringLiteral("idle_poll_after_ms")).toInteger(-1);
+        const auto suggested_presence_ttl =
+            sync.value(QStringLiteral("presence_ttl_seconds")).toInteger(-1);
+        if (suggested_active > 0)
+          active_poll_interval_ms = std::clamp<int>(
+              int(std::min<qint64>(suggested_active,
+                                   std::numeric_limits<int>::max())),
+              poll_active_min_ms, poll_active_max_ms);
+        if (suggested_idle > 0)
+          idle_poll_interval_ms = std::clamp<int>(
+              int(std::min<qint64>(suggested_idle,
+                                   std::numeric_limits<int>::max())),
+              poll_idle_min_ms, poll_idle_max_ms);
+        if (suggested_presence_ttl > 0)
+          presence_ttl_seconds = std::clamp<int>(
+              int(std::min<qint64>(suggested_presence_ttl, 3600)), 1, 3600);
+        poll_timer->setInterval(application_active ? active_poll_interval_ms
+                                                   : idle_poll_interval_ms);
+
+        QVector<Collaborator> updated_presence;
+        const auto presence_values =
+            response.value(QStringLiteral("presence")).toArray();
+        updated_presence.reserve(presence_values.size());
+        for (const auto &value : presence_values) {
+          if (!value.isObject())
+            continue;
+          const auto object = value.toObject();
+          Collaborator collaborator;
+          collaborator.person_id =
+              object.value(QStringLiteral("person_id")).toString();
+          collaborator.client_instance_id =
+              object.value(QStringLiteral("client_instance_id")).toString();
+          collaborator.display_name =
+              object.value(QStringLiteral("display_name")).toString();
+          collaborator.last_seen_at = QDateTime::fromString(
+              object.value(QStringLiteral("last_seen_at")).toString(),
+              Qt::ISODate);
+          collaborator.state =
+              object.value(QStringLiteral("state")).toString();
+          collaborator.applied_stream_sequence =
+              object.value(QStringLiteral("applied_stream_sequence"))
+                  .toInteger(-1);
+          collaborator.is_current_user =
+              object.value(QStringLiteral("is_current_user")).toBool();
+          if (collaborator.person_id.isEmpty() ||
+              collaborator.client_instance_id.isEmpty() ||
+              collaborator.display_name.isEmpty() ||
+              !collaborator.last_seen_at.isValid() ||
+              collaborator.applied_stream_sequence < 0)
+            continue;
+          updated_presence.push_back(std::move(collaborator));
+        }
+        presence = std::move(updated_presence);
+        schedulePresenceExpiry();
+        emit detailsChanged();
         const auto workspace_object =
             response.value(QStringLiteral("workspace")).toObject();
         const auto workspace_revision =
@@ -2333,6 +2975,33 @@ void MapHubSyncController::pollSyncState() {
             workspace.project_revision_id.isEmpty()
                 ? workspace.base_revision_id
                 : workspace.project_revision_id;
+        const auto accepting_terminal_status =
+            isTerminalWorkspaceStatus(remote_status) &&
+            !isTerminalWorkspaceStatus(workspace.status);
+        if (accepting_terminal_status) {
+          // The status below makes stageSnapshotNow() intentionally refuse
+          // further writes. First capture the exact current editor revision,
+          // including checkpoint-only map settings, in both private recovery
+          // storage and the provider-visible working copy.
+          if (!ensureWorkingCopyDurableNow()) {
+            if (!isCurrentSession(generation, workspace_id))
+              return;
+            // This response cannot be acknowledged by ETag yet. Force a full
+            // refetch after the local save retry so a 304 cannot strand the
+            // workspace as editable forever.
+            workspace.sync_etag.clear();
+            saveWorkspace();
+            emit detailsChanged();
+            QTimer::singleShot(5000, this,
+                               [this, generation, workspace_id] {
+              if (isCurrentSession(generation, workspace_id))
+                pollSyncState();
+            });
+            return;
+          }
+          if (!isCurrentSession(generation, workspace_id))
+            return;
+        }
         if (!remote_status.isEmpty())
           workspace.status = remote_status;
         if (workspace.active_revision_id.isEmpty() &&
@@ -2363,6 +3032,8 @@ void MapHubSyncController::pollSyncState() {
                  "and pending edits were preserved."));
         }
         saveWorkspace();
+        emit detailsChanged();
+        acknowledgeAppliedOperations();
         if ((workspace.compaction_recommended ||
              workspace.compaction_required) &&
             operation_store) {
@@ -2388,6 +3059,23 @@ void MapHubSyncController::pollSyncState() {
 }
 
 void MapHubSyncController::setState(State state, const QString &text) {
+  if (workspace_metadata_pending &&
+      !workspace_metadata_error_message.isEmpty() &&
+      state != State::Disconnected &&
+      (state != State::ActionRequired ||
+       text != workspace_metadata_error_message))
+    return;
+  if (stopped_for_conflict && state != State::Disconnected &&
+      state != State::UpstreamChanged && state != State::ActionRequired)
+    return;
+  if (workspace.checkpoint_required &&
+      (state == State::Watching || state == State::SavedLocally ||
+       state == State::Synced)) {
+    state = State::CheckpointNeeded;
+    setState(state,
+             tr("Map settings saved on this device — checkpoint to share"));
+    return;
+  }
   if (current_state == state && state_text == text)
     return;
   current_state = state;
@@ -2395,13 +3083,172 @@ void MapHubSyncController::setState(State state, const QString &text) {
   emit stateChanged(state, text);
 }
 
+void MapHubSyncController::markCheckpointRequired() {
+  if (!workspace.isValid())
+    return;
+  if (!workspace.checkpoint_required) {
+    workspace.checkpoint_required = true;
+    saveWorkspace();
+    emit detailsChanged();
+  }
+  setState(State::CheckpointNeeded,
+           tr("Map settings saved on this device — checkpoint to share"));
+  staged_revision = 0;
+  scheduleSnapshot(true);
+}
+
 bool MapHubSyncController::saveWorkspace() {
+  auto durable_workspace = workspace;
+  if (workspace_metadata_pending) {
+    if (workspace.sync_problem != QLatin1String("workspace_metadata")) {
+      workspace_metadata_desired_problem = workspace.sync_problem;
+      workspace_metadata_desired_stopped =
+          !workspace.sync_problem.isEmpty() &&
+          workspace.sync_problem != QLatin1String("compaction_required");
+    }
+    durable_workspace.sync_problem = workspace_metadata_desired_problem;
+  }
   QString error;
-  if (ManagedMapWorkspace::save(workspace, &error))
+  if (ManagedMapWorkspace::save(durable_workspace, &error)) {
+    if (workspace_metadata_pending) {
+      workspace = durable_workspace;
+      stopped_for_conflict = workspace_metadata_desired_stopped;
+      workspace_metadata_pending = false;
+      workspace_metadata_desired_stopped = false;
+      workspace_metadata_desired_problem.clear();
+      workspace_metadata_error_message.clear();
+    }
     return true;
-  setState(State::ActionRequired,
-           tr("Could not update Map Hub sync metadata: %1").arg(error));
+  }
+  if (!workspace_metadata_pending) {
+    workspace_metadata_desired_problem = workspace.sync_problem;
+    workspace_metadata_desired_stopped = stopped_for_conflict;
+  }
+  workspace_metadata_pending = true;
+  workspace.sync_problem = QStringLiteral("workspace_metadata");
+  stopped_for_conflict = true;
+  workspace_metadata_error_message =
+      tr("Could not update Map Hub sync metadata: %1").arg(error);
+  setState(State::ActionRequired, workspace_metadata_error_message);
   return false;
+}
+
+bool MapHubSyncController::commitWorkingCopy(const QString &snapshot_path,
+                                             qint64 expected_size,
+                                             QString *error) {
+  if (error)
+    error->clear();
+  const auto committer = working_copy_committer;
+  if (committer)
+    return committer(snapshot_path, expected_size, error);
+  const auto committed = copyFileAtomically(
+      snapshot_path, workspace.local_map_path, expected_size);
+  if (!committed && error)
+    *error = tr("Mapper could not update the working .omap file");
+  return committed;
+}
+
+bool MapHubSyncController::commitRequiredWorkingCopy(
+    const QString &snapshot_path, qint64 expected_size) {
+  if (!workspace.isValid())
+    return false;
+  const auto generation = session_generation;
+  const auto workspace_id = workspace.workspace_id;
+  QString working_copy_error;
+  const auto committed =
+      commitWorkingCopy(snapshot_path, expected_size, &working_copy_error);
+  if (!isCurrentSession(generation, workspace_id))
+    return false;
+  if (!committed) {
+    stopped_for_conflict = true;
+    workspace.sync_problem =
+        QStringLiteral("working_copy_commit_required");
+    saveWorkspace();
+    if (!isCurrentSession(generation, workspace_id))
+      return false;
+    setState(
+        State::ActionRequired,
+        working_copy_error.isEmpty()
+            ? tr("The recovery copy is safe, but Mapper could not update this map")
+            : tr("The recovery copy is safe, but this map could not be updated: %1")
+                  .arg(working_copy_error));
+    if (!isCurrentSession(generation, workspace_id))
+      return false;
+    retry_timer->start(5000);
+    return false;
+  }
+
+  if (workspace.sync_problem ==
+      QLatin1String("working_copy_commit_required")) {
+    workspace.sync_problem.clear();
+    stopped_for_conflict = false;
+    if (!saveWorkspace()) {
+      if (!isCurrentSession(generation, workspace_id))
+        return false;
+      return false;
+    }
+  }
+  return isCurrentSession(generation, workspace_id);
+}
+
+bool MapHubSyncController::retryRequiredWorkingCopy() {
+  QString queue_error;
+  const auto pending =
+      MapHubSyncQueue::load(workspace.workspace_id, &queue_error);
+  QString hash_error;
+  const QFileInfo snapshot(pending.snapshot_path);
+  const auto verified =
+      pending.isValid() && snapshot.isFile() &&
+      snapshot.size() == pending.size_bytes &&
+      MapHubApiClient::sha256ForFile(pending.snapshot_path, &hash_error)
+              .compare(pending.sha256, Qt::CaseInsensitive) == 0;
+  if (!verified) {
+    retry_timer->stop();
+    stopped_for_conflict = true;
+    workspace.sync_problem = QStringLiteral("working_copy_recovery_invalid");
+    saveWorkspace();
+    setState(State::ActionRequired,
+             !queue_error.isEmpty()
+                 ? queue_error
+                 : (!hash_error.isEmpty()
+                        ? hash_error
+                        : tr("The saved Map Hub recovery copy did not verify")));
+    return false;
+  }
+  if (!commitRequiredWorkingCopy(pending.snapshot_path, pending.size_bytes))
+    return false;
+
+  staged_revision = pending.map_revision;
+  if (!upload_pending)
+    MapHubSyncQueue::pruneSnapshots(workspace.workspace_id,
+                                    pending.snapshot_path, nullptr,
+                                    pending.entity_index_path);
+  const auto already_published =
+      pending.publish_snapshot && !workspace.snapshot_id.isEmpty() &&
+      workspace.snapshot_sha256.compare(pending.sha256,
+                                        Qt::CaseInsensitive) == 0;
+  if (already_published)
+    MapHubSyncQueue::remove(workspace.workspace_id);
+
+  setState(workspace.checkpoint_required ? State::CheckpointNeeded
+                                         : State::SavedLocally,
+           workspace.checkpoint_required
+               ? tr("Map settings saved locally — checkpoint to share")
+               : tr("Saved locally"));
+  if (!finishDurableInbox(true))
+    return false;
+
+  observed_revision = revision_provider ? revision_provider() : staged_revision;
+  if (observed_revision != staged_revision)
+    scheduleSnapshot();
+  if (pending.publish_snapshot && !already_published)
+    QTimer::singleShot(0, this,
+                       &MapHubSyncController::uploadPendingSnapshot);
+  else if (operation_store && operation_store->pendingCount() > 0)
+    QTimer::singleShot(0, this, &MapHubSyncController::drainOutbox);
+  else
+    QTimer::singleShot(0, this, &MapHubSyncController::pollSyncState);
+  return true;
 }
 
 } // namespace OpenOrienteering

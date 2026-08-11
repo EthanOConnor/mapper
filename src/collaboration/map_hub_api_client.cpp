@@ -6,6 +6,7 @@
 
 #include "map_hub_api_client.h"
 
+#include <algorithm>
 #include <memory>
 
 #include <QBuffer>
@@ -31,6 +32,7 @@ namespace {
 
 constexpr qint64 max_json_response_bytes = 16LL * 1024 * 1024;
 constexpr qint64 max_artifact_bytes = 2LL * 1024 * 1024 * 1024;
+constexpr qint64 max_server_retry_seconds = 60 * 60;
 
 int effectivePort(const QUrl &url) {
   return url.port(url.scheme() == QLatin1String("https") ? 443 : 80);
@@ -51,6 +53,32 @@ bool validHeaderValue(const QString &value, int maximum) {
   auto bytes = value.toUtf8();
   return !bytes.isEmpty() && bytes.size() <= maximum && !bytes.contains('\r') &&
          !bytes.contains('\n') && !bytes.contains('\0');
+}
+
+void setEditingClientHeaders(QNetworkRequest &request,
+                             const QString &client_instance_id) {
+  const auto bytes = client_instance_id.toUtf8();
+  request.setRawHeader("X-Editing-Client-Instance", bytes);
+  request.setRawHeader("X-Mapper-Client-Instance", bytes);
+}
+
+QDateTime boundedRetryAfter(const QByteArray &header) {
+  const auto value = header.trimmed();
+  if (value.isEmpty())
+    return {};
+  const auto now = QDateTime::currentDateTimeUtc();
+  bool is_delta = false;
+  const auto delta_seconds = value.toLongLong(&is_delta);
+  if (is_delta && delta_seconds >= 0)
+    return now.addSecs(std::clamp<qint64>(delta_seconds, 1,
+                                         max_server_retry_seconds));
+
+  const auto absolute =
+      QDateTime::fromString(QString::fromLatin1(value), Qt::RFC2822Date);
+  if (!absolute.isValid())
+    return {};
+  return now.addSecs(std::clamp<qint64>(
+      now.secsTo(absolute.toUTC()), 1, max_server_retry_seconds));
 }
 
 MapHubApiClient::Error invalidIdentifierError() {
@@ -117,10 +145,26 @@ void consumeArtifactData(QNetworkReply *reply, QSaveFile *file,
 MapHubApiClient::MapHubApiClient(QString server_url, QString bearer_token,
                                  QObject *parent)
     : QObject(parent),
-      server_url(
-          QUrl::fromUserInput(server_url).adjusted(QUrl::StripTrailingSlash)),
+      server_url(QUrl::fromUserInput(canonicalServerOrigin(server_url))),
       bearer_token(std::move(bearer_token)),
       network(new QNetworkAccessManager(this)) {}
+
+QString MapHubApiClient::canonicalServerOrigin(const QString &server_url) {
+  auto url = QUrl::fromUserInput(server_url);
+  if (!isAcceptableServerUrl(url))
+    return {};
+  const auto port = effectivePort(url);
+  const auto default_port =
+      url.scheme() == QLatin1String("https") ? 443 : 80;
+  url.setScheme(url.scheme().toLower());
+  url.setHost(url.host().toLower());
+  url.setPort(port == default_port ? -1 : port);
+  url.setPath(QString{});
+  url.setQuery(QString{});
+  url.setFragment(QString{});
+  return url.toString(QUrl::FullyEncoded | QUrl::RemoveUserInfo |
+                      QUrl::StripTrailingSlash);
+}
 
 bool MapHubApiClient::isAcceptableServerUrl(const QUrl &url) {
   if (!url.isValid() || url.host().isEmpty() || !url.userInfo().isEmpty())
@@ -215,6 +259,7 @@ MapHubApiClient::Error MapHubApiClient::replyError(QNetworkReply *reply,
     auto object = document.object().value(QStringLiteral("error")).toObject();
     error.code = object.value(QStringLiteral("code")).toString();
     error.message = object.value(QStringLiteral("message")).toString();
+    error.details = object.value(QStringLiteral("details")).toObject();
   }
   if (error.message.isEmpty())
     error.message = reply->errorString();
@@ -222,6 +267,8 @@ MapHubApiClient::Error MapHubApiClient::replyError(QNetworkReply *reply,
     error.code = reply->error() == QNetworkReply::OperationCanceledError
                      ? QStringLiteral("cancelled")
                      : QStringLiteral("network_error");
+  if (error.http_status == 429 || error.http_status == 503)
+    error.retry_after = boundedRetryAfter(reply->rawHeader("Retry-After"));
   return error;
 }
 
@@ -321,11 +368,13 @@ void MapHubApiClient::workspaceOperations(const QString &workspace_id,
 
 void MapHubApiClient::postWorkspaceTransaction(const QString &workspace_id,
                                                const QByteArray &canonical_json,
+                                               const QString &client_instance_id,
                                                const QString &editing_lease,
                                                JsonHandler handler) {
   if (!ensureReady(true, handler))
     return;
-  if (!validStableId(workspace_id) || !validHeaderValue(editing_lease, 512)) {
+  if (!validStableId(workspace_id) || !validStableId(client_instance_id) ||
+      !validHeaderValue(editing_lease, 512)) {
     handler({}, invalidIdentifierError());
     return;
   }
@@ -339,6 +388,7 @@ void MapHubApiClient::postWorkspaceTransaction(const QString &workspace_id,
       QStringLiteral("/api/v1/workspaces/%1/transactions").arg(workspace_id));
   req.setHeader(QNetworkRequest::ContentTypeHeader,
                 QStringLiteral("application/json"));
+  setEditingClientHeaders(req, client_instance_id);
   req.setRawHeader("X-Editing-Lease", editing_lease.toUtf8());
   QByteArray payload = canonical_json;
   if (canonical_json.size() >= 512) {
@@ -354,10 +404,12 @@ void MapHubApiClient::postWorkspaceTransaction(const QString &workspace_id,
 
 void MapHubApiClient::acknowledgeWorkspaceOperations(
     const QString &workspace_id, const QJsonObject &acknowledgement,
-    const QString &editing_lease, JsonHandler handler) {
+    const QString &client_instance_id, const QString &editing_lease,
+    JsonHandler handler) {
   if (!ensureReady(true, handler))
     return;
-  if (!validStableId(workspace_id) || !validHeaderValue(editing_lease, 512)) {
+  if (!validStableId(workspace_id) || !validStableId(client_instance_id) ||
+      !validHeaderValue(editing_lease, 512)) {
     handler({}, invalidIdentifierError());
     return;
   }
@@ -365,6 +417,7 @@ void MapHubApiClient::acknowledgeWorkspaceOperations(
       request(QStringLiteral("/api/v1/workspaces/%1/ack").arg(workspace_id));
   req.setHeader(QNetworkRequest::ContentTypeHeader,
                 QStringLiteral("application/json"));
+  setEditingClientHeaders(req, client_instance_id);
   req.setRawHeader("X-Editing-Lease", editing_lease.toUtf8());
   auto *reply = network->post(
       req, QJsonDocument(acknowledgement).toJson(QJsonDocument::Compact));
@@ -415,6 +468,7 @@ void MapHubApiClient::uploadWorkspaceSnapshot(
   }
   auto req = request(
       QStringLiteral("/api/v1/workspaces/%1/snapshots").arg(workspace_id));
+  setEditingClientHeaders(req, client_instance_id);
   req.setRawHeader("X-Editing-Lease", editing_lease.toUtf8());
   auto *multi = new QHttpMultiPart(QHttpMultiPart::FormDataType);
   multi->append(textPart("protocol", QStringLiteral("oom-map-ops/1")));
@@ -756,20 +810,33 @@ void MapHubApiClient::createProject(const QJsonObject &project,
   finishJson(reply, std::move(handler));
 }
 
-void MapHubApiClient::startAssignment(const QString &assignment_id,
-                                      JsonHandler handler) {
-  if (!validStableId(assignment_id)) {
-    handler({}, invalidIdentifierError());
+void MapHubApiClient::startAssignment(
+    const QString &assignment_id, const QString &client_instance_id,
+    const QString &retained_editing_lease, JsonHandler handler) {
+  if (!ensureReady(true, handler))
+    return;
+  if (!validStableId(assignment_id) || !validStableId(client_instance_id) ||
+      (!retained_editing_lease.isEmpty() &&
+       !validHeaderValue(retained_editing_lease, 4096))) {
+    handler({}, {0, QStringLiteral("invalid_request_metadata"),
+                 tr("The assignment, client instance, or retained editing "
+                    "lease is invalid.")});
     return;
   }
-  sendJson("POST",
-           QStringLiteral("/api/v1/assignments/%1/start").arg(assignment_id),
-           {}, true, std::move(handler));
+  auto req = request(
+      QStringLiteral("/api/v1/assignments/%1/start").arg(assignment_id));
+  req.setHeader(QNetworkRequest::ContentTypeHeader,
+                QStringLiteral("application/json"));
+  setEditingClientHeaders(req, client_instance_id);
+  if (!retained_editing_lease.isEmpty())
+    req.setRawHeader("X-Editing-Lease", retained_editing_lease.toUtf8());
+  finishJson(network->post(req, QByteArrayLiteral("{}")), std::move(handler));
 }
 
 void MapHubApiClient::checkpoint(
     const QString &workspace_id, const QString &file_path,
-    const QString &base_revision_id, const QString &editing_lease,
+    const QString &base_revision_id, const QString &client_instance_id,
+    const QString &editing_lease,
     const QString &label, const QString &change_summary,
     const QString &idempotency_key, qint64 stream_sequence,
     const QString &stream_hash, const QString &project_revision_id,
@@ -783,6 +850,7 @@ void MapHubApiClient::checkpoint(
   static const QRegularExpression hash_pattern(
       QStringLiteral("^[0-9a-f]{64}$"));
   if ((!base_revision_id.isEmpty() && !validStableId(base_revision_id)) ||
+      !validStableId(client_instance_id) ||
       (!project_revision_id.isEmpty() && !validStableId(project_revision_id)) ||
       stream_sequence < 0 || !hash_pattern.match(stream_hash).hasMatch() ||
       !hash_pattern.match(entity_index_sha256).hasMatch() ||
@@ -796,6 +864,7 @@ void MapHubApiClient::checkpoint(
   auto req = request(
       QStringLiteral("/api/v1/workspaces/%1/checkpoint").arg(workspace_id));
   req.setRawHeader("Idempotency-Key", idempotency_key.toUtf8());
+  setEditingClientHeaders(req, client_instance_id);
   if (!editing_lease.isEmpty())
     req.setRawHeader("X-Editing-Lease", editing_lease.toUtf8());
   auto *multi = new QHttpMultiPart(QHttpMultiPart::FormDataType);
@@ -833,11 +902,12 @@ void MapHubApiClient::checkpoint(
 }
 
 void MapHubApiClient::submitRevision(const QString &revision_id,
+                                     const QString &client_instance_id,
                                      const QString &editing_lease,
                                      JsonHandler handler) {
   if (!ensureReady(true, handler))
     return;
-  if (!validStableId(revision_id) ||
+  if (!validStableId(revision_id) || !validStableId(client_instance_id) ||
       (!editing_lease.isEmpty() && !validHeaderValue(editing_lease, 4096))) {
     handler({}, invalidIdentifierError());
     return;
@@ -846,22 +916,45 @@ void MapHubApiClient::submitRevision(const QString &revision_id,
       request(QStringLiteral("/api/v1/revisions/%1/submit").arg(revision_id));
   req.setHeader(QNetworkRequest::ContentTypeHeader,
                 QStringLiteral("application/json"));
+  setEditingClientHeaders(req, client_instance_id);
   if (!editing_lease.isEmpty())
     req.setRawHeader("X-Editing-Lease", editing_lease.toUtf8());
   finishJson(network->post(req, QByteArrayLiteral("{}")), std::move(handler));
 }
 
 void MapHubApiClient::renewLease(const QString &workspace_id,
+                                 const QString &client_instance_id,
                                  const QString &editing_lease,
                                  JsonHandler handler) {
   if (!ensureReady(true, handler))
     return;
-  if (!validStableId(workspace_id) || !validHeaderValue(editing_lease, 4096)) {
+  if (!validStableId(workspace_id) || !validStableId(client_instance_id) ||
+      !validHeaderValue(editing_lease, 4096)) {
     handler({}, invalidIdentifierError());
     return;
   }
   auto req =
       request(QStringLiteral("/api/v1/workspaces/%1/renew").arg(workspace_id));
+  setEditingClientHeaders(req, client_instance_id);
+  if (!editing_lease.isEmpty())
+    req.setRawHeader("X-Editing-Lease", editing_lease.toUtf8());
+  finishJson(network->post(req, QByteArray{}), std::move(handler));
+}
+
+void MapHubApiClient::releaseLease(const QString &workspace_id,
+                                   const QString &client_instance_id,
+                                   const QString &editing_lease,
+                                   JsonHandler handler) {
+  if (!ensureReady(true, handler))
+    return;
+  if (!validStableId(workspace_id) || !validStableId(client_instance_id) ||
+      !validHeaderValue(editing_lease, 4096)) {
+    handler({}, invalidIdentifierError());
+    return;
+  }
+  auto req =
+      request(QStringLiteral("/api/v1/workspaces/%1/release").arg(workspace_id));
+  setEditingClientHeaders(req, client_instance_id);
   if (!editing_lease.isEmpty())
     req.setRawHeader("X-Editing-Lease", editing_lease.toUtf8());
   finishJson(network->post(req, QByteArray{}), std::move(handler));
@@ -871,13 +964,23 @@ void MapHubApiClient::workspaceSyncState(const QString &workspace_id,
                                          const QString &etag,
                                          const QString &editing_lease,
                                          SyncStateHandler handler) {
+  workspaceSyncState(workspace_id, etag, editing_lease, {},
+                     std::move(handler));
+}
+
+void MapHubApiClient::workspaceSyncState(
+    const QString &workspace_id, const QString &etag,
+    const QString &editing_lease, const QString &client_instance_id,
+    SyncStateHandler handler) {
   if (!ensureReady(true, [handler](const QJsonObject &, const Error &error) {
         handler({}, {}, false, error);
       }))
     return;
   if (!validStableId(workspace_id) ||
       (!editing_lease.isEmpty() &&
-       !validHeaderValue(editing_lease, 4096))) {
+       !validHeaderValue(editing_lease, 4096)) ||
+      (!client_instance_id.isEmpty() &&
+       !validStableId(client_instance_id))) {
     handler({}, {}, false,
             {0, QStringLiteral("invalid_request_metadata"),
              tr("The workspace identifier or editing lease is invalid.")});
@@ -889,6 +992,8 @@ void MapHubApiClient::workspaceSyncState(const QString &workspace_id,
     req.setRawHeader("If-None-Match", etag.toUtf8());
   if (!editing_lease.isEmpty())
     req.setRawHeader("X-Editing-Lease", editing_lease.toUtf8());
+  if (!client_instance_id.isEmpty())
+    setEditingClientHeaders(req, client_instance_id);
   auto *reply = network->get(req);
   auto body = std::make_shared<QByteArray>();
   auto too_large = std::make_shared<bool>(false);

@@ -1964,6 +1964,11 @@ void MapEditorController::createMobileGUI()
 	col = 0;
 	top_action_bar->addAction(hide_top_bar_action, 0, col);
 	top_action_bar->addAction(window->getSaveAct(), 1, col++);
+
+	// Mobile intentionally hides the status bar, so keep connected-workspace
+	// safety, sharing state, checkpoint, and submission one tap away here.
+	top_action_bar->addAction(window->getMapHubWorkspaceAct(), 0, col, 2, 1);
+	++col;
 	
 	top_action_bar->addAction(compass_action, 0, col);
 	top_action_bar->addAction(gps_display_action, 1, col++);

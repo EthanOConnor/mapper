@@ -49,6 +49,9 @@ struct ManagedMapWorkspace {
   QString project_revision_id;
   QString sync_etag;
   QString sync_problem;
+  /** True when the local file contains map-wide state which is durable here
+   * but is not represented by the live oom-map-ops/1 entity stream. */
+  bool checkpoint_required = false;
   QString stream_protocol;
   bool initial_snapshot_required = false;
   qint64 uncompacted_operations = 0;
@@ -87,6 +90,9 @@ struct ManagedMapWorkspace {
   static ManagedMapWorkspace findForWorkspace(const QString &server_url,
                                               const QString &workspace_id,
                                               QString *error = nullptr);
+  static ManagedMapWorkspace findForAssignment(const QString &server_url,
+                                               const QString &assignment_id,
+                                               QString *error = nullptr);
   static bool removeForMap(const QString &local_map_path,
                            QString *error = nullptr);
 };

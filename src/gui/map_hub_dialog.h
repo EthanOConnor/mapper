@@ -60,10 +60,29 @@ private:
   void populate(const QJsonObject &response);
   void beginWorkspace(const QJsonObject &response, const QString &assignment_id,
                       const QString &project_title,
-                      const ManagedMapWorkspace &defaults);
+                      const ManagedMapWorkspace &defaults,
+                      const QString &client_instance_id);
   void startAssignment(const QString &assignment_id, const QString &project_id,
                        const QString &project_title,
                        const QString &assignment_title);
+  void requestAssignmentStart(const QString &assignment_id,
+                              const QString &project_id,
+                              const QString &project_title,
+                              const QString &assignment_title,
+                              const ManagedMapWorkspace &defaults,
+                              bool synchronize_manifest);
+  void completeAssignmentStart(
+      const QJsonObject &response, const MapHubApiClient::Error &error,
+      const ManagedMapWorkspace &existing,
+      const QString &retained_editing_lease, const QString &assignment_id,
+      const QString &project_id, const QString &project_title,
+      const QString &manifest_url, const QString &client_instance_id,
+      const ManagedMapWorkspace &defaults, bool synchronize_manifest,
+      bool may_replace_terminal_lease);
+  bool resumeExistingAssignment(const QJsonObject &response,
+                                const ManagedMapWorkspace &existing,
+                                const QString &client_instance_id,
+                                const QString &retained_editing_lease);
   void openProject(const QString &project_id, const QString &project_title);
   void requestProjectAccess(const QString &project_id,
                             const QString &project_title);

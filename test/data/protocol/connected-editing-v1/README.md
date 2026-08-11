@@ -1,7 +1,9 @@
 # Connected-editing cross-language fixtures
 
 These are the authoritative bootstrap, transaction, chain, and projection
-vectors shared with Mapper.
+vectors for the `oom-map-ops/1` compatibility materializer. The transport and
+materializer are separate: these vectors contain OMAP v9 XML fragments and are
+not a generic orienteering-map object model.
 
 Mapper's `map_hub_protocol_fixture_t` generated the pair from fixed UUID source
 data through `XMLFileExporter`, reimported the OMAP, rebuilt the entity index,
@@ -39,3 +41,9 @@ With the zero genesis hash, the assigned stream chain hashes are:
 Do not hand-edit the Mapper-produced files. Regenerate them through Mapper,
 then update the server projection and hash assertions in
 `lifecycle/tests/test_connected_editing.py`.
+
+These files and their generator are part of the GPL-licensed Mapper repository;
+they do not carry a separate permissive fixture grant. A permissively licensed
+client should use an independently licensed shared contract/vector package and
+an independent OMAP adapter, while treating these vectors as reference
+behavior unless their licensing is changed explicitly.

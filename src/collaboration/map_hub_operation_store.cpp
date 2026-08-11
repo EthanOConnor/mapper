@@ -361,7 +361,24 @@ QString MapHubOperationStore::databasePath(const QString &workspace_id) {
 }
 
 bool MapHubOperationStore::open(const QString &workspace_id, QString *error) {
+  return open(workspace_id, {}, error);
+}
+
+bool MapHubOperationStore::open(
+    const QString &workspace_id, const QString &requested_client_instance_id,
+    QString *error) {
   close();
+  const QUuid requested_uuid(requested_client_instance_id);
+  if (!requested_client_instance_id.isEmpty() && requested_uuid.isNull()) {
+    if (error)
+      *error = QStringLiteral(
+          "The requested Map Hub client identity is invalid.");
+    return false;
+  }
+  const auto requested_client =
+      requested_uuid.isNull()
+          ? QString{}
+          : requested_uuid.toString(QUuid::WithoutBraces).toLower();
   const auto path = databasePath(workspace_id);
   if (path.isEmpty() || !QDir().mkpath(QFileInfo(path).absolutePath())) {
     if (error)
@@ -429,12 +446,32 @@ bool MapHubOperationStore::open(const QString &workspace_id, QString *error) {
                         QFileDevice::ReadOwner | QFileDevice::WriteOwner);
   QFile::setPermissions(path + QStringLiteral("-shm"),
                         QFileDevice::ReadOwner | QFileDevice::WriteOwner);
-  if (meta(database.get(), QStringLiteral("client_instance_id"), error)
-          .isEmpty()) {
+  const auto existing_client =
+      meta(database.get(), QStringLiteral("client_instance_id"), error);
+  if (!existing_client.isEmpty() && QUuid(existing_client).isNull()) {
+    if (error)
+      *error = QStringLiteral(
+          "The Map Hub operation store has an invalid client identity.");
+    close();
+    return false;
+  }
+  if (!existing_client.isEmpty() && !requested_client.isEmpty() &&
+      QUuid(existing_client) != requested_uuid) {
+    if (error)
+      *error = QStringLiteral(
+          "The Map Hub operation store belongs to a different client "
+          "instance.");
+    close();
+    return false;
+  }
+  if (existing_client.isEmpty()) {
     Transaction transaction(database.get(), error);
     if (!transaction)
       return false;
-    const auto client_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    const auto client_id =
+        requested_client.isEmpty()
+            ? QUuid::createUuid().toString(QUuid::WithoutBraces)
+            : requested_client;
     if (!setMeta(database.get(), QStringLiteral("client_instance_id"),
                  client_id, error) ||
         !setMeta(database.get(), QStringLiteral("acknowledged_client_sequence"),

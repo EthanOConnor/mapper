@@ -55,6 +55,7 @@ namespace OpenOrienteering {
 
 class MainWindowController;
 class MapEditorController;
+class MapHubApiClient;
 class MapHubSyncController;
 class MapperServiceProxy;
 class Toast;
@@ -217,6 +218,9 @@ public:
 	
 	/** Returns the close action. */
 	QAction* getCloseAct() const;
+
+	/** Returns the always-available connected-workspace status action. */
+	QAction* getMapHubWorkspaceAct() const;
 	
 	
 	/**
@@ -345,6 +349,9 @@ public slots:
 	/** Open the connected map library and this user's assignments. */
 	void showMapHub();
 
+	/** Show the local and shared truth for the current connected workspace. */
+	void showMapHubWorkspaceStatus();
+
 	/** Create an ordinary .omap map bound to a server-created workspace. */
 	void createConnectedMap(const ManagedMapWorkspace& workspace);
 
@@ -356,6 +363,9 @@ public slots:
 	/** Open a verified immutable Map Hub revision in non-mutating viewer mode. */
 	bool openMapHubReadOnly(const QString& source_path,
 	                       const MapHubReadOnlyDocument& document);
+
+	/** Fork the current immutable Map Hub revision into an ordinary local map. */
+	void openMapHubLocalCopy();
 
 	/** Persist native edit-access state for the current read-only map. */
 	void updateMapHubReadOnlyAccess(const QString& project_id,
@@ -578,7 +588,14 @@ private:
 	                                   const QString& required_crs = {},
 	                                   const QString& required_symbol_standard = {});
 	void checkpointMapHub(bool submit_after);
+	void leaveMapHubConnectedEditing();
+	bool isCurrentMapHubCheckpoint(MapHubApiClient* client,
+	                               quint64 generation,
+	                               const QString& path,
+	                               const QString& workspace_id) const;
+	void finishMapHubCheckpoint(MapHubApiClient* client);
 	void updateMapHubActions();
+	void updateMapHubStatusSurface();
 	void renewMapHubLeaseIfNeeded();
 	void configureMapHubSync();
 	void refreshMapHubImageryCatalog();
@@ -624,8 +641,13 @@ private:
 	QAction* recent_file_act[max_recent_files];
 	QAction* settings_act;
 	QAction* close_act;
+	QAction* map_hub_act = nullptr;
 	QAction* map_hub_checkpoint_act = nullptr;
 	QAction* map_hub_submit_act = nullptr;
+	MapHubApiClient* map_hub_checkpoint_client = nullptr;
+	bool map_hub_checkpoint_pending = false;
+	bool map_hub_submission_pending = false;
+	quint64 map_hub_document_generation = 0;
 	QTimer* map_hub_lease_timer = nullptr;
 	bool map_hub_lease_renewal_pending = false;
 	QTimer* map_hub_access_timer = nullptr;
@@ -634,6 +656,7 @@ private:
 	MapHubSyncController* map_hub_sync = nullptr;
 	QLabel* map_hub_sync_label = nullptr;
 	bool map_hub_read_only = false;
+	bool map_hub_local_copy_in_progress = false;
 	bool map_hub_imagery_refresh_pending = false;
 	QLabel* status_label;
 	Toast* toast = nullptr;
@@ -756,6 +779,12 @@ inline
 QAction* MainWindow::getCloseAct() const
 {
 	return close_act;
+}
+
+inline
+QAction* MainWindow::getMapHubWorkspaceAct() const
+{
+	return map_hub_act;
 }
 
 inline

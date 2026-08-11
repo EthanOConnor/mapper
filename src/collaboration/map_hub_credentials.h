@@ -46,6 +46,23 @@ public:
    * token. */
   static QString workspaceLeaseKey(const QString &server_url,
                                    const QString &workspace_id);
+  /** Client-scoped editing lease key. Multiple client instances may hold
+   * independent leases for the same workspace. */
+  static QString workspaceLeaseKey(const QString &server_url,
+                                   const QString &workspace_id,
+                                   const QString &client_instance_id);
+  /** Reads a client-scoped lease. A legacy workspace-only lease is copied,
+   * verified, and removed on first use. */
+  static Result readWorkspaceLease(const QString &server_url,
+                                   const QString &workspace_id,
+                                   const QString &client_instance_id);
+  static Result writeWorkspaceLease(const QString &server_url,
+                                    const QString &workspace_id,
+                                    const QString &client_instance_id,
+                                    const QString &token);
+  static Result removeWorkspaceLease(const QString &server_url,
+                                     const QString &workspace_id,
+                                     const QString &client_instance_id);
 
 private:
   static QString fallbackPath(const QString &server_url);

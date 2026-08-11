@@ -17,6 +17,9 @@
  *    along with OpenOrienteering.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <memory>
+#include <utility>
+
 #include <QtTest>
 #include <QDir>           // IWYU pragma: keep
 #include <QFileInfo>      // IWYU pragma: keep
@@ -24,9 +27,14 @@
 #include <QSignalSpy>     // IWYU pragma: keep
 #include <QStandardPaths> // IWYU pragma: keep
 #include <QStaticPlugin>  // IWYU pragma: keep
+#include <QTemporaryDir>  // IWYU pragma: keep
 #include <QTemporaryFile> // IWYU pragma: keep
 
 #include "test_config.h"  // IWYU pragma: keep
+#include "core/map.h"
+#include "core/track.h"
+#include "sensors/gps_track_recorder.h"
+#include "templates/template_track.h"
 
 
 namespace OpenOrienteering {}
@@ -65,6 +73,60 @@ private slots:
 	void initTestCase()
 	{
 		QDir::addSearchPath(QStringLiteral("testdata"), QDir(QString::fromUtf8(MAPPER_TEST_SOURCE_DIR)).absoluteFilePath(QStringLiteral("data")));
+	}
+
+	void gpsTrackRecorderPersistsAtDurabilityBoundaries()
+	{
+		QTemporaryDir directory(
+		  QDir::current().filePath(QStringLiteral("sensors_t-XXXXXX")));
+		QVERIFY(directory.isValid());
+
+		Map map;
+
+		const auto verify_saved_point = [](const QString& path) {
+			Track saved_track;
+			return saved_track.loadFrom(path, false)
+			       && saved_track.getNumSegments() == 1
+			       && saved_track.getSegmentPointCount(0) == 1;
+		};
+
+		const auto interrupted_path =
+		  directory.filePath(QStringLiteral("interrupted.gpx"));
+		TemplateTrack interrupted_track(interrupted_path, &map);
+		interrupted_track.configureForGPSTrack();
+		{
+			GPSTrackRecorder recorder(nullptr, &interrupted_track);
+			recorder.newPosition(47.6101, -122.2015, 118.0, 0.8f);
+			QVERIFY(interrupted_track.hasUnsavedChanges());
+			recorder.positionUpdatesInterrupted();
+			QVERIFY(!interrupted_track.hasUnsavedChanges());
+			QVERIFY(verify_saved_point(interrupted_path));
+		}
+
+		const auto destroyed_path =
+		  directory.filePath(QStringLiteral("destroyed.gpx"));
+		TemplateTrack destroyed_track(destroyed_path, &map);
+		destroyed_track.configureForGPSTrack();
+		{
+			GPSTrackRecorder recorder(nullptr, &destroyed_track);
+			recorder.newPosition(47.6102, -122.2016, 119.0, 0.7f);
+			QVERIFY(destroyed_track.hasUnsavedChanges());
+		}
+		QVERIFY(!destroyed_track.hasUnsavedChanges());
+		QVERIFY(verify_saved_point(destroyed_path));
+
+		const auto deleted_path =
+		  directory.filePath(QStringLiteral("deleted.gpx"));
+		auto deleted_track = std::make_unique<TemplateTrack>(deleted_path, &map);
+		deleted_track->configureForGPSTrack();
+		auto* deleted_track_ptr = deleted_track.get();
+		map.addTemplate(0, std::move(deleted_track));
+		{
+			GPSTrackRecorder recorder(nullptr, deleted_track_ptr);
+			recorder.newPosition(47.6103, -122.2017, 120.0, 0.6f);
+			map.deleteTemplate(0);
+		}
+		QVERIFY(verify_saved_point(deleted_path));
 	}
 	
 	

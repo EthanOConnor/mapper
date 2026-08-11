@@ -13,12 +13,22 @@ class MapHubProtocolFixtureTest : public QObject {
   Q_OBJECT
 
 private slots:
+  void initTestCase();
+  void operationStoreHonorsRequestedClientIdentity();
   void nativeBootstrapFixture();
   void rejectsMalformedEntityIndexes();
   void supportsAllAddressableEntityOperations();
   void journalsReplayAndRebasesCompactedPendingWork();
   void controllerBootstrapsAndJournalsStructuralEdits();
   void controllerReplaysDurableRemoteInbox();
+  void controllerRestoresStickyUpstreamConflict();
+  void controllerRetriesRequiredWorkingCopyCommit();
+  void controllerDefersStructuralCapturePastRevisionIncrement();
+  void controllerKeepsOutboxBackoffAcrossPollSuccess();
+  void controllerCoalescesPresenceTransitions();
+  void controllerStagesCurrentRevisionBeforeRemoteTerminalStatus();
+  void controllerKeepsWorkspaceMetadataFailureSticky();
+  void controllerKeepsInboxUntilAppliedReceiptPersists();
 };
 
 #endif

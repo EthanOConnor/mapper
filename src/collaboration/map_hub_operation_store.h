@@ -69,6 +69,11 @@ public:
   MapHubOperationStore &operator=(const MapHubOperationStore &) = delete;
 
   bool open(const QString &workspace_id, QString *error = nullptr);
+  /** Opens the durable store and binds a newly created store to the requested
+   * client identity. An existing store with a different identity is rejected. */
+  bool open(const QString &workspace_id,
+            const QString &requested_client_instance_id,
+            QString *error = nullptr);
   void close();
   bool isOpen() const noexcept;
 

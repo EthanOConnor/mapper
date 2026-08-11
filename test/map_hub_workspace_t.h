@@ -15,6 +15,7 @@ private slots:
   void initTestCase();
   void storesMacCredentialsInOwnerOnlyFile();
   void recordRoundTripsWithoutSecrets();
+  void findsNewestValidAssignmentWorkspace();
   void recordIsBoundToCanonicalMapPath();
   void readOnlyDocumentRoundTripsAndRejectsPathSubstitution();
   void validatesServerTransport();
@@ -23,6 +24,8 @@ private slots:
   void hashesArtifactsExactly();
   void completesBrowserMediatedConnection();
   void editAccessUsesNativeIdempotentEndpoints();
+  void assignmentStartCarriesStableClientIdentity();
+  void leaseLifecycleCarriesStableClientIdentity();
   void verifiedDownloadRequiresBoundRevisionHeaders();
   void checkpointCarriesStreamProjectionDigest();
   void snapshotCompressesEntityIndex();
@@ -31,6 +34,9 @@ private slots:
   void rejectsValuesOutsideOperationJsonProfile();
   void boundsZstdTransportFrames();
   void workspaceSyncStateDecodesBoundedZstd();
+  void preservesStructuredApiErrorDetails();
+  void releaseLeaseIsIdempotent();
+  void acknowledgementCarriesOptionalPresence();
   void pendingDraftRoundTripsAndCoalesces();
   void pendingDraftRejectsMovedOrMissingSnapshots();
   void relocatesStaleIosWorkspaceRoots();

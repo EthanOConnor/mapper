@@ -21,6 +21,9 @@
 #include <QSaveFile>
 #include <QStandardPaths>
 #include <QUrl>
+#include <QUuid>
+
+#include "map_hub_api_client.h"
 
 #if defined(Q_OS_IOS)
 #include <Security/Security.h>
@@ -50,7 +53,7 @@ QByteArray serverKey(const QString &server_url) {
   url.setPath(QString{});
   url.setQuery(QString{});
   url.setFragment(QString{});
-  auto normalized =
+  const auto normalized =
       url.adjusted(QUrl::RemoveUserInfo | QUrl::StripTrailingSlash)
           .toString(QUrl::FullyEncoded) +
       QLatin1Char('#') + credential_scope;
@@ -254,9 +257,91 @@ QString MapHubCredentials::accountName(const QString &server_url) {
 
 QString MapHubCredentials::workspaceLeaseKey(const QString &server_url,
                                              const QString &workspace_id) {
-  auto url = QUrl::fromUserInput(server_url);
+  auto url = QUrl::fromUserInput(
+      MapHubApiClient::canonicalServerOrigin(server_url));
+  if (url.isEmpty())
+    return {};
   url.setFragment(QStringLiteral("workspace-lease/%1").arg(workspace_id));
   return url.toString(QUrl::FullyEncoded);
+}
+
+QString MapHubCredentials::workspaceLeaseKey(
+    const QString &server_url, const QString &workspace_id,
+    const QString &client_instance_id) {
+  const QUuid workspace_uuid(workspace_id);
+  const QUuid client_uuid(client_instance_id);
+  if (workspace_uuid.isNull() || client_uuid.isNull())
+    return {};
+  auto url = QUrl::fromUserInput(
+      MapHubApiClient::canonicalServerOrigin(server_url));
+  if (url.isEmpty())
+    return {};
+  url.setFragment(QStringLiteral("workspace-lease/%1/client/%2")
+                      .arg(workspace_uuid.toString(QUuid::WithoutBraces),
+                           client_uuid.toString(QUuid::WithoutBraces)));
+  return url.toString(QUrl::FullyEncoded);
+}
+
+MapHubCredentials::Result MapHubCredentials::readWorkspaceLease(
+    const QString &server_url, const QString &workspace_id,
+    const QString &client_instance_id) {
+  const auto scoped_key =
+      workspaceLeaseKey(server_url, workspace_id, client_instance_id);
+  if (scoped_key.isEmpty())
+    return {{}, credentialTr("The Map Hub workspace or client identity is "
+                             "invalid."),
+            false};
+  auto scoped = readToken(scoped_key);
+  if (!scoped || !scoped.token.isEmpty())
+    return scoped;
+
+  const auto legacy_key = workspaceLeaseKey(server_url, workspace_id);
+  auto legacy = readToken(legacy_key);
+  if (!legacy || legacy.token.isEmpty())
+    return legacy;
+
+  auto migrated = writeToken(scoped_key, legacy.token);
+  if (!migrated)
+    return migrated;
+  auto verified = readToken(scoped_key);
+  if (!verified)
+    return verified;
+  if (verified.token != legacy.token)
+    return {{}, credentialTr("The migrated Map Hub editing lease could not be "
+                             "verified."),
+            verified.used_fallback};
+  auto removed = removeToken(legacy_key);
+  if (!removed)
+    return removed;
+  return verified;
+}
+
+MapHubCredentials::Result MapHubCredentials::writeWorkspaceLease(
+    const QString &server_url, const QString &workspace_id,
+    const QString &client_instance_id, const QString &token) {
+  const auto scoped_key =
+      workspaceLeaseKey(server_url, workspace_id, client_instance_id);
+  if (scoped_key.isEmpty())
+    return {{}, credentialTr("The Map Hub workspace or client identity is "
+                             "invalid."),
+            false};
+  return writeToken(scoped_key, token);
+}
+
+MapHubCredentials::Result MapHubCredentials::removeWorkspaceLease(
+    const QString &server_url, const QString &workspace_id,
+    const QString &client_instance_id) {
+  const auto scoped_key =
+      workspaceLeaseKey(server_url, workspace_id, client_instance_id);
+  if (scoped_key.isEmpty())
+    return {{}, credentialTr("The Map Hub workspace or client identity is "
+                             "invalid."),
+            false};
+  const auto scoped = removeToken(scoped_key);
+  const auto legacy = removeToken(workspaceLeaseKey(server_url, workspace_id));
+  if (!scoped)
+    return scoped;
+  return legacy;
 }
 
 QString MapHubCredentials::fallbackPath(const QString &server_url) {

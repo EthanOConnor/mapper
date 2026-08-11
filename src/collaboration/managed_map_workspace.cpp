@@ -15,6 +15,7 @@
 #include <QStandardPaths>
 
 #include "core/document_path.h"
+#include "map_hub_api_client.h"
 
 namespace OpenOrienteering {
 
@@ -72,6 +73,7 @@ QJsonObject ManagedMapWorkspace::toJson() const {
       {QStringLiteral("project_revision_id"), project_revision_id},
       {QStringLiteral("sync_etag"), sync_etag},
       {QStringLiteral("sync_problem"), sync_problem},
+      {QStringLiteral("checkpoint_required"), checkpoint_required},
       {QStringLiteral("stream_protocol"), stream_protocol},
       {QStringLiteral("initial_snapshot_required"),
        initial_snapshot_required},
@@ -161,6 +163,8 @@ ManagedMapWorkspace ManagedMapWorkspace::fromJson(const QJsonObject &object,
       object.value(QStringLiteral("sync_etag")).toString();
   workspace.sync_problem =
       object.value(QStringLiteral("sync_problem")).toString();
+  workspace.checkpoint_required =
+      object.value(QStringLiteral("checkpoint_required")).toBool();
   workspace.stream_protocol =
       object.value(QStringLiteral("stream_protocol")).toString();
   workspace.initial_snapshot_required =
@@ -301,6 +305,13 @@ ManagedMapWorkspace::loadForMap(const QString &local_map_path, QString *error) {
 
 ManagedMapWorkspace ManagedMapWorkspace::findForWorkspace(
     const QString &server_url, const QString &workspace_id, QString *error) {
+  const auto canonical_server =
+      MapHubApiClient::canonicalServerOrigin(server_url);
+  if (canonical_server.isEmpty() || workspace_id.isEmpty()) {
+    if (error)
+      *error = QStringLiteral("The server or workspace identity is invalid.");
+    return {};
+  }
   auto root = qEnvironmentVariable("MAPPER_MANAGED_WORKSPACE_ROOT");
   if (root.isEmpty())
     root = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
@@ -319,7 +330,9 @@ ManagedMapWorkspace ManagedMapWorkspace::findForWorkspace(
       continue;
     QString record_error;
     const auto candidate = fromJson(document.object(), &record_error);
-    if (!candidate.isValid() || candidate.server_url != server_url ||
+    if (!candidate.isValid() ||
+        MapHubApiClient::canonicalServerOrigin(candidate.server_url) !=
+            canonical_server ||
         candidate.workspace_id != workspace_id ||
         !QFileInfo::exists(candidate.local_map_path))
       continue;
@@ -334,6 +347,57 @@ ManagedMapWorkspace ManagedMapWorkspace::findForWorkspace(
   }
   if (!best.isValid() && error)
     *error = QStringLiteral("No existing local workspace was found.");
+  return best;
+}
+
+ManagedMapWorkspace ManagedMapWorkspace::findForAssignment(
+    const QString &server_url, const QString &assignment_id, QString *error) {
+  const auto canonical_server =
+      MapHubApiClient::canonicalServerOrigin(server_url);
+  if (canonical_server.isEmpty() || assignment_id.isEmpty()) {
+    if (error)
+      *error = QStringLiteral("The server or assignment identity is empty.");
+    return {};
+  }
+
+  auto root = qEnvironmentVariable("MAPPER_MANAGED_WORKSPACE_ROOT");
+  if (root.isEmpty())
+    root = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+  const QDir directory(
+      QDir(root).filePath(QStringLiteral("managed-workspaces")));
+  ManagedMapWorkspace best;
+  QDateTime best_time;
+  for (const auto &name :
+       directory.entryList({QStringLiteral("*.json")}, QDir::Files)) {
+    QFile file(directory.filePath(name));
+    if (!file.open(QIODevice::ReadOnly) || file.size() > 1024 * 1024)
+      continue;
+    QJsonParseError parse_error;
+    const auto document = QJsonDocument::fromJson(file.readAll(), &parse_error);
+    if (parse_error.error != QJsonParseError::NoError || !document.isObject())
+      continue;
+    QString record_error;
+    const auto candidate = fromJson(document.object(), &record_error);
+    const auto candidate_server =
+        MapHubApiClient::canonicalServerOrigin(candidate.server_url);
+    const QFileInfo local_file(candidate.local_map_path);
+    const QFileInfo expected_record(recordPathForMap(candidate.local_map_path));
+    const QFileInfo scanned_record(file.fileName());
+    if (!candidate.isValid() || candidate_server != canonical_server ||
+        candidate.assignment_id != assignment_id || !local_file.exists() ||
+        !local_file.isFile() ||
+        expected_record.absoluteFilePath() != scanned_record.absoluteFilePath())
+      continue;
+    const auto candidate_time =
+        candidate.last_synced_at.isValid() ? candidate.last_synced_at
+                                           : local_file.lastModified();
+    if (!best.isValid() || candidate_time > best_time) {
+      best = candidate;
+      best_time = candidate_time;
+    }
+  }
+  if (!best.isValid() && error)
+    *error = QStringLiteral("No existing local assignment was found.");
   return best;
 }
 

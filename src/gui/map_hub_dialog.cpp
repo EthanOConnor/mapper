@@ -47,6 +47,7 @@
 #include <QSpinBox>
 #include <QStackedWidget>
 #include <QStandardPaths>
+#include <QStringList>
 #include <QTabBar>
 #include <QTabWidget>
 #include <QTextEdit>
@@ -177,6 +178,98 @@ QString projectManifestUrl(const QString &server, const QString &project_id) {
   url.setQuery(QString{});
   url.setFragment(QString{});
   return url.toString(QUrl::FullyEncoded);
+}
+
+QString pendingAssignmentClientInstance(const QString &server,
+                                        const QString &assignment_id,
+                                        const QString &preferred,
+                                        QString *error) {
+  const auto canonical_server =
+      MapHubApiClient::canonicalServerOrigin(server);
+  const QUuid assignment_uuid(assignment_id);
+  const QUuid preferred_uuid(preferred);
+  if (canonical_server.isEmpty() || assignment_uuid.isNull() ||
+      (!preferred.isEmpty() && preferred_uuid.isNull())) {
+    if (error)
+      *error = QStringLiteral(
+          "The pending Map Hub assignment identity is invalid.");
+    return {};
+  }
+
+  const auto assignment_key =
+      assignment_uuid.toString(QUuid::WithoutBraces);
+  const auto digest_for = [&](const QString &server_spelling) {
+    QByteArray identity_material = server_spelling.toUtf8();
+    identity_material.append('\n');
+    identity_material.append(assignment_key.toUtf8());
+    return QString::fromLatin1(
+        QCryptographicHash::hash(identity_material,
+                                 QCryptographicHash::Sha256)
+            .toHex());
+  };
+  const auto canonical_digest = digest_for(canonical_server);
+  QStringList candidate_digests{canonical_digest, digest_for(server)};
+  candidate_digests.push_back(digest_for(canonical_server + QLatin1Char('/')));
+
+  QSettings settings;
+  settings.beginGroup(QStringLiteral("MapHub/PendingAssignmentStarts"));
+  candidate_digests.append(settings.childGroups());
+  settings.endGroup();
+  candidate_digests.removeDuplicates();
+  QStringList matching_legacy_digests;
+  auto client_instance_id = preferred_uuid.isNull()
+                                ? QString{}
+                                : preferred_uuid.toString(
+                                      QUuid::WithoutBraces);
+  for (const auto &digest : std::as_const(candidate_digests)) {
+    settings.beginGroup(QStringLiteral("MapHub/PendingAssignmentStarts/%1")
+                            .arg(digest));
+    const auto stored_server = MapHubApiClient::canonicalServerOrigin(
+        settings.value(QStringLiteral("server_url")).toString());
+    const QUuid stored_assignment(
+        settings.value(QStringLiteral("assignment_id")).toString());
+    const QUuid stored_client(
+        settings.value(QStringLiteral("client_instance_id")).toString());
+    settings.endGroup();
+    if (stored_server == canonical_server &&
+        stored_assignment == assignment_uuid && !stored_client.isNull()) {
+      matching_legacy_digests.push_back(digest);
+      if (client_instance_id.isEmpty())
+        client_instance_id =
+            stored_client.toString(QUuid::WithoutBraces);
+    }
+  }
+  if (client_instance_id.isEmpty())
+    client_instance_id =
+        QUuid::createUuid().toString(QUuid::WithoutBraces);
+  settings.beginGroup(QStringLiteral("MapHub/PendingAssignmentStarts/%1")
+                          .arg(canonical_digest));
+  settings.setValue(QStringLiteral("server_url"), canonical_server);
+  settings.setValue(QStringLiteral("assignment_id"),
+                    assignment_key);
+  settings.setValue(QStringLiteral("client_instance_id"), client_instance_id);
+  settings.endGroup();
+  for (const auto &digest : std::as_const(matching_legacy_digests)) {
+    if (digest != canonical_digest)
+      settings.remove(QStringLiteral("MapHub/PendingAssignmentStarts/%1")
+                          .arg(digest));
+  }
+  settings.sync();
+  if (settings.status() != QSettings::NoError) {
+    if (error)
+      *error = QStringLiteral(
+          "Mapper could not durably save the pending assignment identity.");
+    return {};
+  }
+  return client_instance_id;
+}
+
+bool terminalEditingLeaseError(const MapHubApiClient::Error &error) {
+  return error.code == QLatin1String("lease_required") ||
+         error.code == QLatin1String("lease_released") ||
+         error.code == QLatin1String("lease_expired") ||
+         error.code == QLatin1String("released") ||
+         error.code == QLatin1String("expired");
 }
 
 QString eventWebUrl(const QString &server, const QString &event_id) {
@@ -2607,65 +2700,371 @@ void MapHubDialog::startAssignment(const QString &assignment_id,
                                    const QString &project_id,
                                    const QString &project_title,
                                    const QString &assignment_title) {
-  auto server =
-      Settings::getInstance().getSetting(Settings::MapHub_ServerUrl).toString();
-  auto manifest_url = projectManifestUrl(server, project_id);
+  requestAssignmentStart(assignment_id, project_id, project_title,
+                         assignment_title, {}, true);
+}
+
+void MapHubDialog::requestAssignmentStart(
+    const QString &assignment_id, const QString &project_id,
+    const QString &project_title, const QString &assignment_title,
+    const ManagedMapWorkspace &provided_defaults, bool synchronize_manifest) {
+  if (!client) {
+    setBusy(false);
+    QMessageBox::warning(this, tr("Could not start assignment"),
+                         tr("The Map Hub connection is no longer available."));
+    return;
+  }
+
+  const auto server = MapHubApiClient::canonicalServerOrigin(
+      Settings::getInstance().getSetting(Settings::MapHub_ServerUrl).toString());
+  if (server.isEmpty()) {
+    setBusy(false);
+    QMessageBox::warning(this, tr("Could not start assignment"),
+                         tr("The configured Map Hub server URL is invalid."));
+    return;
+  }
+  QString lookup_error;
+  auto existing = ManagedMapWorkspace::findForAssignment(
+      server, assignment_id, &lookup_error);
+  QString preferred_client_instance;
+  if (existing.isValid()) {
+    MapHubOperationStore store;
+    QString store_error;
+    const auto opened = existing.client_instance_id.isEmpty()
+                            ? store.open(existing.workspace_id, &store_error)
+                            : store.open(existing.workspace_id,
+                                         existing.client_instance_id,
+                                         &store_error);
+    const auto state = opened ? store.state(&store_error)
+                              : MapHubOperationStore::State{};
+    if (!opened || !store_error.isEmpty() ||
+        QUuid(state.client_instance_id).isNull()) {
+      setBusy(false);
+      QMessageBox::warning(
+          this, tr("Could not resume assignment"),
+          store_error.isEmpty()
+              ? tr("The existing connected workspace has no valid client "
+                   "identity. Its local map and lease were left unchanged.")
+              : store_error);
+      return;
+    }
+    preferred_client_instance =
+        QUuid(state.client_instance_id).toString(QUuid::WithoutBraces);
+    if (existing.client_instance_id != preferred_client_instance) {
+      existing.client_instance_id = preferred_client_instance;
+      QString save_error;
+      if (!ManagedMapWorkspace::save(existing, &save_error)) {
+        setBusy(false);
+        QMessageBox::warning(this, tr("Could not resume assignment"),
+                             save_error);
+        return;
+      }
+    }
+  }
+
+  QString identity_error;
+  const auto client_instance_id = pendingAssignmentClientInstance(
+      server, assignment_id, preferred_client_instance, &identity_error);
+  if (client_instance_id.isEmpty()) {
+    setBusy(false);
+    QMessageBox::warning(this, tr("Could not start assignment"),
+                         identity_error);
+    return;
+  }
+
+  QString retained_editing_lease;
+  if (existing.isValid()) {
+    const auto stored = MapHubCredentials::readWorkspaceLease(
+        server, existing.workspace_id, client_instance_id);
+    if (!stored) {
+      setBusy(false);
+      QMessageBox::warning(this, tr("Could not resume assignment"),
+                           stored.error);
+      return;
+    }
+    retained_editing_lease = stored.token;
+  }
+
+  const auto manifest_url = projectManifestUrl(server, project_id);
   setBusy(
       true,
       tr("Starting %1 and obtaining its editing lease…").arg(assignment_title));
-  client->startAssignment(
-      assignment_id,
-      [this, assignment_id, project_id, project_title, manifest_url](
-          const QJsonObject &response, const MapHubApiClient::Error &error) {
-        if (error) {
-          setBusy(false);
-          showError(tr("Could not start assignment"), error);
+  QPointer<MapHubDialog> guard(this);
+  QPointer<MapHubApiClient> request_client(client);
+  request_client->startAssignment(
+      assignment_id, client_instance_id, retained_editing_lease,
+      [guard, request_client, response_existing = std::move(existing),
+       retained_editing_lease, assignment_id, project_id, project_title,
+       manifest_url, client_instance_id, provided_defaults,
+       synchronize_manifest](const QJsonObject &response,
+                             const MapHubApiClient::Error &error) {
+        if (!guard || guard->client != request_client)
           return;
-        }
-        setBusy(true, tr("Synchronizing project-authorized tiled sources…"));
-        client->projectManifest(
-            project_id,
-            [this, response, assignment_id, project_title,
-             manifest_url](const QJsonObject &manifest,
-                           const MapHubApiClient::Error &manifest_error) {
-              ManagedMapWorkspace defaults;
-              if (!manifest_error) {
-                auto target =
-                    manifest.value(QStringLiteral("target")).toObject();
-                defaults.target_crs =
-                    target.value(QStringLiteral("crs")).toString();
-                defaults.target_scale =
-                    target.value(QStringLiteral("scale")).toInt();
-                defaults.symbol_standard =
-                    target.value(QStringLiteral("symbol_standard")).toString();
-                auto installed =
-                    MapHubImageryCatalog::install(manifest, manifest_url);
-                if (!installed)
-                  QMessageBox::warning(this,
-                                       tr("Map opened without project tiles"),
-                                       installed.error);
-              } else {
-                QMessageBox::warning(
-                    this, tr("Map opened without project metadata"),
-                    tr("Mapper could not synchronize this project's target "
-                       "settings or tiled sources: %1")
-                        .arg(manifest_error.message));
-              }
-              beginWorkspace(response, assignment_id, project_title, defaults);
-            });
+        guard->completeAssignmentStart(
+            response, error, response_existing, retained_editing_lease,
+            assignment_id, project_id, project_title, manifest_url,
+            client_instance_id, provided_defaults, synchronize_manifest,
+            true);
       });
+}
+
+void MapHubDialog::completeAssignmentStart(
+    const QJsonObject &response, const MapHubApiClient::Error &error,
+    const ManagedMapWorkspace &existing,
+    const QString &retained_editing_lease, const QString &assignment_id,
+    const QString &project_id, const QString &project_title,
+    const QString &manifest_url, const QString &client_instance_id,
+    const ManagedMapWorkspace &provided_defaults, bool synchronize_manifest,
+    bool may_replace_terminal_lease) {
+  if (error) {
+    if (may_replace_terminal_lease && existing.isValid() &&
+        !retained_editing_lease.isEmpty() &&
+        terminalEditingLeaseError(error)) {
+      setBusy(true, tr("Replacing the expired editing lease…"));
+      QPointer<MapHubDialog> guard(this);
+      QPointer<MapHubApiClient> request_client(client);
+      if (!request_client) {
+        setBusy(false);
+        QMessageBox::warning(
+            this, tr("Could not resume assignment"),
+            tr("The Map Hub connection is no longer available."));
+        return;
+      }
+      request_client->startAssignment(
+          assignment_id, client_instance_id, {},
+          [guard, request_client, existing, assignment_id, project_id,
+           project_title, manifest_url, client_instance_id, provided_defaults,
+           synchronize_manifest](
+              const QJsonObject &retry_response,
+              const MapHubApiClient::Error &retry_error) {
+            if (!guard || guard->client != request_client)
+              return;
+            guard->completeAssignmentStart(
+                retry_response, retry_error, existing, {}, assignment_id,
+                project_id, project_title, manifest_url, client_instance_id,
+                provided_defaults, synchronize_manifest, false);
+          });
+      return;
+    }
+    setBusy(false);
+    showError(tr("Could not start assignment"), error);
+    return;
+  }
+  if (existing.isValid()) {
+    resumeExistingAssignment(response, existing, client_instance_id,
+                             retained_editing_lease);
+    return;
+  }
+  if (!synchronize_manifest) {
+    beginWorkspace(response, assignment_id, project_title, provided_defaults,
+                   client_instance_id);
+    return;
+  }
+
+  setBusy(true, tr("Synchronizing project-authorized tiled sources…"));
+  QPointer<MapHubDialog> guard(this);
+  QPointer<MapHubApiClient> request_client(client);
+  if (!request_client) {
+    setBusy(false);
+    QMessageBox::warning(this, tr("Could not start assignment"),
+                         tr("The Map Hub connection is no longer available."));
+    return;
+  }
+  request_client->projectManifest(
+      project_id,
+      [guard, request_client, response, assignment_id, project_title,
+       manifest_url,
+       client_instance_id](const QJsonObject &manifest,
+                           const MapHubApiClient::Error &manifest_error) {
+        if (!guard || guard->client != request_client)
+          return;
+        ManagedMapWorkspace defaults;
+        if (!manifest_error) {
+          const auto target =
+              manifest.value(QStringLiteral("target")).toObject();
+          defaults.target_crs =
+              target.value(QStringLiteral("crs")).toString();
+          defaults.target_scale =
+              target.value(QStringLiteral("scale")).toInt();
+          defaults.symbol_standard =
+              target.value(QStringLiteral("symbol_standard")).toString();
+          const auto installed =
+              MapHubImageryCatalog::install(manifest, manifest_url);
+          if (!installed)
+            QMessageBox::warning(
+                guard, guard->tr("Map opened without project tiles"),
+                installed.error);
+        } else {
+          QMessageBox::warning(
+              guard, guard->tr("Map opened without project metadata"),
+              guard
+                  ->tr("Mapper could not synchronize this project's target "
+                       "settings or tiled sources: %1")
+                  .arg(manifest_error.message));
+        }
+        guard->beginWorkspace(response, assignment_id, project_title, defaults,
+                              client_instance_id);
+      });
+}
+
+bool MapHubDialog::resumeExistingAssignment(
+    const QJsonObject &response, const ManagedMapWorkspace &existing,
+    const QString &client_instance_id,
+    const QString &retained_editing_lease) {
+  const auto workspace_object =
+      response.value(QStringLiteral("workspace")).toObject();
+  const auto response_workspace_id =
+      workspace_object.value(QStringLiteral("id")).toString();
+  auto response_assignment_id =
+      workspace_object.value(QStringLiteral("assignment_id")).toString();
+  if (response_assignment_id.isEmpty())
+    response_assignment_id =
+        response.value(QStringLiteral("assignment_id")).toString();
+  const auto lease = response.value(QStringLiteral("lease")).toObject();
+  const auto response_client_instance =
+      lease.value(QStringLiteral("client_instance_id")).toString();
+  const auto response_lease_id =
+      lease.value(QStringLiteral("id")).toString();
+  const auto reused_value = lease.value(QStringLiteral("reused"));
+  auto editing_lease = lease.value(QStringLiteral("token")).toString();
+  if (editing_lease.isEmpty())
+    editing_lease = retained_editing_lease;
+  auto expires_at = QDateTime::fromString(
+      lease.value(QStringLiteral("expires_at")).toString(),
+      Qt::ISODateWithMs);
+  if (!expires_at.isValid())
+    expires_at = QDateTime::fromString(
+        lease.value(QStringLiteral("expires_at")).toString(), Qt::ISODate);
+
+  const auto token_matches_reuse =
+      !reused_value.isBool()
+          ? (retained_editing_lease.isEmpty() ||
+             editing_lease == retained_editing_lease)
+          : reused_value.toBool()
+                ? (!retained_editing_lease.isEmpty() &&
+                   editing_lease == retained_editing_lease)
+                : (retained_editing_lease.isEmpty() ||
+                   editing_lease != retained_editing_lease);
+
+  const auto response_is_bound =
+      response_workspace_id == existing.workspace_id &&
+      (response_assignment_id.isEmpty() ||
+       response_assignment_id == existing.assignment_id) &&
+      (response_client_instance.isEmpty() ||
+       response_client_instance == client_instance_id) &&
+      (response_lease_id.isEmpty() || !QUuid(response_lease_id).isNull()) &&
+      !editing_lease.isEmpty() && expires_at.isValid() &&
+      expires_at > QDateTime::currentDateTimeUtc() &&
+      token_matches_reuse;
+  if (!response_is_bound) {
+    setBusy(false);
+    QMessageBox::warning(
+        this, tr("Invalid workspace response"),
+        tr("Map Hub did not return the same assignment, workspace, client "
+           "instance, and fresh editing lease. The existing local workspace "
+           "was left unchanged."));
+    return false;
+  }
+
+  QString load_error;
+  auto current = ManagedMapWorkspace::loadForMap(existing.local_map_path,
+                                                 &load_error);
+  const QFileInfo local_file(existing.local_map_path);
+  if (!current.isValid() ||
+      MapHubApiClient::canonicalServerOrigin(current.server_url) !=
+          MapHubApiClient::canonicalServerOrigin(existing.server_url) ||
+      current.assignment_id != existing.assignment_id ||
+      current.workspace_id != existing.workspace_id || !local_file.exists() ||
+      !local_file.isFile() ||
+      (!current.client_instance_id.isEmpty() &&
+       current.client_instance_id != client_instance_id)) {
+    setBusy(false);
+    QMessageBox::warning(
+        this, tr("Could not resume assignment"),
+        load_error.isEmpty()
+            ? tr("The existing connected workspace changed while its lease "
+                 "was being refreshed. No local file was opened or replaced.")
+            : load_error);
+    return false;
+  }
+
+  MapHubOperationStore store;
+  QString store_error;
+  if (!store.open(current.workspace_id, client_instance_id, &store_error) ||
+      store.state(&store_error).client_instance_id != client_instance_id ||
+      !store_error.isEmpty()) {
+    setBusy(false);
+    QMessageBox::warning(this, tr("Could not resume assignment"),
+                         store_error.isEmpty()
+                             ? tr("The existing connected workspace belongs "
+                                  "to a different client instance.")
+                             : store_error);
+    return false;
+  }
+
+  const auto stored = MapHubCredentials::writeWorkspaceLease(
+      current.server_url, current.workspace_id, client_instance_id,
+      editing_lease);
+  if (!stored) {
+    setBusy(false);
+    QMessageBox::warning(this, tr("Could not secure editing lease"),
+                         stored.error);
+    return false;
+  }
+  current.client_instance_id = client_instance_id;
+  current.lease_expires_at = expires_at.toUTC();
+  QString save_error;
+  if (!ManagedMapWorkspace::save(current, &save_error)) {
+    setBusy(false);
+    QMessageBox::warning(this, tr("Could not resume assignment"), save_error);
+    return false;
+  }
+
+  setBusy(false);
+  if (window->openConnectedWorkspace(current.local_map_path,
+                                     current.local_map_path, current))
+    accept();
+  return true;
 }
 
 void MapHubDialog::beginWorkspace(const QJsonObject &response,
                                   const QString &assignment_id,
                                   const QString &project_title,
-                                  const ManagedMapWorkspace &defaults) {
+                                  const ManagedMapWorkspace &defaults,
+                                  const QString &client_instance_id) {
   const auto sync_state_key = QStringLiteral("_mapper_sync_state");
+  const auto response_workspace =
+      response.value(QStringLiteral("workspace")).toObject();
+  const auto response_lease =
+      response.value(QStringLiteral("lease")).toObject();
+  auto response_assignment_id =
+      response_workspace.value(QStringLiteral("assignment_id")).toString();
+  if (response_assignment_id.isEmpty())
+    response_assignment_id =
+        response.value(QStringLiteral("assignment_id")).toString();
+  const auto response_client_instance =
+      response_lease.value(QStringLiteral("client_instance_id")).toString();
+  const auto response_lease_id =
+      response_lease.value(QStringLiteral("id")).toString();
+  const auto response_lease_token =
+      response_lease.value(QStringLiteral("token")).toString();
+  if (QUuid(client_instance_id).isNull() ||
+      (!response_assignment_id.isEmpty() &&
+       response_assignment_id != assignment_id) ||
+      (!response_client_instance.isEmpty() &&
+       response_client_instance != client_instance_id) ||
+      (!response_lease_id.isEmpty() && QUuid(response_lease_id).isNull()) ||
+      response_lease_token.isEmpty()) {
+    setBusy(false);
+    QMessageBox::warning(
+        this, tr("Invalid workspace response"),
+        tr("Map Hub returned a workspace or editing lease for a different "
+           "assignment client. Nothing was downloaded or created locally."));
+    return;
+  }
   if (!response.contains(sync_state_key)) {
-    const auto workspace_id = response.value(QStringLiteral("workspace"))
-                                  .toObject()
-                                  .value(QStringLiteral("id"))
-                                  .toString();
+    const auto workspace_id =
+        response_workspace.value(QStringLiteral("id")).toString();
     if (QUuid(workspace_id).isNull()) {
       setBusy(false);
       QMessageBox::warning(
@@ -2680,20 +3079,26 @@ void MapHubDialog::beginWorkspace(const QJsonObject &response,
             .toObject()
             .value(QStringLiteral("token"))
             .toString();
-    client->workspaceSyncState(
-        workspace_id, {}, editing_lease,
-        [this, response, assignment_id, project_title, defaults,
+    QPointer<MapHubDialog> guard(this);
+    QPointer<MapHubApiClient> request_client(client);
+    request_client->workspaceSyncState(
+        workspace_id, {}, editing_lease, client_instance_id,
+        [guard, request_client, response, assignment_id, project_title,
+         defaults, client_instance_id,
          sync_state_key](const QJsonObject &sync_state, const QString &, bool,
                          const MapHubApiClient::Error &error) mutable {
+          if (!guard || guard->client != request_client)
+            return;
           if (error) {
-            setBusy(false);
-            showError(tr("Could not read connected-editing state"), error);
+            guard->setBusy(false);
+            guard->showError(
+                guard->tr("Could not read connected-editing state"), error);
             return;
           }
           auto hydrated_response = response;
           hydrated_response.insert(sync_state_key, sync_state);
-          beginWorkspace(hydrated_response, assignment_id, project_title,
-                         defaults);
+          guard->beginWorkspace(hydrated_response, assignment_id,
+                                project_title, defaults, client_instance_id);
         });
     return;
   }
@@ -2708,6 +3113,8 @@ void MapHubDialog::beginWorkspace(const QJsonObject &response,
   const auto sync_project_revision =
       sync_state.value(QStringLiteral("project_revision")).toObject();
   const auto sync_lease = sync_state.value(QStringLiteral("lease")).toObject();
+  const auto sync_client_instance =
+      sync_lease.value(QStringLiteral("client_instance_id")).toString();
   const auto sync_stream =
       sync_state.value(QStringLiteral("stream")).toObject();
   const auto sync_snapshot =
@@ -2791,6 +3198,20 @@ void MapHubDialog::beginWorkspace(const QJsonObject &response,
       sync_stream.value(QStringLiteral("initial_snapshot_required")).toBool();
   const auto sync_workspace_id =
       sync_workspace.value(QStringLiteral("id")).toString();
+  auto lease_expiry = QDateTime::fromString(
+      lease.value(QStringLiteral("expires_at")).toString(),
+      Qt::ISODateWithMs);
+  if (!lease_expiry.isValid())
+    lease_expiry = QDateTime::fromString(
+        lease.value(QStringLiteral("expires_at")).toString(), Qt::ISODate);
+  auto current_lease_expiry = QDateTime::fromString(
+      sync_lease.value(QStringLiteral("expires_at")).toString(),
+      Qt::ISODateWithMs);
+  if (!current_lease_expiry.isValid())
+    current_lease_expiry = QDateTime::fromString(
+        sync_lease.value(QStringLiteral("expires_at")).toString(), Qt::ISODate);
+  if (current_lease_expiry.isValid())
+    lease_expiry = current_lease_expiry;
   const auto valid_revision = [](const QJsonObject &revision) {
     return revision.isEmpty() ||
            !QUuid(revision.value(QStringLiteral("id")).toString()).isNull();
@@ -2815,6 +3236,10 @@ void MapHubDialog::beginWorkspace(const QJsonObject &response,
       !sync_stream.value(QStringLiteral("compaction_recommended")).isBool() ||
       !sync_stream.value(QStringLiteral("compaction_required")).isBool() ||
       !sync_lease.value(QStringLiteral("valid")).toBool() ||
+      !lease_expiry.isValid() ||
+      lease_expiry <= QDateTime::currentDateTimeUtc() ||
+      (!sync_client_instance.isEmpty() &&
+       sync_client_instance != client_instance_id) ||
       !valid_revision(sync_workspace_revision) ||
       !valid_revision(sync_active_revision) ||
       !valid_revision(sync_project_revision) ||
@@ -2828,16 +3253,31 @@ void MapHubDialog::beginWorkspace(const QJsonObject &response,
            "workspace. Nothing was downloaded or created locally."));
     return;
   }
-  if (!lease.value(QStringLiteral("token")).toString().isEmpty()) {
-    auto stored = MapHubCredentials::writeToken(
-        MapHubCredentials::workspaceLeaseKey(server, workspace_id),
-        lease.value(QStringLiteral("token")).toString());
-    if (!stored) {
-      setBusy(false);
-      QMessageBox::warning(this, tr("Could not secure editing lease"),
-                           stored.error);
-      return;
-    }
+
+  MapHubOperationStore identity_store;
+  QString identity_store_error;
+  if (!identity_store.open(workspace_id, client_instance_id,
+                           &identity_store_error) ||
+      identity_store.state(&identity_store_error).client_instance_id !=
+          client_instance_id ||
+      !identity_store_error.isEmpty()) {
+    setBusy(false);
+    QMessageBox::warning(
+        this, tr("Could not initialize connected editing"),
+        identity_store_error.isEmpty()
+            ? tr("The local operation store belongs to a different client "
+                 "instance.")
+            : identity_store_error);
+    return;
+  }
+  auto stored = MapHubCredentials::writeWorkspaceLease(
+      server, workspace_id, client_instance_id,
+      lease.value(QStringLiteral("token")).toString());
+  if (!stored) {
+    setBusy(false);
+    QMessageBox::warning(this, tr("Could not secure editing lease"),
+                         stored.error);
+    return;
   }
   auto managed = defaults;
   managed.server_url = server;
@@ -2856,6 +3296,7 @@ void MapHubDialog::beginWorkspace(const QJsonObject &response,
   managed.work_package_id = work_package_id;
   managed.workspace_id = workspace_id;
   managed.assignment_id = assignment_id;
+  managed.client_instance_id = client_instance_id;
   managed.manifest_url = projectManifestUrl(server, managed.project_id);
   managed.status = workspace_object.value(QStringLiteral("status")).toString();
   if (!sync_workspace.value(QStringLiteral("status")).toString().isEmpty())
@@ -2883,12 +3324,7 @@ void MapHubDialog::beginWorkspace(const QJsonObject &response,
       effective_revision.value(QStringLiteral("artifact_kind")).toString();
   managed.base_artifact_name =
       effective_revision.value(QStringLiteral("original_name")).toString();
-  managed.lease_expires_at = QDateTime::fromString(
-      lease.value(QStringLiteral("expires_at")).toString(), Qt::ISODate);
-  const auto current_lease_expiry = QDateTime::fromString(
-      sync_lease.value(QStringLiteral("expires_at")).toString(), Qt::ISODate);
-  if (current_lease_expiry.isValid())
-    managed.lease_expires_at = current_lease_expiry;
+  managed.lease_expires_at = lease_expiry.toUTC();
   managed.stream_protocol =
       sync_state.value(QStringLiteral("protocol")).toString();
   managed.initial_snapshot_required =
@@ -2932,7 +3368,8 @@ void MapHubDialog::beginWorkspace(const QJsonObject &response,
   if (existing.isValid()) {
     MapHubOperationStore existing_store;
     QString store_error;
-    const auto store_ready = existing_store.open(workspace_id, &store_error);
+    const auto store_ready = existing_store.open(
+        workspace_id, client_instance_id, &store_error);
     const auto store_state = store_ready ? existing_store.state(&store_error)
                                          : MapHubOperationStore::State{};
     const auto projection_ready =
@@ -2986,12 +3423,14 @@ void MapHubDialog::beginWorkspace(const QJsonObject &response,
       QStringLiteral("^[0-9a-fA-F]{64}$"));
   auto effective_sha =
       effective_revision.value(QStringLiteral("sha256")).toString();
-  if (!sha256_pattern.match(effective_sha).hasMatch()) {
+  const auto effective_size =
+      effective_revision.value(QStringLiteral("size_bytes")).toInteger(-1);
+  if (!sha256_pattern.match(effective_sha).hasMatch() || effective_size <= 0) {
     setBusy(false);
     QMessageBox::warning(
         this, tr("Could not verify map"),
         tr("Map Hub returned downloadable map bytes without a valid SHA-256 "
-           "checksum. Nothing was downloaded."));
+           "checksum and positive byte size. Nothing was downloaded."));
     return;
   }
   auto extension = artifactExtension(effective_revision);
@@ -3013,35 +3452,40 @@ void MapHubDialog::beginWorkspace(const QJsonObject &response,
   setBusy(true,
           tr("Downloading and verifying r%1…")
               .arg(effective_revision.value(QStringLiteral("number")).toInt()));
-  client->downloadArtifact(
-      download_url, effective_sha, destination,
-      [this, managed,
+  QPointer<MapHubDialog> guard(this);
+  QPointer<MapHubApiClient> request_client(client);
+  request_client->downloadArtifact(
+      download_url, effective_sha, effective_size, destination,
+      [guard, request_client, managed,
        effective_revision_number =
            effective_revision.value(QStringLiteral("number")).toInt()](
           const QString &path, const MapHubApiClient::Error &error) mutable {
+        if (!guard || guard->client != request_client)
+          return;
         if (error) {
-          setBusy(false);
-          showError(tr("Could not download map"), error);
+          guard->setBusy(false);
+          guard->showError(guard->tr("Could not download map"), error);
           return;
         }
         auto normalized_path = path;
         if (!path.endsWith(QLatin1String(".omap"), Qt::CaseInsensitive))
-          normalized_path = uniqueDestination(
+          normalized_path = guard->uniqueDestination(
               managed.project_title, managed.project_id, managed.workspace_id,
               effective_revision_number, QStringLiteral("omap"));
 #ifdef MAPPER_MOBILE
-        if (window->hasOpenedFile() &&
-            DocumentPath::canonical(window->currentPath()) !=
+        if (guard->window->hasOpenedFile() &&
+            DocumentPath::canonical(guard->window->currentPath()) !=
                 DocumentPath::canonical(path) &&
-            !window->closeFile()) {
+            !guard->window->closeFile()) {
           QFile::remove(path);
-          setBusy(false);
+          guard->setBusy(false);
           return;
         }
 #endif
-        setBusy(false);
-        if (window->openConnectedWorkspace(path, normalized_path, managed))
-          accept();
+        guard->setBusy(false);
+        if (guard->window->openConnectedWorkspace(path, normalized_path,
+                                                   managed))
+          guard->accept();
       });
 }
 
@@ -3078,53 +3522,51 @@ void MapHubDialog::createConnectedMap() {
                              idempotency_key);
   transaction_state.endGroup();
   setBusy(true, tr("Creating the Map Hub project before the local map…"));
-  client->createProject(
+  QPointer<MapHubDialog> guard(this);
+  QPointer<MapHubApiClient> request_client(client);
+  request_client->createProject(
       payload, idempotency_key,
-      [this, title, workspace_defaults, start_locally, assignee_name](
-          const QJsonObject &response, const MapHubApiClient::Error &error) {
+      [guard, request_client, title, workspace_defaults, start_locally,
+       assignee_name](const QJsonObject &response,
+                      const MapHubApiClient::Error &error) {
+        if (!guard || guard->client != request_client)
+          return;
         if (error) {
-          setBusy(false);
-          showError(tr("Could not create connected map"), error);
+          guard->setBusy(false);
+          guard->showError(guard->tr("Could not create connected map"),
+                           error);
           return;
         }
         QSettings transaction_state;
         transaction_state.remove(QStringLiteral("MapHub/PendingProjectCreate"));
         if (!start_locally) {
-          setBusy(false);
+          guard->setBusy(false);
           QMessageBox::information(
-              this, tr("Connected map assigned"),
-              tr("“%1” and its first work package were created in Map Hub "
-                 "and assigned to %2. Their Mapper account will see it in My "
-                 "work; no local map was created on this computer.")
+              guard, guard->tr("Connected map assigned"),
+              guard
+                  ->tr("“%1” and its first work package were created in Map "
+                       "Hub and assigned to %2. Their Mapper account will see "
+                       "it in My work; no local map was created on this "
+                       "computer.")
                   .arg(title, assignee_name));
-          refresh();
+          guard->refresh();
           return;
         }
         auto assignment_id =
             response.value(QStringLiteral("assignment_id")).toString();
         if (assignment_id.isEmpty()) {
-          setBusy(false);
+          guard->setBusy(false);
           QMessageBox::warning(
-              this, tr("Project created, but local work could not start"),
-              tr("The project is safe in Map Hub, but the server did not "
-                 "return its assignment ID. Refresh the library before opening "
-                 "it."));
+              guard,
+              guard->tr("Project created, but local work could not start"),
+              guard->tr(
+                  "The project is safe in Map Hub, but the server did not "
+                  "return its assignment ID. Refresh the library before "
+                  "opening it."));
           return;
         }
-        setBusy(true, tr("Project created. Starting its managed workspace…"));
-        client->startAssignment(
-            assignment_id, [this, assignment_id, title, workspace_defaults](
-                               const QJsonObject &started,
-                               const MapHubApiClient::Error &start_error) {
-              if (start_error) {
-                setBusy(false);
-                showError(
-                    tr("Project created, but its workspace could not start"),
-                    start_error);
-                return;
-              }
-              beginWorkspace(started, assignment_id, title, workspace_defaults);
-            });
+        guard->requestAssignmentStart(assignment_id, {}, title, title,
+                                      workspace_defaults, false);
       });
 }
 
