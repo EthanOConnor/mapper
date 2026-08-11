@@ -363,6 +363,15 @@ namespace Util
 	 * \see QTextDocument::toPlainText
 	 */
 	QString plainText(QString maybe_markup);
+
+	/**
+	 * Re-resolves palette-based style sheets after a system appearance change.
+	 *
+	 * Qt style sheets resolve palette(role) values when polished. Native mobile
+	 * platforms can change the application palette while a sheet remains open,
+	 * so those cached values otherwise retain the previous appearance.
+	 */
+	void keepStyleSheetsSynchronizedWithPalette(QWidget* root);
 	
 	
 	namespace ToolButton

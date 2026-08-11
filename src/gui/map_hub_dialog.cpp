@@ -70,6 +70,7 @@
 #include "fileformats/file_format_registry.h"
 #include "gui/action_icon.h"
 #include "gui/main_window.h"
+#include "gui/util_gui.h"
 #include "imagery/tile_network_manager.h"
 #include "settings.h"
 
@@ -332,7 +333,6 @@ public:
 #if defined(MAPPER_MOBILE)
     if (parent) {
       setAttribute(Qt::WA_WindowPropagation);
-      setPalette(parent->palette());
       resize(parent->size());
     }
     auto mobile_font = font();
@@ -342,8 +342,9 @@ public:
         "QDialog { background: palette(window); }"
         "QTextEdit { background: palette(base); border: 1px solid "
         "palette(midlight); border-radius: 10px; padding: 8px; }"
-        "QPushButton#editAccessPrimary { background: palette(highlight); "
-        "color: palette(highlighted-text); border: 0; border-radius: 12px; "
+        "QPushButton#editAccessPrimary { background: palette(button); "
+        "color: palette(button-text); border: 2px solid palette(accent); "
+        "border-radius: 12px; "
         "padding: 10px 14px; }"
         "QPushButton#editAccessQuiet { background: transparent; border: 0; "
         "color: palette(link); padding: 9px; }"));
@@ -388,6 +389,10 @@ public:
     layout->addWidget(message);
     layout->addStretch();
     layout->addLayout(buttons);
+
+#if defined(MAPPER_MOBILE)
+    Util::keepStyleSheetsSynchronizedWithPalette(this);
+#endif
 
     poll_timer->setSingleShot(true);
     connect(poll_timer, &QTimer::timeout, this, [this] { pollRequest(); });
@@ -640,7 +645,6 @@ public:
 #if defined(MAPPER_MOBILE)
     if (parent) {
       setAttribute(Qt::WA_WindowPropagation);
-      setPalette(parent->palette());
       resize(parent->size());
     }
     auto mobile_font = font();
@@ -652,10 +656,11 @@ public:
         "palette(base); border: 1px solid palette(midlight); "
         "border-radius: 8px; padding: 6px 8px; }"
         "QListWidget::item { padding: 7px 5px; }"
-        "QLabel#connectedMapSection { color: palette(highlight); "
+        "QLabel#connectedMapSection { color: palette(window-text); "
         "padding-top: 12px; }"
-        "QPushButton#connectedMapPrimary { background: palette(highlight); "
-        "color: palette(highlighted-text); border: 0; border-radius: 12px; "
+        "QPushButton#connectedMapPrimary { background: palette(button); "
+        "color: palette(button-text); border: 2px solid palette(accent); "
+        "border-radius: 12px; "
         "padding: 10px 14px; }"));
 #else
     resize(720, 780);
@@ -681,7 +686,7 @@ public:
            "workspace as one guided setup."),
         form_widget);
     intro->setWordWrap(true);
-    intro->setStyleSheet(QStringLiteral("color: palette(mid);"));
+    intro->setStyleSheet(QStringLiteral("color: palette(window-text);"));
     form->addRow(intro);
     add_section(tr("Map"));
 #endif
@@ -784,7 +789,8 @@ public:
         tr("Leave the dataset name empty when the source is not known yet."),
         form_widget);
     source_help->setWordWrap(true);
-    source_help->setStyleSheet(QStringLiteral("color: palette(mid);"));
+    source_help->setStyleSheet(
+        QStringLiteral("color: palette(window-text);"));
     form->addRow(source_help);
 #endif
     source_title->setPlaceholderText(
@@ -830,7 +836,7 @@ public:
                    this);
     note->setWordWrap(true);
 #if defined(MAPPER_MOBILE)
-    note->setStyleSheet(QStringLiteral("color: palette(mid);"));
+    note->setStyleSheet(QStringLiteral("color: palette(window-text);"));
 #endif
     form->addRow(note);
     auto *buttons = new QDialogButtonBox(
@@ -882,6 +888,10 @@ public:
     scroll->setWidget(form_widget);
     layout->addWidget(scroll, 1);
     layout->addWidget(buttons);
+
+#if defined(MAPPER_MOBILE)
+    Util::keepStyleSheetsSynchronizedWithPalette(this);
+#endif
 
     connect(kind, &QComboBox::currentIndexChanged, this, [this] {
       auto value = kind->currentData().toString();
@@ -1006,20 +1016,21 @@ MapHubDialog::MapHubDialog(MainWindow *window)
       new_button(new QPushButton(tr("New connected map…"), this)),
       refresh_button(new QPushButton(tr("Refresh"), this)) {
   setWindowTitle(tr("Map Hub — library and assignments"));
-#if defined(MAPPER_MOBILE)
-  if (window) {
-    // A QDialog is a window, so Qt does not normally inherit its parent's
-    // palette.  iOS supplies the dark window surface independently; without
-    // explicit propagation, controls can retain light-theme (black) text.
-    setAttribute(Qt::WA_WindowPropagation);
-    setPalette(window->palette());
-    resize(window->size());
-  }
-  auto mobile_font = font();
-  mobile_font.setPointSizeF(16.0);
-  setFont(mobile_font);
-  first_use_page->setObjectName(QStringLiteral("mapHubFirstUse"));
-  first_use_page->setStyleSheet(QStringLiteral(
+  if (Settings::mobileModeEnforced()) {
+    if (window) {
+      // A QDialog is a window, so Qt does not normally inherit its parent's
+      // palette. Window propagation keeps the native system palette live when
+      // iOS or Android changes appearance while this sheet is open.
+      setAttribute(Qt::WA_WindowPropagation);
+      resize(window->size());
+    }
+    auto mobile_font = font();
+    mobile_font.setPointSizeF(16.0);
+    setFont(mobile_font);
+    connect_button->setObjectName(QStringLiteral("mapHubPrimary"));
+    invitation_button->setObjectName(QStringLiteral("mapHubPrimary"));
+    first_use_page->setObjectName(QStringLiteral("mapHubFirstUse"));
+    first_use_page->setStyleSheet(QStringLiteral(
       "QWidget#mapHubFirstUse { background: palette(window); }"
       "QFrame#mapHubChoiceGroup, QFrame#mapHubConnectionCard { "
       "background: transparent; border: 0; }"
@@ -1031,36 +1042,39 @@ MapHubDialog::MapHubDialog(MainWindow *window)
       "padding: 8px 2px; text-align: left; }"
       "QLineEdit { background: palette(base); border: 1px solid "
       "palette(midlight); border-radius: 10px; padding: 8px 10px; }"
-      "QPushButton#mapHubPrimary { background: palette(highlight); color: "
-      "palette(highlighted-text); border: 0; border-radius: 12px; "
+      "QPushButton#mapHubPrimary { background: palette(button); color: "
+      "palette(button-text); border: 2px solid palette(accent); "
+      "border-radius: 12px; "
       "padding: 10px 14px; }"
       "QPushButton#mapHubQuiet { background: transparent; border: 0; "
       "color: palette(link); padding: 8px; text-align: left; }"
       "QWidget#mapHubFooter { background: palette(base); border-top: 1px "
       "solid palette(midlight); }"));
-  library_page->setObjectName(QStringLiteral("mapHubLibrary"));
-  library_page->setStyleSheet(QStringLiteral(
+    library_page->setObjectName(QStringLiteral("mapHubLibrary"));
+    library_page->setStyleSheet(QStringLiteral(
       "QWidget#mapHubLibrary { background: palette(window); }"
       "QTabWidget::pane { background: transparent; border: 0; }"
       "QTabBar::tab { background: transparent; padding: 9px 12px; "
-      "border: 0; color: palette(mid); }"
-      "QTabBar::tab:selected { color: palette(text); border-bottom: 3px "
-      "solid palette(highlight); }"
+      "border: 0; color: palette(window-text); }"
+      "QTabBar::tab:selected { color: palette(window-text); border-bottom: "
+      "3px solid palette(accent); }"
       "QTreeWidget { background: palette(window); border: 0; }"
       "QTreeWidget#mapHubVenueList::item:selected { background: transparent; "
       "color: palette(text); }"
       "QToolButton#mapHubVenueMore { background: transparent; border: 0; "
       "border-radius: 10px; padding: 8px; }"
+      "QToolButton#mapHubVenueMore:focus { border: 2px solid palette(link); }"
       "QToolButton#mapHubVenueMore:pressed { background: "
       "palette(alternate-base); }"
-      "QPushButton#mapHubLibraryPrimary { background: palette(highlight); "
-      "color: palette(highlighted-text); border: 0; border-radius: 12px; "
+      "QPushButton#mapHubLibraryPrimary { background: palette(button); "
+      "color: palette(button-text); border: 2px solid palette(accent); "
+      "border-radius: 12px; "
       "padding: 10px 14px; }"
       "QPushButton#mapHubLibraryQuiet { background: palette(base); border: "
       "1px solid palette(midlight); border-radius: 10px; padding: 8px; }"));
-#else
-  resize(880, 640);
-#endif
+  } else {
+    resize(880, 640);
+  }
   pages->setMinimumSize({});
   pages->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
 
@@ -1073,8 +1087,10 @@ MapHubDialog::MapHubDialog(MainWindow *window)
       tr("Sign in securely with your Map Hub passkey, use an invitation, or "
          "connect with a token."),
       first_use_page);
+  first_use_intro->setObjectName(QStringLiteral("mapHubFirstUseIntro"));
   first_use_intro->setWordWrap(true);
-  first_use_intro->setStyleSheet(QStringLiteral("color: palette(mid);"));
+  first_use_intro->setStyleSheet(
+      QStringLiteral("color: palette(window-text);"));
   first_use_status->setWordWrap(true);
 
   first_use_server->setPlaceholderText(
@@ -1177,9 +1193,11 @@ MapHubDialog::MapHubDialog(MainWindow *window)
   connection_heading->setFont(connection_heading_font);
   connection_card_layout->addWidget(connection_heading);
   first_use_connection_summary = new QLabel(landing_page);
+  first_use_connection_summary->setObjectName(
+      QStringLiteral("mapHubConnectionSummary"));
   first_use_connection_summary->setWordWrap(true);
   first_use_connection_summary->setStyleSheet(
-      QStringLiteral("color: palette(mid);"));
+      QStringLiteral("color: palette(window-text);"));
   connection_card_layout->addWidget(first_use_connection_summary);
   auto *change_connection =
       new QPushButton(tr("Change server or workspace"), landing_page);
@@ -1200,8 +1218,10 @@ MapHubDialog::MapHubDialog(MainWindow *window)
       tr("Paste the invitation from your map librarian. Account setup opens "
          "in Safari and offers a passkey first."),
       invitation_page);
+  invitation_help->setObjectName(QStringLiteral("mapHubInvitationHelp"));
   invitation_help->setWordWrap(true);
-  invitation_help->setStyleSheet(QStringLiteral("color: palette(mid);"));
+  invitation_help->setStyleSheet(
+      QStringLiteral("color: palette(window-text);"));
   invitation_layout->addWidget(invitation_help);
   auto *invitation_label = new QLabel(tr("Invitation token"), invitation_page);
   invitation_layout->addWidget(invitation_label);
@@ -1225,8 +1245,10 @@ MapHubDialog::MapHubDialog(MainWindow *window)
       tr("Copy the Mapper connection token from your Map Hub profile and "
          "paste it below. It is stored securely on this iPhone."),
       token_page);
+  token_help->setObjectName(QStringLiteral("mapHubTokenHelp"));
   token_help->setWordWrap(true);
-  token_help->setStyleSheet(QStringLiteral("color: palette(mid);"));
+  token_help->setStyleSheet(
+      QStringLiteral("color: palette(window-text);"));
   token_layout->addWidget(token_help);
   token_layout->addWidget(new QLabel(tr("Connection token"), token_page));
   first_use_token->setEchoMode(QLineEdit::Password);
@@ -1251,8 +1273,10 @@ MapHubDialog::MapHubDialog(MainWindow *window)
       tr("Most people can keep these defaults. Change them only for another "
          "Map Hub server or workspace location."),
       connection_page);
+  connection_help->setObjectName(QStringLiteral("mapHubConnectionHelp"));
   connection_help->setWordWrap(true);
-  connection_help->setStyleSheet(QStringLiteral("color: palette(mid);"));
+  connection_help->setStyleSheet(
+      QStringLiteral("color: palette(window-text);"));
   connection_layout->addWidget(connection_help);
   auto *connection_form = new QFormLayout;
   connection_form->setRowWrapPolicy(QFormLayout::WrapAllRows);
@@ -1279,8 +1303,10 @@ MapHubDialog::MapHubDialog(MainWindow *window)
       tr("Safari will open Map Hub. Sign in with your passkey, confirm the "
          "matching code, then return to Mapper."),
       passkey_page);
+  passkey_help->setObjectName(QStringLiteral("mapHubPasskeyHelp"));
   passkey_help->setWordWrap(true);
-  passkey_help->setStyleSheet(QStringLiteral("color: palette(mid);"));
+  passkey_help->setStyleSheet(
+      QStringLiteral("color: palette(window-text);"));
   passkey_layout->addWidget(passkey_help);
   auto *code_heading = new QLabel(tr("Confirmation code"), passkey_page);
   passkey_layout->addWidget(code_heading);
@@ -1444,6 +1470,12 @@ MapHubDialog::MapHubDialog(MainWindow *window)
 
   connection_label->setWordWrap(true);
   activity_label->setWordWrap(true);
+  connection_label->setObjectName(QStringLiteral("mapHubConnectionStatus"));
+  activity_label->setObjectName(QStringLiteral("mapHubActivityStatus"));
+  tabs->setObjectName(QStringLiteral("mapHubLibraryTabs"));
+  assignment_list->setObjectName(QStringLiteral("mapHubAssignmentList"));
+  project_list->setObjectName(QStringLiteral("mapHubVenueList"));
+  event_list->setObjectName(QStringLiteral("mapHubEventList"));
   assignment_list->setHeaderLabels(
       {tr("Assignment"), tr("Map"), tr("Status"), tr("Due")});
   assignment_list->setRootIsDecorated(false);
@@ -1453,6 +1485,13 @@ MapHubDialog::MapHubDialog(MainWindow *window)
   event_list->setHeaderLabels({tr("Event"), tr("Date"), tr("Venue"), tr("Map"),
                                tr("Status"), tr("Series")});
   event_list->setRootIsDecorated(true);
+  if (Settings::mobileModeEnforced()) {
+    for (auto *tree : {assignment_list, project_list, event_list}) {
+      tree->setStyleSheet(QStringLiteral(
+          "QTreeView::item { color: palette(window-text); "
+          "padding: 10px 6px; }"));
+    }
+  }
 #if defined(MAPPER_MOBILE)
   tabs->addTab(assignment_list, tr("My work"));
   tabs->addTab(project_list, tr("Maps"));
@@ -1466,14 +1505,11 @@ MapHubDialog::MapHubDialog(MainWindow *window)
     tree->setUniformRowHeights(false);
     tree->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     tree->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    tree->setStyleSheet(
-        QStringLiteral("QTreeView::item { padding: 10px 6px; }"));
     configureMobileLibraryTree(tree);
     for (int column = 1; column < tree->columnCount(); ++column)
       tree->setColumnHidden(column, true);
   }
   project_list->setRootIsDecorated(false);
-  project_list->setObjectName(QStringLiteral("mapHubVenueList"));
   project_list->setSelectionMode(QAbstractItemView::NoSelection);
   project_list->setFocusPolicy(Qt::NoFocus);
   project_list->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -1529,8 +1565,10 @@ MapHubDialog::MapHubDialog(MainWindow *window)
   library_title_font.setBold(true);
   library_title->setFont(library_title_font);
   library_layout->addWidget(library_title);
-  connection_label->setStyleSheet(QStringLiteral("color: palette(mid);"));
-  activity_label->setStyleSheet(QStringLiteral("color: palette(mid);"));
+  connection_label->setStyleSheet(
+      QStringLiteral("color: palette(window-text);"));
+  activity_label->setStyleSheet(
+      QStringLiteral("color: palette(window-text);"));
 #endif
   library_layout->addWidget(connection_label);
   library_layout->addWidget(tabs, 1);
@@ -1595,6 +1633,8 @@ MapHubDialog::MapHubDialog(MainWindow *window)
           [this] { openSelectedProject(); });
   connect(event_list, &QTreeWidget::itemDoubleClicked, this,
           [this] { openSelectedEvent(); });
+  if (Settings::mobileModeEnforced())
+    Util::keepStyleSheetsSynchronizedWithPalette(this);
   refresh();
 }
 
@@ -2045,7 +2085,7 @@ void MapHubDialog::populate(const QJsonObject &response) {
     auto *more = new QToolButton(project_list);
     more->setObjectName(QStringLiteral("mapHubVenueMore"));
     more->setAutoRaise(true);
-    more->setFocusPolicy(Qt::NoFocus);
+    more->setFocusPolicy(Qt::StrongFocus);
     more->setIcon(ActionIcon::fromName(u"three-dots"));
     more->setIconSize(QSize(24, 24));
     more->setMinimumSize(44, 44);

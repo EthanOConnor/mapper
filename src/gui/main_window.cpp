@@ -1346,7 +1346,6 @@ void MainWindow::showMapHubWorkspaceStatus()
 	     ".omap, including map settings and template configuration."),
 	  details_parent);
 	explanation->setWordWrap(true);
-	explanation->setStyleSheet(QStringLiteral("color: palette(mid);"));
 	details_layout->addWidget(explanation);
 
 	if (details_widget)

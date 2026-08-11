@@ -15,7 +15,12 @@ namespace OpenOrienteering::ActionIcon {
 /** Maximum physical extent materialized for an application icon. */
 inline constexpr auto maxRasterExtent = 256;
 
-/** Returns a native SVG action icon with bounded rasterization. */
+/**
+ * Returns a native SVG action icon with bounded rasterization.
+ *
+ * Theme-sensitive chrome follows the application palette when it is rendered,
+ * while self-contained and semantic artwork retains its source colors.
+ */
 QIcon fromName(QStringView name);
 
 /** Applies the same bounded scaling contract to a native or style icon. */

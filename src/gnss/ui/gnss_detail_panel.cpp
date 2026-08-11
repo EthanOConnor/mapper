@@ -27,7 +27,6 @@
 #include <QFont>
 #include <QFormLayout>
 #include <QLabel>
-#include <QPalette>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QScroller>
@@ -205,11 +204,6 @@ QSize GnssDetailPanel::sizeHint() const
 void GnssDetailPanel::setupUi()
 {
 	setAutoFillBackground(true);
-	auto pal = palette();
-	pal.setColor(QPalette::Window, Qt::white);
-	pal.setColor(QPalette::WindowText, Qt::black);
-	pal.setColor(QPalette::Text, Qt::black);
-	setPalette(pal);
 
 	// Accept all touch/mouse events so they don't pass through to the map
 	setAttribute(Qt::WA_AcceptTouchEvents);

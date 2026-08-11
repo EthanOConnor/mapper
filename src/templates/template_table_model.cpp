@@ -21,6 +21,8 @@
 #include "template_table_model.h"
 #include "gui/action_icon.h"
 
+#include <cmath>
+
 #include <Qt>
 #include <QtGlobal>
 #include <QApplication>
@@ -51,7 +53,45 @@ Qt::CheckState toCheckState(const QVariant& value)
 
 QColor paletteColor(OpenOrienteering::MapView const& view, QPalette::ColorRole role) {
 	auto const group = view.areAllTemplatesHidden() ? QPalette::Disabled : QPalette::Active;
-	return QPalette().color(group, role);
+	return QApplication::palette().color(group, role);
+}
+
+qreal linearColorChannel(int channel)
+{
+	auto const value = channel / 255.0;
+	return value <= 0.04045
+	       ? value / 12.92
+	       : std::pow((value + 0.055) / 1.055, 2.4);
+}
+
+qreal relativeLuminance(const QColor& color)
+{
+	return 0.2126 * linearColorChannel(color.red())
+	       + 0.7152 * linearColorChannel(color.green())
+	       + 0.0722 * linearColorChannel(color.blue());
+}
+
+qreal contrastRatio(const QColor& first, const QColor& second)
+{
+	auto const first_luminance = relativeLuminance(first);
+	auto const second_luminance = relativeLuminance(second);
+	auto const lighter = qMax(first_luminance, second_luminance);
+	auto const darker = qMin(first_luminance, second_luminance);
+	return (lighter + 0.05) / (darker + 0.05);
+}
+
+QColor errorTextColor(const QColor& background, const QColor& fallback)
+{
+	// Preserve a red error cue while choosing the variant that remains readable
+	// on light and dark system surfaces.  A high-contrast palette may still
+	// require its own foreground, which is the final fallback.
+	auto const dark_error = QColor{0xb0, 0x00, 0x20};
+	auto const light_error = QColor{0xff, 0x6b, 0x6b};
+	auto const color = contrastRatio(background, dark_error)
+	                   >= contrastRatio(background, light_error)
+	                 ? dark_error
+	                 : light_error;
+	return contrastRatio(background, color) >= 4.5 ? color : fallback;
 }
 
 /**
@@ -387,17 +427,22 @@ QVariant TemplateTableModel::templateData(Template* temp, const QModelIndex &ind
 	auto visibility = view.getTemplateVisibility(temp);
 	if (role == Qt::ForegroundRole)
 	{
-		auto text_color = QColor::fromRgb(255, 51, 51);
 		if (temp->getTemplateState() == Template::Invalid)
 		{
-			if (visibility.visible)
-				text_color = text_color.darker();
+			auto const background_role =
+#ifdef Q_OS_ANDROID
+			  QPalette::Window;
+#else
+			  QPalette::Base;
+#endif
+			return QBrush(errorTextColor(
+			  paletteColor(view, background_role),
+			  paletteColor(view, QPalette::WindowText)));
 		}
-		else if (visibility.visible)
-			text_color = paletteColor(view, QPalette::WindowText);
-		else
-			text_color = QPalette().color(QPalette::Disabled, QPalette::WindowText);
-		return QBrush(text_color);
+		if (visibility.visible)
+			return QBrush(paletteColor(view, QPalette::WindowText));
+		return QBrush(QApplication::palette().color(
+		  QPalette::Disabled, QPalette::WindowText));
 	}
 	
 	switch (combined(index.column(), Qt::ItemDataRole(role)))

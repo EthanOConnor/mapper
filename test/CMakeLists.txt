@@ -263,6 +263,26 @@ add_system_test(symbol_set_t)
 add_system_test(symbol_t)
 add_system_test(template_t)
 add_system_test(tools_t)
+if(WIN32)
+	add_test(NAME tools_t_mobile_map_hub
+	  COMMAND $<TARGET_FILE:tools_t>
+	    mapHubDarkModeTextRemainsReadable
+	    mapHubWorkspaceStatusActionsRemainReachable
+	    -o "${CMAKE_CURRENT_BINARY_DIR}/tools_t_mobile_map_hub.txt,txt"
+	)
+else()
+	add_test(NAME tools_t_mobile_map_hub
+	  COMMAND $<TARGET_FILE:tools_t>
+	    mapHubDarkModeTextRemainsReadable
+	    mapHubWorkspaceStatusActionsRemainReachable
+	    -o -,txt
+	)
+endif()
+set_tests_properties(tools_t_mobile_map_hub PROPERTIES
+	ENVIRONMENT "MAPPER_MOBILE_GUI=1"
+	RUN_SERIAL TRUE
+	WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+)
 add_system_test(track_t)  # Could be unit test, but needs Georeferencing
 add_system_test(transform_t)
 add_system_test(undo_manager_t)

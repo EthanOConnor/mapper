@@ -28,8 +28,10 @@
 #include <QtGlobal>
 #include <QtMath>
 #include <QtTest>
+#include <QApplication>
 #include <QBuffer>
 #include <QByteArray>
+#include <QBrush>
 #include <QColor>
 #include <QCoreApplication>
 #include <QDir>
@@ -44,8 +46,10 @@
 #include <QMetaObject>
 #include <QObject>
 #include <QPointF>
+#include <QPalette>
 #include <QRectF>
 #include <QSignalSpy>  // IWYU pragma: keep
+#include <QScopeGuard>
 #include <QString>
 #include <QStringList>
 #include <QTemporaryDir>
@@ -292,6 +296,28 @@ private slots:
 		QCOMPARE(temp->getTemplatePath(), QStringLiteral("world-file.png"));
 		QCOMPARE(temp->getTemplateRelativePath(), QStringLiteral("world-file.png"));
 		QCOMPARE(temp->getTemplateState(), Template::Invalid);
+
+		const auto prior_palette = QApplication::palette();
+		auto restore_palette = qScopeGuard(
+		  [&] { QApplication::setPalette(prior_palette); });
+		TemplateTableModel model(map, view);
+		const auto name_index = model.index(
+		  model.rowFromPos(0), TemplateTableModel::nameColumn());
+		for (const auto& row : {
+		       std::pair{QColor{Qt::black}, QColor{0xff, 0x6b, 0x6b}},
+		       std::pair{QColor{Qt::white}, QColor{0xb0, 0x00, 0x20}},
+		     })
+		{
+			auto palette = prior_palette;
+			palette.setColor(QPalette::Active, QPalette::Window, row.first);
+			palette.setColor(QPalette::Active, QPalette::Base, row.first);
+			palette.setColor(QPalette::Active, QPalette::WindowText,
+			                 row.first == Qt::black ? Qt::white : Qt::black);
+			QApplication::setPalette(palette);
+			QCOMPARE(model.data(name_index, Qt::ForegroundRole)
+			           .value<QBrush>().color(),
+			         row.second);
+		}
 		
 		QCOMPARE(temp->getTemplateRelativePath(nullptr), QStringLiteral("world-file.png"));
 		auto base_dir = QDir(QStringLiteral("testdata:templates"));

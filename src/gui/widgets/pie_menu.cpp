@@ -302,10 +302,14 @@ void PieMenu::paintEvent(QPaintEvent* event)
 		if (action->isChecked())
 		{
 			mode = QIcon::Selected;
-			QPen pen(palette.color(QPalette::Dark));
-			pen.setWidth(1);
+			// A persistent checked cue must not depend on making an already-black
+			// or already-white button a few percent darker.  The semantic text
+			// color supplies a high-contrast outline in light, dark, and system
+			// high-contrast palettes.
+			QPen pen(palette.color(QPalette::ButtonText));
+			pen.setWidth(2);
 			painter.setPen(pen);
-			painter.setBrush(palette.color(QPalette::Button).darker(120));
+			painter.setBrush(palette.brush(QPalette::Highlight));
 			painter.setOpacity(1.0);
 			painter.drawConvexPolygon(area);
 		}

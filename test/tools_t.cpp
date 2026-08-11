@@ -28,23 +28,31 @@
 #include <Qt>
 #include <QtGlobal>
 #include <QtTest>
+#include <QAbstractItemDelegate>
 #include <QAction>
 #include <QApplication>
+#include <QColor>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QEvent>
 #include <QFile>
+#include <QImage>
 #include <QLayout>
+#include <QLabel>
 #include <QListWidget>
 #include <QMouseEvent>
+#include <QPainter>
 #include <QPoint>
 #include <QPointF>
 #include <QPushButton>
+#include <QPalette>
 #include <QScopeGuard>
 #include <QScrollArea>
+#include <QStyleOptionViewItem>
 #include <QString>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <QTreeWidget>
 #include <QUuid>
 #include <QWheelEvent>
 
@@ -59,6 +67,7 @@
 #include "core/symbols/point_symbol.h"
 #include "global.h"
 #include "fileformats/file_format_registry.h"
+#include "gui/home_screen_controller.h"
 #include "gui/main_window.h"
 #include "gui/map/map_editor.h"
 #include "gui/map/map_find_feature.h"
@@ -141,6 +150,28 @@ QAction* actionWithText(QObject* parent, const QString& text)
 			return action;
 	}
 	return nullptr;
+}
+
+qreal relativeLuminance(const QColor& color)
+{
+	auto linear = [](qreal component) {
+		component /= 255.0;
+		return component <= 0.04045
+		         ? component / 12.92
+		         : std::pow((component + 0.055) / 1.055, 2.4);
+	};
+	return 0.2126 * linear(color.red())
+	       + 0.7152 * linear(color.green())
+	       + 0.0722 * linear(color.blue());
+}
+
+qreal contrastRatio(const QColor& first, const QColor& second)
+{
+	auto first_luminance = relativeLuminance(first);
+	auto second_luminance = relativeLuminance(second);
+	if (first_luminance < second_luminance)
+		std::swap(first_luminance, second_luminance);
+	return (first_luminance + 0.05) / (second_luminance + 0.05);
 }
 
 void acceptFirstSketchLayer()
@@ -449,6 +480,240 @@ void ToolsTest::mapHubWorkspaceStatusActionsRemainReachable()
 	QVERIFY(inspection.checkpoint_visible);
 	QVERIFY(inspection.submit_visible);
 	QVERIFY(inspection.close_visible);
+}
+
+void ToolsTest::mapHubDarkModeTextRemainsReadable()
+{
+	if (!Settings::mobileModeEnforced())
+		QSKIP("Run with MAPPER_MOBILE_GUI=1 to exercise the mobile presentation.");
+
+	const auto prior_palette = QApplication::palette();
+	auto restore_palette = qScopeGuard(
+	  [&] { QApplication::setPalette(prior_palette); });
+	auto dark_palette = prior_palette;
+	for (auto group : {QPalette::Active, QPalette::Inactive,
+	                   QPalette::Disabled})
+	{
+		dark_palette.setColor(group, QPalette::Window, QColor(0x00, 0x00, 0x00));
+		dark_palette.setColor(group, QPalette::Base, QColor(0x1c, 0x1c, 0x1e));
+		dark_palette.setColor(group, QPalette::Button, QColor(0x1c, 0x1c, 0x1e));
+		dark_palette.setColor(group, QPalette::WindowText,
+		                      QColor(0xf0, 0xf0, 0xf0));
+		// QIOS can leave the item-view Text role at its light-appearance value
+		// after changing the native Window surface to black.
+		dark_palette.setColor(group, QPalette::Text, Qt::black);
+		dark_palette.setColor(group, QPalette::ButtonText,
+		                      QColor(0xf0, 0xf0, 0xf0));
+		dark_palette.setColor(group, QPalette::Mid, QColor(0x26, 0x26, 0x26));
+		dark_palette.setColor(group, QPalette::Highlight,
+		                      QColor(0x0b, 0x46, 0x96, 0x3c));
+		dark_palette.setColor(group, QPalette::HighlightedText, Qt::white);
+		dark_palette.setColor(group, QPalette::Link, QColor(0x0a, 0x84, 0xff));
+		dark_palette.setColor(group, QPalette::Accent, QColor(0x0a, 0x84, 0xff));
+	}
+	QVERIFY(contrastRatio(dark_palette.color(QPalette::Mid),
+	                      dark_palette.color(QPalette::Window)) < 4.5);
+	QVERIFY(contrastRatio(dark_palette.color(QPalette::Text),
+	                      dark_palette.color(QPalette::Window)) < 4.5);
+	QVERIFY(contrastRatio(dark_palette.color(QPalette::WindowText),
+	                      dark_palette.color(QPalette::Window)) >= 4.5);
+	QApplication::setPalette(dark_palette);
+
+	auto* window = new MainWindow;
+	window->setController(new HomeScreenController);
+	struct Inspection
+	{
+		bool found_dialog = false;
+		bool found_intro = false;
+		bool found_tabs = false;
+		bool found_primary = false;
+		bool found_library_trees = false;
+		bool rendered_item_text = false;
+		bool semantic_styles = false;
+		bool accent_affordances = false;
+		qreal intro_contrast = 0.0;
+		qreal tabs_contrast = 0.0;
+		qreal primary_contrast = 0.0;
+		qreal light_intro_contrast = 0.0;
+		qreal light_tabs_contrast = 0.0;
+		qreal light_primary_contrast = 0.0;
+		bool appearance_change_propagated = false;
+	} inspection;
+
+	QTimer::singleShot(0, [&inspection] {
+		auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+		if (!dialog)
+		{
+			QApplication::closeAllWindows();
+			return;
+		}
+		inspection.found_dialog = true;
+		dialog->ensurePolished();
+		QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+
+		auto* intro = dialog->findChild<QLabel*>(
+		  QStringLiteral("mapHubFirstUseIntro"));
+		auto* tabs = dialog->findChild<QTabWidget*>(
+		  QStringLiteral("mapHubLibraryTabs"));
+		auto* primary = dialog->findChild<QPushButton*>(
+		  QStringLiteral("mapHubPrimary"));
+		auto* assignments = dialog->findChild<QTreeWidget*>(
+		  QStringLiteral("mapHubAssignmentList"));
+		auto* venues = dialog->findChild<QTreeWidget*>(
+		  QStringLiteral("mapHubVenueList"));
+		auto* events = dialog->findChild<QTreeWidget*>(
+		  QStringLiteral("mapHubEventList"));
+		inspection.found_intro = intro;
+		inspection.found_tabs = tabs && tabs->tabBar();
+		inspection.found_primary = primary;
+		inspection.found_library_trees = assignments && venues && events;
+		if (intro)
+		{
+			intro->ensurePolished();
+			inspection.intro_contrast = contrastRatio(
+			  intro->palette().color(intro->foregroundRole()),
+			  dialog->palette().color(QPalette::Window));
+		}
+		if (tabs && tabs->tabBar())
+		{
+			tabs->tabBar()->ensurePolished();
+			inspection.tabs_contrast = contrastRatio(
+			  tabs->tabBar()->palette().color(tabs->tabBar()->foregroundRole()),
+			  dialog->palette().color(QPalette::Window));
+		}
+		if (primary)
+		{
+			primary->ensurePolished();
+			inspection.primary_contrast = contrastRatio(
+			  primary->palette().color(QPalette::ButtonText),
+			  primary->palette().color(QPalette::Button));
+		}
+		if (assignments)
+		{
+			auto* item = new QTreeWidgetItem(
+			  assignments, {QStringLiteral("Synthetic visible assignment")});
+			assignments->ensurePolished();
+			const auto index = assignments->indexFromItem(item);
+			QStyleOptionViewItem option;
+			option.initFrom(assignments);
+			option.rect = QRect(0, 0, 360, 48);
+			option.state = QStyle::State_Active | QStyle::State_Enabled;
+			option.widget = assignments;
+			QImage rendered(option.rect.size(),
+			                QImage::Format_ARGB32_Premultiplied);
+			rendered.fill(assignments->palette().color(QPalette::Window));
+			QPainter painter(&rendered);
+			assignments->itemDelegate()->paint(&painter, option, index);
+			painter.end();
+			for (int y = 0; y < rendered.height()
+			                && !inspection.rendered_item_text;
+			     ++y)
+			{
+				for (int x = 0; x < rendered.width(); ++x)
+				{
+					if (contrastRatio(rendered.pixelColor(x, y), Qt::black) >= 4.5)
+					{
+						inspection.rendered_item_text = true;
+						break;
+					}
+				}
+			}
+		}
+
+		auto light_palette = QApplication::palette();
+		for (auto group : {QPalette::Active, QPalette::Inactive,
+		                   QPalette::Disabled})
+		{
+			light_palette.setColor(group, QPalette::Window, Qt::white);
+			light_palette.setColor(group, QPalette::Base, Qt::white);
+			light_palette.setColor(group, QPalette::Button, QColor(0xf2, 0xf2, 0xf7));
+			light_palette.setColor(group, QPalette::WindowText, Qt::black);
+			light_palette.setColor(group, QPalette::Text, Qt::black);
+			light_palette.setColor(group, QPalette::ButtonText, Qt::black);
+			light_palette.setColor(group, QPalette::Mid, QColor(0xd0, 0xd0, 0xd0));
+			light_palette.setColor(group, QPalette::Accent,
+			                       QColor(0x00, 0x7a, 0xff));
+		}
+		QApplication::setPalette(light_palette);
+		QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+		inspection.appearance_change_propagated =
+		  dialog->palette().color(QPalette::Window) == QColor{Qt::white};
+		if (intro)
+		{
+			inspection.light_intro_contrast = contrastRatio(
+			  intro->palette().color(intro->foregroundRole()),
+			  dialog->palette().color(QPalette::Window));
+		}
+		if (tabs && tabs->tabBar())
+		{
+			inspection.light_tabs_contrast = contrastRatio(
+			  tabs->tabBar()->palette().color(tabs->tabBar()->foregroundRole()),
+			  dialog->palette().color(QPalette::Window));
+		}
+		if (primary)
+		{
+			inspection.light_primary_contrast = contrastRatio(
+			  primary->palette().color(QPalette::ButtonText),
+			  primary->palette().color(QPalette::Button));
+		}
+
+		auto* first_use = dialog->findChild<QWidget*>(
+		  QStringLiteral("mapHubFirstUse"));
+		auto const first_use_style = first_use
+		                               ? first_use->styleSheet().toLower()
+		                               : QString{};
+		auto* library = dialog->findChild<QWidget*>(
+		  QStringLiteral("mapHubLibrary"));
+		auto const library_style = library
+		                             ? library->styleSheet().toLower()
+		                             : QString{};
+		inspection.accent_affordances =
+		  first_use_style.contains(
+		    QStringLiteral("border: 2px solid palette(accent)"))
+		  && library_style.contains(
+		    QStringLiteral("3px solid palette(accent)"));
+
+		inspection.semantic_styles = true;
+		for (auto* widget : dialog->findChildren<QWidget*>())
+		{
+			const auto style = widget->styleSheet().toLower();
+			if (style.contains(QStringLiteral("color: palette(mid)"))
+			    || style.contains(QStringLiteral("color:palette(mid)"))
+			    || style.contains(QStringLiteral("color: palette(highlight)"))
+			    || style.contains(QStringLiteral("color:palette(highlight)")))
+			{
+				inspection.semantic_styles = false;
+				break;
+			}
+		}
+		dialog->reject();
+	});
+
+	window->showMapHub();
+	window->deleteLater();
+	QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+
+	QVERIFY(inspection.found_dialog);
+	QVERIFY(inspection.found_intro);
+	QVERIFY(inspection.found_tabs);
+	QVERIFY(inspection.found_primary);
+	QVERIFY(inspection.found_library_trees);
+	QVERIFY(inspection.rendered_item_text);
+	QVERIFY(inspection.semantic_styles);
+	QVERIFY(inspection.accent_affordances);
+	QVERIFY(inspection.appearance_change_propagated);
+	QVERIFY2(inspection.intro_contrast >= 4.5,
+	         qPrintable(QString::number(inspection.intro_contrast)));
+	QVERIFY2(inspection.tabs_contrast >= 4.5,
+	         qPrintable(QString::number(inspection.tabs_contrast)));
+	QVERIFY2(inspection.primary_contrast >= 4.5,
+	         qPrintable(QString::number(inspection.primary_contrast)));
+	QVERIFY2(inspection.light_intro_contrast >= 4.5,
+	         qPrintable(QString::number(inspection.light_intro_contrast)));
+	QVERIFY2(inspection.light_tabs_contrast >= 4.5,
+	         qPrintable(QString::number(inspection.light_tabs_contrast)));
+	QVERIFY2(inspection.light_primary_contrast >= 4.5,
+	         qPrintable(QString::number(inspection.light_primary_contrast)));
 }
 
 

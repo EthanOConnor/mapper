@@ -199,7 +199,6 @@ void GnssDeviceDialog::setupConnectedPage()
 	title_font.setBold(true);
 	title_font.setPointSize(title_font.pointSize() + 4);
 	title->setFont(title_font);
-	title->setStyleSheet(QStringLiteral("color: green"));
 	layout->addWidget(title);
 
 	layout->addStretch();

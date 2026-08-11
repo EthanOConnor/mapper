@@ -37,6 +37,28 @@ namespace OpenOrienteering {
 
 namespace {
 
+qreal linearColorChannel(int channel)
+{
+	auto const value = channel / 255.0;
+	return value <= 0.04045
+	       ? value / 12.92
+	       : std::pow((value + 0.055) / 1.055, 2.4);
+}
+
+qreal relativeLuminance(const QColor& color)
+{
+	return 0.2126 * linearColorChannel(color.red())
+	       + 0.7152 * linearColorChannel(color.green())
+	       + 0.0722 * linearColorChannel(color.blue());
+}
+
+QColor readableBadgeText(const QColor& background)
+{
+	// Opaque black or white reliably clears normal-text contrast for every
+	// status badge; choosing by luminance also survives future badge colors.
+	return relativeLuminance(background) > 0.179 ? Qt::black : Qt::white;
+}
+
 /// Returns the badge color for the given fix type.
 QColor fixBadgeColor(GnssFixType fix)
 {
@@ -172,11 +194,12 @@ void GnssStatusOverlay::paintEvent(QPaintEvent*)
 		qreal badgeH = fm.height() + mm(1.0);
 		QRectF badgeRect(x, cy - badgeH / 2.0, badgeW, badgeH);
 
+		auto const badge_color = fixBadgeColor(m_fixType);
 		painter.setPen(Qt::NoPen);
-		painter.setBrush(fixBadgeColor(m_fixType));
+		painter.setBrush(badge_color);
 		painter.drawRoundedRect(badgeRect, badgeRadius, badgeRadius);
 
-		painter.setPen(Qt::white);
+		painter.setPen(readableBadgeText(badge_color));
 		painter.drawText(badgeRect, Qt::AlignCenter, text);
 
 		x = badgeRect.right() + padding;
