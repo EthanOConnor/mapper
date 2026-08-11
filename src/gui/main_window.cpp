@@ -51,6 +51,8 @@
 #include <QSaveFile>
 #include <QScopeGuard>
 #include <QScopedValueRollback>
+#include <QScrollArea>
+#include <QScroller>
 #include <QSet>
 #include <QSettings>
 #include <QStackedWidget>
@@ -1287,25 +1289,40 @@ void MainWindow::showMapHubWorkspaceStatus()
 	}
 
 	QDialog dialog(this);
+	dialog.setObjectName(QStringLiteral("mapHubWorkspaceStatusDialog"));
 	dialog.setWindowTitle(tr("Connected workspace"));
 	dialog.setWindowModality(Qt::WindowModal);
 
 	auto* layout = new QVBoxLayout(&dialog);
-	auto* title = new QLabel(&dialog);
+	const auto compact_mobile = Settings::mobileModeEnforced();
+	auto* details_parent = static_cast<QWidget*>(&dialog);
+	auto* details_layout = layout;
+	QWidget* details_widget = nullptr;
+	if (compact_mobile)
+	{
+		details_widget = new QWidget(&dialog);
+		details_widget->setObjectName(
+		  QStringLiteral("mapHubWorkspaceDetails"));
+		details_parent = details_widget;
+		details_layout = new QVBoxLayout(details_widget);
+		details_layout->setContentsMargins(0, 0, 0, 0);
+	}
+
+	auto* title = new QLabel(details_parent);
 	title->setTextFormat(Qt::PlainText);
 	auto title_font = title->font();
 	title_font.setBold(true);
 	title->setFont(title_font);
 	title->setWordWrap(true);
-	layout->addWidget(title);
+	details_layout->addWidget(title);
 
 	auto* form = new QFormLayout();
 	form->setRowWrapPolicy(QFormLayout::WrapLongRows);
 	form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
-	auto* state_value = new QLabel(&dialog);
-	auto* pending_value = new QLabel(&dialog);
-	auto* revision_value = new QLabel(&dialog);
-	auto* collaborators_value = new QLabel(&dialog);
+	auto* state_value = new QLabel(details_parent);
+	auto* pending_value = new QLabel(details_parent);
+	auto* revision_value = new QLabel(details_parent);
+	auto* collaborators_value = new QLabel(details_parent);
 	for (auto* label : {state_value, pending_value, revision_value,
 	                    collaborators_value})
 	{
@@ -1317,20 +1334,36 @@ void MainWindow::showMapHubWorkspaceStatus()
 	form->addRow(tr("On this device"), pending_value);
 	form->addRow(tr("Revision"), revision_value);
 	form->addRow(tr("Here now"), collaborators_value);
-	layout->addLayout(form);
+	details_layout->addLayout(form);
 
-	auto* local_truth = new QLabel(&dialog);
+	auto* local_truth = new QLabel(details_parent);
 	local_truth->setWordWrap(true);
 	local_truth->setTextFormat(Qt::RichText);
-	layout->addWidget(local_truth);
+	details_layout->addWidget(local_truth);
 
 	auto* explanation = new QLabel(
 	  tr("Drawing edits are shared live. A checkpoint shares the complete "
 	     ".omap, including map settings and template configuration."),
-	  &dialog);
+	  details_parent);
 	explanation->setWordWrap(true);
 	explanation->setStyleSheet(QStringLiteral("color: palette(mid);"));
-	layout->addWidget(explanation);
+	details_layout->addWidget(explanation);
+
+	if (details_widget)
+	{
+		auto* details_scroll = new QScrollArea(&dialog);
+		details_scroll->setObjectName(
+		  QStringLiteral("mapHubWorkspaceDetailsScroll"));
+		details_scroll->setWidgetResizable(true);
+		details_scroll->setFrameShape(QFrame::NoFrame);
+		details_scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+		details_scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+		details_scroll->setMinimumHeight(0);
+		QScroller::grabGesture(
+		  details_scroll->viewport(), QScroller::TouchGesture);
+		details_scroll->setWidget(details_widget);
+		layout->addWidget(details_scroll, 1);
+	}
 
 	auto* action_layout = new QGridLayout();
 	auto* retry_button = new QPushButton(tr("Retry / Refresh"), &dialog);
@@ -1339,6 +1372,17 @@ void MainWindow::showMapHubWorkspaceStatus()
 	auto* open_hub_button = new QPushButton(tr("Open Map Hub"), &dialog);
 	auto* leave_button = new QPushButton(tr("Leave connected editing"), &dialog);
 	auto* local_copy_button = new QPushButton(tr("Open local copy"), &dialog);
+	retry_button->setObjectName(QStringLiteral("mapHubWorkspaceRetryButton"));
+	checkpoint_button->setObjectName(
+	  QStringLiteral("mapHubWorkspaceCheckpointButton"));
+	submit_button->setObjectName(
+	  QStringLiteral("mapHubWorkspaceSubmitButton"));
+	open_hub_button->setObjectName(
+	  QStringLiteral("mapHubWorkspaceOpenHubButton"));
+	leave_button->setObjectName(
+	  QStringLiteral("mapHubWorkspaceLeaveButton"));
+	local_copy_button->setObjectName(
+	  QStringLiteral("mapHubWorkspaceLocalCopyButton"));
 	action_layout->addWidget(retry_button, 0, 0);
 	action_layout->addWidget(checkpoint_button, 0, 1);
 	action_layout->addWidget(submit_button, 1, 0);
@@ -1348,6 +1392,8 @@ void MainWindow::showMapHubWorkspaceStatus()
 	layout->addLayout(action_layout);
 
 	auto* close_buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+	close_buttons->setObjectName(
+	  QStringLiteral("mapHubWorkspaceCloseButtons"));
 	connect(close_buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
 	layout->addWidget(close_buttons);
 

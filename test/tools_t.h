@@ -35,6 +35,7 @@ private slots:
 	void newMapStartsWithoutFormat();
 	void unattachedLoadedEditorDestructsCleanly();
 	void framePublishesTemplateContextBeforeRasterCollection();
+	void mapHubWorkspaceStatusActionsRemainReachable();
 	
 	void editTool();
 	void panToolRecoversFromLostRelease();

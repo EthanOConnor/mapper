@@ -31,15 +31,24 @@
 #include <QAction>
 #include <QApplication>
 #include <QDialog>
+#include <QDialogButtonBox>
 #include <QEvent>
+#include <QFile>
+#include <QLayout>
 #include <QListWidget>
 #include <QMouseEvent>
 #include <QPoint>
 #include <QPointF>
+#include <QPushButton>
+#include <QScopeGuard>
+#include <QScrollArea>
 #include <QString>
+#include <QTemporaryDir>
 #include <QTimer>
+#include <QUuid>
 #include <QWheelEvent>
 
+#include "collaboration/managed_map_workspace.h"
 #include "core/map.h"
 #include "core/map_color.h"
 #include "core/map_coord.h"
@@ -49,6 +58,7 @@
 #include "core/symbols/line_symbol.h"
 #include "core/symbols/point_symbol.h"
 #include "global.h"
+#include "fileformats/file_format_registry.h"
 #include "gui/main_window.h"
 #include "gui/map/map_editor.h"
 #include "gui/map/map_find_feature.h"
@@ -60,6 +70,7 @@
 #include "tools/sketch_tool.h"
 #include "undo/undo.h"
 #include "undo/undo_manager.h"
+#include "settings.h"
 
 using namespace OpenOrienteering;
 
@@ -306,6 +317,138 @@ void ToolsTest::framePublishesTemplateContextBeforeRasterCollection()
 	view->setZoom(view->getZoom() * std::sqrt(2.0));
 	QTRY_VERIFY_WITH_TIMEOUT(raster_ptr->collected, 1000);
 	QVERIFY(!raster_ptr->collected_without_context);
+}
+
+void ToolsTest::mapHubWorkspaceStatusActionsRemainReachable()
+{
+	if (!Settings::mobileModeEnforced())
+		QSKIP("Run with MAPPER_MOBILE_GUI=1 to exercise the compact layout.");
+
+	QTemporaryDir directory(
+	  QStringLiteral("%1/tools-map-hub-XXXXXX")
+	    .arg(QCoreApplication::applicationDirPath()));
+	QVERIFY(directory.isValid());
+	const auto prior_workspace_root = qgetenv("MAPPER_MANAGED_WORKSPACE_ROOT");
+	const auto prior_sync_root = qgetenv("MAPPER_MAP_HUB_SYNC_ROOT");
+	qputenv("MAPPER_MANAGED_WORKSPACE_ROOT", directory.path().toUtf8());
+	qputenv("MAPPER_MAP_HUB_SYNC_ROOT", directory.path().toUtf8());
+	auto restore_environment = qScopeGuard([&] {
+		if (prior_workspace_root.isNull())
+			qunsetenv("MAPPER_MANAGED_WORKSPACE_ROOT");
+		else
+			qputenv("MAPPER_MANAGED_WORKSPACE_ROOT", prior_workspace_root);
+		if (prior_sync_root.isNull())
+			qunsetenv("MAPPER_MAP_HUB_SYNC_ROOT");
+		else
+			qputenv("MAPPER_MAP_HUB_SYNC_ROOT", prior_sync_root);
+	});
+
+	const auto map_path = directory.filePath(QStringLiteral("compact.omap"));
+	QFile map_file(map_path);
+	QVERIFY(map_file.open(QIODevice::WriteOnly));
+	QVERIFY(map_file.write("compact fixture") > 0);
+	map_file.close();
+
+	ManagedMapWorkspace workspace;
+	workspace.local_map_path = map_path;
+	workspace.server_url = QStringLiteral("https://maps.example.test");
+	workspace.project_id =
+	  QUuid::createUuid().toString(QUuid::WithoutBraces);
+	workspace.project_title = QStringLiteral("Compact connected workspace");
+	workspace.work_package_id =
+	  QUuid::createUuid().toString(QUuid::WithoutBraces);
+	workspace.workspace_id =
+	  QUuid::createUuid().toString(QUuid::WithoutBraces);
+	workspace.assignment_id =
+	  QUuid::createUuid().toString(QUuid::WithoutBraces);
+	workspace.client_instance_id =
+	  QUuid::createUuid().toString(QUuid::WithoutBraces);
+	workspace.status = QStringLiteral("active");
+	workspace.checkpoint_required = true;
+	workspace.stream_protocol = QStringLiteral("oom-map-ops/1");
+	workspace.stream_head_hash = QString(64, QLatin1Char('0'));
+	workspace.minimum_available_sequence = 1;
+	QString workspace_error;
+	QVERIFY2(ManagedMapWorkspace::save(workspace, &workspace_error),
+	         qPrintable(workspace_error));
+
+	const auto* format = FileFormats.findFormatForFilename(
+	  map_path, &FileFormat::supportsFileOpen);
+	QVERIFY(format);
+	auto* window = new MainWindow;
+	auto* editor = new MapEditorController(
+	  MapEditorController::MapEditor, new Map);
+	window->setController(editor, map_path, format);
+
+	struct Inspection
+	{
+		bool found_dialog = false;
+		bool compact_size = false;
+		bool found_scroll = false;
+		bool actions_outside_scroll = false;
+		bool checkpoint_visible = false;
+		bool submit_visible = false;
+		bool close_visible = false;
+	} inspection;
+
+	QTimer::singleShot(0, [&inspection] {
+		auto* dialog = qobject_cast<QDialog*>(
+		  QApplication::activeModalWidget());
+		if (!dialog
+		    || dialog->objectName()
+	         != QLatin1String("mapHubWorkspaceStatusDialog"))
+		{
+			QApplication::closeAllWindows();
+			return;
+		}
+		inspection.found_dialog = true;
+		dialog->resize(640, 320);
+		dialog->layout()->activate();
+		QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+		inspection.compact_size = dialog->height() <= 320;
+
+		auto* scroll = dialog->findChild<QScrollArea*>(
+		  QStringLiteral("mapHubWorkspaceDetailsScroll"));
+		auto* checkpoint = dialog->findChild<QPushButton*>(
+		  QStringLiteral("mapHubWorkspaceCheckpointButton"));
+		auto* submit = dialog->findChild<QPushButton*>(
+		  QStringLiteral("mapHubWorkspaceSubmitButton"));
+		auto* close_box = dialog->findChild<QDialogButtonBox*>(
+		  QStringLiteral("mapHubWorkspaceCloseButtons"));
+		auto* close = close_box
+		            ? close_box->button(QDialogButtonBox::Close)
+		            : nullptr;
+		inspection.found_scroll = scroll && scroll->widget();
+		inspection.actions_outside_scroll =
+		  scroll && checkpoint && submit && close
+		  && !scroll->isAncestorOf(checkpoint)
+		  && !scroll->isAncestorOf(submit)
+		  && !scroll->isAncestorOf(close);
+
+		auto fully_visible = [dialog](const QWidget* widget) {
+			if (!widget || !widget->isVisibleTo(dialog))
+				return false;
+			const QRect geometry(
+			  widget->mapTo(dialog, QPoint{}), widget->size());
+			return dialog->rect().contains(geometry);
+		};
+		inspection.checkpoint_visible = fully_visible(checkpoint);
+		inspection.submit_visible = fully_visible(submit);
+		inspection.close_visible = fully_visible(close);
+		dialog->reject();
+	});
+
+	window->showMapHubWorkspaceStatus();
+	window->deleteLater();
+	QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+
+	QVERIFY(inspection.found_dialog);
+	QVERIFY(inspection.compact_size);
+	QVERIFY(inspection.found_scroll);
+	QVERIFY(inspection.actions_outside_scroll);
+	QVERIFY(inspection.checkpoint_visible);
+	QVERIFY(inspection.submit_visible);
+	QVERIFY(inspection.close_visible);
 }
 
 
