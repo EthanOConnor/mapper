@@ -41,6 +41,9 @@ public:
 	GPSTrackRecorder(GPSDisplay* gps_display, TemplateTrack* target_template, int draw_update_interval_milliseconds = -1, MapWidget* widget = nullptr);
 	~GPSTrackRecorder() override;
 
+	/// The recording target, or nullptr after the template was deleted.
+	TemplateTrack* targetTemplate() const { return is_active ? target_template : nullptr; }
+
 public slots:
 	void newPosition(double latitude, double longitude, double altitude, float accuracy);
 	void positionUpdatesInterrupted();

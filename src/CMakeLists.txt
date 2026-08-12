@@ -118,6 +118,7 @@ set(Mapper_Common_SRCS
   mapper_resource.cpp
   settings.cpp
 
+	collaboration/field_asset_store.cpp
 	collaboration/managed_map_workspace.cpp
 	collaboration/map_hub_read_only_document.cpp
 	collaboration/map_hub_api_client.cpp

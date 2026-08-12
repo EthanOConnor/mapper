@@ -23,7 +23,11 @@
 #include "gui/action_icon.h"
 
 #include <chrono>
+#include <functional>
+#include <initializer_list>
+#include <memory>
 #include <utility>
+#include <vector>
 
 #include <QApplication>
 #include <QCloseEvent>
@@ -67,6 +71,7 @@
 
 #include "mapper_config.h"
 #include "settings.h"
+#include "collaboration/field_asset_store.h"
 #include "collaboration/managed_map_workspace.h"
 #include "collaboration/map_hub_api_client.h"
 #include "collaboration/map_hub_credentials.h"
@@ -97,6 +102,7 @@
 #include "gui/widgets/toast.h"
 #include "imagery/tile_network_manager.h"
 #include "templates/template.h"
+#include "templates/template_track.h"
 #include "undo/undo_manager.h"
 #include "util/util.h"
 #include "util/mapper_service_proxy.h"
@@ -262,6 +268,7 @@ void MainWindow::applicationStateChanged()
 		if (map_hub_sync)
 			map_hub_sync->applicationBecameActive();
 		QTimer::singleShot(0, this, &MainWindow::refreshMapHubImageryCatalog);
+		QTimer::singleShot(0, this, &MainWindow::refreshMapHubFieldAssets);
 	}
 	else if (map_hub_sync)
 	{
@@ -1618,6 +1625,7 @@ void MainWindow::configureMapHubSync()
 #endif
 	);
 	QTimer::singleShot(0, this, &MainWindow::refreshMapHubImageryCatalog);
+	QTimer::singleShot(0, this, &MainWindow::refreshMapHubFieldAssets);
 }
 
 
@@ -1664,6 +1672,185 @@ void MainWindow::refreshMapHubImageryCatalog()
 				manifest, manifest_url);
 			if (!result.error.isEmpty())
 				showStatusBarMessage(result.error, 12000);
+		});
+}
+
+void MainWindow::refreshMapHubFieldAssets()
+{
+	if (map_hub_field_assets_refresh_pending || currentPath().isEmpty())
+		return;
+	QString error;
+	auto const managed = ManagedMapWorkspace::loadForMap(currentPath(), &error);
+	if (!managed.isValid() || managed.project_id.isEmpty())
+		return;
+	auto const credential = MapHubCredentials::readToken(managed.server_url);
+	if (!credential.error.isEmpty() || credential.token.isEmpty())
+		return;
+
+	struct FieldAssetItem
+	{
+		QString sha256;
+		qint64 size_bytes = 0;
+		QUrl download_url;
+		QString original_name;
+	};
+
+	map_hub_field_assets_refresh_pending = true;
+	auto* client =
+		new MapHubApiClient(managed.server_url, credential.token, this);
+	const auto expected_path = DocumentPath::canonical(currentPath());
+	const auto request_generation = map_hub_document_generation;
+	const auto stale = [this, expected_path, request_generation] {
+		return request_generation != map_hub_document_generation
+		       || DocumentPath::canonical(currentPath()) != expected_path;
+	};
+	const auto finish = [this, client] {
+		map_hub_field_assets_refresh_pending = false;
+		client->deleteLater();
+	};
+	const auto integrate = [this](const std::vector<FieldAssetItem>& items) {
+		auto* map_editor = qobject_cast<MapEditorController*>(controller);
+		if (!map_editor)
+			return;
+		auto* map = map_editor->getMap();
+		if (!map)
+			return;
+		FieldAssetStore store;
+		auto changed = false;
+		for (const auto& item : items)
+		{
+			const auto stored_path = store.pathFor(item.sha256);
+			if (stored_path.isEmpty())
+				continue;
+			const auto identity =
+				FieldAssetStore::resourceIdentityFor(item.sha256);
+			Template* existing = nullptr;
+			for (int i = 0; i < map->getNumTemplates(); ++i)
+			{
+				auto* temp = map->getTemplate(i);
+				if (temp->resourceIdentity() == identity)
+				{
+					existing = temp;
+					break;
+				}
+			}
+			if (existing)
+			{
+				// Resolve a known tracklog whose local file went missing
+				// (e.g. the map moved between machines) to the store copy.
+				if (qobject_cast<TemplateTrack*>(existing)
+				    && existing->getTemplateState() != Template::Loaded
+				    && !QFileInfo::exists(existing->getTemplatePath()))
+				{
+					existing->setTemplatePath(stored_path);
+					map->emitTemplateChanged(existing);
+					changed = true;
+				}
+				continue;
+			}
+			// Append as a closed template the user can enable from the list.
+			auto track = std::make_unique<TemplateTrack>(stored_path, map);
+			track->setResourceIdentity(identity);
+			track->configureForGPSTrack();
+			track->unloadTemplateFile();
+			map->addTemplate(map->getNumTemplates(), std::move(track));
+			changed = true;
+		}
+		if (changed)
+			map->setTemplatesDirty();
+	};
+
+	client->listFieldAssets(
+		managed.project_id,
+		[this, client, stale, finish, integrate](
+			const QJsonObject& response,
+			const MapHubApiClient::Error& api_error) {
+			if (api_error || stale())
+			{
+				finish();
+				return;
+			}
+			auto items = std::make_shared<std::vector<FieldAssetItem>>();
+			const auto array =
+				response.value(QStringLiteral("items")).toArray();
+			for (const auto& value : array)
+			{
+				const auto object = value.toObject();
+				FieldAssetItem item;
+				item.sha256 =
+					object.value(QStringLiteral("sha256")).toString();
+				item.size_bytes = static_cast<qint64>(
+					object.value(QStringLiteral("size_bytes")).toDouble());
+				item.download_url = QUrl(
+					object.value(QStringLiteral("download_url")).toString());
+				item.original_name =
+					object.value(QStringLiteral("original_name")).toString();
+				if (FieldAssetStore::isValidSha256(item.sha256)
+				    && item.size_bytes > 0 && item.download_url.isValid()
+				    && !item.download_url.isEmpty())
+					items->push_back(std::move(item));
+			}
+			// Fetch missing assets one at a time, then integrate.
+			auto next = std::make_shared<std::function<void(std::size_t)>>();
+			*next = [this, client, stale, finish, integrate, items, next](
+				std::size_t index) {
+				// Deferred so the self-referencing chain is released without
+				// destroying the running function object.
+				const auto release = [next] {
+					QTimer::singleShot(0, [next] { *next = nullptr; });
+				};
+				if (stale())
+				{
+					finish();
+					release();
+					return;
+				}
+				if (index >= items->size())
+				{
+					integrate(*items);
+					finish();
+					release();
+					return;
+				}
+				const auto& item = (*items)[index];
+				FieldAssetStore store;
+				if (store.has(item.sha256))
+				{
+					(*next)(index + 1);
+					return;
+				}
+				const auto staging = store.stagingPathFor(item.sha256);
+				if (staging.isEmpty())
+				{
+					(*next)(index + 1);
+					return;
+				}
+				client->downloadArtifact(
+					item.download_url, item.sha256, item.size_bytes, staging,
+					[item, staging, next, index](
+						const QString& /*destination*/,
+						const MapHubApiClient::Error& download_error) {
+						if (download_error)
+						{
+							qWarning("Field-asset download failed: %s",
+							         qUtf8Printable(download_error.message));
+							QFile::remove(staging);
+						}
+						else
+						{
+							QString promote_error;
+							FieldAssetStore store;
+							if (!store.promote(item.sha256,
+							                   item.original_name, staging,
+							                   &promote_error))
+								qWarning(
+									"Field-asset promotion failed: %s",
+									qUtf8Printable(promote_error));
+						}
+						(*next)(index + 1);
+					});
+			};
+			(*next)(0);
 		});
 }
 

@@ -613,6 +613,9 @@ public:
 	inline const QString& getTemplatePath() const {return template_path;}
 	/** Stable identity for recovery and provider-independent resource receipts. */
 	inline const QString& resourceIdentity() const {return resource_identity;}
+	/** Rebinds the stable resource identity, e.g. to a Map Hub field-asset
+	 * identity after a successful upload. */
+	inline void setResourceIdentity(const QString& value) {resource_identity = value;}
 	/// Changes the path and filename only. Does not do any reloading etc.
 	void setTemplatePath(const QString& value);
 

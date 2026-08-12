@@ -72,6 +72,7 @@ class MapWidget;
 class SketchLayerFeature;
 class PrintWidget;
 class ReopenTemplateDialog;
+class TemplateTrack;
 class Symbol;
 class SymbolReportFeature;
 class SymbolWidget;
@@ -517,6 +518,8 @@ public slots:
 	/** Enables or disables GPS display. */
 	void enableGPSDisplay(bool enable);
 	void refreshGnssStatusOverlay();
+	/** Uploads a finished GNSS tracklog when the map belongs to Map Hub. */
+	void uploadFieldCheckTrack(TemplateTrack* track);
 	void positionGnssStatusOverlay();
 	/** Returns whether location updates and their visible UI are active. */
 	bool isGPSDisplayEnabled() const;

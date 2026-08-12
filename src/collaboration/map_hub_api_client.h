@@ -132,6 +132,17 @@ public:
   void downloadArtifact(const QUrl &url, const QString &expected_sha256,
                         qint64 expected_size, const QString &destination,
                         DownloadHandler handler);
+  /** Uploads a GPX field asset (tracklog) to a project. Idempotent by
+   * (project, sha256): re-uploading the same bytes returns the existing
+   * asset. recorded_start/recorded_end and device are optional. */
+  void uploadFieldAsset(const QString &project_id, const QString &file_path,
+                        const QString &sha256, qint64 size_bytes,
+                        const QString &purpose,
+                        const QDateTime &recorded_start,
+                        const QDateTime &recorded_end,
+                        const QJsonObject &device,
+                        const QString &original_name, JsonHandler handler);
+  void listFieldAssets(const QString &project_id, JsonHandler handler);
 
   static QString sha256ForFile(const QString &path, QString *error = nullptr);
   static bool isAcceptableServerUrl(const QUrl &url);

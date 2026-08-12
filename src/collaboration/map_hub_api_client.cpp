@@ -482,6 +482,91 @@ void MapHubApiClient::uploadWorkspaceSnapshot(
   finishJson(reply, std::move(handler));
 }
 
+void MapHubApiClient::uploadFieldAsset(
+    const QString &project_id, const QString &file_path,
+    const QString &sha256, qint64 size_bytes, const QString &purpose,
+    const QDateTime &recorded_start, const QDateTime &recorded_end,
+    const QJsonObject &device, const QString &original_name,
+    JsonHandler handler) {
+  if (!ensureReady(true, handler))
+    return;
+  constexpr qint64 max_field_asset_bytes = 64LL * 1024 * 1024;
+  static const QRegularExpression hash_pattern(
+      QStringLiteral("^[0-9a-f]{64}$"));
+  if (!validStableId(project_id) || !hash_pattern.match(sha256).hasMatch() ||
+      size_bytes < 1 || size_bytes > max_field_asset_bytes) {
+    handler({}, {0, QStringLiteral("invalid_request_metadata"),
+                 tr("The field-asset upload metadata is invalid.")});
+    return;
+  }
+  auto req = request(
+      QStringLiteral("/api/v1/projects/%1/field-assets").arg(project_id));
+  auto *multi = new QHttpMultiPart(QHttpMultiPart::FormDataType);
+  multi->append(textPart("sha256", sha256));
+  multi->append(textPart("size_bytes", QString::number(size_bytes)));
+  multi->append(textPart("purpose", purpose.isEmpty()
+                                        ? QStringLiteral("field_check")
+                                        : purpose));
+  if (recorded_start.isValid())
+    multi->append(textPart(
+        "recorded_start",
+        recorded_start.toUTC().toString(Qt::ISODateWithMs)));
+  if (recorded_end.isValid())
+    multi->append(textPart(
+        "recorded_end", recorded_end.toUTC().toString(Qt::ISODateWithMs)));
+  if (!device.isEmpty())
+    multi->append(textPart("device",
+                           QString::fromUtf8(QJsonDocument(device).toJson(
+                               QJsonDocument::Compact))));
+  // The declared original name may contain anything; the file-part name
+  // must stay a safe header token.
+  auto filename = original_name;
+  filename.remove(QLatin1Char('"'));
+  filename.remove(QLatin1Char('\\'));
+  filename.remove(QLatin1Char('\r'));
+  filename.remove(QLatin1Char('\n'));
+  if (filename.isEmpty())
+    filename = QStringLiteral("tracklog.gpx");
+  if (!original_name.isEmpty())
+    multi->append(textPart("original_name", original_name));
+  QHttpPart file_part;
+  file_part.setHeader(
+      QNetworkRequest::ContentDispositionHeader,
+      QStringLiteral("form-data; name=\"file\"; filename=\"%1\"")
+          .arg(filename));
+  file_part.setHeader(QNetworkRequest::ContentTypeHeader,
+                      QStringLiteral("application/gpx+xml"));
+  auto *file = new QFile(file_path, multi);
+  if (!file->open(QIODevice::ReadOnly) || file->size() != size_bytes) {
+    const auto message =
+        file->isOpen()
+            ? tr("The tracklog changed while its upload was prepared.")
+            : file->errorString();
+    delete multi;
+    handler({}, {0, QStringLiteral("local_file"), message});
+    return;
+  }
+  file_part.setBodyDevice(file);
+  multi->append(file_part);
+  auto *reply = network->post(req, multi);
+  multi->setParent(reply);
+  finishJson(reply, std::move(handler));
+}
+
+void MapHubApiClient::listFieldAssets(const QString &project_id,
+                                      JsonHandler handler) {
+  if (!ensureReady(true, handler))
+    return;
+  if (!validStableId(project_id)) {
+    handler({}, invalidIdentifierError());
+    return;
+  }
+  finishJson(
+      network->get(request(
+          QStringLiteral("/api/v1/projects/%1/field-assets").arg(project_id))),
+      std::move(handler));
+}
+
 bool MapHubApiClient::ensureReady(bool authenticated,
                                   const JsonHandler &handler) const {
   if (!isAcceptableServerUrl(server_url)) {

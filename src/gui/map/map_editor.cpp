@@ -43,6 +43,7 @@
 #include <QByteArray>
 #include <QComboBox>
 #include <QDate>
+#include <QDateTime>
 #include <QDialog>
 #include <QDir>
 #include <QDockWidget>
@@ -57,6 +58,7 @@
 #include <QIcon>
 #include <QImage> // IWYU pragma: keep
 #include <QInputDialog>
+#include <QJsonObject>
 #include <QIODevice>
 #include <QKeyEvent> // IWYU pragma: keep
 #include <QKeySequence>
@@ -102,6 +104,10 @@
 #endif
 
 #include "settings.h"
+#include "collaboration/field_asset_store.h"
+#include "collaboration/managed_map_workspace.h"
+#include "collaboration/map_hub_api_client.h"
+#include "collaboration/map_hub_credentials.h"
 #include "core/document_path.h"
 #if defined(Q_OS_IOS)
 #include "core/apple_document_access.h"
@@ -4343,9 +4349,12 @@ void MapEditorController::enableGPSDisplay(bool enable)
 		gps_display->setGnssSession(nullptr);
 		GnssController::instance().disconnectExternal();
 		refreshGnssStatusOverlay();
-		
-		delete gps_track_recorder;
+
+		auto* recorded_track =
+			gps_track_recorder ? gps_track_recorder->targetTemplate() : nullptr;
+		delete gps_track_recorder;  // final flush of the GPX file
 		gps_track_recorder = nullptr;
+		uploadFieldCheckTrack(recorded_track);
 	}
 	gps_display->setVisible(enable);
 	
@@ -4384,6 +4393,96 @@ void MapEditorController::refreshGnssStatusOverlay()
 	gnss_status_overlay->setVisible(map_page_active);
 	if (map_page_active)
 		positionGnssStatusOverlay();
+}
+
+void MapEditorController::uploadFieldCheckTrack(TemplateTrack* track)
+{
+	if (!track || !window || window->currentPath().isEmpty())
+		return;
+	const auto gpx_path = track->getTemplatePath();
+	if (gpx_path.isEmpty() || !QFileInfo::exists(gpx_path))
+		return;
+
+	// Only maps bound to a managed Map Hub workspace synchronize tracklogs.
+	QString workspace_error;
+	const auto managed =
+		ManagedMapWorkspace::loadForMap(window->currentPath(), &workspace_error);
+	if (!managed.isValid() || managed.project_id.isEmpty())
+		return;
+	const auto credential = MapHubCredentials::readToken(managed.server_url);
+	if (!credential || credential.token.isEmpty())
+		return;
+
+	// Recorded range and accuracy-basis summary from the track data.
+	const auto& data = track->getTrack();
+	QDateTime recorded_start;
+	QDateTime recorded_end;
+	QString accuracy_basis;
+	auto point_count = 0;
+	for (int segment = 0; segment < data.getNumSegments(); ++segment)
+	{
+		const auto segment_size = data.getSegmentPointCount(segment);
+		for (int i = 0; i < segment_size; ++i)
+		{
+			const auto& point = data.getSegmentPoint(segment, i);
+			++point_count;
+			if (point.datetime.isValid())
+			{
+				if (!recorded_start.isValid() || point.datetime < recorded_start)
+					recorded_start = point.datetime;
+				if (!recorded_end.isValid() || point.datetime > recorded_end)
+					recorded_end = point.datetime;
+			}
+			if (accuracy_basis.isEmpty())
+				accuracy_basis = point.accuracyBasis;
+		}
+	}
+	if (point_count == 0)
+		return;
+
+	QString sha_error;
+	const auto sha256 = MapHubApiClient::sha256ForFile(gpx_path, &sha_error);
+	const auto size_bytes = QFileInfo(gpx_path).size();
+	if (sha256.isEmpty() || size_bytes < 1)
+	{
+		qWarning("Field-asset upload skipped: %s", qUtf8Printable(sha_error));
+		return;
+	}
+	const auto resource_identity = FieldAssetStore::resourceIdentityFor(sha256);
+	if (track->resourceIdentity() == resource_identity)
+		return;  // These exact bytes were already uploaded.
+
+	QJsonObject device;
+	device.insert(QStringLiteral("receiver"),
+	              Settings::getInstance().positionSource());
+	if (!accuracy_basis.isEmpty())
+		device.insert(QStringLiteral("source"), accuracy_basis);
+
+	auto* client =
+		new MapHubApiClient(managed.server_url, credential.token, this);
+	QPointer<TemplateTrack> track_guard(track);
+	client->uploadFieldAsset(
+		managed.project_id, gpx_path, sha256, size_bytes,
+		QStringLiteral("field_check"), recorded_start, recorded_end, device,
+		QFileInfo(gpx_path).fileName(),
+		[client, track_guard, resource_identity](
+			const QJsonObject& /*response*/,
+			const MapHubApiClient::Error& api_error) {
+			client->deleteLater();
+			if (api_error)
+			{
+				qWarning("Field-asset upload failed: %s",
+				         qUtf8Printable(api_error.message));
+				return;
+			}
+			if (track_guard
+			    && track_guard->resourceIdentity() != resource_identity)
+			{
+				track_guard->setResourceIdentity(resource_identity);
+				if (auto* target_map = track_guard->getMap())
+					target_map->setTemplatesDirty();
+			}
+		});
 }
 
 bool MapEditorController::isGPSDisplayEnabled() const

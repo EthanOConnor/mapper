@@ -585,6 +585,7 @@ private:
 	void renewMapHubLeaseIfNeeded();
 	void configureMapHubSync();
 	void refreshMapHubImageryCatalog();
+	void refreshMapHubFieldAssets();
 	void pollMapHubReadOnlyAccess();
 
 	static MainWindow* findMainWindow(const QString& file_name);
@@ -639,6 +640,7 @@ private:
 	bool map_hub_read_only = false;
 	bool map_hub_local_copy_in_progress = false;
 	bool map_hub_imagery_refresh_pending = false;
+	bool map_hub_field_assets_refresh_pending = false;
 	QLabel* status_label;
 	Toast* toast = nullptr;
 	
