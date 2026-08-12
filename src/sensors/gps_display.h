@@ -118,6 +118,14 @@ signals:
 	/// latitude / longitude in degrees and also gives altitude
 	/// (meters above sea level; -9999 is unknown)
 	void latLonUpdated(double latitude, double longitude, double altitude, float accuracy);
+
+	/// Is emitted whenever a new position update happens, carrying the full
+	/// GNSS fix before it is collapsed to a QGeoPositionInfo. For positions
+	/// from the platform position source (no external GNSS session), a
+	/// GnssPosition is synthesized from the QGeoPositionInfo attributes and
+	/// accuracy_basis is "platform". For external sessions, accuracy_basis
+	/// is empty (unknown at this layer).
+	void gnssPositionUpdated(const OpenOrienteering::GnssPosition& position, const QString& accuracy_basis);
 	
 	/// Is emitted when updates are interrupted after previously being active,
 	/// due to loss of satellite reception or another error such as the user
@@ -130,6 +138,7 @@ private slots:
 	void error();
 	
 private:
+	void processPositionUpdate(const QGeoPositionInfo& info, bool synthesize_gnss_position);
 	MapCoordF calcLatestGPSCoord(bool& ok);
 	void updateMapWidget();
 	

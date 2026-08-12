@@ -22,6 +22,7 @@
 #include <Qt>
 #include <QtGlobal>
 #include <QtTest>
+#include <QBuffer>
 #include <QByteArray>
 #include <QCoreApplication>
 #include <QDateTime>
@@ -150,6 +151,120 @@ private slots:
 	}
 	
 	
+	void gnssQualityRoundTripTest()
+	{
+		auto track = Track{};
+
+		auto rtk_point = TrackPoint{ {47.61, -122.20}, base_datetime.addSecs(1), 118.5f, 0.8f };
+		rtk_point.hAccuracy = 0.014f;
+		rtk_point.vAccuracy = 0.021f;
+		rtk_point.correctionAge = 1.5f;
+		rtk_point.fixType = TrackFixType::RtkFixed;
+		rtk_point.satellitesUsed = 29;
+		rtk_point.accuracyBasis = QStringLiteral("gst");
+		track.appendTrackPoint(rtk_point);
+
+		auto float_point = TrackPoint{ {47.62, -122.21}, base_datetime.addSecs(2) };
+		float_point.hAccuracy = 0.12f;
+		float_point.fixType = TrackFixType::RtkFloat;
+		track.appendTrackPoint(float_point);
+
+		auto plain_point = TrackPoint{ {47.63, -122.22}, base_datetime.addSecs(3), 120.0f };
+		track.appendTrackPoint(plain_point);
+		track.finishCurrentSegment();
+
+		QBuffer buffer;
+		QVERIFY(buffer.open(QIODevice::ReadWrite));
+		QVERIFY(track.saveGpxTo(buffer));
+
+		const auto data = buffer.data();
+		QVERIFY(data.contains("xmlns=\"http://www.topografix.com/GPX/1/1\""));
+		QVERIFY(data.contains("xmlns:mapper=\"http://openorienteering.org/xmlns/mapper-gnss/1\""));
+		QVERIFY(data.contains("<mapper:gnss"));
+		QVERIFY(data.contains("fix=\"rtk-fixed\""));
+		QVERIFY(data.contains("fix=\"rtk-float\""));
+		QVERIFY(data.contains("hacc=\"0.014\""));
+		QVERIFY(data.contains("vacc=\"0.021\""));
+		QVERIFY(data.contains("basis=\"gst\""));
+		QVERIFY(data.contains("corr_age=\"1.500\""));
+		QVERIFY(data.contains("<sat>29</sat>"));
+		// The best standard approximation of an RTK fix:
+		QVERIFY(data.contains("<fix>dgps</fix>"));
+		// True DOP is written as <hdop>:
+		QVERIFY(data.contains("<hdop>0.800</hdop>"));
+
+		QVERIFY(buffer.seek(0));
+		auto loaded_track = Track{};
+		QVERIFY(loaded_track.loadGpxFrom(buffer, true));
+		QCOMPARE(loaded_track, track);
+
+		QCOMPARE(loaded_track.getSegmentPoint(0, 0).fixType, TrackFixType::RtkFixed);
+		QCOMPARE(loaded_track.getSegmentPoint(0, 0).satellitesUsed, 29);
+		QCOMPARE(loaded_track.getSegmentPoint(0, 1).fixType, TrackFixType::RtkFloat);
+		QCOMPARE(loaded_track.getSegmentPoint(0, 2).fixType, TrackFixType::Unknown);
+		QVERIFY(qIsNaN(loaded_track.getSegmentPoint(0, 2).hAccuracy));
+	}
+
+
+	void legacyGpxLoadTest()
+	{
+		// Legacy Mapper output: no namespaces, no fix/sat/extensions.
+		// The foreign extensions subtree must be skipped completely, i.e.
+		// its nested ele/time/hdop must not be misparsed as point data.
+		QByteArray legacy_gpx(
+		  "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+		  "<gpx version=\"1.1\" creator=\"OpenOrienteering Mapper\">\n"
+		  "<trk>\n"
+		  "<trkseg>\n"
+		  "<trkpt lat=\"50.000000000000\" lon=\"7.000000000000\">"
+		  "<time>2010-01-01T00:00:01Z</time><ele>100.000</ele><hdop>1.500</hdop>"
+		  "<extensions><vendor:stats xmlns:vendor=\"http://example.com/x/1\">"
+		  "<vendor:ele>999.0</vendor:ele><vendor:hdop>77.0</vendor:hdop>"
+		  "</vendor:stats></extensions>"
+		  "</trkpt>\n"
+		  "</trkseg>\n"
+		  "</trk>\n"
+		  "</gpx>\n");
+		QBuffer buffer(&legacy_gpx);
+		QVERIFY(buffer.open(QIODevice::ReadOnly));
+
+		auto track = Track{};
+		QVERIFY(track.loadGpxFrom(buffer, false));
+		QCOMPARE(track.getNumSegments(), 1);
+		QCOMPARE(track.getSegmentPointCount(0), 1);
+
+		const auto& point = track.getSegmentPoint(0, 0);
+		QCOMPARE(point.latlon.latitude(), 50.0);
+		QCOMPARE(point.elevation, 100.0f);
+		QCOMPARE(point.hDOP, 1.5f);
+		// Unknown quality data stays unknown:
+		QVERIFY(qIsNaN(point.hAccuracy));
+		QVERIFY(qIsNaN(point.vAccuracy));
+		QVERIFY(qIsNaN(point.correctionAge));
+		QCOMPARE(point.fixType, TrackFixType::Unknown);
+		QCOMPARE(point.satellitesUsed, -1);
+		QVERIFY(point.accuracyBasis.isEmpty());
+	}
+
+
+	void noHdopFromAccuracyTest()
+	{
+		// A point which only knows accuracy in meters must not emit <hdop>.
+		auto track = Track{};
+		auto point = TrackPoint{ {50.0, 7.0}, base_datetime };
+		point.hAccuracy = 3.7f;
+		track.appendTrackPoint(point);
+		track.finishCurrentSegment();
+
+		QBuffer buffer;
+		QVERIFY(buffer.open(QIODevice::ReadWrite));
+		QVERIFY(track.saveGpxTo(buffer));
+
+		const auto data = buffer.data();
+		QVERIFY(!data.contains("<hdop>"));
+		QVERIFY(data.contains("hacc=\"3.700\""));
+	}
+
 };
 
 

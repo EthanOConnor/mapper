@@ -46,26 +46,127 @@
 
 namespace OpenOrienteering {
 
+namespace {
+
+constexpr auto gpx_namespace = QLatin1String("http://www.topografix.com/GPX/1/1");
+constexpr auto mapper_gnss_namespace = QLatin1String("http://openorienteering.org/xmlns/mapper-gnss/1");
+
+/// The best approximation of the fix type in the standard GPX `fixType` vocabulary.
+QString toGpxFixString(TrackFixType fix_type)
+{
+	switch (fix_type)
+	{
+	case TrackFixType::None:
+		return QStringLiteral("none");
+	case TrackFixType::Fix2D:
+		return QStringLiteral("2d");
+	case TrackFixType::Fix3D:
+		return QStringLiteral("3d");
+	case TrackFixType::DGPS:
+	case TrackFixType::RtkFloat:
+	case TrackFixType::RtkFixed:
+		// RTK is differentially corrected; "dgps" is the best standard value.
+		return QStringLiteral("dgps");
+	case TrackFixType::Unknown:
+		break;
+	}
+	return {};
+}
+
+/// The full fix type vocabulary of the mapper-gnss extension namespace.
+QString toMapperFixString(TrackFixType fix_type)
+{
+	switch (fix_type)
+	{
+	case TrackFixType::None:
+		return QStringLiteral("none");
+	case TrackFixType::Fix2D:
+		return QStringLiteral("2d");
+	case TrackFixType::Fix3D:
+		return QStringLiteral("3d");
+	case TrackFixType::DGPS:
+		return QStringLiteral("dgps");
+	case TrackFixType::RtkFloat:
+		return QStringLiteral("rtk-float");
+	case TrackFixType::RtkFixed:
+		return QStringLiteral("rtk-fixed");
+	case TrackFixType::Unknown:
+		break;
+	}
+	return {};
+}
+
+/// Parses both the standard GPX `fixType` vocabulary and the mapper-gnss one.
+TrackFixType fixTypeFromString(QStringView string)
+{
+	if (string.compare(QLatin1String("none"), Qt::CaseInsensitive) == 0)
+		return TrackFixType::None;
+	if (string.compare(QLatin1String("2d"), Qt::CaseInsensitive) == 0)
+		return TrackFixType::Fix2D;
+	if (string.compare(QLatin1String("3d"), Qt::CaseInsensitive) == 0
+	    || string.compare(QLatin1String("pps"), Qt::CaseInsensitive) == 0)
+		return TrackFixType::Fix3D;
+	if (string.compare(QLatin1String("dgps"), Qt::CaseInsensitive) == 0)
+		return TrackFixType::DGPS;
+	if (string.compare(QLatin1String("rtk-float"), Qt::CaseInsensitive) == 0)
+		return TrackFixType::RtkFloat;
+	if (string.compare(QLatin1String("rtk-fixed"), Qt::CaseInsensitive) == 0)
+		return TrackFixType::RtkFixed;
+	return TrackFixType::Unknown;
+}
+
+}  // namespace
+
+
 // ### TrackPoint ###
 
-void TrackPoint::save(QXmlStreamWriter* stream) const
+void TrackPoint::save(QXmlStreamWriter* stream, const QString* waypoint_name) const
 {
 	stream->writeAttribute(QStringLiteral("lat"), QString::number(latlon.latitude(), 'f', 12));
 	stream->writeAttribute(QStringLiteral("lon"), QString::number(latlon.longitude(), 'f', 12));
-	
-	if (datetime.isValid())
-	{
-		// Preserve sub-second fixes at multi-Hz logging rates without changing
-		// the established representation of exact whole-second timestamps.
-		stream->writeTextElement(
-		  QStringLiteral("time"),
-		  datetime.time().msec() != 0 ? datetime.toString(Qt::ISODateWithMs)
-		                               : datetime.toString(Qt::ISODate));
-	}
+
+	// Child elements in GPX 1.1 ptType schema order:
+	// ele, time, ..., name, ..., fix, sat, hdop, ..., extensions.
 	if (!qIsNaN(elevation))
 		stream->writeTextElement(QStringLiteral("ele"), QString::number(static_cast<qreal>(elevation), 'f', 3));
+	if (datetime.isValid())
+		// Millisecond precision matters for multi-Hz GNSS logs (whole-second
+		// stamps collide at 2.5Hz), but whole-second times keep the historic
+		// format so existing consumers and fixtures see unchanged output.
+		stream->writeTextElement(QStringLiteral("time"),
+		                         datetime.time().msec() != 0
+		                             ? datetime.toString(Qt::ISODateWithMs)
+		                             : datetime.toString(Qt::ISODate));
+	if (waypoint_name)
+		stream->writeTextElement(QStringLiteral("name"), *waypoint_name);
+	if (fixType != TrackFixType::Unknown)
+		stream->writeTextElement(QStringLiteral("fix"), toGpxFixString(fixType));
+	if (satellitesUsed >= 0)
+		stream->writeTextElement(QStringLiteral("sat"), QString::number(satellitesUsed));
+	// <hdop> carries true DOP only - never accuracy in meters.
 	if (!qIsNaN(hDOP))
 		stream->writeTextElement(QStringLiteral("hdop"), QString::number(static_cast<qreal>(hDOP), 'f', 3));
+
+	const auto beyond_standard_fix = fixType == TrackFixType::RtkFloat
+	                                 || fixType == TrackFixType::RtkFixed;
+	if (!qIsNaN(hAccuracy) || !qIsNaN(vAccuracy) || !qIsNaN(correctionAge)
+	    || !accuracyBasis.isEmpty() || beyond_standard_fix)
+	{
+		stream->writeStartElement(QStringLiteral("extensions"));
+		stream->writeStartElement(mapper_gnss_namespace, QStringLiteral("gnss"));
+		if (!qIsNaN(hAccuracy))
+			stream->writeAttribute(QStringLiteral("hacc"), QString::number(static_cast<qreal>(hAccuracy), 'f', 3));
+		if (!qIsNaN(vAccuracy))
+			stream->writeAttribute(QStringLiteral("vacc"), QString::number(static_cast<qreal>(vAccuracy), 'f', 3));
+		if (fixType != TrackFixType::Unknown)
+			stream->writeAttribute(QStringLiteral("fix"), toMapperFixString(fixType));
+		if (!accuracyBasis.isEmpty())
+			stream->writeAttribute(QStringLiteral("basis"), accuracyBasis);
+		if (!qIsNaN(correctionAge))
+			stream->writeAttribute(QStringLiteral("corr_age"), QString::number(static_cast<qreal>(correctionAge), 'f', 3));
+		stream->writeEndElement();  // mapper:gnss
+		stream->writeEndElement();  // extensions
+	}
 }
 
 bool operator==(const TrackPoint& lhs, const TrackPoint& rhs)
@@ -78,7 +179,13 @@ bool operator==(const TrackPoint& lhs, const TrackPoint& rhs)
 	       && lhs.map_coord == rhs.map_coord
 	       && lhs.datetime == rhs.datetime
 	       && fuzzyCompare(lhs.elevation, rhs.elevation)
-	       && fuzzyCompare(lhs.hDOP, rhs.hDOP);
+	       && fuzzyCompare(lhs.hDOP, rhs.hDOP)
+	       && fuzzyCompare(lhs.hAccuracy, rhs.hAccuracy)
+	       && fuzzyCompare(lhs.vAccuracy, rhs.vAccuracy)
+	       && fuzzyCompare(lhs.correctionAge, rhs.correctionAge)
+	       && lhs.fixType == rhs.fixType
+	       && lhs.satellitesUsed == rhs.satellitesUsed
+	       && lhs.accuracyBasis == rhs.accuracyBasis;
 }
 
 
@@ -170,15 +277,16 @@ bool Track::saveGpxTo(QIODevice& device) const
 	stream.writeStartElement(QString::fromLatin1("gpx"));
 	stream.writeAttribute(QString::fromLatin1("version"), QString::fromLatin1("1.1"));
 	stream.writeAttribute(QString::fromLatin1("creator"), qApp->applicationDisplayName());
-	
+	stream.writeDefaultNamespace(gpx_namespace);
+	stream.writeNamespace(mapper_gnss_namespace, QStringLiteral("mapper"));
+
 	int size = getNumWaypoints();
 	for (int i = 0; i < size; ++i)
 	{
 		stream.writeCharacters(newline);
 		stream.writeStartElement(QStringLiteral("wpt"));
 		const TrackPoint& point = getWaypoint(i);
-		point.save(&stream);
-		stream.writeTextElement(QStringLiteral("name"), getWaypointName(i));
+		point.save(&stream, &getWaypointName(i));
 		stream.writeEndElement();
 	}
 	
@@ -340,8 +448,50 @@ bool Track::loadGpxFrom(QIODevice& device, bool project_points)
 				point.datetime = QDateTime::fromString(stream.readElementText(), Qt::ISODate);
 			else if (stream.name().compare(QLatin1String("hdop"), Qt::CaseInsensitive) == 0)
 				point.hDOP = stream.readElementText().toFloat();
+			else if (stream.name().compare(QLatin1String("fix"), Qt::CaseInsensitive) == 0)
+				point.fixType = fixTypeFromString(stream.readElementText());
+			else if (stream.name().compare(QLatin1String("sat"), Qt::CaseInsensitive) == 0)
+			{
+				bool sat_ok = false;
+				const auto sat = stream.readElementText().toInt(&sat_ok);
+				point.satellitesUsed = (sat_ok && sat >= 0) ? sat : -1;
+			}
 			else if (stream.name().compare(QLatin1String("name"), Qt::CaseInsensitive) == 0)
 				point_name = stream.readElementText();
+			else if (stream.name().compare(QLatin1String("extensions"), Qt::CaseInsensitive) == 0)
+			{
+				// Handle known extension elements, and skip unknown extension
+				// content as complete subtrees so that nested elements (such
+				// as a vendor's own <ele> or <time>) cannot be misparsed as
+				// GPX point data.
+				while (stream.readNextStartElement())
+				{
+					if (stream.name().compare(QLatin1String("gnss"), Qt::CaseInsensitive) == 0
+					    && (stream.namespaceUri() == mapper_gnss_namespace
+					        || stream.namespaceUri().isEmpty()))
+					{
+						const auto attributes = stream.attributes();
+						if (attributes.hasAttribute(QLatin1String("hacc")))
+							point.hAccuracy = attributes.value(QLatin1String("hacc")).toFloat();
+						if (attributes.hasAttribute(QLatin1String("vacc")))
+							point.vAccuracy = attributes.value(QLatin1String("vacc")).toFloat();
+						if (attributes.hasAttribute(QLatin1String("fix")))
+						{
+							// The extension value is more precise than the standard
+							// <fix> element (e.g. rtk-fixed vs. dgps), but an
+							// unrecognized value must not discard the standard one.
+							const auto extension_fix = fixTypeFromString(attributes.value(QLatin1String("fix")));
+							if (extension_fix != TrackFixType::Unknown)
+								point.fixType = extension_fix;
+						}
+						if (attributes.hasAttribute(QLatin1String("basis")))
+							point.accuracyBasis = attributes.value(QLatin1String("basis")).toString();
+						if (attributes.hasAttribute(QLatin1String("corr_age")))
+							point.correctionAge = attributes.value(QLatin1String("corr_age")).toFloat();
+					}
+					stream.skipCurrentElement();
+				}
+			}
 		}
 		else if (stream.tokenType() == QXmlStreamReader::EndElement)
 		{

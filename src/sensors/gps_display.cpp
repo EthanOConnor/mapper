@@ -427,6 +427,13 @@ void GPSDisplay::timerEvent(QTimerEvent* e)
 
 void GPSDisplay::positionUpdated(const QGeoPositionInfo& info)
 {
+	// Position from the platform QGeoPositionInfoSource: no full GNSS fix is
+	// available, so a GnssPosition is synthesized for gnssPositionUpdated().
+	processPositionUpdate(info, true);
+}
+
+void GPSDisplay::processPositionUpdate(const QGeoPositionInfo& info, bool synthesize_gnss_position)
+{
 #if defined(QT_POSITIONING_LIB)
 	if (!info.isValid())
 		return;
@@ -434,7 +441,7 @@ void GPSDisplay::positionUpdated(const QGeoPositionInfo& info)
 	gps_updated = true;
 	tracking_lost = false;
 	has_valid_position = true;
-	
+
 	bool ok = false;
 	calcLatestGPSCoord(ok);
 	if (ok)
@@ -446,8 +453,32 @@ void GPSDisplay::positionUpdated(const QGeoPositionInfo& info)
 			(info.coordinate().type() == QGeoCoordinate::Coordinate3D) ? info.coordinate().altitude() : -9999,
 			latest_gps_coord_accuracy
 		);
+		if (synthesize_gnss_position)
+		{
+			GnssPosition position;
+			position.latitude = info.coordinate().latitude();
+			position.longitude = info.coordinate().longitude();
+			if (info.coordinate().type() == QGeoCoordinate::Coordinate3D)
+				position.altitudeMsl = info.coordinate().altitude();
+			position.fixType = (info.coordinate().type() == QGeoCoordinate::Coordinate3D)
+			                   ? GnssFixType::Fix3D : GnssFixType::Fix2D;
+			if (info.hasAttribute(QGeoPositionInfo::HorizontalAccuracy))
+				position.hAccuracy = float(info.attribute(QGeoPositionInfo::HorizontalAccuracy));
+			if (info.hasAttribute(QGeoPositionInfo::VerticalAccuracy))
+				position.vAccuracy = float(info.attribute(QGeoPositionInfo::VerticalAccuracy));
+			// Platform accuracies (Android, iOS) are 1-sigma radial.
+			position.accuracyBasis = GnssAccuracyBasis::Sigma68;
+			position.computeP95();
+			if (info.hasAttribute(QGeoPositionInfo::GroundSpeed))
+				position.groundSpeed = float(info.attribute(QGeoPositionInfo::GroundSpeed));
+			if (info.hasAttribute(QGeoPositionInfo::Direction))
+				position.headingMotion = float(info.attribute(QGeoPositionInfo::Direction));
+			position.timestamp = info.timestamp().toUTC();
+			position.valid = true;
+			emit gnssPositionUpdated(position, QStringLiteral("platform"));
+		}
 	}
-	
+
 	updateMapWidget();
 #endif
 }
@@ -457,6 +488,9 @@ void GPSDisplay::externalPositionUpdated(const GnssPosition& position)
 #if defined(QT_POSITIONING_LIB)
 	if (!position.valid)
 		return;
+	// Full fix first: consumers such as the track recorder must see the
+	// complete GNSS quality data before it is collapsed to QGeoPositionInfo.
+	emit gnssPositionUpdated(position, QString());
 	auto altitude = std::isfinite(position.altitudeMsl)
 	              ? position.altitudeMsl : position.altitude;
 	QGeoCoordinate coordinate;
@@ -484,7 +518,7 @@ void GPSDisplay::externalPositionUpdated(const GnssPosition& position)
 	if (std::isfinite(position.headingMotion))
 		info.setAttribute(QGeoPositionInfo::Direction,
 		                  position.headingMotion);
-	positionUpdated(info);
+	processPositionUpdate(info, false);
 #else
 	Q_UNUSED(position)
 #endif

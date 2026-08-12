@@ -20,10 +20,13 @@
 
 #include "gps_track_recorder.h"
 
+#include <cmath>
+
 #include <QDateTime>
 #include <QtGlobal>
 
 #include "core/latlon.h"
+#include "gnss/gnss_position.h"
 #include "core/map.h"
 #include "core/map_view.h"
 #include "core/track.h"
@@ -47,8 +50,14 @@ GPSTrackRecorder::GPSTrackRecorder(GPSDisplay* gps_display, TemplateTrack* targe
 	// Start with a new segment
 	target_template->getTrack().finishCurrentSegment();
 	
-	connect(gps_display, &GPSDisplay::latLonUpdated, this, &GPSTrackRecorder::newPosition);
-	connect(gps_display, &GPSDisplay::positionUpdatesInterrupted, this, &GPSTrackRecorder::positionUpdatesInterrupted);
+	if (gps_display)
+	{
+		// The GnssPosition signal carries the full fix (accuracy, fix type,
+		// DOP, satellites, timestamp); latLonUpdated is its lossy collapse
+		// and must not be connected in addition (double points).
+		connect(gps_display, &GPSDisplay::gnssPositionUpdated, this, &GPSTrackRecorder::newGnssPosition);
+		connect(gps_display, &GPSDisplay::positionUpdatesInterrupted, this, &GPSTrackRecorder::positionUpdatesInterrupted);
+	}
 	connect(target_template->getMap(), &Map::templateDeleted, this, &GPSTrackRecorder::templateDeleted);
 	
 	if (draw_update_interval_milliseconds > 0)
@@ -66,14 +75,68 @@ GPSTrackRecorder::~GPSTrackRecorder()
 	persistUpdate();
 }
 
+namespace {
+
+TrackFixType toTrackFixType(GnssFixType fix_type)
+{
+	switch (fix_type)
+	{
+	case GnssFixType::NoFix:
+		// A recorded position with "NoFix" means the source did not report
+		// a fix type, not that there was no fix.
+		return TrackFixType::Unknown;
+	case GnssFixType::Fix2D:
+		return TrackFixType::Fix2D;
+	case GnssFixType::Fix3D:
+		return TrackFixType::Fix3D;
+	case GnssFixType::DGPS:
+		return TrackFixType::DGPS;
+	case GnssFixType::RtkFloat:
+		return TrackFixType::RtkFloat;
+	case GnssFixType::RtkFixed:
+		return TrackFixType::RtkFixed;
+	}
+	return TrackFixType::Unknown;
+}
+
+}  // namespace
+
+
+void GPSTrackRecorder::newGnssPosition(const GnssPosition& position, const QString& accuracy_basis)
+{
+	auto new_point = TrackPoint { LatLon(position.latitude, position.longitude) };
+	// Use the fix's own timestamp; reception time skews multi-Hz logs.
+	new_point.datetime = position.timestamp.isValid()
+	                     ? position.timestamp.toUTC()
+	                     : QDateTime::currentDateTimeUtc();
+	// GPX <ele> is height above mean sea level.
+	if (std::isfinite(position.altitudeMsl))
+		new_point.elevation = static_cast<float>(position.altitudeMsl);
+	else if (std::isfinite(position.altitude))
+		new_point.elevation = static_cast<float>(position.altitude);
+	new_point.hDOP = position.hDOP;  // true DOP or NaN - never meters
+	new_point.hAccuracy = position.hAccuracy;
+	new_point.vAccuracy = position.vAccuracy;
+	new_point.correctionAge = position.correctionAge;
+	new_point.fixType = toTrackFixType(position.fixType);
+	new_point.satellitesUsed = position.satellitesUsed > 0 ? int(position.satellitesUsed) : -1;
+	new_point.accuracyBasis = accuracy_basis;
+	target_template->getTrack().appendTrackPoint(new_point);
+	target_template->setHasUnsavedChanges(true);
+	track_changed_since_last_update = true;
+}
+
 void GPSTrackRecorder::newPosition(double latitude, double longitude, double altitude, float accuracy)
 {
-	const auto new_point = TrackPoint {
-		LatLon(latitude, longitude),
-		QDateTime::currentDateTimeUtc(),
-		static_cast<float>(altitude),
-		accuracy
-	};
+	auto new_point = TrackPoint { LatLon(latitude, longitude) };
+	// No fix timestamp is available on this legacy path.
+	new_point.datetime = QDateTime::currentDateTimeUtc();
+	if (altitude > -9999)
+		new_point.elevation = static_cast<float>(altitude);
+	// The accuracy is horizontal accuracy in meters, not DOP: it must not
+	// end up in TrackPoint::hDOP (and thus in GPX <hdop>).
+	if (accuracy >= 0)
+		new_point.hAccuracy = accuracy;
 	target_template->getTrack().appendTrackPoint(new_point);
 	target_template->setHasUnsavedChanges(true);
 	track_changed_since_last_update = true;

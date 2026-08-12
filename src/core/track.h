@@ -39,8 +39,27 @@ namespace OpenOrienteering {
 
 
 /**
+ * GNSS fix type of a track point, ordered by increasing quality.
+ *
+ * This mirrors GnssFixType (src/gnss/gnss_position.h) but adds an explicit
+ * Unknown state for data loaded from files which do not record the fix type,
+ * and keeps core/ free of a dependency on the gnss module.
+ */
+enum class TrackFixType : qint8
+{
+	Unknown  = -1,   ///< Not recorded / not reported by the source
+	None     = 0,
+	Fix2D    = 1,
+	Fix3D    = 2,
+	DGPS     = 3,
+	RtkFloat = 4,
+	RtkFixed = 5,
+};
+
+
+/**
  * A geographic point with optional attributes such as time.
- * 
+ *
  * \see GPX `ptType`, https://www.topografix.com/GPX/1/1/#type_ptType
  */
 struct TrackPoint
@@ -48,12 +67,21 @@ struct TrackPoint
 	LatLon latlon;
 	QDateTime datetime  = {};       // QDateTime() when invalid
 	float elevation     = NAN;      // NaN when invalid
-	float hDOP          = NAN;      // NaN when invalid
+	float hDOP          = NAN;      // True horizontal dilution of precision (unitless), NaN when unknown
 	MapCoordF map_coord = {};
-	
+
+	// GNSS quality metadata (serialized via GPX <fix>/<sat> and the
+	// mapper-gnss extension namespace).
+	float hAccuracy     = NAN;      // Horizontal accuracy, 1-sigma meters, NaN when unknown
+	float vAccuracy     = NAN;      // Vertical accuracy, 1-sigma meters, NaN when unknown
+	float correctionAge = NAN;      // Seconds since last correction applied, NaN when unknown
+	TrackFixType fixType = TrackFixType::Unknown;
+	int satellitesUsed  = -1;       // -1 when unknown
+	QString accuracyBasis = {};     // e.g. "gst", "ubx", "dop-uere", "platform"; empty when unknown
+
 	// Default special member functions are fine.
-	
-	void save(QXmlStreamWriter* stream) const;
+
+	void save(QXmlStreamWriter* stream, const QString* waypoint_name = nullptr) const;
 };
 
 bool operator==(const TrackPoint& lhs, const TrackPoint& rhs);
