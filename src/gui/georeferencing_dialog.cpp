@@ -28,6 +28,7 @@
 #include <QtGlobal>
 #include <QAbstractButton>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QCursor>
 #include <QDate>
 #include <QDesktopServices>  // IWYU pragma: keep
@@ -149,7 +150,7 @@ GeoreferencingDialog::GeoreferencingDialog(
 	
 	ref_point_button = new QPushButton(tr("&Pick on map"));
 	int ref_point_button_width = ref_point_button->sizeHint().width();
-	auto geographic_datum_label = new QLabel(tr("(Datum: WGS84)"));
+	geographic_datum_label = new QLabel(tr("(Datum: WGS84)"));
 	int geographic_datum_label_width = geographic_datum_label->sizeHint().width();
 	
 	map_x_edit = Util::SpinBox::create<MapCoordF>();
@@ -186,6 +187,19 @@ GeoreferencingDialog::GeoreferencingDialog(
 		geographic_ref_layout->addSpacing(ref_point_button_width - geographic_datum_label_width);
 	geographic_ref_layout->addWidget(geographic_datum_label, 0);
 	
+	frame_combo = new QComboBox();
+	frame_combo->addItem(tr("WGS 84 (broad accuracy)"), QString{});
+	frame_combo->addItem(tr("ITRF2014 (RTK, precise)"), Georeferencing::itrf2014_frame_id);
+	epoch_edit = Util::SpinBox::create(3, 1990.0, 2100.0);
+	auto const today = QDate::currentDate();
+	auto const default_epoch = today.year() + (today.dayOfYear() - 1) / double(today.daysInYear());
+	epoch_edit->setValue(georef->getCoordinateEpoch() > 0 ? georef->getCoordinateEpoch() : default_epoch);
+	frame_combo->setCurrentIndex(qMax(0, frame_combo->findData(georef->getGeographicFrame())));
+	auto frame_layout = new QHBoxLayout();
+	frame_layout->addWidget(frame_combo, 2);
+	frame_layout->addWidget(new QLabel(tr("Epoch:")), 0);
+	frame_layout->addWidget(epoch_edit, 1);
+
 	show_refpoint_label = new QLabel(tr("Show reference point in:"));
 	link_label = new QLabel(QLatin1String("-"));
 	link_label->setOpenExternalLinks(true);
@@ -250,6 +264,7 @@ GeoreferencingDialog::GeoreferencingDialog(
 	edit_layout->addRow(tr("Map coordinates:"), map_ref_layout);
 	edit_layout->addRow(projected_ref_label, projected_ref_layout);
 	edit_layout->addRow(tr("Geographic coordinates:"), geographic_ref_layout);
+	edit_layout->addRow(tr("Reference frame:"), frame_layout);
 	edit_layout->addRow(show_refpoint_label, link_label);
 	edit_layout->addRow(tr("On CRS changes, keep:"), keep_projected_radio);
 	edit_layout->addRow({}, keep_geographic_radio);
@@ -292,6 +307,9 @@ GeoreferencingDialog::GeoreferencingDialog(
 	connect(lat_edit, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &GeoreferencingDialog::latLonEdited);
 	connect(lon_edit, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &GeoreferencingDialog::latLonEdited);
 	connect(keep_geographic_radio, &QRadioButton::toggled, this, &GeoreferencingDialog::keepCoordsChanged);
+
+	connect(frame_combo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &GeoreferencingDialog::frameEdited);
+	connect(epoch_edit, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &GeoreferencingDialog::frameEdited);
 	
 	connect(declination_edit, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &GeoreferencingDialog::declinationEdited);
 	connect(declination_button, &QPushButton::clicked, this, &GeoreferencingDialog::requestDeclination);
@@ -366,8 +384,13 @@ void GeoreferencingDialog::projectionChanged()
 {
 	ScopedMultiSignalsBlocker block(
 	            crs_selector,
-	            lat_edit, lon_edit
+	            lat_edit, lon_edit,
+	            frame_combo, epoch_edit
 	);
+
+	frame_combo->setCurrentIndex(qMax(0, frame_combo->findData(georef->getGeographicFrame())));
+	if (georef->getCoordinateEpoch() > 0)
+		epoch_edit->setValue(georef->getCoordinateEpoch());
 	
 	if (georef->getState() == Georeferencing::Geospatial)
 	{
@@ -605,6 +628,10 @@ void GeoreferencingDialog::updateWidgets()
 	status_field->setVisible(geographic_coords_enabled);
 	lat_edit->setEnabled(geographic_coords_enabled);
 	lon_edit->setEnabled(geographic_coords_enabled);
+	bool itrf_frame = !frame_combo->currentData().toString().isEmpty();
+	frame_combo->setEnabled(geographic_coords_enabled);
+	epoch_edit->setEnabled(geographic_coords_enabled && itrf_frame);
+	geographic_datum_label->setText(itrf_frame ? tr("(Datum: ITRF2014)") : tr("(Datum: WGS84)"));
 	show_refpoint_label->setEnabled(geographic_coords_enabled);
 	//keep_geographic_radio->setEnabled(geographic_coords_enabled);
 	
@@ -736,6 +763,30 @@ void GeoreferencingDialog::latLonEdited()
 	georef->setGeographicRefPoint(LatLon(latitude, longitude), !grivation_locked, !scale_factor_locked);
 	keep_geographic_radio->setChecked(true);
 	reset_button->setEnabled(true);
+}
+
+void GeoreferencingDialog::frameEdited()
+{
+	auto const frame_id = frame_combo->currentData().toString();
+	auto const epoch = frame_id.isEmpty() ? 0.0 : epoch_edit->value();
+	if (georef->getGeographicFrame() == frame_id && georef->getCoordinateEpoch() == epoch)
+		return;
+
+	Georeferencing georef_copy = *georef;
+	georef_copy.setGeographicFrame(frame_id, epoch);
+	if (georef_copy.getState() == Georeferencing::Geospatial)
+	{
+		// The frame change alters the projection, leaving the reference point's
+		// geographic and projected coordinates inconsistent. Reconcile them
+		// according to the user's keep-coordinates choice, like crsEdited().
+		if (keep_geographic_radio->isChecked())
+			georef_copy.setGeographicRefPoint(georef->getGeographicRefPoint(), !grivation_locked, !scale_factor_locked);
+		else
+			georef_copy.setProjectedRefPoint(georef->getProjectedRefPoint(), !grivation_locked, !scale_factor_locked);
+	}
+	*georef = georef_copy;
+	reset_button->setEnabled(true);
+	updateWidgets();
 }
 
 void GeoreferencingDialog::keepCoordsChanged()

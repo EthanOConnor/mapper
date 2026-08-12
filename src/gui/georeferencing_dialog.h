@@ -34,6 +34,7 @@
 class QAction;
 class QCursor;
 class QCheckBox;
+class QComboBox;
 class QDialogButtonBox;
 class QDoubleSpinBox;
 class QLabel;
@@ -236,6 +237,11 @@ protected:
 	 * Notifies the dialog of a change in the latitude / longitude fields.
 	 */
 	void latLonEdited();
+
+	/**
+	 * Notifies the dialog of a change in the geographic frame / epoch fields.
+	 */
+	void frameEdited();
 	
 	/** 
 	 * Notifies the dialog of a change in the declination field.
@@ -279,6 +285,9 @@ private:
 	
 	QDoubleSpinBox* lat_edit;
 	QDoubleSpinBox* lon_edit;
+	QLabel* geographic_datum_label;
+	QComboBox* frame_combo;
+	QDoubleSpinBox* epoch_edit;
 	QLabel* show_refpoint_label;
 	QLabel* link_label;
 	

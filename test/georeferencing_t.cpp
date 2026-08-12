@@ -21,14 +21,19 @@
 
 #include <cmath>
 #include <cstddef>
+#include <vector>
 
 #include <QtMath>
 #include <QtTest>
+#include <QBuffer>
 #include <QByteArray>
+#include <QIODevice>
 #include <QLineF>
 #include <QPoint>
 #include <QPointF>
 #include <QVariant>
+#include <QXmlStreamReader>
+#include <QXmlStreamWriter>
 
 #include <geodesic.h>
 #ifndef ACCEPT_USE_OF_DEPRECATED_PROJ_API_H
@@ -578,6 +583,97 @@ void GeoreferencingTest::testUTMZoneCalculation_data()
 	QTest::newRow("Svalbard6") << 72.0 << 32.99 << QStringLiteral("35 N");
 	QTest::newRow("Svalbard7") << 72.0 << 33.0 << QStringLiteral("37 N");
 	QTest::newRow("Svalbard8") << 72.0 << 39.0 << QStringLiteral("37 N");
+}
+
+void GeoreferencingTest::testGeographicFrame()
+{
+#ifdef ACCEPT_USE_OF_DEPRECATED_PROJ_API_H
+	QSKIP("Geographic frames are not supported with the deprecated PROJ API");
+#else
+	// NAD83(2011) / Washington North (meters), as produced by the EPSG CRS template.
+	auto const epsg_id = QStringLiteral("EPSG");
+	auto const wa_north_spec = QStringLiteral("+init=epsg:6596");
+	auto const wa_north_params = std::vector<QString>{ QStringLiteral("6596") };
+	// EarthScope NTRIP streams: ITRF2014, NOTA coordinate epoch 2026-03-30.
+	auto const itrf_epoch = 2026.245;
+	auto const test_point = LatLon { 47.5886, -122.232 };  // Mercer Island, WA
+
+	Georeferencing legacy_georef;
+	QVERIFY(legacy_georef.setProjectedCRS(epsg_id, wa_north_spec, wa_north_params));
+	QCOMPARE(legacy_georef.getState(), Georeferencing::Geospatial);
+	QVERIFY(legacy_georef.getGeographicFrame().isEmpty());
+
+	bool ok = false;
+	auto const legacy_projected = legacy_georef.toProjectedCoords(test_point, &ok);
+	QVERIFY(ok);
+
+	Georeferencing itrf_georef;
+	QVERIFY(itrf_georef.setProjectedCRS(epsg_id, wa_north_spec, wa_north_params));
+	itrf_georef.setGeographicFrame(Georeferencing::itrf2014_frame_id, itrf_epoch);
+	QCOMPARE(itrf_georef.getState(), Georeferencing::Geospatial);
+	QCOMPARE(itrf_georef.getGeographicFrame(), Georeferencing::itrf2014_frame_id);
+	QCOMPARE(itrf_georef.getCoordinateEpoch(), itrf_epoch);
+
+	auto const itrf_projected = itrf_georef.toProjectedCoords(test_point, &ok);
+	QVERIFY(ok);
+	// Ground truth from cs2cs (PROJ 9.8.1), i.e. the EPSG time-dependent
+	// Helmert transformation "ITRF2014 to NAD83(2011) (1)" evaluated at the
+	// coordinate epoch: EPSG:9000 -> EPSG:6596 at 2026.245.
+	QVERIFY2(std::fabs(itrf_projected.x() - 394805.8635) < 0.05, QByteArray::number(itrf_projected.x(), 'f', 4).constData());
+	QVERIFY2(std::fabs(itrf_projected.y() - 66397.4514) < 0.05, QByteArray::number(itrf_projected.y(), 'f', 4).constData());
+
+	// The legacy WGS84 ensemble interpretation must not resolve to the same
+	// operation: depending on the PROJ database it yields a null datum shift
+	// or a third-party fixed-epoch variant, decimeters to meters away.
+	auto const shift = QLineF { legacy_projected, itrf_projected }.length();
+	QVERIFY2(shift > 0.2 && shift < 2.5, QByteArray::number(shift).constData());
+
+	// The inverse transformation must round-trip.
+	auto const round_trip = itrf_georef.toGeographicCoords(itrf_projected, &ok);
+	QVERIFY(ok);
+	QVERIFY(std::fabs(round_trip.latitude() - test_point.latitude()) < 1e-9);
+	QVERIFY(std::fabs(round_trip.longitude() - test_point.longitude()) < 1e-9);
+
+	// The transformation must be sensitive to the coordinate epoch:
+	// plate motion accumulates a decimeter-scale difference over 16 years.
+	Georeferencing itrf_2010_georef;
+	QVERIFY(itrf_2010_georef.setProjectedCRS(epsg_id, wa_north_spec, wa_north_params));
+	itrf_2010_georef.setGeographicFrame(Georeferencing::itrf2014_frame_id, 2010.0);
+	auto const itrf_2010_projected = itrf_2010_georef.toProjectedCoords(test_point, &ok);
+	QVERIFY(ok);
+	auto const epoch_shift = QLineF { itrf_projected, itrf_2010_projected }.length();
+	QVERIFY2(epoch_shift > 0.05 && epoch_shift < 1.0, QByteArray::number(epoch_shift).constData());
+
+	// Copying must preserve frame, epoch, and transformation.
+	Georeferencing copied_georef { itrf_georef };
+	QCOMPARE(copied_georef.getGeographicFrame(), Georeferencing::itrf2014_frame_id);
+	QCOMPARE(copied_georef.getCoordinateEpoch(), itrf_epoch);
+	auto const copied_projected = copied_georef.toProjectedCoords(test_point, &ok);
+	QVERIFY(ok);
+	QVERIFY(QLineF(copied_projected, itrf_projected).length() < 0.001);
+
+	// Saving and loading must preserve frame, epoch, and transformation.
+	QBuffer buffer;
+	QVERIFY(buffer.open(QIODevice::ReadWrite));
+	{
+		QXmlStreamWriter xml { &buffer };
+		xml.writeStartDocument();
+		itrf_georef.save(xml);
+		xml.writeEndDocument();
+	}
+	QVERIFY(buffer.seek(0));
+	Georeferencing loaded_georef;
+	{
+		QXmlStreamReader xml { &buffer };
+		QVERIFY(xml.readNextStartElement());
+		loaded_georef.load(xml, false);
+	}
+	QCOMPARE(loaded_georef.getGeographicFrame(), Georeferencing::itrf2014_frame_id);
+	QCOMPARE(loaded_georef.getCoordinateEpoch(), itrf_epoch);
+	auto const loaded_projected = loaded_georef.toProjectedCoords(test_point, &ok);
+	QVERIFY(ok);
+	QVERIFY(QLineF(loaded_projected, itrf_projected).length() < 0.001);
+#endif  // !ACCEPT_USE_OF_DEPRECATED_PROJ_API_H
 }
 
 void GeoreferencingTest::testUTMZoneCalculation()

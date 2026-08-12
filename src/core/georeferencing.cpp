@@ -35,6 +35,7 @@
 #include <QLatin1String>
 #include <QLocale>
 #include <QPoint>
+#include <QRegularExpression>
 #include <QSignalBlocker>
 #include <QStandardPaths> // IWYU pragma: keep
 #include <QStringView>
@@ -88,6 +89,9 @@ namespace literal
 	
 	static const QLatin1String proj_4("PROJ.4");
 	static const QLatin1String geographic_coordinates("Geographic coordinates");
+
+	static const QLatin1String frame("frame");
+	static const QLatin1String epoch("epoch");
 }
 
 
@@ -246,8 +250,21 @@ namespace
 	                         " +no_defs"
 	    },
 	};
-	
-	
+
+
+	/**
+	 * Returns the PROJ specification of the geographic CRS for a frame id.
+	 *
+	 * An empty frame id selects the legacy WGS84 ensemble specification.
+	 */
+	QString geographicCrsSpecForFrame(const QString& frame_id)
+	{
+		if (frame_id == Georeferencing::itrf2014_frame_id)
+			return QStringLiteral("EPSG:9000");  // ITRF2014 geographic 2D
+		return Georeferencing::geographic_crs_spec;
+	}
+
+
 }  // namespace
 
 
@@ -270,9 +287,16 @@ ProjTransform::ProjTransform(const QString& crs_spec)
 	auto spec_latin1 = crs_spec.toLatin1();
 	if (!spec_latin1.contains("+no_defs"))
 		spec_latin1.append(" +no_defs");
-	
+
 	*pj_get_errno_ref() = 0;
 	pj = pj_init_plus(spec_latin1);
+}
+
+ProjTransform::ProjTransform(const QString& crs_spec, const QString& /*geographic_crs_spec*/, double /*coordinate_epoch*/)
+: ProjTransform(crs_spec)
+{
+	// The deprecated PROJ API supports neither specific geographic frames
+	// nor coordinate epochs.
 }
 
 ProjTransform::~ProjTransform()
@@ -284,6 +308,7 @@ ProjTransform::~ProjTransform()
 ProjTransform& ProjTransform::operator=(ProjTransform&& other) noexcept
 {
 	std::swap(pj, other.pj);
+	std::swap(coordinate_epoch, other.coordinate_epoch);
 	return *this;
 }
 
@@ -376,9 +401,9 @@ ProjTransform::ProjTransform(const QString& crs_spec)
 {
 	if (crs_spec.isEmpty())
 		return;
-	
+
 	static auto const geographic_crs_spec_utf8 = Georeferencing::geographic_crs_spec.toUtf8();
-	
+
 	auto crs_spec_utf8 = crs_spec.toUtf8();
 #ifdef PROJ_ISSUE_1573
 	// Cf. https://github.com/OSGeo/PROJ/pull/1573
@@ -396,6 +421,42 @@ ProjTransform::ProjTransform(const QString& crs_spec)
 		operator=({proj_normalize_for_visualization(PJ_DEFAULT_CTX, pj)});
 }
 
+ProjTransform::ProjTransform(const QString& crs_spec, const QString& geographic_crs_spec, double coordinate_epoch)
+: coordinate_epoch{coordinate_epoch}
+{
+	if (crs_spec.isEmpty())
+		return;
+
+	auto crs_spec_utf8 = crs_spec.toUtf8();
+#ifdef PROJ_ISSUE_1573
+	// Cf. https://github.com/OSGeo/PROJ/pull/1573
+	crs_spec_utf8.replace("+datum=potsdam", "+ellps=bessel +nadgrids=@BETA2007.gsb");
+#endif
+#if defined(ACCEPT_USE_OF_DEPRECATED_PROJ_API_H) || (PROJ_VERSION_MAJOR) < 8
+	static auto const geographic_crs_spec_utf8 = Georeferencing::geographic_crs_spec.toUtf8();
+	auto const source_crs_utf8 = geographic_crs_spec.isEmpty() ? geographic_crs_spec_utf8 : geographic_crs_spec.toUtf8();
+	pj = proj_create_crs_to_crs(PJ_DEFAULT_CTX, source_crs_utf8, crs_spec_utf8, nullptr);
+#else
+	static auto const default_geographic_crs = crs(Georeferencing::geographic_crs_spec);
+	auto const source_crs = geographic_crs_spec.isEmpty() ? ProjTransform{} : crs(geographic_crs_spec);
+	auto const projected_crs = crs(crs_spec);
+	// With a specific geographic frame, rely on the default authority policy:
+	// AUTHORITY=any may select third-party variants of datum transformations
+	// (e.g. ESRI operations fixed to a reference epoch) which silently ignore
+	// the coordinate epoch.
+	static const char* const any_authority_options[] = {"AUTHORITY=any", nullptr};
+	auto const* options = geographic_crs_spec.isEmpty() ? any_authority_options : nullptr;
+	pj = proj_create_crs_to_crs_from_pj(PJ_DEFAULT_CTX,
+	                                    source_crs.isValid() ? source_crs.pj : default_geographic_crs.pj,
+	                                    projected_crs.pj, nullptr, options);
+#endif
+	if (pj)
+	{
+		auto normalized = ProjTransform{proj_normalize_for_visualization(PJ_DEFAULT_CTX, pj)};
+		std::swap(pj, normalized.pj);
+	}
+}
+
 ProjTransform::~ProjTransform()
 {
 	if (pj)
@@ -405,6 +466,7 @@ ProjTransform::~ProjTransform()
 ProjTransform& ProjTransform::operator=(ProjTransform&& other) noexcept
 {
 	std::swap(pj, other.pj);
+	std::swap(coordinate_epoch, other.coordinate_epoch);
 	return *this;
 }
 
@@ -451,8 +513,9 @@ bool ProjTransform::isGeographic() const
 
 QPointF ProjTransform::forward(const LatLon& lat_lon, bool* ok) const
 {
+	auto const t = coordinate_epoch > 0 ? coordinate_epoch : HUGE_VAL;
 	proj_errno_reset(pj);
-	auto pj_coord = proj_trans(pj, PJ_FWD, proj_coord(lat_lon.longitude(), lat_lon.latitude(), 0, HUGE_VAL));
+	auto pj_coord = proj_trans(pj, PJ_FWD, proj_coord(lat_lon.longitude(), lat_lon.latitude(), 0, t));
 	if (ok)
 		*ok = proj_errno(pj) == 0;
 	return {pj_coord.xy.x, pj_coord.xy.y};
@@ -460,8 +523,9 @@ QPointF ProjTransform::forward(const LatLon& lat_lon, bool* ok) const
 
 LatLon ProjTransform::inverse(const QPointF& projected_coords, bool* ok) const
 {
+	auto const t = coordinate_epoch > 0 ? coordinate_epoch : HUGE_VAL;
 	proj_errno_reset(pj);
-	auto pj_coord = proj_trans(pj, PJ_INV, proj_coord(projected_coords.x(), projected_coords.y(), 0, HUGE_VAL));
+	auto pj_coord = proj_trans(pj, PJ_INV, proj_coord(projected_coords.x(), projected_coords.y(), 0, t));
 	if (ok)
 		*ok = proj_errno(pj) == 0;
 	return {pj_coord.lp.phi, pj_coord.lp.lam};
@@ -480,6 +544,8 @@ QString ProjTransform::errorText() const
 //### Georeferencing ###
 
 const QString Georeferencing::geographic_crs_spec(QString::fromLatin1("+proj=latlong +datum=WGS84"));
+
+const QString Georeferencing::itrf2014_frame_id(QString::fromLatin1("ITRF2014"));
 
 Georeferencing::Georeferencing()
 : state(Local),
@@ -517,7 +583,9 @@ Georeferencing::Georeferencing(const Georeferencing& other)
   projected_crs_id(other.projected_crs_id),
   projected_crs_spec(other.projected_crs_spec),
   projected_crs_parameters(other.projected_crs_parameters),
-  proj_transform(projected_crs_spec),
+  geographic_frame(other.geographic_frame),
+  coordinate_epoch(other.coordinate_epoch),
+  proj_transform(makeProjTransform()),
   geographic_ref_point(other.geographic_ref_point)
 {
 	updateTransformation();
@@ -546,7 +614,9 @@ Georeferencing& Georeferencing::operator=(const Georeferencing& other)
 	projected_crs_id         = other.projected_crs_id;
 	projected_crs_spec       = other.projected_crs_spec;
 	projected_crs_parameters = other.projected_crs_parameters;
-	proj_transform           = ProjTransform(other.projected_crs_spec);
+	geographic_frame         = other.geographic_frame;
+	coordinate_epoch         = other.coordinate_epoch;
+	proj_transform           = makeProjTransform();
 	geographic_ref_point     = other.geographic_ref_point;
 	
 	emit stateChanged();
@@ -651,6 +721,11 @@ void Georeferencing::load(QXmlStreamReader& xml, bool load_scale_only)
 			}
 			else if (xml.name() == literal::geographic_crs)
 			{
+				XmlElementReader geographic_crs_element(xml);
+				if (geographic_crs_element.hasAttribute(literal::frame))
+					geographic_frame = geographic_crs_element.attribute<QString>(literal::frame);
+				if (geographic_crs_element.hasAttribute(literal::epoch))
+					coordinate_epoch = geographic_crs_element.attribute<double>(literal::epoch);
 				while (xml.readNextStartElement())
 				{
 					XmlElementReader current_element(xml);
@@ -695,7 +770,7 @@ void Georeferencing::load(QXmlStreamReader& xml, bool load_scale_only)
 	emit declinationChanged();
 	if (!projected_crs_spec.isEmpty())
 	{
-		proj_transform = {projected_crs_spec};
+		proj_transform = makeProjTransform();
 		state = proj_transform.isValid() ? Geospatial : BrokenGeospatial;
 		updateGridCompensation();
 		if (!georef_element.hasAttribute(literal::auxiliary_scale_factor))
@@ -767,6 +842,13 @@ void Georeferencing::save(QXmlStreamWriter& xml) const
 	{
 		XmlElementWriter crs_element(xml, literal::geographic_crs);
 		crs_element.writeAttribute(literal::id, literal::geographic_coordinates);
+		// The spec element below remains the legacy WGS84 specification so that
+		// older versions can still load the file. The frame and epoch attributes
+		// refine the interpretation of geographic coordinates.
+		if (!geographic_frame.isEmpty())
+			crs_element.writeAttribute(literal::frame, geographic_frame);
+		if (coordinate_epoch > 0)
+			crs_element.writeAttribute(literal::epoch, coordinate_epoch, 3);
 		{
 			XmlElementWriter spec_element(xml, literal::spec);
 			spec_element.writeAttribute(literal::language, literal::proj_4);
@@ -1094,6 +1176,42 @@ const QTransform& Georeferencing::projectedToMap() const
 
 
 
+ProjTransform Georeferencing::makeProjTransform() const
+{
+	if (geographic_frame.isEmpty())
+		return ProjTransform{projected_crs_spec};
+
+	auto spec = projected_crs_spec;
+	{
+		// With PROJ.4 init rules, "+init=epsg:..." resolves to a CRS bound to
+		// WGS84, typically via a low-accuracy (often null) datum shift which
+		// would short-circuit the accurate transformation from the geographic
+		// frame. Use the authority code directly instead.
+		static const QRegularExpression init_epsg(QStringLiteral("^\\s*\\+init=epsg:(\\d+)\\s*$"));
+		const auto match = init_epsg.match(spec);
+		if (match.hasMatch())
+			spec = QLatin1String("EPSG:") + match.captured(1);
+	}
+	return {spec, geographicCrsSpecForFrame(geographic_frame), coordinate_epoch};
+}
+
+void Georeferencing::setGeographicFrame(const QString& frame_id, double epoch)
+{
+	if (geographic_frame == frame_id && coordinate_epoch == epoch)
+		return;
+
+	geographic_frame = frame_id;
+	coordinate_epoch = epoch;
+	if (!projected_crs_spec.isEmpty())
+	{
+		proj_transform = makeProjTransform();
+		setState(proj_transform.isValid() ? Geospatial : BrokenGeospatial);
+		if (getState() == Geospatial)
+			updateGridCompensation();
+	}
+	emit projectionChanged();
+}
+
 bool Georeferencing::setProjectedCRS(const QString& id, QString spec, std::vector<QString> params)
 {
 	// Default return value if no change is necessary
@@ -1128,7 +1246,7 @@ bool Georeferencing::setProjectedCRS(const QString& id, QString spec, std::vecto
 		else
 		{
 			projected_crs_parameters.swap(params); // params was passed by value!
-			proj_transform = {projected_crs_spec};
+			proj_transform = makeProjTransform();
 			ok = proj_transform.isValid();
 			if (ok)
 				setState(Geospatial);

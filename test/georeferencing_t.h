@@ -85,6 +85,12 @@ private slots:
 #endif
 	
 	/**
+	 * Tests geographic frame and coordinate epoch support (ITRF2014 vs. the
+	 * legacy WGS84 ensemble interpretation of geographic coordinates).
+	 */
+	void testGeographicFrame();
+
+	/**
 	 * Tests the determination of the UTM zone from the given latitude and longitude.
 	 */
 	void testUTMZoneCalculation();
