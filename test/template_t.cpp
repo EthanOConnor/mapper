@@ -487,6 +487,40 @@ private slots:
 		                      .arg(max_center_error, 0, 'g', 8)));
 	}
 	
+	void templateTrackDisplayModeTest()
+	{
+#ifdef MAPPER_USE_GDAL
+		GdalManager().setFormatEnabled(GdalManager::GPX, false);
+#endif
+
+		auto const map_file = QStringLiteral("testdata:templates/template-track.xmap");
+
+		Map map;
+		MapView view{ &map };
+		QVERIFY(map.loadFrom(map_file, &view));
+		auto* const original = qobject_cast<TemplateTrack*>(map.getTemplate(0));
+		QVERIFY(original);
+
+		// The traditional appearance is the default, and stays out of the file.
+		QCOMPARE(original->getTrackDisplayMode(), TemplateTrack::TrackDisplayMode::Classic);
+
+		original->setTrackDisplayMode(TemplateTrack::TrackDisplayMode::FixAware);
+
+		QBuffer buffer;
+		QVERIFY(buffer.open(QIODevice::WriteOnly));
+		QVERIFY(map.exportToIODevice(buffer));
+		buffer.close();
+
+		Map restored;
+		QVERIFY(buffer.open(QIODevice::ReadOnly));
+		QVERIFY(restored.importFromIODevice(buffer));
+		buffer.close();
+
+		auto const* const reloaded = qobject_cast<const TemplateTrack*>(restored.getTemplate(0));
+		QVERIFY(reloaded);
+		QCOMPARE(reloaded->getTrackDisplayMode(), TemplateTrack::TrackDisplayMode::FixAware);
+	}
+
 #ifdef MAPPER_USE_GDAL
 	void ogrTemplateTest_data()
 	{

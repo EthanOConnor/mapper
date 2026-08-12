@@ -52,6 +52,7 @@
 #include <QLatin1String>
 #include <QList>
 #include <QLocale>
+#include <QActionGroup>
 #include <QMenu>
 #include <QMessageBox>
 #include <QModelIndex>
@@ -301,6 +302,22 @@ TemplateListWidget::TemplateListWidget(Map& map, MapView& main_view, MapEditorCo
 	georef_action->setCheckable(true);
 	position_action = edit_menu->addAction(tr("Positioning..."));
 	position_action->setCheckable(true);
+	track_display_menu = edit_menu->addMenu(tr("Track display"));
+	track_display_group = new QActionGroup(track_display_menu);
+	auto* const classic_action = track_display_menu->addAction(tr("Uniform line"));
+	classic_action->setData(int(TemplateTrack::TrackDisplayMode::Classic));
+	auto* const band_action = track_display_menu->addAction(tr("Accuracy band"));
+	band_action->setData(int(TemplateTrack::TrackDisplayMode::AccuracyBand));
+	auto* const fix_action = track_display_menu->addAction(tr("Accuracy band and fix mode"));
+	fix_action->setData(int(TemplateTrack::TrackDisplayMode::FixAware));
+	for (auto* action : { classic_action, band_action, fix_action })
+	{
+		action->setCheckable(true);
+		track_display_group->addAction(action);
+	}
+	connect(track_display_group, &QActionGroup::triggered,
+	        this, &TemplateListWidget::changeTrackDisplayClicked);
+
 	edit_menu->addSeparator();
 	import_action =  edit_menu->addAction(tr("Import and remove"), this, &TemplateListWidget::importClicked);
 	
@@ -527,6 +544,16 @@ void TemplateListWidget::updateButtons()
 		import_action->setEnabled(import_enabled);
 		if (vectorize_action)
 			vectorize_action->setEnabled(vectorize_enabled);
+
+		auto* const track = qobject_cast<TemplateTrack*>(temp);
+		auto const track_display_enabled = track && track->hasGnssQualityData();
+		track_display_menu->menuAction()->setEnabled(track_display_enabled);
+		if (track_display_enabled)
+		{
+			auto const mode = int(track->getTrackDisplayMode());
+			for (auto* action : track_display_group->actions())
+				action->setChecked(action->data().toInt() == mode);
+		}
 	}
 	
 	// Not strictly related to buttons, but exactly the same triggers.
@@ -1234,6 +1261,22 @@ void TemplateListWidget::importClicked()
 		map_visibility.visible = true;
 	}
 }
+
+void TemplateListWidget::changeTrackDisplayClicked(QAction* action)
+{
+	auto* const track = qobject_cast<TemplateTrack*>(currentTemplate());
+	if (!track || !action)
+		return;
+
+	auto const mode = TemplateTrack::TrackDisplayMode(action->data().toInt());
+	if (mode == track->getTrackDisplayMode())
+		return;
+
+	track->setTrackDisplayMode(mode);
+	map.emitTemplateChanged(track);
+	map.setTemplatesDirty();
+}
+
 
 void TemplateListWidget::changeGeorefClicked()
 {

@@ -21,6 +21,9 @@
 
 #include "template_track.h"
 
+#include <algorithm>
+#include <array>
+#include <cmath>
 #include <utility>
 
 #include <Qt>
@@ -63,6 +66,87 @@ namespace OpenOrienteering {
 class Symbol;
 
 namespace {
+
+/// Ground half-widths (m) which accuracy values are grouped into for drawing.
+const std::array<double, 9> accuracy_buckets = { 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 25.0 };
+
+/// Bounds on the drawn band, so that neither an RTK fix disappears nor a lost
+/// fix paints over half the map.
+constexpr auto min_band_meters = 0.25;
+constexpr auto max_band_meters = 25.0;
+
+/// Opacity is band_ink/width, bounded to stay both visible and unobtrusive.
+constexpr auto band_ink = 0.25;
+constexpr auto min_band_alpha = 0.04;
+constexpr auto max_band_alpha = 0.5;
+
+/// Neutral grey: the band carries no hue of its own, leaving colour to the map.
+const QColor band_base_color = QColor(40, 40, 40);
+
+/**
+ * Returns the accuracy bucket index for a horizontal accuracy in meters,
+ * or -1 if the accuracy is unknown.
+ */
+int accuracyBucket(float h_accuracy)
+{
+	if (!(h_accuracy > 0))  // false for NaN
+		return -1;
+	for (std::size_t i = 0; i < accuracy_buckets.size(); ++i)
+	{
+		if (double(h_accuracy) <= accuracy_buckets[i])
+			return int(i);
+	}
+	return int(accuracy_buckets.size()) - 1;
+}
+
+/// Serialized names of the track display modes.
+QString displayModeName(TemplateTrack::TrackDisplayMode mode)
+{
+	switch (mode)
+	{
+	case TemplateTrack::TrackDisplayMode::AccuracyBand:
+		return QString::fromLatin1("accuracy_band");
+	case TemplateTrack::TrackDisplayMode::FixAware:
+		return QString::fromLatin1("fix_aware");
+	case TemplateTrack::TrackDisplayMode::Classic:
+		break;
+	}
+	return QString::fromLatin1("classic");
+}
+
+TemplateTrack::TrackDisplayMode displayModeFromName(QStringView name)
+{
+	if (name == QLatin1String("accuracy_band"))
+		return TemplateTrack::TrackDisplayMode::AccuracyBand;
+	if (name == QLatin1String("fix_aware"))
+		return TemplateTrack::TrackDisplayMode::FixAware;
+	return TemplateTrack::TrackDisplayMode::Classic;
+}
+
+/**
+ * Returns the centre line dash pattern which represents a GNSS fix mode.
+ *
+ * Solid means an RTK fixed solution, dashed a float solution, dotted an
+ * ordinary or differential 3D fix. Anything less trustworthy is drawn solid,
+ * like a track without recorded quality data.
+ */
+std::vector<double> dashPatternForFix(TrackFixType fix, double width)
+{
+	switch (fix)
+	{
+	case TrackFixType::RtkFloat:
+		return { 4 * width, 3 * width };
+	case TrackFixType::DGPS:
+	case TrackFixType::Fix3D:
+		return { width, 2 * width };
+	case TrackFixType::RtkFixed:
+	case TrackFixType::Fix2D:
+	case TrackFixType::None:
+	case TrackFixType::Unknown:
+		break;
+	}
+	return {};
+}
 
 const MapColor& makeTrackColor(Map& map)
 {
@@ -188,6 +272,30 @@ TemplateTrack* TemplateTrack::duplicate() const
 
 
 
+void TemplateTrack::setTrackDisplayMode(TrackDisplayMode mode)
+{
+	// The mode belongs to the template configuration in the map file, not to
+	// the track file, so it must not mark the template file as modified.
+	display_mode = mode;
+}
+
+
+bool TemplateTrack::hasGnssQualityData() const
+{
+	for (int segment = 0; segment < track.getNumSegments(); ++segment)
+	{
+		auto const count = track.getSegmentPointCount(segment);
+		for (int i = 0; i < count; ++i)
+		{
+			auto const& point = track.getSegmentPoint(segment, i);
+			if (point.hAccuracy > 0 || point.fixType != TrackFixType::Unknown)
+				return true;
+		}
+	}
+	return false;
+}
+
+
 void TemplateTrack::saveTypeSpecificTemplateConfiguration(QXmlStreamWriter& xml) const
 {
 	if (preserved_georef)
@@ -196,7 +304,14 @@ void TemplateTrack::saveTypeSpecificTemplateConfiguration(QXmlStreamWriter& xml)
 		preserved_georef->save(xml);
 		return;
 	}
-	
+
+	if (display_mode != TrackDisplayMode::Classic)
+	{
+		xml.writeStartElement(QString::fromLatin1("display"));
+		xml.writeAttribute(QString::fromLatin1("mode"), displayModeName(display_mode));
+		xml.writeEndElement(/*display*/);
+	}
+
 	// Follow map georeferencing XML structure
 	xml.writeStartElement(QString::fromLatin1("crs_spec"));
 	xml.writeCharacters(track_crs_spec);
@@ -216,6 +331,11 @@ bool TemplateTrack::loadTypeSpecificTemplateConfiguration(QXmlStreamReader& xml)
 	if (xml.name() == QLatin1String("crs_spec"))
 	{
 		track_crs_spec = xml.readElementText();
+	}
+	else if (xml.name() == QLatin1String("display"))
+	{
+		display_mode = displayModeFromName(xml.attributes().value(QLatin1String("mode")));
+		xml.skipCurrentElement();
 	}
 	else if (xml.name() == QLatin1String("projected_crs_spec"))
 	{
@@ -347,6 +467,7 @@ std::shared_ptr<const render::RenderIR> TemplateTrack::buildRenderIR(
 	render::Revision revision) const
 {
 	render::RenderIRBuilder builder(revision);
+	auto coord_scale = 1.0;
 	if (!is_georeferenced)
 	{
 		auto const origin = templateToMap(QPointF(0, 0));
@@ -357,25 +478,111 @@ std::shared_ptr<const render::RenderIR> TemplateTrack::buildRenderIR(
 			y_axis.x() - origin.x(), y_axis.y() - origin.y(),
 			origin.x(), origin.y(),
 		});
+		coord_scale = std::hypot(x_axis.x() - origin.x(), x_axis.y() - origin.y());
+		if (!(coord_scale > 0))
+			coord_scale = 1.0;
 	}
 
 	auto const track_width = on_screen ? 1.0 / std::max(view_scale, 1.0e-9) : 0.1;
-	for (int segment = 0; segment < track.getNumSegments(); ++segment)
-	{
+	auto const track_color = QColor(212, 0, 244);
+
+	// Ground meters per drawing unit. Map coordinates are millimetres at map
+	// scale; when the track is not georeferenced, the pushed transform scales
+	// them again, and accuracy widths have to be divided by that factor to end
+	// up the intended size on the map.
+	auto const scale_denominator = map ? double(map->getScaleDenominator()) : 0.0;
+	auto const drawing_units_per_meter = scale_denominator > 0
+	                                     ? 1000.0 / scale_denominator / coord_scale
+	                                     : 0.0;
+	auto const quality_mode = display_mode != TrackDisplayMode::Classic
+	                          && drawing_units_per_meter > 0
+	                          && hasGnssQualityData();
+
+	auto const stroke_run = [this, &builder](int segment, int from, int to,
+	                                         double width, const QColor& color,
+	                                         std::vector<double> dash_pattern) {
 		render::PathBuilder path;
-		for (int point_index = 0; point_index < track.getSegmentPointCount(segment); ++point_index)
+		for (int i = from; i <= to; ++i)
 		{
-			auto const& point = track.getSegmentPoint(segment, point_index);
-			if (point_index == 0)
+			auto const& point = track.getSegmentPoint(segment, i);
+			if (i == from)
 				path.moveTo({ point.map_coord.x(), point.map_coord.y() });
 			else
 				path.lineTo({ point.map_coord.x(), point.map_coord.y() });
 		}
 		auto stroke = render::StrokeStyle{};
-		stroke.width = track_width;
-		builder.strokePath(path.finish(), render::fromQColor(QColor(212, 0, 244)),
+		stroke.width = width;
+		stroke.cap = render::LineCap::Round;
+		stroke.join = render::LineJoin::Round;
+		stroke.dash_pattern = std::move(dash_pattern);
+		builder.strokePath(path.finish(), render::fromQColor(color),
 		                   std::move(stroke),
 		                   render::QualityHint::ForceAntialiasing);
+	};
+
+	// Groups consecutive points sharing a key into runs, so that the number of
+	// paths follows the number of quality changes rather than the sample rate.
+	auto const for_each_run = [this](int segment, auto key, auto apply_run) {
+		auto const count = track.getSegmentPointCount(segment);
+		if (count < 2)
+			return;
+		auto run_start = 0;
+		auto run_key = key(track.getSegmentPoint(segment, 0));
+		for (int i = 1; i < count; ++i)
+		{
+			auto const point_key = key(track.getSegmentPoint(segment, i));
+			if (point_key != run_key)
+			{
+				apply_run(run_start, i, run_key);
+				run_start = i;
+				run_key = point_key;
+			}
+		}
+		apply_run(run_start, count - 1, run_key);
+	};
+
+	for (int segment = 0; segment < track.getNumSegments(); ++segment)
+	{
+		if (quality_mode)
+		{
+			// The band is the recorded confidence region: its ground width is
+			// twice the horizontal accuracy. Opacity is inversely proportional
+			// to the width so that a segment's total ink stays roughly constant
+			// - a sloppy fix reads as a wide faint smear, an exact one as a
+			// crisp line, without introducing a second colour to the map.
+			for_each_run(segment,
+			             [](const TrackPoint& point) { return accuracyBucket(point.hAccuracy); },
+			             [&](int from, int to, int bucket) {
+				if (bucket < 0)
+					return;
+				auto const band_meters = std::clamp(2.0 * accuracy_buckets[std::size_t(bucket)],
+				                                    min_band_meters, max_band_meters);
+				auto const band_width = band_meters * drawing_units_per_meter;
+				if (band_width <= track_width)
+					return;
+				auto band_color = band_base_color;
+				band_color.setAlphaF(std::clamp(band_ink / band_meters,
+				                                min_band_alpha, max_band_alpha));
+				stroke_run(segment, from, to, band_width, band_color, {});
+			});
+		}
+
+		if (quality_mode && display_mode == TrackDisplayMode::FixAware)
+		{
+			// The fix mode rides on the centre line's dash pattern rather than
+			// on its colour, which orienteering maps have no room left for.
+			for_each_run(segment,
+			             [](const TrackPoint& point) { return point.fixType; },
+			             [&](int from, int to, TrackFixType fix) {
+				stroke_run(segment, from, to, track_width, track_color,
+				           dashPatternForFix(fix, track_width));
+			});
+		}
+		else
+		{
+			stroke_run(segment, 0, track.getSegmentPointCount(segment) - 1,
+			           track_width, track_color, {});
+		}
 	}
 
 	QFont waypoint_font;

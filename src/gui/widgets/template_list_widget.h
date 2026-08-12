@@ -32,9 +32,11 @@
 #include "core/map_view.h"
 
 class QAction;
+class QActionGroup;
 class QBoxLayout;
 class QCheckBox;
 class QEvent;
+class QMenu;
 class QModelIndex;
 class QTableView;
 class QToolButton;
@@ -134,6 +136,7 @@ protected:
 	void positionClicked(bool checked);
 	void importClicked();
 	void changeGeorefClicked();
+	void changeTrackDisplayClicked(QAction* action);
 	void moreActionClicked(QAction* action);
 	void vectorizeClicked();
 	
@@ -163,6 +166,8 @@ private:
 	QAction* position_action;
 	QAction* import_action;
 	QAction* georef_action;
+	QMenu* track_display_menu;
+	QActionGroup* track_display_group;
 	QAction* vectorize_action;
 	
 	// Buttons

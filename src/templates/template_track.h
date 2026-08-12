@@ -52,6 +52,19 @@ class TemplateTrack : public Template
 Q_OBJECT
 public:
 	/**
+	 * How recorded GNSS quality data affects drawing the track.
+	 */
+	enum class TrackDisplayMode
+	{
+		/// Uniform stroke, the traditional appearance.
+		Classic,
+		/// Horizontal-accuracy band under a thin centerline.
+		AccuracyBand,
+		/// Accuracy band plus a fix-type styled centerline.
+		FixAware,
+	};
+
+	/**
 	 * Returns the filename extensions supported by this template class.
 	 */
 	static const std::vector<QByteArray>& supportedExtensions();
@@ -99,7 +112,16 @@ public:
 	
 	/// Returns the Track data object.
 	inline Track& getTrack() {return track;}
-	
+
+	/// Returns how recorded GNSS quality data affects drawing this track.
+	TrackDisplayMode getTrackDisplayMode() const { return display_mode; }
+
+	/// Sets how recorded GNSS quality data affects drawing this track.
+	void setTrackDisplayMode(TrackDisplayMode mode);
+
+	/// Returns true if the track carries per-point accuracy or fix-type data.
+	bool hasGnssQualityData() const;
+
 public slots:
 	void updateGeoreferencing();
 	
@@ -114,6 +136,7 @@ protected:
 	
 private:
 	Track track;
+	TrackDisplayMode display_mode = TrackDisplayMode::Classic;
 	QString track_crs_spec;
 	QString projected_crs_spec;
 	friend class OgrTemplate; // for migration
