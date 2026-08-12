@@ -55,6 +55,16 @@ struct ProjTransform
 	ProjTransform(const ProjTransform&) = delete;
 	ProjTransform(ProjTransform&& other) noexcept;
 	ProjTransform(const QString& crs_spec);
+	/**
+	 * Creates a transformation from a specific geographic CRS to the given CRS.
+	 *
+	 * When geographic_crs_spec is empty, the shared default geographic CRS
+	 * (WGS84 ensemble) is used. A non-zero coordinate_epoch (a decimal year,
+	 * e.g. 2026.245) is passed to PROJ as the time coordinate, enabling
+	 * time-dependent transformations between dynamic and static frames.
+	 * With the deprecated PROJ API, both extra arguments are ignored.
+	 */
+	ProjTransform(const QString& crs_spec, const QString& geographic_crs_spec, double coordinate_epoch);
 	~ProjTransform();
 	
 	ProjTransform& operator=(const ProjTransform& other) = delete;
@@ -73,9 +83,12 @@ struct ProjTransform
 	
 private:
 	ProjTransform(ProjTransformData* pj) noexcept;
-	
+
 	ProjTransformData* pj = nullptr;
-	
+
+	/// Coordinate epoch as decimal year, or 0 when unset.
+	double coordinate_epoch = 0;
+
 };
 
 
@@ -134,6 +147,11 @@ public:
 	 * A shared PROJ specification of a WGS84 geographic CRS.
 	 */
 	static const QString geographic_crs_spec;
+
+	/**
+	 * Identifier of the ITRF2014 geographic frame, cf. setGeographicFrame().
+	 */
+	static const QString itrf2014_frame_id;
 	
 	
 	/**
@@ -439,6 +457,40 @@ public:
 	
 	
 	/**
+	 * Returns the identifier of the geographic frame, or an empty string.
+	 *
+	 * An empty string means the legacy behaviour: geographic coordinates are
+	 * treated as referring to the WGS84 datum ensemble, and PROJ may resolve
+	 * transformations to other datums with low-accuracy (ballpark) operations.
+	 */
+	QString getGeographicFrame() const { return geographic_frame; }
+
+	/**
+	 * Returns the coordinate epoch as a decimal year, or 0 when unset.
+	 */
+	double getCoordinateEpoch() const { return coordinate_epoch; }
+
+	/**
+	 * Sets the geographic frame and coordinate epoch of geographic coordinates.
+	 *
+	 * When the frame is itrf2014_frame_id, geographic coordinates (from GPX
+	 * files, GNSS receivers, etc.) are interpreted as ITRF2014 coordinates at
+	 * the given coordinate epoch (a decimal year, e.g. 2026.245). This makes
+	 * PROJ apply accurate time-dependent datum transformations to projected
+	 * CRS based on other datums (e.g. NAD83(2011) state plane), instead of
+	 * the ballpark WGS84 ensemble shortcut.
+	 *
+	 * An empty frame restores the legacy WGS84 ensemble interpretation;
+	 * the epoch should be 0 then.
+	 *
+	 * Like setProjectedCRS(), this does not touch the reference points: the
+	 * changed projection leaves their geographic and projected coordinates
+	 * inconsistent. It is up to the caller to reestablish a consistent
+	 * configuration, e.g. via setGeographicRefPoint().
+	 */
+	void setGeographicFrame(const QString& frame_id, double epoch);
+
+	/**
 	 * Returns the geographic coordinates of the reference point.
 	 */
 	LatLon getGeographicRefPoint() const;
@@ -631,6 +683,9 @@ signals:
 private:
 	void setScaleFactors(double combined_scale_factor, double auxiliary_scale_factor);
 	void setDeclinationAndGrivation(double declination, double grivation);
+
+	/// Creates the projection for the current CRS spec, frame and epoch.
+	ProjTransform makeProjTransform() const;
 	
 	State state;
 	
@@ -672,7 +727,15 @@ private:
 	QString projected_crs_id;
 	QString projected_crs_spec;
 	std::vector< QString > projected_crs_parameters;
-	
+
+	/// Geographic frame id (e.g. itrf2014_frame_id), or empty for the
+	/// legacy WGS84 ensemble interpretation. Declared before proj_transform
+	/// because the transformation is constructed from frame and epoch.
+	QString geographic_frame;
+
+	/// Coordinate epoch as decimal year, or 0 when unset.
+	double coordinate_epoch = 0;
+
 	ProjTransform proj_transform;
 	
 	LatLon geographic_ref_point;
