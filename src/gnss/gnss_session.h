@@ -112,6 +112,8 @@ public:
 
 	/// Start the NTRIP client if one is configured.
 	void startNtrip();
+	/// Stop and remove the configured NTRIP client.
+	void clearNtripClient();
 
 signals:
 	/// Emitted when a new position fix is available.
@@ -182,6 +184,7 @@ private:
 	bool m_protocolDetected = false;
 	GnssProtocol m_detectedProtocol = GnssProtocol::Unknown;
 	QByteArray m_detectionBuffer;
+	qint64 m_lastReceiverStateEmitMs = 0;
 
 	// Raw data ring buffer for diagnostics dump
 	struct RawEntry {

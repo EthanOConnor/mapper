@@ -55,6 +55,9 @@ static const int kMaxConnectAttempts = 3;
 
 // Timeout per connect attempt (ArduSimple can take 3-4s)
 static const NSTimeInterval kConnectTimeout = 5.0;
+// Keep enough room for ordinary RTCM bursts without allowing stale corrections
+// to accumulate for minutes behind a congested BLE link.
+static const NSUInteger kMaxQueuedWriteBytes = 32 * 1024;
 
 
 // ============================================================================
@@ -87,6 +90,10 @@ typedef NS_ENUM(NSInteger, NusConnectionPhase) {
 	NusConnectionPhase _phase;
 	int _connectAttempt;
 	BOOL _isReconnect;  // true when auto-reconnecting (no timeout, CB waits)
+	NSMutableArray<NSData*>* _writeQueue;
+	NSUInteger _queuedWriteBytes;
+	NSUInteger _inFlightWriteBytes;
+	BOOL _writeWithResponseInFlight;
 }
 - (instancetype)initWithTransport:(OpenOrienteering::IosBleNusTransport*)transport
                    centralManager:(CBCentralManager*)manager
@@ -97,6 +104,7 @@ typedef NS_ENUM(NSInteger, NusConnectionPhase) {
 - (void)disconnectAndTeardown;
 - (void)reconnectAfterPowerOn;
 - (BOOL)writeData:(const QByteArray&)data;
+- (void)drainWriteQueue;
 @end
 
 
@@ -120,6 +128,10 @@ typedef NS_ENUM(NSInteger, NusConnectionPhase) {
 		_phase = PhaseIdle;
 		_connectAttempt = 0;
 		_isReconnect = NO;
+		_writeQueue = [[NSMutableArray alloc] init];
+		_queuedWriteBytes = 0;
+		_inFlightWriteBytes = 0;
+		_writeWithResponseInFlight = NO;
 
 		// Take over as delegate for both manager and peripheral
 		_centralManager.delegate = self;
@@ -254,6 +266,10 @@ typedef NS_ENUM(NSInteger, NusConnectionPhase) {
 	}
 	_rxCharacteristic = nil;
 	_txCharacteristic = nil;
+	[_writeQueue removeAllObjects];
+	_queuedWriteBytes = 0;
+	_inFlightWriteBytes = 0;
+	_writeWithResponseInFlight = NO;
 	_centralManager.delegate = nil;
 }
 
@@ -262,7 +278,11 @@ typedef NS_ENUM(NSInteger, NusConnectionPhase) {
 
 - (BOOL)writeData:(const QByteArray&)data
 {
-	if (!_transport || !_rxCharacteristic || !_peripheral || _phase != PhaseReady)
+	if (!_transport || !_rxCharacteristic || !_peripheral || _phase != PhaseReady
+	    || data.isEmpty())
+		return NO;
+	if ((_rxCharacteristic.properties & (CBCharacteristicPropertyWriteWithoutResponse
+	                                     | CBCharacteristicPropertyWrite)) == 0)
 		return NO;
 
 	CBCharacteristicWriteType writeType =
@@ -274,24 +294,61 @@ typedef NS_ENUM(NSInteger, NusConnectionPhase) {
 	if (mtu <= 0)
 		mtu = 20;  // BLE 4.0 default
 
+	if (_queuedWriteBytes + static_cast<NSUInteger>(data.size()) > kMaxQueuedWriteBytes)
+		return NO;
+
 	const char* bytes = data.constData();
 	NSInteger remaining = data.size();
 	NSInteger offset = 0;
-	int totalWritten = 0;
 
 	while (remaining > 0) {
 		NSInteger chunkSize = MIN(remaining, mtu);
 		NSData* chunk = [NSData dataWithBytes:(bytes + offset) length:chunkSize];
-		[_peripheral writeValue:chunk forCharacteristic:_rxCharacteristic type:writeType];
+		[_writeQueue addObject:chunk];
+		_queuedWriteBytes += static_cast<NSUInteger>(chunkSize);
 		offset += chunkSize;
 		remaining -= chunkSize;
-		totalWritten += chunkSize;
 	}
 
-	if (totalWritten > 0)
-		_transport->didWriteData(totalWritten);
-
+	[self drainWriteQueue];
 	return YES;
+}
+
+- (void)drainWriteQueue
+{
+	if (!_transport || !_rxCharacteristic || !_peripheral || _phase != PhaseReady)
+		return;
+
+	const BOOL withoutResponse =
+		(_rxCharacteristic.properties & CBCharacteristicPropertyWriteWithoutResponse) != 0;
+	if (!withoutResponse)
+	{
+		if (_writeWithResponseInFlight || _writeQueue.count == 0)
+			return;
+		NSData* chunk = _writeQueue.firstObject;
+		[_writeQueue removeObjectAtIndex:0];
+		_queuedWriteBytes -= chunk.length;
+		_inFlightWriteBytes = chunk.length;
+		_writeWithResponseInFlight = YES;
+		[_peripheral writeValue:chunk
+		      forCharacteristic:_rxCharacteristic
+		                   type:CBCharacteristicWriteWithResponse];
+		return;
+	}
+
+	// CoreBluetooth's readiness flag is the required backpressure contract for
+	// write-without-response. A synchronous RTCM burst can otherwise drop BLE
+	// chunks while the connection and caster indicators still look healthy.
+	while (_writeQueue.count > 0 && _peripheral.canSendWriteWithoutResponse)
+	{
+		NSData* chunk = _writeQueue.firstObject;
+		[_writeQueue removeObjectAtIndex:0];
+		_queuedWriteBytes -= chunk.length;
+		[_peripheral writeValue:chunk
+		      forCharacteristic:_rxCharacteristic
+		                   type:CBCharacteristicWriteWithoutResponse];
+		_transport->didWriteData(static_cast<int>(chunk.length));
+	}
 }
 
 
@@ -311,6 +368,10 @@ typedef NS_ENUM(NSInteger, NusConnectionPhase) {
 		_rxCharacteristic = nil;
 		_txCharacteristic = nil;
 		_peripheral = nil;
+		[_writeQueue removeAllObjects];
+		_queuedWriteBytes = 0;
+		_inFlightWriteBytes = 0;
+		_writeWithResponseInFlight = NO;
 		_phase = PhaseIdle;
 		_transport->didUpdateState(static_cast<int>(central.state));
 	} else if (central.state == CBManagerStatePoweredOn) {
@@ -387,6 +448,10 @@ didDisconnectPeripheral:(CBPeripheral*)peripheral
 
 	_rxCharacteristic = nil;
 	_txCharacteristic = nil;
+	[_writeQueue removeAllObjects];
+	_queuedWriteBytes = 0;
+	_inFlightWriteBytes = 0;
+	_writeWithResponseInFlight = NO;
 
 	_transport->didDisconnectPeripheral(
 		QString::fromNSString(error ? error.localizedDescription : @""));
@@ -446,9 +511,16 @@ didDiscoverCharacteristicsForService:(CBService*)service
 	BOOL rxFound = NO, txFound = NO;
 	for (CBCharacteristic* ch in service.characteristics) {
 		if ([ch.UUID isEqual:nusRxCharUuid()]) {
-			_rxCharacteristic = ch;
-			rxFound = YES;
-			NSLog(@"GNSS NUS: found RX characteristic");
+			const auto writable =
+				(ch.properties & (CBCharacteristicPropertyWriteWithoutResponse
+				                | CBCharacteristicPropertyWrite)) != 0;
+			if (writable) {
+				_rxCharacteristic = ch;
+				rxFound = YES;
+				NSLog(@"GNSS NUS: found writable RX characteristic");
+			} else {
+				NSLog(@"GNSS NUS: RX characteristic is not writable");
+			}
 		} else if ([ch.UUID isEqual:nusTxCharUuid()]) {
 			_txCharacteristic = ch;
 			txFound = YES;
@@ -491,7 +563,14 @@ didUpdateNotificationStateForCharacteristic:(CBCharacteristic*)characteristic
 		NSLog(@"GNSS NUS: ready! MTU payload=%ld", (long)mtu);
 		_phase = PhaseReady;
 		_transport->didSubscribeToTx(static_cast<int>(mtu));
+		[self drainWriteQueue];
 	}
+}
+
+- (void)peripheralIsReadyToSendWriteWithoutResponse:(CBPeripheral*)peripheral
+{
+	GUARD_TRANSPORT();
+	[self drainWriteQueue];
 }
 
 - (void)peripheral:(CBPeripheral*)peripheral
@@ -512,9 +591,24 @@ didUpdateValueForCharacteristic:(CBCharacteristic*)characteristic
 didWriteValueForCharacteristic:(CBCharacteristic*)characteristic
              error:(NSError*)error
 {
+	GUARD_TRANSPORT();
+	const auto completedBytes = _inFlightWriteBytes;
+	_inFlightWriteBytes = 0;
+	_writeWithResponseInFlight = NO;
 	if (error) {
 		NSLog(@"GNSS NUS: write error: %@", error);
+		[_writeQueue removeAllObjects];
+		_queuedWriteBytes = 0;
+		_transport->didFailWrite(QString::fromNSString(error.localizedDescription));
+		// Treat a failed acknowledged write as a broken byte stream. Continuing
+		// could splice RTCM frames; reconnect and reconfigure the receiver.
+		[_centralManager cancelPeripheralConnection:_peripheral];
+		return;
 	}
+	else if (completedBytes > 0) {
+		_transport->didWriteData(static_cast<int>(completedBytes));
+	}
+	[self drainWriteQueue];
 }
 
 @end
@@ -724,6 +818,11 @@ void IosBleNusTransport::didReceiveData(const QByteArray& data)
 void IosBleNusTransport::didWriteData(int bytesWritten)
 {
 	emit writeComplete(bytesWritten);
+}
+
+void IosBleNusTransport::didFailWrite(const QString& error)
+{
+	emit errorOccurred(error.isEmpty() ? QStringLiteral("Bluetooth write failed") : error);
 }
 
 

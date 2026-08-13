@@ -35,6 +35,9 @@ private slots:
   void pendingDraftRejectsMovedOrMissingSnapshots();
   void relocatesStaleIosWorkspaceRoots();
   void preservesPublishedTileMatrixLimits();
+  void preservesNativeAndWebMercatorMatrixSemantics();
+  void rejectsManifestLayersWithoutMatrixMetadata();
+  void replacesAuthorizedProjectCatalogsWithoutStaleEntries();
 };
 
 #endif

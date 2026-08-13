@@ -37,6 +37,8 @@
 #include "collaboration/oom_json.h"
 #include "collaboration/zstd_codec.h"
 #include "imagery/oic_catalog.h"
+#include "imagery/imagery_catalog_repository.h"
+#include "imagery/tile_network_manager.h"
 
 using namespace OpenOrienteering;
 
@@ -1041,28 +1043,75 @@ void MapHubWorkspaceTest::relocatesStaleIosWorkspaceRoots() {
 
 void MapHubWorkspaceTest::preservesPublishedTileMatrixLimits() {
   QJsonArray limits{
-      QJsonObject{{QStringLiteral("tileMatrix"), QStringLiteral("12")},
-                  {QStringLiteral("minTileRow"), 1431},
-                  {QStringLiteral("maxTileRow"), 1432},
-                  {QStringLiteral("minTileCol"), 657},
-                  {QStringLiteral("maxTileCol"), 658}},
+      QJsonObject{{QStringLiteral("tileMatrix"), QStringLiteral("1")},
+                  {QStringLiteral("minTileRow"), 0},
+                  {QStringLiteral("maxTileRow"), 1},
+                  {QStringLiteral("minTileCol"), 0},
+                  {QStringLiteral("maxTileCol"), 1}},
+  };
+  QJsonObject matrix_set{
+      {QStringLiteral("id"), QStringLiteral("native-epsg-6596")},
+      {QStringLiteral("crs"), QStringLiteral("EPSG:6596")},
+      {QStringLiteral("orderedAxes"),
+       QJsonArray{QStringLiteral("E"), QStringLiteral("N")}},
+      {QStringLiteral("tileMatrices"),
+       QJsonArray{QJsonObject{
+           {QStringLiteral("id"), QStringLiteral("0")},
+           {QStringLiteral("scaleDenominator"), 3265.7208171559198},
+           {QStringLiteral("cellSize"), 0.9144018288036575},
+           {QStringLiteral("pointOfOrigin"),
+            QJsonArray{394500.0, 67400.0}},
+           {QStringLiteral("cornerOfOrigin"), QStringLiteral("topLeft")},
+           {QStringLiteral("tileWidth"), 256},
+           {QStringLiteral("tileHeight"), 256},
+           {QStringLiteral("matrixWidth"), 1},
+           {QStringLiteral("matrixHeight"), 1},
+       }, QJsonObject{
+           {QStringLiteral("id"), QStringLiteral("1")},
+           {QStringLiteral("scaleDenominator"), 1632.8604085779599},
+           {QStringLiteral("cellSize"), 0.45720091440182875},
+           {QStringLiteral("pointOfOrigin"), QJsonArray{394500.0, 67400.0}},
+           {QStringLiteral("cornerOfOrigin"), QStringLiteral("topLeft")},
+           {QStringLiteral("tileWidth"), 256},
+           {QStringLiteral("tileHeight"), 256},
+           {QStringLiteral("matrixWidth"), 2},
+           {QStringLiteral("matrixHeight"), 2},
+       }}},
+  };
+  QJsonObject coverage{
+      {QStringLiteral("type"), QStringLiteral("Polygon")},
+      {QStringLiteral("coordinates"),
+       QJsonArray{QJsonArray{QJsonArray{-122.24, 47.56},
+                             QJsonArray{-122.22, 47.56},
+                             QJsonArray{-122.22, 47.58},
+                             QJsonArray{-122.24, 47.58},
+                             QJsonArray{-122.24, 47.56}}}},
   };
   QJsonObject manifest{
       {QStringLiteral("id"), QStringLiteral("project-id")},
-      {QStringLiteral("current_revision"),
-       QJsonObject{{QStringLiteral("number"), 2}}},
+      {QStringLiteral("imagery_generation"), QStringLiteral("generation-a")},
       {QStringLiteral("title"), QStringLiteral("Kelsey Creek–Wilburton Hill")},
       {QStringLiteral("tile_layers"),
        QJsonArray{QJsonObject{
            {QStringLiteral("id"), QStringLiteral("intensity")},
+           {QStringLiteral("generation_token"), QString(64, QLatin1Char('a'))},
            {QStringLiteral("title"), QStringLiteral("All-return intensity")},
            {QStringLiteral("type"), QStringLiteral("raster")},
            {QStringLiteral("url_template"),
             QStringLiteral(
                 "https://maps.example.test/api/v1/tiles/{z}/{x}/{y}.png")},
-           {QStringLiteral("min_zoom"), 12},
-           {QStringLiteral("max_zoom"), 18},
+           {QStringLiteral("min_zoom"), 0},
+           {QStringLiteral("max_zoom"), 1},
+           {QStringLiteral("format"), QStringLiteral("image/png")},
+           {QStringLiteral("tile_matrix_set"), matrix_set},
            {QStringLiteral("tile_matrix_limits"), limits},
+           {QStringLiteral("coverage"), coverage},
+           {QStringLiteral("coverage_crs"), QStringLiteral("EPSG:4326")},
+           {QStringLiteral("category"), QStringLiteral("elevation")},
+           {QStringLiteral("start_date"), QStringLiteral("2025-01-01")},
+           {QStringLiteral("end_date"), QStringLiteral("2025-12-31")},
+           {QStringLiteral("resampling"), QStringLiteral("bilinear")},
+           {QStringLiteral("empty_http_status_codes"), QJsonArray{204, 404}},
            {QStringLiteral("source_raster"),
             QJsonObject{
                 {QStringLiteral("artifact_id"), QStringLiteral("artifact-id")},
@@ -1084,6 +1133,10 @@ void MapHubWorkspaceTest::preservesPublishedTileMatrixLimits() {
   auto source =
       document.value(QStringLiteral("sources")).toArray().at(0).toObject();
   QCOMPARE(source.value(QStringLiteral("tileMatrixLimits")).toArray(), limits);
+  QCOMPARE(source.value(QStringLiteral("tileMatrixSet")).toObject(), matrix_set);
+  QCOMPARE(source.value(QStringLiteral("coverage")).toObject(), coverage);
+  QCOMPARE(source.value(QStringLiteral("format")).toString(),
+           QStringLiteral("image/png"));
   auto source_raster = source.value(QStringLiteral("extensions"))
                            .toObject()
                            .value(QStringLiteral("org.cascadeoc.maphub"))
@@ -1096,6 +1149,10 @@ void MapHubWorkspaceTest::preservesPublishedTileMatrixLimits() {
       QJsonDocument(document).toJson(QJsonDocument::Compact));
   QVERIFY(result.accepted());
   QCOMPARE(result.supportedSourceCount(), qsizetype(1));
+  QCOMPARE(result.catalog.sources.at(0).resolved_source->tile_matrix_set.crs,
+           QStringLiteral("EPSG:6596"));
+  QCOMPARE(result.catalog.sources.at(0).resolved_source->request.empty_http_status_codes,
+           QVector<int>({204, 404}));
   QCOMPARE(result.catalog.sources.at(0).tile_limit_definitions.size(),
            qsizetype(1));
   QCOMPARE(result.catalog.sources.at(0)
@@ -1106,6 +1163,155 @@ void MapHubWorkspaceTest::preservesPublishedTileMatrixLimits() {
                .value(QStringLiteral("artifact_id"))
                .toString(),
            QStringLiteral("artifact-id"));
+}
+
+void MapHubWorkspaceTest::preservesNativeAndWebMercatorMatrixSemantics() {
+  QJsonObject manifest{
+      {QStringLiteral("id"), QStringLiteral("project-id")},
+      {QStringLiteral("title"), QStringLiteral("Luther Burbank")},
+      {QStringLiteral("imagery_generation"), QStringLiteral("generation-1")},
+      {QStringLiteral("tile_layers"),
+       QJsonArray{QJsonObject{
+           {QStringLiteral("id"), QStringLiteral("street")},
+           {QStringLiteral("generation_token"), QString(64, QLatin1Char('a'))},
+           {QStringLiteral("title"), QStringLiteral("Street tiles")},
+           {QStringLiteral("type"), QStringLiteral("raster")},
+           {QStringLiteral("url_template"),
+            QStringLiteral("https://maps.example.test/tiles/{z}/{x}/{y}.png")},
+           {QStringLiteral("format"), QStringLiteral("image/png")},
+           {QStringLiteral("min_zoom"), 0},
+           {QStringLiteral("max_zoom"), 19},
+           {QStringLiteral("tile_matrix_set"), QStringLiteral("WebMercatorQuad")},
+       }}},
+  };
+  QString error;
+  auto first = MapHubImageryCatalog::catalogDocument(
+      manifest, QStringLiteral("https://maps.example.test/manifest"), &error);
+  QVERIFY2(error.isEmpty(), qPrintable(error));
+  auto source = first.value(QStringLiteral("sources")).toArray().at(0).toObject();
+  QCOMPARE(source.value(QStringLiteral("tileMatrixSetURI")).toString(),
+           QStringLiteral("http://www.opengis.net/def/tilematrixset/OGC/1.0/WebMercatorQuad"));
+  QVERIFY(!source.contains(QStringLiteral("tileMatrixSet")));
+  auto read = imagery::OicCatalogReader::read(
+      QJsonDocument(first).toJson(QJsonDocument::Compact));
+  QCOMPARE(read.supportedSourceCount(), qsizetype(1));
+  QCOMPARE(read.catalog.sources.at(0).resolved_source->tile_matrix_set.crs,
+           QStringLiteral("EPSG:3857"));
+
+  auto changed = manifest;
+  changed.insert(QStringLiteral("imagery_generation"), QStringLiteral("generation-2"));
+  auto layers = changed.value(QStringLiteral("tile_layers")).toArray();
+  auto layer = layers.at(0).toObject();
+  layer.insert(QStringLiteral("generation_token"), QString(64, QLatin1Char('b')));
+  layers.replace(0, layer);
+  changed.insert(QStringLiteral("tile_layers"), layers);
+  auto second = MapHubImageryCatalog::catalogDocument(
+      changed, QStringLiteral("https://maps.example.test/manifest"), &error);
+  QCOMPARE(first.value(QStringLiteral("id")), second.value(QStringLiteral("id")));
+  QVERIFY(first.value(QStringLiteral("revision")) !=
+          second.value(QStringLiteral("revision")));
+  QCOMPARE(second.value(QStringLiteral("sources")).toArray().size(), 1);
+}
+
+void MapHubWorkspaceTest::rejectsManifestLayersWithoutMatrixMetadata() {
+  QJsonObject manifest{
+      {QStringLiteral("id"), QStringLiteral("project-id")},
+      {QStringLiteral("title"), QStringLiteral("Luther Burbank")},
+      {QStringLiteral("tile_layers"),
+       QJsonArray{QJsonObject{
+           {QStringLiteral("id"), QStringLiteral("native")},
+           {QStringLiteral("generation_token"), QString(64, QLatin1Char('a'))},
+           {QStringLiteral("title"), QStringLiteral("Native LiDAR")},
+           {QStringLiteral("type"), QStringLiteral("raster")},
+           {QStringLiteral("url_template"),
+            QStringLiteral("https://maps.example.test/tiles/{z}/{x}/{y}.png")},
+           {QStringLiteral("format"), QStringLiteral("image/png")},
+       }}},
+  };
+  QString error;
+  QVERIFY(MapHubImageryCatalog::catalogDocument(
+              manifest, QStringLiteral("https://maps.example.test/manifest"),
+              &error)
+              .isEmpty());
+  QVERIFY(error.contains(QStringLiteral("will not guess a CRS")));
+}
+
+void MapHubWorkspaceTest::replacesAuthorizedProjectCatalogsWithoutStaleEntries() {
+  QTemporaryDir directory;
+  QVERIFY(directory.isValid());
+  imagery::TileNetworkManager::Config network_config;
+  network_config.cache_directory = directory.filePath(QStringLiteral("cache"));
+  network_config.max_retries = 0;
+  imagery::TileNetworkManager network(network_config);
+  imagery::ImageryCatalogRepository repository(
+      directory.filePath(QStringLiteral("catalogs")), &network);
+  QSignalSpy operations(
+      &repository, &imagery::ImageryCatalogRepository::operationFinished);
+
+  auto layer = [](QString project_id, QString layer_id, QString generation) {
+    return QJsonObject{
+        {QStringLiteral("id"), layer_id},
+        {QStringLiteral("generation_token"), generation},
+        {QStringLiteral("project_id"), project_id},
+        {QStringLiteral("project_title"),
+         QString(QStringLiteral("Project ") + project_id)},
+        {QStringLiteral("title"), QStringLiteral("Aerial")},
+        {QStringLiteral("type"), QStringLiteral("raster")},
+        {QStringLiteral("url_template"),
+         QString(QStringLiteral("https://maps.example.test/tiles/") + project_id
+                 + QStringLiteral("/{z}/{x}/{y}.png"))},
+        {QStringLiteral("format"), QStringLiteral("image/png")},
+        {QStringLiteral("scheme"), QStringLiteral("xyz")},
+        {QStringLiteral("tile_matrix_set_uri"),
+         QStringLiteral("http://www.opengis.net/def/tilematrixset/OGC/1.0/WebMercatorQuad")},
+        {QStringLiteral("min_zoom"), 0},
+        {QStringLiteral("max_zoom"), 19},
+        {QStringLiteral("coverage_bbox"), QJsonArray{-122.3, 47.5, -122.2, 47.6}},
+        {QStringLiteral("coverage_crs"), QStringLiteral("EPSG:4326")},
+        {QStringLiteral("empty_http_status_codes"), QJsonArray{204, 404}},
+    };
+  };
+  auto shared_layer = layer(QString(), QStringLiteral("shared-layer"),
+                            QString(64, QLatin1Char('d')));
+  shared_layer.insert(QStringLiteral("project_id"), QJsonValue(QJsonValue::Null));
+  shared_layer.insert(QStringLiteral("project_title"), QJsonValue(QJsonValue::Null));
+  QJsonObject first{
+      {QStringLiteral("schema_version"), 1},
+      {QStringLiteral("catalog_generation"), QString(64, QLatin1Char('a'))},
+      {QStringLiteral("layers"),
+       QJsonArray{layer(QStringLiteral("project-a"), QStringLiteral("layer-a"),
+                        QString(64, QLatin1Char('a'))),
+                  layer(QStringLiteral("project-b"), QStringLiteral("layer-b"),
+                        QString(64, QLatin1Char('b'))),
+                  shared_layer}},
+  };
+  auto batch = MapHubImageryCatalog::installAuthorizedCatalog(
+      first, QStringLiteral("https://maps.example.test/api/v1/imagery/catalog"),
+      &repository);
+  QVERIFY2(batch.error.isEmpty(), qPrintable(batch.error));
+  QCOMPARE(batch.operation_ids.size(), 3);
+  QTRY_COMPARE_WITH_TIMEOUT(operations.size(), 3, 3000);
+  QTRY_COMPARE_WITH_TIMEOUT(repository.snapshot()->catalogs.size(), 3, 3000);
+
+  auto replacement_layer = layer(QStringLiteral("project-a"),
+                                 QStringLiteral("layer-a"),
+                                 QString(64, QLatin1Char('c')));
+  replacement_layer.insert(QStringLiteral("title"), QStringLiteral("New aerial"));
+  QJsonObject second{
+      {QStringLiteral("schema_version"), 1},
+      {QStringLiteral("catalog_generation"), QString(64, QLatin1Char('b'))},
+      {QStringLiteral("layers"), QJsonArray{replacement_layer}},
+  };
+  batch = MapHubImageryCatalog::installAuthorizedCatalog(
+      second, QStringLiteral("https://maps.example.test/api/v1/imagery/catalog"),
+      &repository);
+  QVERIFY2(batch.error.isEmpty(), qPrintable(batch.error));
+  QCOMPARE(batch.operation_ids.size(), 3);
+  QTRY_COMPARE_WITH_TIMEOUT(operations.size(), 6, 3000);
+  QTRY_COMPARE_WITH_TIMEOUT(repository.snapshot()->catalogs.size(), 1, 3000);
+  QCOMPARE(repository.snapshot()->catalogs.first().read_result.catalog.sources.size(), 1);
+  QCOMPARE(repository.snapshot()->catalogs.first().read_result.catalog.sources.first().metadata.name,
+           QStringLiteral("New aerial"));
 }
 
 QTEST_GUILESS_MAIN(MapHubWorkspaceTest)

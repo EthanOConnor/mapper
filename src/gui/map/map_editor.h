@@ -44,6 +44,7 @@ class QFrame;
 class QKeyEvent;
 class QLabel;
 class QMenu;
+class QStackedWidget;
 // IWYU pragma: no_forward_declare QString
 class QToolBar;
 class QToolButton;
@@ -60,6 +61,7 @@ class GPSTemporaryMarkers;
 class GPSTrackRecorder;
 class GeoreferencingDialog;
 class GnssStatusOverlay;
+class GnssDetailPanel;
 class MainWindow;
 class MapCoordF;
 class MapEditorActivity;
@@ -514,6 +516,7 @@ public slots:
 	
 	/** Enables or disables GPS display. */
 	void enableGPSDisplay(bool enable);
+	void refreshGnssStatusOverlay();
 	void positionGnssStatusOverlay();
 	/** Returns whether location updates and their visible UI are active. */
 	bool isGPSDisplayEnabled() const;
@@ -545,6 +548,10 @@ public slots:
 	void mobileSymbolSelectorClicked();
 	/** Counterpart to mobileSymbolSelectorClicked(). */
 	void mobileSymbolSelectorFinished();
+	/** Shows the mobile GNSS detail screen. */
+	void showMobileGnssDetails();
+	/** Returns from a mobile secondary screen to the map. */
+	void showMobileMapPage();
 
 	/** Creates and adds a new map part */
 	void addMapPart();
@@ -900,6 +907,13 @@ private:
 	QToolButton* show_top_bar_button;
 	QAction* mobile_symbol_selector_action;
 	QMenu* mobile_symbol_button_menu;
+	QToolButton* mobile_symbol_details_button = nullptr;
+	QLabel* mobile_symbol_read_only_label = nullptr;
+	QStackedWidget* mobile_page_stack = nullptr;
+	QWidget* mobile_map_page = nullptr;
+	QWidget* mobile_symbol_page = nullptr;
+	QWidget* mobile_gnss_page = nullptr;
+	GnssDetailPanel* mobile_gnss_panel = nullptr;
 	
 	QPointer<QComboBox> mappart_selector_box;
 	

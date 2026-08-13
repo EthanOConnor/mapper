@@ -17,6 +17,7 @@
 #include <QXmlStreamReader>
 
 #include "collaboration/managed_map_workspace.h"
+#include "collaboration/map_hub_api_client.h"
 #include "collaboration/map_hub_edit_transaction.h"
 #include "collaboration/map_hub_entity_index.h"
 #include "collaboration/map_hub_operation_store.h"
@@ -644,6 +645,12 @@ void MapHubProtocolFixtureTest::controllerStagesCompleteFileHandoffs() {
       2000);
   QVERIFY2(controller.state() != MapHubSyncController::State::ActionRequired,
            qPrintable(controller.stateText()));
+  QVERIFY(QFileInfo::exists(workspace.local_map_path));
+  QCOMPARE(MapHubApiClient::sha256ForFile(workspace.local_map_path),
+           MapHubApiClient::sha256ForFile(
+               handoff_directory.filePath(
+                   handoff_directory.entryList(
+                       {QStringLiteral("*.omap")}, QDir::Files).constFirst())));
 
   const auto first_files =
       handoff_directory.entryList({QStringLiteral("*.omap")}, QDir::Files);

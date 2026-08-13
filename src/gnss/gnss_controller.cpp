@@ -280,8 +280,27 @@ void GnssController::disconnectExternal()
 
 void GnssController::useNtripProfile(const QString& name)
 {
-	if (!m_session || name.isEmpty())
+	configureNtrip(true, name);
+}
+
+void GnssController::configureNtrip(bool enabled, const QString& name)
+{
+	auto& settings = Settings::getInstance();
+	settings.setGnssAutoStartNtrip(enabled);
+	if (!enabled)
+	{
+		if (m_session)
+			m_session->clearNtripClient();
 		return;
+	}
+
+	if (name.isEmpty())
+	{
+		emit errorOccurred(tr("NTRIP"),
+		                   tr("Choose a correction profile before starting the live test."));
+		return;
+	}
+	ensureSession();
 	QString error;
 	auto profile = NtripProfileStore::load(name, &error);
 	if (!profile)
@@ -292,8 +311,7 @@ void GnssController::useNtripProfile(const QString& name)
 	auto client = std::make_unique<NtripClient>(m_session);
 	client->setProfile(*profile);
 	m_session->setNtripClient(std::move(client));
-	Settings::getInstance().setGnssNtripActiveProfile(name);
-	Settings::getInstance().setGnssAutoStartNtrip(true);
+	settings.setGnssNtripActiveProfile(name);
 	if (m_session->isActive())
 		m_session->startNtrip();
 }

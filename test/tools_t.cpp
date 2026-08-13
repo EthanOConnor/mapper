@@ -32,12 +32,15 @@
 #include <QApplication>
 #include <QDialog>
 #include <QEvent>
+#include <QLabel>
 #include <QListWidget>
 #include <QMouseEvent>
 #include <QPoint>
 #include <QPointF>
+#include <QStackedWidget>
 #include <QString>
 #include <QTimer>
+#include <QToolButton>
 #include <QWheelEvent>
 
 #include "core/map.h"
@@ -49,10 +52,12 @@
 #include "core/symbols/line_symbol.h"
 #include "core/symbols/point_symbol.h"
 #include "global.h"
+#include "settings.h"
 #include "gui/main_window.h"
 #include "gui/map/map_editor.h"
 #include "gui/map/map_find_feature.h"
 #include "gui/map/map_widget.h"
+#include "gui/widgets/symbol_widget.h"
 #include "templates/template_image.h"
 #include "tools/edit_point_tool.h"
 #include "tools/edit_tool.h"
@@ -306,6 +311,72 @@ void ToolsTest::framePublishesTemplateContextBeforeRasterCollection()
 	view->setZoom(view->getZoom() * std::sqrt(2.0));
 	QTRY_VERIFY_WITH_TIMEOUT(raster_ptr->collected, 1000);
 	QVERIFY(!raster_ptr->collected_without_context);
+}
+
+void ToolsTest::mobileSecondaryPagesReplaceMapSurface()
+{
+	auto& settings = Settings::getInstance();
+	const auto previous_touch_mode = settings.touchModeEnabled();
+	settings.setTouchModeEnabled(true);
+	{
+		auto* map = new Map;
+		map->addSymbol(new PointSymbol, 0);
+		TestMapEditor editor(map); // taking ownership
+		editor.window->resize(844, 390);
+		editor.window->show();
+		QCoreApplication::processEvents();
+		auto* pages = editor.window->findChild<QStackedWidget*>(
+		  QStringLiteral("mobileEditorPages"));
+		auto* symbol_button = editor.window->findChild<QToolButton*>(
+		  QStringLiteral("mobileSymbolPickerButton"));
+		QVERIFY(pages);
+		QVERIFY(symbol_button);
+		QVERIFY(symbol_button->isEnabled());
+		QVERIFY(!symbol_button->menu());
+		QCOMPARE(pages->currentWidget()->objectName(), QString{});
+
+		symbol_button->click();
+		QCOMPARE(pages->currentWidget()->objectName(),
+		         QStringLiteral("mobileSymbolPage"));
+		QVERIFY(pages->currentWidget() != editor.map_widget);
+
+		editor.editor->mobileSymbolSelectorFinished();
+		QCOMPARE(pages->currentIndex(), 0);
+		editor.editor->showMobileGnssDetails();
+		QCOMPARE(pages->currentWidget()->objectName(),
+		         QStringLiteral("mobileGnssPage"));
+		editor.editor->showMobileMapPage();
+		QCOMPARE(pages->currentIndex(), 0);
+
+		auto* symbol_widget = editor.window->findChild<SymbolWidget*>();
+		QVERIFY(symbol_widget);
+		symbol_widget->selectSingleSymbol(map->getSymbol(0));
+		editor.editor->setReadOnly(true);
+		QVERIFY(symbol_button->isEnabled());
+		auto* draw_point = editor.editor->getAction("drawpoint");
+		QVERIFY(draw_point);
+		QVERIFY(draw_point->isEnabled());
+		QVERIFY(!draw_point->isChecked());
+		draw_point->trigger();
+		QCoreApplication::processEvents();
+		QCOMPARE(editor.editor->getTool()->toolType(), MapEditorTool::Pan);
+		QVERIFY(!draw_point->isChecked());
+		symbol_button->click();
+		QCOMPARE(pages->currentWidget()->objectName(),
+		         QStringLiteral("mobileSymbolPage"));
+		auto* read_only_label = editor.window->findChild<QLabel*>(
+		  QStringLiteral("mobileSymbolReadOnlyLabel"));
+		QVERIFY(read_only_label);
+		QVERIFY(read_only_label->isVisible());
+		QVERIFY(read_only_label->text().contains(
+		  QStringLiteral("href=\"map-hub\"")));
+		QVERIFY(read_only_label->text().contains(
+		  QStringLiteral("href=\"local-copy\"")));
+		editor.editor->mobileSymbolSelectorFinished();
+		QCOMPARE(pages->currentIndex(), 0);
+	}
+	QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+	settings.setTouchModeEnabled(previous_touch_mode);
 }
 
 

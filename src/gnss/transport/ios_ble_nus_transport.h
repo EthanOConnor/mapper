@@ -88,6 +88,7 @@ public:
 	void didSubscribeToTx(int mtu);
 	void didReceiveData(const QByteArray& data);
 	void didWriteData(int bytesWritten);
+	void didFailWrite(const QString& error);
 
 private:
 	void setState(State newState);

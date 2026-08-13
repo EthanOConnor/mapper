@@ -70,7 +70,7 @@ void NtripSettingsWidget::setupUi()
 	add_button = new QPushButton(tr("Add"), this);
 	edit_button = new QPushButton(tr("Edit"), this);
 	remove_button = new QPushButton(tr("Remove"), this);
-	test_button = new QPushButton(tr("Test Connection"), this);
+	test_button = new QPushButton(tr("Test caster login"), this);
 
 	button_layout->addWidget(add_button);
 	button_layout->addWidget(edit_button);

@@ -70,6 +70,7 @@
 #include "collaboration/managed_map_workspace.h"
 #include "collaboration/map_hub_api_client.h"
 #include "collaboration/map_hub_credentials.h"
+#include "collaboration/map_hub_imagery_catalog.h"
 #include "collaboration/map_hub_read_only_document.h"
 #include "collaboration/map_hub_sync_controller.h"
 #include "collaboration/map_hub_workspace.h"
@@ -143,7 +144,12 @@ MainWindow::MainWindow(bool as_main_window, QWidget* parent, Qt::WindowFlags fla
 	map_hub_sync_label->setTextFormat(Qt::RichText);
 	map_hub_sync_label->setOpenExternalLinks(false);
 	connect(map_hub_sync_label, &QLabel::linkActivated, this,
-	        [this] { showMapHub(); });
+	        [this](const QString& link) {
+		        if (link == QLatin1String("local-copy"))
+			        openMapHubLocalCopy();
+		        else
+			        showMapHub();
+	        });
 	statusBar()->addPermanentWidget(map_hub_sync_label);
 	statusBar()->setSizeGripEnabled(as_main_window);
 	updateToastEnabled();
@@ -255,6 +261,7 @@ void MainWindow::applicationStateChanged()
 			map_hub_access_timer->start(0);
 		if (map_hub_sync)
 			map_hub_sync->applicationBecameActive();
+		QTimer::singleShot(0, this, &MainWindow::refreshMapHubImageryCatalog);
 	}
 	else if (map_hub_sync)
 	{
@@ -1474,7 +1481,8 @@ void MainWindow::configureMapHubSync()
 			action = tr("Start editing");
 		}
 		map_hub_sync_label->setText(
-		  tr("%1 · <a href=\"map-hub\">%2</a>")
+		  tr("%1 · <a href=\"map-hub\">%2</a> · "
+		     "<a href=\"local-copy\">Open local copy</a>")
 		    .arg(state.toHtmlEscaped(), action.toHtmlEscaped()));
 		map_hub_sync_label->setToolTip(
 		  tr("This verified Map Hub revision cannot be changed locally."));
@@ -1490,6 +1498,7 @@ void MainWindow::configureMapHubSync()
 			map_hub_access_timer->stop();
 			map_hub_access_etag.clear();
 		}
+		QTimer::singleShot(0, this, &MainWindow::refreshMapHubImageryCatalog);
 		return;
 	}
 
@@ -1538,6 +1547,123 @@ void MainWindow::configureMapHubSync()
 				return false;
 			}
 			return true;
+		},
+#if defined(Q_OS_IOS)
+		[this](const QString& snapshot_path, qint64 expected_size,
+		       QString* error) {
+			if (error)
+				error->clear();
+			if (snapshot_path.isEmpty()
+			    || QFileInfo(snapshot_path).size() != expected_size)
+			{
+				if (error)
+					*error = tr("The connected-editing recovery snapshot did not verify.");
+				return false;
+			}
+			if (!presents_document || presented_document_deleted
+			    || provider_document_transaction_active
+			    || external_change_pending
+			    || AppleDocumentAccess::hasPresentedDocumentConflict())
+			{
+				if (error)
+					*error = tr("The document provider has a pending change.");
+				return false;
+			}
+
+			const auto transaction_token = presented_document_token;
+			const auto transaction_path = currentPath();
+			const auto transaction_generation =
+				presented_document_change_generation;
+			QByteArray receipt;
+			QString provider_error;
+			if (!AppleDocumentAccess::capturePresentedDocumentWriteReceipt(
+			      transaction_path, false, &receipt, &provider_error))
+			{
+				if (error)
+					*error = provider_error;
+				return false;
+			}
+
+			QString coordinated_path;
+			bool saved = false;
+			{
+				QScopedValueRollback<bool> transaction_guard{
+					provider_document_transaction_active, true};
+				saved = AppleDocumentAccess::writePresentedDocument(
+					transaction_path, snapshot_path, receipt, 0,
+					&coordinated_path, &provider_error);
+			}
+			replayPendingPresentedDocumentEvents();
+			const auto committed_path = coordinated_path.isEmpty()
+			                          ? transaction_path
+			                          : DocumentPath::canonical(coordinated_path);
+			const auto stable = saved
+			                    && presented_document_token == transaction_token
+			                    && presents_document
+			                    && !presented_document_deleted
+			                    && currentPath() == transaction_path
+			                    && committed_path == transaction_path
+			                    && presented_document_change_generation
+			                       == transaction_generation;
+			if (!stable && error)
+			{
+				*error = provider_error.isEmpty()
+				       ? tr("The document provider changed during autosave.")
+				       : provider_error;
+			}
+			return stable;
+		}
+#else
+		MapHubSyncController::WorkingCopyCommitter{}
+#endif
+	);
+	QTimer::singleShot(0, this, &MainWindow::refreshMapHubImageryCatalog);
+}
+
+
+void MainWindow::refreshMapHubImageryCatalog()
+{
+	if (map_hub_imagery_refresh_pending || currentPath().isEmpty())
+		return;
+	QString error;
+	auto const managed = ManagedMapWorkspace::loadForMap(currentPath(), &error);
+	auto const read_only = MapHubReadOnlyDocument::loadForMap(currentPath(), &error);
+	QString server_url;
+	QString project_id;
+	QString manifest_url;
+	if (managed.isValid())
+	{
+		server_url = managed.server_url;
+		project_id = managed.project_id;
+		manifest_url = managed.manifest_url;
+	}
+	else if (read_only.isValid())
+	{
+		server_url = read_only.server_url;
+		project_id = read_only.project_id;
+		manifest_url = read_only.manifest_url;
+	}
+	if (server_url.isEmpty() || project_id.isEmpty() || manifest_url.isEmpty())
+		return;
+	auto const credential = MapHubCredentials::readToken(server_url);
+	if (!credential.error.isEmpty() || credential.token.isEmpty())
+		return;
+
+	map_hub_imagery_refresh_pending = true;
+	auto* client = new MapHubApiClient(server_url, credential.token, this);
+	client->projectManifest(
+		project_id,
+		[this, client, manifest_url](
+			const QJsonObject& manifest,
+			const MapHubApiClient::Error& api_error) {
+			map_hub_imagery_refresh_pending = false;
+			client->deleteLater();
+			if (api_error)
+				return;
+			auto const result = MapHubImageryCatalog::install(
+				manifest, manifest_url);
+			if (!result.error.isEmpty())
+				showStatusBarMessage(result.error, 12000);
 		});
 }
 
@@ -3169,7 +3295,7 @@ bool MainWindow::save()
 
 bool MainWindow::saveTo(const QString &path, const FileFormat& format)
 {
-	if (map_hub_read_only)
+	if (map_hub_read_only && !map_hub_local_copy_in_progress)
 	{
 		QMessageBox::information(
 		  this, tr("Read-only Map Hub map"),
@@ -3898,7 +4024,7 @@ bool MainWindow::exportPresentedDocument(
 
 bool MainWindow::showSaveAsDialog()
 {
-	if (map_hub_read_only)
+	if (map_hub_read_only && !map_hub_local_copy_in_progress)
 	{
 		QMessageBox::information(
 		  this, tr("Read-only Map Hub map"),
@@ -4035,6 +4161,23 @@ bool MainWindow::showSaveAsDialog()
 		path = format->fixupExtension(path);
 #endif
 	return saveTo(path, *format);
+}
+
+void MainWindow::openMapHubLocalCopy()
+{
+	if (!map_hub_read_only || map_hub_local_copy_in_progress)
+		return;
+
+	map_hub_local_copy_in_progress = true;
+	auto reset = qScopeGuard(
+	  [this] { map_hub_local_copy_in_progress = false; });
+	if (showSaveAsDialog())
+	{
+		showStatusBarMessage(
+		  tr("Opened an independent local copy. Map Hub will not receive "
+		     "changes from this file."),
+		  8000);
+	}
 }
 
 void MainWindow::toggleFullscreenMode()

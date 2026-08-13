@@ -529,6 +529,73 @@ void MapHubApiClient::library(JsonHandler handler) {
              std::move(handler));
 }
 
+void MapHubApiClient::imageryCatalog(const QString &etag,
+                                     SyncStateHandler handler) {
+  if (!ensureReady(true, [handler](const QJsonObject &, const Error &error) {
+        handler({}, {}, false, error);
+      }))
+    return;
+  auto req = request(QStringLiteral("/api/v1/imagery/catalog"));
+  if (!etag.isEmpty() && validHeaderValue(etag, 512))
+    req.setRawHeader("If-None-Match", etag.toUtf8());
+  auto *reply = network->get(req);
+  auto body = std::make_shared<QByteArray>();
+  auto too_large = std::make_shared<bool>(false);
+  reply->setReadBufferSize(max_json_response_bytes + 1);
+  connect(reply, &QIODevice::readyRead, this, [reply, body, too_large] {
+    if (*too_large)
+      return;
+    body->append(reply->readAll());
+    if (body->size() > max_json_response_bytes) {
+      *too_large = true;
+      reply->abort();
+    }
+  });
+  connect(reply, &QNetworkReply::finished, this,
+          [reply, body, too_large, handler = std::move(handler)]() mutable {
+            if (!*too_large) {
+              body->append(reply->readAll());
+              *too_large = body->size() > max_json_response_bytes;
+            }
+            const auto response_etag =
+                QString::fromUtf8(reply->rawHeader("ETag"));
+            const auto status = reply
+                                    ->attribute(QNetworkRequest::HttpStatusCodeAttribute)
+                                    .toInt();
+            if (status == 304 && reply->error() == QNetworkReply::NoError) {
+              handler({}, response_etag, true, {});
+            } else if (*too_large) {
+              handler({}, response_etag, false,
+                      {status, QStringLiteral("response_too_large"),
+                       tr("Map Hub returned more than 16 MiB of imagery "
+                          "metadata; Mapper discarded the response.")});
+            } else {
+              MapHubApiClient::Error decoding_error;
+              if (!decodeJsonResponse(reply, body.get(), &decoding_error)) {
+                handler({}, response_etag, false, decoding_error);
+                reply->deleteLater();
+                return;
+              }
+              if (reply->error() != QNetworkReply::NoError) {
+                handler({}, response_etag, false, replyError(reply, *body));
+                reply->deleteLater();
+                return;
+              }
+              QJsonParseError parse_error;
+              const auto document = QJsonDocument::fromJson(*body, &parse_error);
+              if (parse_error.error != QJsonParseError::NoError ||
+                  !document.isObject()) {
+                handler({}, response_etag, false,
+                        {status, QStringLiteral("invalid_response"),
+                         tr("Map Hub returned invalid imagery metadata.")});
+              } else {
+                handler(document.object(), response_etag, false, {});
+              }
+            }
+            reply->deleteLater();
+          });
+}
+
 void MapHubApiClient::projectManifest(const QString &project_id,
                                       JsonHandler handler) {
   if (!ensureReady(true, handler))

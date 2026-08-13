@@ -118,6 +118,8 @@ void GnssSession::setTransport(std::unique_ptr<GnssTransport> transport)
 
 void GnssSession::setNtripClient(std::unique_ptr<NtripClient> ntrip)
 {
+	if (m_ntrip)
+		m_ntrip->stop();
 	m_ntrip = std::move(ntrip);
 	m_state.correctionState = m_ntrip ? GnssCorrectionState::Disconnected
 	                                  : GnssCorrectionState::Disabled;
@@ -126,6 +128,11 @@ void GnssSession::setNtripClient(std::unique_ptr<NtripClient> ntrip)
 		connectNtripSignals();
 		m_state.ntripProfileName = m_ntrip->profileName();
 	}
+	else
+	{
+		m_state.ntripProfileName.clear();
+	}
+	emitStateChanged();
 }
 
 
@@ -164,6 +171,8 @@ void GnssSession::stop()
 
 	if (m_transport)
 		m_transport->disconnectFromDevice();
+	if (m_ntrip)
+		m_ntrip->stop();
 
 	if (m_rawLogger)
 		m_rawLogger->stop();
@@ -214,36 +223,62 @@ void GnssSession::connectNtripSignals()
 
 void GnssSession::onTransportDataReceived(const QByteArray& data)
 {
+	if (data.isEmpty())
+		return;
+
+	const auto nowMs = QDateTime::currentMSecsSinceEpoch();
+	m_state.receiverBytesReceived += data.size();
+	m_state.lastReceiverDataTime = QDateTime::fromMSecsSinceEpoch(nowMs, QTimeZone::UTC);
 	appendRawEntry('R', data);
 
 	// Raw logging
 	if (m_rawLogger && m_rawLogger->isLogging())
 		m_rawLogger->logReceiverData(data);
 
-	if (!m_protocolDetected)
-	{
-		// Buffer initial data for protocol detection
-		m_detectionBuffer.append(data);
-		if (m_detectionBuffer.size() >= ProtocolDetector::kMinDetectionBytes)
-		{
-			m_detectedProtocol = ProtocolDetector::detect(m_detectionBuffer);
-			m_protocolDetected = true;
-			m_state.protocol = m_detectedProtocol;
-
-			// Always feed both parsers — each skips bytes it doesn't recognize.
-			// The receiver may switch protocols mid-stream (e.g., NMEA → UBX
-			// after we send configuration), so single-parser routing is fragile.
-			m_ubxParser->addData(m_detectionBuffer);
-			m_nmeaParser->addData(m_detectionBuffer);
-			m_detectionBuffer.clear();
-		}
-		return;
-	}
-
 	// Always feed both parsers — each skips foreign bytes at its sync level.
-	// Protocol detection is informational (for UI display), not routing.
+	// Protocol detection is informational (for UI display), not routing. In
+	// particular, startup noise must never delay or suppress a valid fix.
 	m_ubxParser->addData(data);
 	m_nmeaParser->addData(data);
+
+	bool protocolChanged = false;
+	if (!m_protocolDetected)
+	{
+		// BLE receivers commonly deliver an ACK, banner, partial frame, or other
+		// startup noise first. Keep a bounded rolling window and retry until a
+		// a checksum-valid GNSS record arrives instead of permanently
+		// classifying the stream from the first 16 bytes.
+		constexpr int detectionWindowBytes = 4096;
+		m_detectionBuffer.append(data);
+		if (m_detectionBuffer.size() > detectionWindowBytes)
+			m_detectionBuffer = m_detectionBuffer.right(detectionWindowBytes);
+		if (m_detectionBuffer.size() >= ProtocolDetector::kMinDetectionBytes)
+		{
+			auto detected = ProtocolDetector::detect(m_detectionBuffer);
+			if (detected != GnssProtocol::Unknown)
+			{
+				protocolChanged = m_state.protocol != detected;
+				m_detectedProtocol = detected;
+				m_state.protocol = detected;
+				// RTCM/BINEX/BYNAV can appear as an echo or startup stream
+				// before position output begins. Surface the diagnosis, but
+				// continue scanning until a supported position protocol arrives.
+				m_protocolDetected = detected == GnssProtocol::UBX
+				                  || detected == GnssProtocol::NMEA
+				                  || detected == GnssProtocol::Mixed;
+				if (m_protocolDetected)
+					m_detectionBuffer.clear();
+			}
+		}
+	}
+	// Raw-data-only streams must still become visible to diagnostics, but do
+	// not repaint the UI for every BLE notification.
+	if (protocolChanged || m_lastReceiverStateEmitMs == 0
+	    || nowMs - m_lastReceiverStateEmitMs >= 500)
+	{
+		m_lastReceiverStateEmitMs = nowMs;
+		emitStateChanged();
+	}
 }
 
 
@@ -428,10 +463,17 @@ void GnssSession::onNtripCorrectionData(const QByteArray& data)
 	// Forward corrections to the receiver
 	if (m_transport && m_transport->state() == GnssTransport::State::Connected)
 	{
-		appendRawEntry('T', data);
-		m_transport->write(data);
-		if (m_ntrip)
+		if (m_transport->write(data) && m_ntrip)
+		{
+			appendRawEntry('T', data);
 			m_ntrip->addBytesSentToReceiver(data.size());
+		}
+		else
+			m_state.ntripBytesDroppedToReceiver += data.size();
+	}
+	else
+	{
+		m_state.ntripBytesDroppedToReceiver += data.size();
 	}
 
 	m_state.lastCorrectionTime = QDateTime::currentDateTimeUtc();
@@ -511,11 +553,12 @@ void GnssSession::resetSessionState()
 	m_state.sessionStart = sessionStart;
 	m_state.correctionState = m_ntrip ? GnssCorrectionState::Disconnected
 	                                  : GnssCorrectionState::Disabled;
-	m_state.ntripProfileName = m_ntrip ? m_ntrip->mountpoint() : QString{};
+	m_state.ntripProfileName = m_ntrip ? m_ntrip->profileName() : QString{};
 
 	m_protocolDetected = false;
 	m_detectedProtocol = GnssProtocol::Unknown;
 	m_detectionBuffer.clear();
+	m_lastReceiverStateEmitMs = 0;
 	m_fusion.reset();
 	m_ubxParser->reset();
 	m_nmeaParser->reset();
@@ -662,6 +705,12 @@ void GnssSession::startNtrip()
 }
 
 
+void GnssSession::clearNtripClient()
+{
+	setNtripClient({});
+}
+
+
 // ---- iOS / background handling ----
 
 
@@ -707,8 +756,14 @@ void GnssSession::configureReceiver()
 	auto commands = UbxConfig::buildInitSequence();
 	for (const auto& cmd : commands)
 	{
-		appendRawEntry('W', cmd);  // W = config write to receiver
-		m_transport->write(cmd);
+		if (!m_transport->write(cmd))
+		{
+			emit errorOccurred(
+			  tr("Receiver configuration"),
+			  tr("Bluetooth output queue could not accept the receiver configuration"));
+			break;
+		}
+		appendRawEntry('W', cmd);  // W = config write queued to receiver
 	}
 }
 

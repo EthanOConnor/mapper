@@ -1,6 +1,5 @@
 /*
- *    Copyright 2012, 2013 Thomas Schöps
- *    Copyright 2017, 2020, 2025 Kai Pastor
+ *    Copyright 2026 Ethan O'Connor
  *
  *    This file is part of OpenOrienteering.
  *
@@ -18,33 +17,19 @@
  *    along with OpenOrienteering.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef OPENORIENTEERING_TOOLS_T_H
-#define OPENORIENTEERING_TOOLS_T_H
+#ifndef OPENORIENTEERING_GNSS_UI_T_H
+#define OPENORIENTEERING_GNSS_UI_T_H
 
 #include <QObject>
 
-
-/**
- * @test Tests the editing tools.
- */
-class ToolsTest : public QObject
+class GnssUiTest : public QObject
 {
 Q_OBJECT
+
 private slots:
-	void initTestCase();
-	void newMapStartsWithoutFormat();
-	void unattachedLoadedEditorDestructsCleanly();
-	void framePublishesTemplateContextBeforeRasterCollection();
-	void mobileSecondaryPagesReplaceMapSurface();
-	
-	void editTool();
-	void panToolRecoversFromLostRelease();
-	void panDefersTemplateSceneIntegration();
-	void wheelDefersTemplateSceneIntegrationUntilIdle();
-	void sketchToolKeepsPrivateHistory();
-	void sketchToolAnnotatesReadOnlyMap();
-	
-	void testFindObjects();
+	void overlayDistinguishesLinkFromPosition();
+	void detailPanelDiagnosesAndReconfigures();
+	void settingsPageProvidesMapIndependentPreflight();
 };
 
 #endif

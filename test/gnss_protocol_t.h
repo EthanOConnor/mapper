@@ -46,6 +46,9 @@ private slots:
 	void ubxPartialFrame();
 	void ubxBadChecksum();
 	void ubxResyncAfterGarbage();
+	void ubxInitConfiguresBothReceiverUarts();
+	void sessionReportsRawReceiverTrafficBeforePositionParsing();
+	void sessionRedetectsProtocolAfterStartupNoise();
 
 	// NMEA parser tests
 	void nmeaGgaParsing();
@@ -59,6 +62,7 @@ private slots:
 	void detectNmea();
 	void detectMixed();
 	void detectUnknown();
+	void detectRtcm3();
 
 	// RTCM framer tests
 	void rtcmFrameValidation();

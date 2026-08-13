@@ -28,6 +28,7 @@
 
 class QCheckBox;
 class QComboBox;
+class QLabel;
 class QPushButton;
 class QWidget;
 
@@ -35,6 +36,7 @@ class QWidget;
 namespace OpenOrienteering {
 
 class NtripSettingsWidget;
+struct GnssState;
 
 
 class GnssSettingsPage : public SettingsPage
@@ -48,10 +50,18 @@ public:
 	void apply() override;
 	void reset() override;
 
+	/// Update the map-independent live preflight presentation. Public so the
+	/// application-wide session and focused UI tests share the same path.
+	void updatePreflightState(const GnssState& state);
+
 private:
+	void saveConfiguration();
+	void bindSession();
+	void startPreflight();
 	void updateWidgets();
 	void updateDeviceSelector();
 	void updateCorrectionControls();
+	void updatePreflightAvailability();
 
 	QComboBox* receiver_mode_box;
 	QComboBox* device_selector;
@@ -60,6 +70,13 @@ private:
 	QCheckBox* corrections_box;
 	QCheckBox* raw_logging_box;
 	NtripSettingsWidget* ntrip_widget;
+	QLabel* preflight_title_label;
+	QLabel* preflight_detail_label;
+	QLabel* preflight_receiver_label;
+	QLabel* preflight_corrections_label;
+	QLabel* preflight_error_label;
+	QPushButton* preflight_start_button;
+	QPushButton* preflight_disconnect_button;
 };
 
 

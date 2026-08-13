@@ -25,11 +25,11 @@
 
 #include <QObject>
 #include <QSize>
-#include <QWidget>
+#include <QTimer>
+#include <QToolButton>
 
 #include "gnss/gnss_state.h"
 
-class QMouseEvent;
 class QPaintEvent;
 
 namespace OpenOrienteering {
@@ -38,13 +38,13 @@ namespace OpenOrienteering {
 /**
  * A compact transparent overlay widget showing GNSS status at a glance.
  *
- * Displays fix type, P95 accuracy, correction state, and transport state
- * as a horizontal bar. Intended as a sibling of MapWidget with
+ * Displays an explicit position-health summary plus receiver and correction
+ * state. Intended as a sibling of MapWidget with
  * WA_NoSystemBackground, following the same pattern as CompassDisplay.
  *
  * Tapping the overlay emits clicked() to open the GNSS detail panel.
  */
-class GnssStatusOverlay : public QWidget
+class GnssStatusOverlay : public QToolButton
 {
 	Q_OBJECT
 public:
@@ -54,18 +54,15 @@ public:
 	void updateState(const GnssState& state);
 	QSize sizeHint() const override;
 
-signals:
-	void clicked();  // emitted on tap to open detail panel
-
 protected:
 	void paintEvent(QPaintEvent* event) override;
-	void mousePressEvent(QMouseEvent* event) override;
 
 private:
-	GnssFixType m_fixType = GnssFixType::NoFix;
-	float m_accuracyP95 = NAN;
-	GnssCorrectionState m_correctionState = GnssCorrectionState::Disabled;
-	GnssTransportState m_transportState = GnssTransportState::Disconnected;
+	void repaintLatestState();
+
+	GnssState m_state;
+	bool m_repaintPending = false;
+	QTimer m_repaintTimer;
 };
 
 

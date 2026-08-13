@@ -88,7 +88,8 @@ void ImagerySourceModel::rebuild()
 	roots_.clear();
 	if (snapshot_)
 	{
-		roots_.reserve(snapshot_->catalogs.size());
+		roots_.reserve(snapshot_->catalogs.size() + 1);
+		std::unique_ptr<Node> map_hub;
 		for (auto const& installed : snapshot_->catalogs)
 		{
 			auto catalog = std::make_unique<Node>();
@@ -204,7 +205,35 @@ void ImagerySourceModel::rebuild()
 			     row < int(catalog->children.size());
 			     ++row)
 				catalog->children[row]->row = row;
-			roots_.push_back(std::move(catalog));
+			if (installed.read_result.catalog.id.startsWith(
+				    QLatin1String("org.cascadeoc.maphub.")))
+			{
+				if (!map_hub)
+				{
+					map_hub = std::make_unique<Node>();
+					map_hub->type = NodeType::Provider;
+					map_hub->name = tr("Map Hub");
+					map_hub->status = tr("Authorized online imagery");
+					map_hub->tooltip = tr(
+						"Imagery available through your connected Map Hub account.");
+					map_hub->search_text = tr("Map Hub authorized online imagery");
+				}
+				catalog->parent = map_hub.get();
+				catalog->row = int(map_hub->children.size());
+				map_hub->children.push_back(std::move(catalog));
+			}
+			else
+			{
+				catalog->row = int(roots_.size());
+				roots_.push_back(std::move(catalog));
+			}
+		}
+		if (map_hub)
+		{
+			for (auto& root : roots_)
+				++root->row;
+			map_hub->row = 0;
+			roots_.insert(roots_.begin(), std::move(map_hub));
 		}
 	}
 	endResetModel();
@@ -234,7 +263,7 @@ QModelIndex ImagerySourceModel::index(
 			return {};
 		return createIndex(row, column, roots_[row].get());
 	}
-	if (parent_node->type != NodeType::Catalog
+	if (parent_node->type == NodeType::Source
 	    || row >= int(parent_node->children.size()))
 		return {};
 	return createIndex(
@@ -264,9 +293,9 @@ int ImagerySourceModel::rowCount(
 	auto* parent_node = node(parent);
 	if (!parent_node)
 		return int(roots_.size());
-	return parent_node->type == NodeType::Catalog
-		? int(parent_node->children.size())
-		: 0;
+	return parent_node->type == NodeType::Source
+		? 0
+		: int(parent_node->children.size());
 }
 
 
@@ -291,7 +320,7 @@ QVariant ImagerySourceModel::data(
 	case Qt::ToolTipRole:
 		return plainTextToolTip(item->tooltip);
 	case Qt::DecorationRole:
-		if (item->type == NodeType::Catalog)
+		if (item->type != NodeType::Source)
 			return ActionIcon::fromName(u"folder");
 		return item->supported
 			? ActionIcon::fromName(u"image")
@@ -344,16 +373,27 @@ ImagerySourceModel::sourceHandle(
 QModelIndex ImagerySourceModel::indexForHandle(
 	const imagery::ImagerySourceHandle& handle) const
 {
-	for (auto const& catalog : roots_)
+	for (auto const& root : roots_)
 	{
-		for (auto const& source : catalog->children)
-		{
-			if (source->handle && *source->handle == handle)
-				return createIndex(
-					source->row,
-					0,
-					source.get());
-		}
+		auto const found = indexForHandle(*root, handle);
+		if (found.isValid())
+			return found;
+	}
+	return {};
+}
+
+
+QModelIndex ImagerySourceModel::indexForHandle(
+	const Node& parent,
+	const imagery::ImagerySourceHandle& handle) const
+{
+	for (auto const& child : parent.children)
+	{
+		if (child->handle && *child->handle == handle)
+			return createIndex(child->row, 0, child.get());
+		auto const found = indexForHandle(*child, handle);
+		if (found.isValid())
+			return found;
 	}
 	return {};
 }

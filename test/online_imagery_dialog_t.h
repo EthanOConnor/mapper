@@ -20,6 +20,7 @@ private slots:
 	void selectsCatalogSourceByStableHandle();
 	void switchingToCatalogCancelsStaleDiscovery();
 	void arcGisDiscoveryUsesConfiguredReferer();
+	void exposesMapHubProviderBeforeAdvancedPaths();
 };
 
 #endif

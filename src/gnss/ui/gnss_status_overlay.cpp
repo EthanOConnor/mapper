@@ -22,9 +22,9 @@
 #include <cmath>
 
 #include <QColor>
+#include <QDebug>
 #include <QFont>
 #include <QFontMetricsF>
-#include <QMouseEvent>
 #include <QPainter>
 #include <QPen>
 #include <QRectF>
@@ -36,6 +36,25 @@
 namespace OpenOrienteering {
 
 namespace {
+
+bool transportConnected(GnssTransportState state)
+{
+	return state == GnssTransportState::Connected;
+}
+
+QString protocolText(GnssProtocol protocol)
+{
+	switch (protocol) {
+	case GnssProtocol::UBX: return QStringLiteral("UBX");
+	case GnssProtocol::NMEA: return QStringLiteral("NMEA");
+	case GnssProtocol::Mixed: return QStringLiteral("UBX + NMEA");
+	case GnssProtocol::RTCM3: return QStringLiteral("RTCM 3");
+	case GnssProtocol::BINEX: return QStringLiteral("BINEX");
+	case GnssProtocol::BYNAV: return QStringLiteral("BYNAV");
+	case GnssProtocol::Unknown: return {};
+	}
+	return {};
+}
 
 /// Returns the badge color for the given fix type.
 QColor fixBadgeColor(GnssFixType fix)
@@ -65,51 +84,56 @@ QString fixBadgeText(GnssFixType fix)
 	return QStringLiteral("---");
 }
 
-/// Returns the indicator color for the correction state.
-/// The bool reference indicates whether the circle should be filled.
-QColor correctionIndicatorColor(GnssCorrectionState state, bool& filled)
+QString fixTitle(GnssFixType fix)
 {
-	filled = false;
-	switch (state) {
-	case GnssCorrectionState::Disabled:
-	case GnssCorrectionState::Disconnected:
-		return QColor(0x80, 0x80, 0x80);  // gray, unfilled
-	case GnssCorrectionState::Connecting:
-	case GnssCorrectionState::Reconnecting:
-		return QColor(0xFF, 0xD6, 0x00);  // yellow outline
-	case GnssCorrectionState::Flowing:
-		filled = true;
-		return QColor(0x4C, 0xAF, 0x50);  // green filled
-	case GnssCorrectionState::Connected:
-	case GnssCorrectionState::Stale:
-		filled = true;
-		return QColor(0xFF, 0x98, 0x00);  // orange filled
+	switch (fix) {
+	case GnssFixType::RtkFixed: return GnssStatusOverlay::tr("RTK fixed");
+	case GnssFixType::RtkFloat: return GnssStatusOverlay::tr("RTK float");
+	case GnssFixType::DGPS: return GnssStatusOverlay::tr("Differential fix");
+	case GnssFixType::Fix3D: return GnssStatusOverlay::tr("3D position");
+	case GnssFixType::Fix2D: return GnssStatusOverlay::tr("2D position");
+	case GnssFixType::NoFix: return GnssStatusOverlay::tr("No position fix");
 	}
-	return QColor(0x80, 0x80, 0x80);
+	return GnssStatusOverlay::tr("No position fix");
 }
 
-/// Returns the indicator color for the transport state.
-QColor transportIndicatorColor(GnssTransportState state)
+QString correctionSummary(GnssCorrectionState state)
 {
 	switch (state) {
-	case GnssTransportState::Disconnected:
-		return QColor(0xF4, 0x43, 0x36);  // red
-	case GnssTransportState::Connecting:
-	case GnssTransportState::Reconnecting:
-		return QColor(0xFF, 0xD6, 0x00);  // yellow
-	case GnssTransportState::Connected:
-		return QColor(0x4C, 0xAF, 0x50);  // green
+	case GnssCorrectionState::Flowing: return GnssStatusOverlay::tr("corrections flowing");
+	case GnssCorrectionState::Connected: return GnssStatusOverlay::tr("corrections waiting");
+	case GnssCorrectionState::Stale: return GnssStatusOverlay::tr("corrections stale");
+	case GnssCorrectionState::Connecting:
+	case GnssCorrectionState::Reconnecting: return GnssStatusOverlay::tr("corrections connecting");
+	case GnssCorrectionState::Disconnected: return GnssStatusOverlay::tr("corrections offline");
+	case GnssCorrectionState::Disabled: return GnssStatusOverlay::tr("no corrections");
 	}
-	return QColor(0xF4, 0x43, 0x36);
+	return GnssStatusOverlay::tr("no corrections");
 }
 
 }  // namespace
 
 
 GnssStatusOverlay::GnssStatusOverlay(QWidget* parent)
- : QWidget(parent)
+ : QToolButton(parent)
 {
 	setAttribute(Qt::WA_NoSystemBackground, true);
+	setAutoRaise(true);
+	setCheckable(false);
+	setFocusPolicy(Qt::NoFocus);
+	setCursor(Qt::PointingHandCursor);
+	connect(this, &QToolButton::clicked, this, [] {
+		qInfo("GNSS status control activated (button)");
+	});
+	m_repaintTimer.setInterval(1000);
+	m_repaintTimer.setSingleShot(true);
+	connect(&m_repaintTimer, &QTimer::timeout, this, [this] {
+		if (!m_repaintPending)
+			return;
+		m_repaintPending = false;
+		repaintLatestState();
+		m_repaintTimer.start();
+	});
 }
 
 GnssStatusOverlay::~GnssStatusOverlay()
@@ -119,10 +143,33 @@ GnssStatusOverlay::~GnssStatusOverlay()
 
 void GnssStatusOverlay::updateState(const GnssState& state)
 {
-	m_fixType = state.solution.position.fixType;
-	m_accuracyP95 = state.solution.position.hAccuracyP95;
-	m_correctionState = state.correctionState;
-	m_transportState = state.transportState;
+	m_state = state;
+	QString accessible;
+	if (!transportConnected(state.transportState))
+		accessible = tr("GNSS receiver disconnected");
+	else if (state.receiverBytesReceived == 0)
+		accessible = tr("GNSS connected, waiting for receiver data");
+	else if (!state.solution.hasFreshPosition)
+		accessible = state.protocol == GnssProtocol::Unknown
+		  ? tr("GNSS data is not recognized")
+		  : tr("GNSS receiver data is arriving, but there is no position fix");
+	else
+		accessible = fixTitle(state.solution.position.fixType);
+	setAccessibleName(accessible);
+	setAccessibleDescription(tr("Tap for GNSS status and configuration"));
+	setToolTip(accessible + QStringLiteral(". ")
+	           + tr("Tap for status and configuration."));
+	if (m_repaintTimer.isActive())
+	{
+		m_repaintPending = true;
+		return;
+	}
+	repaintLatestState();
+	m_repaintTimer.start();
+}
+
+void GnssStatusOverlay::repaintLatestState()
+{
 	update();
 	if (auto* p = parentWidget())
 		p->update(geometry());
@@ -130,8 +177,16 @@ void GnssStatusOverlay::updateState(const GnssState& state)
 
 QSize GnssStatusOverlay::sizeHint() const
 {
-	auto w = qRound(Util::mmToPixelLogical(60.0));
-	auto h = qRound(Util::mmToPixelLogical(10.0));
+#if defined(Q_OS_IOS)
+	// Large enough to read and acquire one-handed while still fitting beside
+	// the portrait Dynamic Island on current iPhones. This is also the touch
+	// target, so do not shrink it back to a decorative status badge.
+	auto w = qRound(Util::mmToPixelLogical(33.0));
+	auto h = qRound(Util::mmToPixelLogical(11.5));
+#else
+	auto w = qRound(Util::mmToPixelLogical(64.0));
+	auto h = qRound(Util::mmToPixelLogical(15.0));
+#endif
 	return QSize(w, h);
 }
 
@@ -142,30 +197,156 @@ void GnssStatusOverlay::paintEvent(QPaintEvent*)
 
 	auto mm = [](qreal v) { return Util::mmToPixelLogical(v); };
 
+#if defined(Q_OS_IOS)
+	{
+	const auto& position = m_state.solution.position;
+	const bool connected = transportConnected(m_state.transportState);
+	const bool hasBytes = m_state.receiverBytesReceived > 0;
+	const bool freshPosition = m_state.solution.hasFreshPosition;
+	QColor healthColor;
+	QString text;
+	if (!connected)
+	{
+		healthColor = QColor(0xEF, 0x53, 0x50);
+		text = tr("GNSS off");
+	}
+	else if (!hasBytes)
+	{
+		healthColor = QColor(0xFF, 0xA7, 0x26);
+		text = tr("No data");
+	}
+	else if (!freshPosition)
+	{
+		healthColor = QColor(0xFF, 0xC1, 0x07);
+		switch (m_state.protocol)
+		{
+		case GnssProtocol::RTCM3: text = tr("RTCM only"); break;
+		case GnssProtocol::BINEX: text = tr("BINEX"); break;
+		case GnssProtocol::BYNAV: text = tr("BYNAV"); break;
+		case GnssProtocol::Unknown: text = tr("Data?"); break;
+		case GnssProtocol::UBX:
+		case GnssProtocol::NMEA:
+		case GnssProtocol::Mixed: text = tr("No fix"); break;
+		}
+	}
+	else
+	{
+		healthColor = fixBadgeColor(position.fixType);
+		text = fixBadgeText(position.fixType);
+		if (std::isfinite(position.hAccuracyP95))
+			text += position.hAccuracyP95 < 10.0f
+			      ? tr("  %1m").arg(position.hAccuracyP95, 0, 'f', 2)
+			      : tr("  %1m").arg(position.hAccuracyP95, 0, 'f', 1);
+	}
+
+	QRectF bounds(QPointF(0, 0), QSizeF(size()));
+	bounds.adjust(mm(0.25), mm(0.25), -mm(0.25), -mm(0.25));
+	painter.setPen(QPen(QColor(255, 255, 255, 32), mm(0.18)));
+	painter.setBrush(QColor(12, 16, 22, 238));
+	painter.drawRoundedRect(bounds, bounds.height() / 2.0, bounds.height() / 2.0);
+
+	const auto dotDiameter = mm(2.8);
+	QRectF dot(bounds.left() + mm(1.6),
+	           bounds.center().y() - dotDiameter / 2.0,
+	           dotDiameter, dotDiameter);
+	painter.setPen(Qt::NoPen);
+	painter.setBrush(healthColor);
+	painter.drawEllipse(dot);
+
+	QFont compactFont = font();
+	compactFont.setPixelSize(qRound(mm(3.6)));
+	compactFont.setBold(true);
+	painter.setFont(compactFont);
+	painter.setPen(Qt::white);
+	QRectF textRect(dot.right() + mm(1.2), bounds.top(),
+	                bounds.right() - dot.right() - mm(3.0), bounds.height());
+	painter.drawText(textRect, Qt::AlignLeft | Qt::AlignVCenter,
+	                 QFontMetricsF(compactFont).elidedText(
+	                   text, Qt::ElideRight, textRect.width()));
+
+	QFont chevronFont = compactFont;
+	chevronFont.setBold(false);
+	painter.setFont(chevronFont);
+	painter.setPen(QColor(220, 226, 234));
+	QRectF chevronRect(bounds.right() - mm(2.9), bounds.top(),
+	                   mm(2.0), bounds.height());
+	painter.drawText(chevronRect, Qt::AlignCenter, QStringLiteral("›"));
+	return;
+	}
+#endif
+
 	auto const margin = mm(1.0);
-	auto const padding = mm(1.5);
-	auto const indicatorRadius = mm(1.5);
+	auto const padding = mm(1.4);
 	auto const badgeRadius = mm(1.5);
 
 	QRectF bounds = { {0, 0}, QSizeF(size()) };
 	bounds.adjust(margin, margin, -margin, -margin);
 
-	// -- Background: semi-transparent dark rounded rect --
+	// High-contrast card remains readable over aerial imagery and map colors.
 	painter.setPen(Qt::NoPen);
-	painter.setBrush(QColor(0, 0, 0, 160));
+	painter.setBrush(QColor(19, 24, 31, 225));
 	painter.drawRoundedRect(bounds, mm(2.0), mm(2.0));
 
-	qreal x = bounds.left() + padding;
+	const auto& solution = m_state.solution;
+	const auto& position = solution.position;
+	const bool connected = transportConnected(m_state.transportState);
+	const bool hasBytes = m_state.receiverBytesReceived > 0;
+	const bool freshPosition = solution.hasFreshPosition;
+	QColor healthColor;
+	QString title;
+	QString detail;
+	if (!connected)
+	{
+		healthColor = QColor(0xEF, 0x53, 0x50);
+		title = tr("Receiver disconnected");
+		detail = tr("Tap to reconnect or change receiver");
+	}
+	else if (!hasBytes)
+	{
+		healthColor = QColor(0xFF, 0xA7, 0x26);
+		title = tr("Waiting for receiver data");
+		detail = tr("BLE connected · no position stream");
+	}
+	else if (!freshPosition)
+	{
+		healthColor = QColor(0xFF, 0xC1, 0x07);
+		title = m_state.protocol == GnssProtocol::Unknown
+		      ? tr("Unrecognized receiver data") : tr("Waiting for position fix");
+		auto protocol = protocolText(m_state.protocol);
+		detail = protocol.isEmpty()
+		       ? tr("Data arriving · tap for diagnostics")
+		       : tr("%1 data arriving · no usable fix").arg(protocol);
+	}
+	else
+	{
+		healthColor = fixBadgeColor(position.fixType);
+		title = fixTitle(position.fixType);
+		if (std::isfinite(position.hAccuracyP95))
+			title += position.hAccuracyP95 < 10.0f
+			       ? tr(" · %1 m").arg(position.hAccuracyP95, 0, 'f', 2)
+			       : tr(" · %1 m").arg(position.hAccuracyP95, 0, 'f', 1);
+		detail = tr("%1 satellites · %2")
+		           .arg(position.satellitesUsed)
+		           .arg(correctionSummary(m_state.correctionState));
+	}
+
+	// A colored leading rail communicates overall positioning health. Receiver
+	// and NTRIP connectivity alone never produce a green success state.
+	QRectF rail(bounds.left(), bounds.top(), mm(1.5), bounds.height());
+	painter.setBrush(healthColor);
+	painter.drawRoundedRect(rail, mm(0.75), mm(0.75));
+
+	qreal x = rail.right() + padding;
 	qreal const cy = bounds.center().y();
 
-	// -- 1. Fix badge --
+	// Compact fix badge.
 	{
 		QFont badgeFont;
 		badgeFont.setPixelSize(qRound(mm(4.0)));
 		badgeFont.setBold(true);
 		painter.setFont(badgeFont);
 
-		QString text = fixBadgeText(m_fixType);
+		QString text = freshPosition ? fixBadgeText(position.fixType) : QStringLiteral("!");
 		QFontMetricsF fm(badgeFont);
 		qreal textWidth = fm.horizontalAdvance(text);
 		qreal badgeW = textWidth + mm(2.0);
@@ -173,7 +354,7 @@ void GnssStatusOverlay::paintEvent(QPaintEvent*)
 		QRectF badgeRect(x, cy - badgeH / 2.0, badgeW, badgeH);
 
 		painter.setPen(Qt::NoPen);
-		painter.setBrush(fixBadgeColor(m_fixType));
+		painter.setBrush(healthColor);
 		painter.drawRoundedRect(badgeRect, badgeRadius, badgeRadius);
 
 		painter.setPen(Qt::white);
@@ -182,71 +363,37 @@ void GnssStatusOverlay::paintEvent(QPaintEvent*)
 		x = badgeRect.right() + padding;
 	}
 
-	// -- 2. P95 accuracy text --
+	const auto chevronWidth = mm(4.0);
+	const auto textRight = bounds.right() - padding - chevronWidth;
+
+	// Primary and explanatory secondary lines.
 	{
-		QFont monoFont;
-		monoFont.setFamily(QStringLiteral("Menlo"));
-		monoFont.setStyleHint(QFont::Monospace);
-		monoFont.setPixelSize(qRound(mm(4.5)));
-		painter.setFont(monoFont);
-
-		QString accText;
-		if (std::isnan(m_accuracyP95))
-		{
-			accText = QStringLiteral("--");
-		}
-		else if (m_accuracyP95 < 10.0f)
-		{
-			accText = QString::number(static_cast<double>(m_accuracyP95), 'f', 2) + QStringLiteral("m");
-		}
-		else
-		{
-			accText = QString::number(static_cast<double>(m_accuracyP95), 'f', 1) + QStringLiteral("m");
-		}
-
+		QFont titleFont = font();
+		titleFont.setPixelSize(qRound(mm(3.7)));
+		titleFont.setBold(true);
+		painter.setFont(titleFont);
 		painter.setPen(Qt::white);
-		QFontMetricsF fm(monoFont);
-		qreal textWidth = fm.horizontalAdvance(accText);
-		QRectF textRect(x, cy - fm.height() / 2.0, textWidth, fm.height());
-		painter.drawText(textRect, Qt::AlignVCenter | Qt::AlignLeft, accText);
+		QRectF titleRect(x, bounds.top() + mm(1.7), textRight - x, mm(5.0));
+		painter.drawText(titleRect, Qt::AlignLeft | Qt::AlignVCenter,
+		                 QFontMetricsF(titleFont).elidedText(title, Qt::ElideRight, titleRect.width()));
 
-		x = textRect.right() + padding;
+		QFont detailFont = font();
+		detailFont.setPixelSize(qRound(mm(3.0)));
+		painter.setFont(detailFont);
+		painter.setPen(QColor(220, 226, 234));
+		QRectF detailRect(x, titleRect.bottom(), textRight - x, mm(4.5));
+		painter.drawText(detailRect, Qt::AlignLeft | Qt::AlignVCenter,
+		                 QFontMetricsF(detailFont).elidedText(detail, Qt::ElideRight, detailRect.width()));
 	}
 
-	// -- 3. Correction indicator --
-	{
-		bool filled = false;
-		QColor color = correctionIndicatorColor(m_correctionState, filled);
-
-		if (filled)
-		{
-			painter.setPen(Qt::NoPen);
-			painter.setBrush(color);
-		}
-		else
-		{
-			painter.setPen(QPen(color, mm(0.5)));
-			painter.setBrush(Qt::NoBrush);
-		}
-		painter.drawEllipse(QPointF(x + indicatorRadius, cy), indicatorRadius, indicatorRadius);
-
-		x += indicatorRadius * 2.0 + padding;
-	}
-
-	// -- 4. Transport indicator --
-	{
-		QColor color = transportIndicatorColor(m_transportState);
-		painter.setPen(Qt::NoPen);
-		painter.setBrush(color);
-		painter.drawEllipse(QPointF(x + indicatorRadius, cy), indicatorRadius, indicatorRadius);
-	}
+	// Chevron makes the tap-through behavior discoverable.
+	painter.setPen(QPen(QColor(220, 226, 234), mm(0.45), Qt::SolidLine,
+	                    Qt::RoundCap, Qt::RoundJoin));
+	auto chevronX = bounds.right() - padding - mm(1.0);
+	painter.drawLine(QPointF(chevronX - mm(1.2), cy - mm(1.7)),
+	                 QPointF(chevronX, cy));
+	painter.drawLine(QPointF(chevronX, cy),
+	                 QPointF(chevronX - mm(1.2), cy + mm(1.7)));
 }
-
-void GnssStatusOverlay::mousePressEvent(QMouseEvent* event)
-{
-	event->accept();
-	emit clicked();
-}
-
 
 }  // namespace OpenOrienteering

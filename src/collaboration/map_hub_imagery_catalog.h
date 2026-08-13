@@ -9,11 +9,23 @@
 
 #include <QJsonObject>
 #include <QString>
+#include <QVector>
+
+#include "imagery/imagery_catalog_repository.h"
 
 namespace OpenOrienteering {
 
 struct MapHubImageryCatalogResult {
   QString catalog_id;
+  int installed_sources = 0;
+  imagery::ImageryCatalogRepository::OperationId operation_id = 0;
+  QString error;
+
+  explicit operator bool() const { return error.isEmpty(); }
+};
+
+struct MapHubImageryCatalogBatchResult {
+  QVector<imagery::ImageryCatalogRepository::OperationId> operation_ids;
   int installed_sources = 0;
   QString error;
 
@@ -30,7 +42,11 @@ public:
                                      const QString &manifest_url,
                                      QString *error = nullptr);
   static MapHubImageryCatalogResult install(const QJsonObject &manifest,
-                                            const QString &manifest_url);
+                                            const QString &manifest_url,
+                                            imagery::ImageryCatalogRepository *repository = nullptr);
+  static MapHubImageryCatalogBatchResult installAuthorizedCatalog(
+      const QJsonObject &catalog, const QString &catalog_url,
+      imagery::ImageryCatalogRepository *repository = nullptr);
 };
 
 } // namespace OpenOrienteering

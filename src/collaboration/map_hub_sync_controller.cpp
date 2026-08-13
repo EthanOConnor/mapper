@@ -11,6 +11,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonObject>
+#include <QSaveFile>
 #include <QSysInfo>
 #include <QTimer>
 #include <QUuid>
@@ -43,6 +44,24 @@ QString uploadKey(const QString &workspace_id, const QString &base_version_id,
           .left(48)));
 }
 
+bool copyFileAtomically(const QString &source_path,
+                        const QString &destination_path, qint64 expected_size) {
+  QFile source(source_path);
+  QSaveFile destination(destination_path);
+  if (!source.open(QIODevice::ReadOnly) ||
+      !destination.open(QIODevice::WriteOnly))
+    return false;
+  QByteArray buffer(1024 * 1024, Qt::Uninitialized);
+  qint64 copied = 0;
+  while (!source.atEnd()) {
+    const auto read = source.read(buffer.data(), buffer.size());
+    if (read <= 0 || destination.write(buffer.constData(), read) != read)
+      return false;
+    copied += read;
+  }
+  return copied == expected_size && destination.commit();
+}
+
 } // namespace
 
 MapHubSyncController::MapHubSyncController(QObject *parent)
@@ -68,7 +87,9 @@ MapHubSyncController::~MapHubSyncController() = default;
 void MapHubSyncController::configure(const ManagedMapWorkspace &new_workspace,
                                      Map *new_map,
                                      RevisionProvider new_revision_provider,
-                                     SnapshotProvider new_snapshot_provider) {
+                                     SnapshotProvider new_snapshot_provider,
+                                     WorkingCopyCommitter
+                                         new_working_copy_committer) {
   clear();
   if (!new_workspace.isValid() || !new_map || !new_revision_provider ||
       !new_snapshot_provider)
@@ -77,6 +98,7 @@ void MapHubSyncController::configure(const ManagedMapWorkspace &new_workspace,
   map = new_map;
   revision_provider = std::move(new_revision_provider);
   snapshot_provider = std::move(new_snapshot_provider);
+  working_copy_committer = std::move(new_working_copy_committer);
   observed_revision = revision_provider();
   staged_revision = observed_revision;
   workspace.file_protocol = QStringLiteral("omap-snapshot/1");
@@ -103,6 +125,7 @@ void MapHubSyncController::clear() {
   map = nullptr;
   revision_provider = {};
   snapshot_provider = {};
+  working_copy_committer = {};
   observed_revision = 0;
   staged_revision = 0;
   upload_pending = false;
@@ -199,6 +222,15 @@ void MapHubSyncController::stageAndUpload() {
   staged_path = final_path;
   staged_sha256 = sha256;
   staged_revision = snapshot_revision;
+  QString working_copy_error;
+  if (!commitWorkingCopy(final_path, size_bytes, &working_copy_error)) {
+    setState(State::SavedLocally,
+             working_copy_error.isEmpty()
+                 ? tr("Saved on this device — finishing the open file will retry")
+                 : working_copy_error);
+    retry_timer->start(retry_interval_ms);
+    return;
+  }
   if (workspace.file_sha256 == sha256 && !workspace.file_version_id.isEmpty()) {
     setState(State::Synced, tr("Available on your other devices"));
     return;
@@ -406,6 +438,20 @@ bool MapHubSyncController::saveWorkspace() {
           ? tr("Your map is safe, but its Map Hub status could not be saved.")
           : error);
   return false;
+}
+
+bool MapHubSyncController::commitWorkingCopy(const QString &snapshot_path,
+                                             qint64 expected_size,
+                                             QString *error) {
+  if (error)
+    error->clear();
+  if (working_copy_committer)
+    return working_copy_committer(snapshot_path, expected_size, error);
+  const auto committed = copyFileAtomically(
+      snapshot_path, workspace.local_map_path, expected_size);
+  if (!committed && error)
+    *error = tr("Your map is safe, but Mapper could not finish saving the open .omap file.");
+  return committed;
 }
 
 } // namespace OpenOrienteering

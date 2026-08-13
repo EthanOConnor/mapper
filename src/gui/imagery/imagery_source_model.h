@@ -38,6 +38,7 @@ public:
 
 	enum class NodeType
 	{
+		Provider,
 		Catalog,
 		Source,
 	};
@@ -72,6 +73,9 @@ private:
 
 	void rebuild();
 	Node* node(const QModelIndex& index) const;
+	QModelIndex indexForHandle(
+		const Node& parent,
+		const imagery::ImagerySourceHandle& handle) const;
 
 	imagery::ImageryCatalogRepository& repository_;
 	imagery::ImageryCatalogRepositorySnapshotPtr snapshot_;

@@ -47,13 +47,16 @@ public:
   using RevisionProvider = std::function<quint64()>;
   using SnapshotProvider = std::function<bool(
       const QString &destination, quint64 *staged_revision, QString *error)>;
+  using WorkingCopyCommitter = std::function<bool(
+      const QString &snapshot_path, qint64 expected_size, QString *error)>;
 
   explicit MapHubSyncController(QObject *parent = nullptr);
   ~MapHubSyncController() override;
 
   void configure(const ManagedMapWorkspace &workspace, Map *map,
                  RevisionProvider revision_provider,
-                 SnapshotProvider snapshot_provider);
+                 SnapshotProvider snapshot_provider,
+                 WorkingCopyCommitter working_copy_committer = {});
   void clear();
   void applicationBecameActive();
   void applicationWillResignActive();
@@ -74,6 +77,8 @@ private:
                         qint64 size_bytes, quint64 map_revision);
   void pollFileState();
   void setState(State state, const QString &text);
+  bool commitWorkingCopy(const QString &snapshot_path, qint64 expected_size,
+                         QString *error = nullptr);
   bool editable() const;
   bool saveWorkspace();
 
@@ -81,6 +86,7 @@ private:
   Map *map = nullptr;
   RevisionProvider revision_provider;
   SnapshotProvider snapshot_provider;
+  WorkingCopyCommitter working_copy_committer;
   QTimer *watch_timer;
   QTimer *stage_timer;
   QTimer *retry_timer;
