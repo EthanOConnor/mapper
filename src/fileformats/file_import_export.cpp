@@ -257,9 +257,7 @@ void Importer::validate()
 	
 	if (have_lost_template)
 	{
-#if defined(MAPPER_MOBILE)
-		addWarning(tr("At least one template file could not be found."));
-#else
+#if !defined(MAPPER_MOBILE)
 		addWarning(tr("At least one template file could not be found.") + QLatin1Char(' ') +
 		           tr("Click the red template name(s) in the Templates -> Template setup window to locate the template file name(s)."));
 #endif

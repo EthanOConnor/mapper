@@ -2837,7 +2837,46 @@ void MapEditorController::reopenTemplateClicked()
 
 void MapEditorController::templateAvailabilityChanged()
 {
-	// Nothing
+	if (!template_window_act || !map)
+		return;
+
+	bool has_missing_template = false;
+	for (auto i = 0; i < map->getNumTemplates(); ++i)
+	{
+		if (map->getTemplate(i)->getTemplateState() == Template::Invalid)
+		{
+			has_missing_template = true;
+			break;
+		}
+	}
+
+	template_window_act->setToolTip(
+	  has_missing_template
+	    ? tr("Templates — one or more layers need attention")
+	    : tr("Template setup window"));
+
+	if (!top_action_bar)
+		return;
+	auto* button = top_action_bar->getButtonForAction(template_window_act);
+	if (!button)
+		return;
+
+	button->setAccessibleDescription(
+	  has_missing_template
+	    ? tr("One or more template layers are unavailable. Tap to manage templates.")
+	    : QString{});
+	button->setStyleSheet(
+	  has_missing_template
+	    ? QStringLiteral(
+	        "QToolButton {"
+	        " border: 3px solid #e6ad16;"
+	        " border-radius: 9px;"
+	        " background-color: rgba(255, 193, 7, 44);"
+	        "}"
+	        "QToolButton:pressed {"
+	        " background-color: rgba(255, 193, 7, 86);"
+	        "}")
+	    : QString{});
 }
 
 void MapEditorController::closedTemplateAvailabilityChanged()
@@ -4630,6 +4669,7 @@ void MapEditorController::setMapAndView(Map* map, MapView* map_view)
 	connect(map, &Map::objectSelectionChanged, this, &MapEditorController::objectSelectionChanged);
 	connect(map, &Map::templateAdded, this, &MapEditorController::templateAdded);
 	connect(map, &Map::templateDeleted, this, &MapEditorController::templateDeleted);
+	connect(map, &Map::templateChanged, this, &MapEditorController::templateAvailabilityChanged);
 	connect(map, &Map::closedTemplateAvailabilityChanged, this, &MapEditorController::closedTemplateAvailabilityChanged);
 	connect(map, &Map::spotColorPresenceChanged, this, &MapEditorController::spotColorPresenceChanged);
 	connect(map, &Map::currentMapPartChanged, this, &MapEditorController::updateMapPartsUI);
