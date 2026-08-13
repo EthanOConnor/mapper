@@ -62,7 +62,6 @@
 #include "collaboration/map_hub_credentials.h"
 #include "collaboration/map_hub_device_authorization.h"
 #include "collaboration/map_hub_imagery_catalog.h"
-#include "collaboration/map_hub_operation_store.h"
 #include "collaboration/map_hub_read_only_document.h"
 #include "collaboration/map_hub_workspace.h"
 #include "core/document_path.h"
@@ -2610,9 +2609,7 @@ void MapHubDialog::startAssignment(const QString &assignment_id,
   auto server =
       Settings::getInstance().getSetting(Settings::MapHub_ServerUrl).toString();
   auto manifest_url = projectManifestUrl(server, project_id);
-  setBusy(
-      true,
-      tr("Starting %1 and obtaining its editing lease…").arg(assignment_title));
+  setBusy(true, tr("Opening the latest saved map for %1…").arg(assignment_title));
   client->startAssignment(
       assignment_id,
       [this, assignment_id, project_id, project_title, manifest_url](
@@ -2670,24 +2667,18 @@ void MapHubDialog::beginWorkspace(const QJsonObject &response,
       setBusy(false);
       QMessageBox::warning(
           this, tr("Invalid workspace response"),
-          tr("Map Hub did not return a stable workspace identifier. Nothing "
-             "was downloaded or created locally."));
+          tr("Map Hub did not return a stable workspace identifier. Nothing was downloaded or created locally."));
       return;
     }
-    setBusy(true, tr("Reading the current connected-editing state…"));
-    const auto editing_lease =
-        response.value(QStringLiteral("lease"))
-            .toObject()
-            .value(QStringLiteral("token"))
-            .toString();
+    setBusy(true, tr("Finding the latest saved map…"));
     client->workspaceSyncState(
-        workspace_id, {}, editing_lease,
+        workspace_id, {}, {},
         [this, response, assignment_id, project_title, defaults,
          sync_state_key](const QJsonObject &sync_state, const QString &, bool,
                          const MapHubApiClient::Error &error) mutable {
           if (error) {
             setBusy(false);
-            showError(tr("Could not read connected-editing state"), error);
+            showError(tr("Could not find the latest saved map"), error);
             return;
           }
           auto hydrated_response = response;
@@ -2707,11 +2698,10 @@ void MapHubDialog::beginWorkspace(const QJsonObject &response,
       sync_state.value(QStringLiteral("active_workspace_revision")).toObject();
   const auto sync_project_revision =
       sync_state.value(QStringLiteral("project_revision")).toObject();
-  const auto sync_lease = sync_state.value(QStringLiteral("lease")).toObject();
-  const auto sync_stream =
-      sync_state.value(QStringLiteral("stream")).toObject();
-  const auto sync_snapshot =
-      sync_stream.value(QStringLiteral("snapshot")).toObject();
+  const auto file_handoff =
+      sync_state.value(QStringLiteral("file_handoff")).toObject();
+  const auto current_file =
+      file_handoff.value(QStringLiteral("current")).toObject();
 
   auto workspace_object =
       response.value(QStringLiteral("workspace")).toObject();
@@ -2728,117 +2718,61 @@ void MapHubDialog::beginWorkspace(const QJsonObject &response,
   else if (!sync_workspace_revision.isEmpty())
     active_revision = sync_workspace_revision;
 
-  const auto snapshot_download_url =
-      QUrl(sync_snapshot.value(QStringLiteral("download_url")).toString());
-  const auto snapshot_sha256 =
-      sync_snapshot.value(QStringLiteral("sha256")).toString();
-  const auto snapshot_stream_sequence =
-      sync_snapshot.value(QStringLiteral("base_stream_sequence")).toInteger(-1);
-  const auto snapshot_entity_index =
-      sync_snapshot.value(QStringLiteral("entity_index")).toObject();
-  static const QRegularExpression lowercase_sha256_pattern(
-      QStringLiteral("^[0-9a-f]{64}$"));
-  const auto has_current_snapshot =
-      sync_state.value(QStringLiteral("protocol")).toString() ==
-          QLatin1String("oom-map-ops/1") &&
-      !sync_snapshot.isEmpty() && snapshot_download_url.isValid() &&
-      !snapshot_download_url.isEmpty() &&
-      !QUuid(sync_snapshot.value(QStringLiteral("id")).toString()).isNull() &&
-      snapshot_stream_sequence >= 0 &&
-      lowercase_sha256_pattern.match(snapshot_sha256).hasMatch() &&
-      lowercase_sha256_pattern
-          .match(sync_snapshot.value(QStringLiteral("base_stream_hash"))
-                     .toString())
-          .hasMatch() &&
-      sync_snapshot.value(QStringLiteral("size_bytes")).toInteger(-1) > 0 &&
-      lowercase_sha256_pattern
-          .match(
-              snapshot_entity_index.value(QStringLiteral("sha256")).toString())
-          .hasMatch() &&
-      !QUrl(snapshot_entity_index.value(QStringLiteral("download_url"))
-                .toString())
-           .isEmpty();
-  if (has_current_snapshot) {
-    effective_revision = {
-        {QStringLiteral("id"),
-         sync_snapshot.value(QStringLiteral("revision_id"))},
-        {QStringLiteral("number"),
-         active_revision.value(QStringLiteral("number"))},
-        {QStringLiteral("sha256"), snapshot_sha256},
-        {QStringLiteral("size_bytes"),
-         sync_snapshot.value(QStringLiteral("size_bytes"))},
-        {QStringLiteral("download_url"),
-         sync_snapshot.value(QStringLiteral("download_url"))},
-        {QStringLiteral("artifact_kind"), QStringLiteral("omap")},
-        {QStringLiteral("original_name"),
-         QStringLiteral("connected-snapshot.omap")},
-    };
-  }
-  auto lease = response.value(QStringLiteral("lease")).toObject();
-  auto server =
+  const auto server =
       Settings::getInstance().getSetting(Settings::MapHub_ServerUrl).toString();
-  auto workspace_id = workspace_object.value(QStringLiteral("id")).toString();
-  auto project_id =
+  const auto workspace_id =
+      workspace_object.value(QStringLiteral("id")).toString();
+  const auto project_id =
       workspace_object.value(QStringLiteral("project_id")).toString();
-  auto work_package_id =
+  const auto work_package_id =
       workspace_object.value(QStringLiteral("work_package_id")).toString();
-  const auto sync_head =
-      sync_stream.value(QStringLiteral("head_sequence")).toInteger(-1);
-  const auto sync_minimum =
-      sync_stream.value(QStringLiteral("minimum_available_sequence"))
-          .toInteger(-1);
-  const auto sync_initial =
-      sync_stream.value(QStringLiteral("initial_snapshot_required")).toBool();
   const auto sync_workspace_id =
       sync_workspace.value(QStringLiteral("id")).toString();
-  const auto valid_revision = [](const QJsonObject &revision) {
-    return revision.isEmpty() ||
-           !QUuid(revision.value(QStringLiteral("id")).toString()).isNull();
-  };
-  const auto valid_minimum =
-      sync_minimum >= 1 && (sync_minimum <= sync_head ||
-                            (sync_head < std::numeric_limits<qint64>::max() &&
-                             sync_minimum == sync_head + 1));
+  const auto file_protocol =
+      file_handoff.value(QStringLiteral("protocol")).toString();
+  static const QRegularExpression lowercase_sha256_pattern(
+      QStringLiteral("^[0-9a-f]{64}$"));
+  const auto current_file_id =
+      current_file.value(QStringLiteral("id")).toString();
+  const auto current_file_sha =
+      current_file.value(QStringLiteral("sha256")).toString();
+  const auto current_file_url =
+      QUrl(current_file.value(QStringLiteral("download_url")).toString());
+  const bool has_current_file =
+      !current_file.isEmpty() && !QUuid(current_file_id).isNull() &&
+      lowercase_sha256_pattern.match(current_file_sha).hasMatch() &&
+      current_file.value(QStringLiteral("size_bytes")).toInteger(-1) > 0 &&
+      current_file_url.isValid() && !current_file_url.isEmpty();
+
   if (QUuid(workspace_id).isNull() || QUuid(project_id).isNull() ||
       QUuid(work_package_id).isNull() || QUuid(assignment_id).isNull() ||
-      sync_state.value(QStringLiteral("protocol")).toString() !=
-          QLatin1String("oom-map-ops/1") ||
-      sync_state.value(QStringLiteral("canonical_json")).toString() !=
-          QLatin1String("oom-json/1") ||
-      sync_workspace_id != workspace_id || sync_head < 0 ||
-      !lowercase_sha256_pattern
-           .match(sync_stream.value(QStringLiteral("head_hash")).toString())
-           .hasMatch() ||
-      !valid_minimum ||
-      !sync_stream.value(QStringLiteral("initial_snapshot_required"))
-           .isBool() ||
-      !sync_stream.value(QStringLiteral("compaction_recommended")).isBool() ||
-      !sync_stream.value(QStringLiteral("compaction_required")).isBool() ||
-      !sync_lease.value(QStringLiteral("valid")).toBool() ||
-      !valid_revision(sync_workspace_revision) ||
-      !valid_revision(sync_active_revision) ||
-      !valid_revision(sync_project_revision) ||
-      (sync_initial && (sync_head != 0 || !sync_snapshot.isEmpty())) ||
-      (!sync_initial &&
-       (!has_current_snapshot || snapshot_stream_sequence > sync_head))) {
+      sync_workspace_id != workspace_id ||
+      file_protocol != QLatin1String("omap-snapshot/1") ||
+      (!current_file.isEmpty() && !has_current_file)) {
     setBusy(false);
     QMessageBox::warning(
         this, tr("Invalid workspace response"),
-        tr("Map Hub did not return a complete, verifiable connected-editing "
-           "workspace. Nothing was downloaded or created locally."));
+        tr("Map Hub did not return a complete saved-map record. Nothing was downloaded or changed locally."));
     return;
   }
-  if (!lease.value(QStringLiteral("token")).toString().isEmpty()) {
-    auto stored = MapHubCredentials::writeToken(
-        MapHubCredentials::workspaceLeaseKey(server, workspace_id),
-        lease.value(QStringLiteral("token")).toString());
-    if (!stored) {
-      setBusy(false);
-      QMessageBox::warning(this, tr("Could not secure editing lease"),
-                           stored.error);
-      return;
-    }
+
+  if (has_current_file) {
+    effective_revision = {
+        {QStringLiteral("id"),
+         active_revision.value(QStringLiteral("id"))},
+        {QStringLiteral("number"),
+         active_revision.value(QStringLiteral("number"))},
+        {QStringLiteral("sha256"), current_file_sha},
+        {QStringLiteral("size_bytes"),
+         current_file.value(QStringLiteral("size_bytes"))},
+        {QStringLiteral("download_url"),
+         current_file.value(QStringLiteral("download_url"))},
+        {QStringLiteral("artifact_kind"), QStringLiteral("omap")},
+        {QStringLiteral("original_name"),
+         current_file.value(QStringLiteral("original_name"))},
+    };
   }
+
   auto managed = defaults;
   managed.server_url = server;
   managed.organization_id =
@@ -2857,14 +2791,12 @@ void MapHubDialog::beginWorkspace(const QJsonObject &response,
   managed.workspace_id = workspace_id;
   managed.assignment_id = assignment_id;
   managed.manifest_url = projectManifestUrl(server, managed.project_id);
-  managed.status = workspace_object.value(QStringLiteral("status")).toString();
-  if (!sync_workspace.value(QStringLiteral("status")).toString().isEmpty())
-    managed.status = sync_workspace.value(QStringLiteral("status")).toString();
+  managed.status = sync_workspace.value(QStringLiteral("status")).toString();
+  if (managed.status.isEmpty())
+    managed.status = workspace_object.value(QStringLiteral("status")).toString();
   managed.exclusive_editing =
-      workspace_object.value(QStringLiteral("exclusive_editing")).toBool();
-  if (sync_workspace.contains(QStringLiteral("exclusive_editing")))
-    managed.exclusive_editing =
-        sync_workspace.value(QStringLiteral("exclusive_editing")).toBool();
+      sync_workspace.value(QStringLiteral("exclusive_editing")).toBool(
+          workspace_object.value(QStringLiteral("exclusive_editing")).toBool());
   managed.base_revision_id =
       original_base.value(QStringLiteral("id")).toString();
   managed.base_revision_number =
@@ -2883,77 +2815,30 @@ void MapHubDialog::beginWorkspace(const QJsonObject &response,
       effective_revision.value(QStringLiteral("artifact_kind")).toString();
   managed.base_artifact_name =
       effective_revision.value(QStringLiteral("original_name")).toString();
-  managed.lease_expires_at = QDateTime::fromString(
-      lease.value(QStringLiteral("expires_at")).toString(), Qt::ISODate);
-  const auto current_lease_expiry = QDateTime::fromString(
-      sync_lease.value(QStringLiteral("expires_at")).toString(), Qt::ISODate);
-  if (current_lease_expiry.isValid())
-    managed.lease_expires_at = current_lease_expiry;
-  managed.stream_protocol =
-      sync_state.value(QStringLiteral("protocol")).toString();
-  managed.initial_snapshot_required =
-      sync_stream.value(QStringLiteral("initial_snapshot_required")).toBool();
-  managed.stream_head_sequence =
-      sync_stream.value(QStringLiteral("head_sequence")).toInteger();
-  managed.stream_head_hash =
-      sync_stream.value(QStringLiteral("head_hash")).toString();
-  managed.minimum_available_sequence =
-      sync_stream.value(QStringLiteral("minimum_available_sequence"))
-          .toInteger(1);
-  managed.uncompacted_operations =
-      sync_stream.value(QStringLiteral("uncompacted_operations")).toInteger();
-  managed.compaction_recommended =
-      sync_stream.value(QStringLiteral("compaction_recommended")).toBool();
-  managed.compaction_required =
-      sync_stream.value(QStringLiteral("compaction_required")).toBool();
-  if (has_current_snapshot) {
-    managed.snapshot_stream_sequence =
-        sync_snapshot.value(QStringLiteral("base_stream_sequence")).toInteger();
-    managed.snapshot_stream_hash =
-        sync_snapshot.value(QStringLiteral("base_stream_hash")).toString();
-    managed.snapshot_id = sync_snapshot.value(QStringLiteral("id")).toString();
-    managed.snapshot_sha256 = snapshot_sha256;
-    managed.snapshot_size_bytes =
-        sync_snapshot.value(QStringLiteral("size_bytes")).toInteger();
-    managed.snapshot_download_url = snapshot_download_url.toString();
-    managed.snapshot_revision_id =
-        sync_snapshot.value(QStringLiteral("revision_id")).toString();
-    const auto entity_index =
-        sync_snapshot.value(QStringLiteral("entity_index")).toObject();
-    managed.snapshot_entity_index_sha256 =
-        entity_index.value(QStringLiteral("sha256")).toString();
-    managed.snapshot_entity_index_download_url =
-        entity_index.value(QStringLiteral("download_url")).toString();
+  managed.file_protocol = file_protocol;
+  if (has_current_file) {
+    managed.file_version_id = current_file_id;
+    managed.file_generation =
+        current_file.value(QStringLiteral("generation")).toInteger();
+    managed.file_sha256 = current_file_sha;
+    managed.file_size_bytes =
+        current_file.value(QStringLiteral("size_bytes")).toInteger();
+    managed.file_download_url = current_file_url.toString();
   }
 
   QString existing_error;
   const auto existing = ManagedMapWorkspace::findForWorkspace(
       server, workspace_id, &existing_error);
-  if (existing.isValid()) {
-    MapHubOperationStore existing_store;
-    QString store_error;
-    const auto store_ready = existing_store.open(workspace_id, &store_error);
-    const auto store_state = store_ready ? existing_store.state(&store_error)
-                                         : MapHubOperationStore::State{};
-    const auto projection_ready =
-        managed.initial_snapshot_required ||
-        (store_ready &&
-         !existing_store.entityIndex(&store_error).entities.isEmpty());
-    const auto existing_active = existing.active_revision_id.isEmpty()
-                                     ? existing.base_revision_id
-                                     : existing.active_revision_id;
-    const auto current_active = managed.active_revision_id.isEmpty()
-                                    ? managed.base_revision_id
-                                    : managed.active_revision_id;
-    const auto retained_tail_available =
-        store_state.published_stream_sequence >=
-            managed.minimum_available_sequence - 1 &&
-        store_state.published_stream_sequence <= managed.stream_head_sequence;
-    if (store_error.isEmpty() && projection_ready && retained_tail_available &&
-        existing_active == current_active &&
-        existing.project_revision_id == managed.project_revision_id) {
+  if (existing.isValid() && has_current_file &&
+      existing.file_version_id == current_file_id &&
+      QFileInfo::exists(existing.local_map_path)) {
+    QString local_hash_error;
+    const auto existing_sha = MapHubApiClient::sha256ForFile(
+        existing.local_map_path, &local_hash_error);
+    if (existing_sha.compare(current_file_sha, Qt::CaseInsensitive) == 0) {
       managed.local_map_path = existing.local_map_path;
       managed.source_artifact_path = existing.source_artifact_path;
+      managed.client_instance_id = existing.client_instance_id;
       setBusy(false);
       if (window->openConnectedWorkspace(existing.local_map_path,
                                          existing.local_map_path, managed))
@@ -2962,7 +2847,7 @@ void MapHubDialog::beginWorkspace(const QJsonObject &response,
     }
   }
 
-  auto download_url =
+  const auto download_url =
       QUrl(effective_revision.value(QStringLiteral("download_url")).toString());
   const auto baseline =
       MapHubApiClient::classifyWorkspaceBaseline(effective_revision);
@@ -2976,43 +2861,36 @@ void MapHubDialog::beginWorkspace(const QJsonObject &response,
     setBusy(false);
     QMessageBox::warning(
         this, tr("Incomplete map baseline"),
-        tr("Map Hub identified an existing base revision but did not provide "
-           "a valid artifact download URL. Mapper did not create a blank map; "
-           "refresh the assignment or ask the map librarian to repair the "
-           "revision."));
+        tr("Map Hub did not provide a complete downloadable map. Nothing was created locally."));
     return;
   }
   static const QRegularExpression sha256_pattern(
       QStringLiteral("^[0-9a-fA-F]{64}$"));
-  auto effective_sha =
+  const auto effective_sha =
       effective_revision.value(QStringLiteral("sha256")).toString();
   if (!sha256_pattern.match(effective_sha).hasMatch()) {
     setBusy(false);
     QMessageBox::warning(
         this, tr("Could not verify map"),
-        tr("Map Hub returned downloadable map bytes without a valid SHA-256 "
-           "checksum. Nothing was downloaded."));
+        tr("Map Hub returned map bytes without a valid checksum. Nothing was downloaded."));
     return;
   }
-  auto extension = artifactExtension(effective_revision);
+  const auto extension = artifactExtension(effective_revision);
   if (managed.base_artifact_kind != QLatin1String("omap") &&
       managed.base_artifact_kind != QLatin1String("ocad") &&
       !managed.base_artifact_kind.isEmpty()) {
     setBusy(false);
     QMessageBox::warning(
         this, tr("Unsupported map baseline"),
-        tr("Map Hub returned a %1 artifact where an .omap or OCAD map was "
-           "required. Nothing was opened.")
+        tr("Map Hub returned a %1 artifact where an .omap or OCAD map was required.")
             .arg(managed.base_artifact_kind));
     return;
   }
-  auto destination = uniqueDestination(
+  const auto destination = uniqueDestination(
       project_title, managed.project_id, managed.workspace_id,
       effective_revision.value(QStringLiteral("number")).toInt(), extension);
   managed.local_map_path = destination;
-  setBusy(true,
-          tr("Downloading and verifying r%1…")
-              .arg(effective_revision.value(QStringLiteral("number")).toInt()));
+  setBusy(true, tr("Downloading and verifying the latest saved map…"));
   client->downloadArtifact(
       download_url, effective_sha, destination,
       [this, managed,
@@ -3044,7 +2922,6 @@ void MapHubDialog::beginWorkspace(const QJsonObject &response,
           accept();
       });
 }
-
 void MapHubDialog::createConnectedMap() {
   if (busy)
     return;

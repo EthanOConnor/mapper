@@ -47,6 +47,13 @@ struct ManagedMapWorkspace {
   int active_revision_number = 0;
   QString active_sha256;
   QString project_revision_id;
+  QString file_protocol;
+  QString file_version_id;
+  qint64 file_generation = 0;
+  QString file_sha256;
+  qint64 file_size_bytes = 0;
+  QString file_download_url;
+  QString file_etag;
   QString sync_etag;
   QString sync_problem;
   QString stream_protocol;

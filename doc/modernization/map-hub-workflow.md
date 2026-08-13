@@ -18,20 +18,23 @@ replace `.omap`, embed a database document in it, or weaken OCAD import/export.
    assigned managed workspace. Course-design and print-production assignments
    remain visible, but are managed in Map Hub instead of being opened as map
    workspaces; Purple Pen remains the producer of their course files and PDFs.
-3. Starting an assignment asks the server for the current workspace and, when
-   required, an exclusive editing lease. Mapper downloads the approved base to
-   a new local workspace, verifies its SHA-256 before opening it, and
+3. Starting an assignment asks the server for the latest complete saved map.
+   Mapper downloads it to a new local workspace, verifies its SHA-256 before opening it, and
    synchronizes project-authorized raster tile layers into the immutable OIC
    catalog store. A native OMAP base remains OMAP. An OCAD base is preserved
    byte-for-byte beside a normalized native `.omap` editing workspace.
-4. Normal Save is always local and offline-capable. **Checkpoint to Map Hub**
-   saves first, uploads the exact native `.omap`, supplies the exact base
-   revision and a stable idempotency key, and records the returned immutable
-   revision. A stale base never overwrites local work.
-5. **Submit for review** checkpoints if necessary, submits that exact revision,
-   and releases the editing lease. Approval remains a server-side librarian or
-   director action.
-6. **New connected map** captures one or more venues, predecessor lineage,
+4. Normal Save is always local and offline-capable. After a brief idle period,
+   explicit save, or app backgrounding, Mapper uploads the complete native
+   `.omap` with the exact file-version ID it started from. A linear save becomes
+   available on the user's other devices. A stale save and the newer file are
+   both retained and Mapper asks the user to reopen and compare; it never
+   changes the open file behind their back.
+5. **Checkpoint to Map Hub** names the already uploaded file version and creates
+   an immutable review point. It does not require a clean operation stream or
+   editing lease.
+6. **Submit for review** checkpoints if necessary and submits that exact
+   revision. Approval remains a server-side librarian or director action.
+7. **New connected map** captures one or more venues, predecessor lineage,
    work type, assignee, source provenance, target CRS/scale/symbol standard,
    and exclusive-editing policy. It creates the database project, work
    package, assignment, and server workspace first. Only after the idempotent
@@ -44,13 +47,13 @@ replace `.omap`, embed a database document in it, or weaken OCAD import/export.
 
 Managed-workspace records live under Qt's application data directory in
 `managed-workspaces/`, addressed by the canonical local map path. They contain
-stable organization/project/work-package/workspace/revision IDs, checksums, and
-lease expiry, but no bearer secret. They are app-private sidecars, not siblings
+stable organization/project/work-package/workspace/revision/file-version IDs
+and checksums, but no bearer secret. They are app-private sidecars, not siblings
 of the map, so exporting or emailing an `.omap` does not disclose lifecycle
 state.
 
-The account token and each workspace lease use macOS Keychain, Windows
-Credential Manager, or an Android Keystore-backed encrypted value. Linux uses
+The account token uses macOS Keychain, Windows Credential Manager, or an
+Android Keystore-backed encrypted value. Linux uses
 Secret Service when `secret-tool` is available; minimal Unix systems use an
 explicit owner-only application credential file fallback. Tokens are never
 stored in QSettings, URLs, imagery catalogs, or map documents.
@@ -68,12 +71,12 @@ are rejected instead of being persisted.
 - `POST /api/v1/projects` with `Idempotency-Key`
 - `POST /api/v1/assignments/{assignment_id}/start`
 - `GET /api/v1/artifacts/{artifact_id}/download`
+- `GET /api/v1/workspaces/{workspace_id}/files`
+- `POST /api/v1/workspaces/{workspace_id}/files` with `Idempotency-Key`, the
+  complete native OMAP, and optional exact `base_version_id`
 - `POST /api/v1/workspaces/{workspace_id}/checkpoint` with
-  `Idempotency-Key`, exact `base_revision_id`, and `X-Editing-Lease` when
-  exclusive
-- `POST /api/v1/workspaces/{workspace_id}/renew`
-- `POST /api/v1/revisions/{revision_id}/submit` with `X-Editing-Lease` when
-  exclusive
+  `Idempotency-Key`, exact `file_version_id`, and optional `base_revision_id`
+- `POST /api/v1/revisions/{revision_id}/submit`
 - `POST /api/v1/invites/redeem`
 
 All protected calls use `Authorization: Bearer …`; Mapper accepts a non-TLS

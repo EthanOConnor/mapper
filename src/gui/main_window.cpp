@@ -1614,7 +1614,8 @@ void MainWindow::renewMapHubLeaseIfNeeded()
 		return;
 	QString metadata_error;
 	auto managed = ManagedMapWorkspace::loadForMap(currentPath(), &metadata_error);
-	if (!managed.isValid() || managed.status == QLatin1String("submitted"))
+	if (!managed.isValid() || managed.status == QLatin1String("submitted")
+	    || managed.file_protocol == QLatin1String("omap-snapshot/1"))
 		return;
 	auto now = QDateTime::currentDateTimeUtc();
 	if (managed.lease_expires_at.isValid()
@@ -1689,7 +1690,7 @@ void MainWindow::checkpointMapHub(bool submit_after)
 	      QLatin1String("omap"), Qt::CaseInsensitive) != 0)
 	{
 		QMessageBox::warning(this, tr("Native .omap workspace required"),
-		                     tr("Map Hub checkpoints preserve the native Mapper workspace. Save this document as .omap before checkpointing; OCAD remains available as an explicit export."));
+		                     tr("Map Hub preserves the complete native Mapper workspace. Save this document as .omap before sending it for review."));
 		return;
 	}
 	if (hasUnsavedChanges() && !save())
@@ -1698,7 +1699,7 @@ void MainWindow::checkpointMapHub(bool submit_after)
 	auto local_sha = MapHubApiClient::sha256ForFile(currentPath(), &hash_error);
 	if (local_sha.isEmpty())
 	{
-		QMessageBox::warning(this, tr("Could not checkpoint map"), hash_error);
+		QMessageBox::warning(this, tr("Could not send map"), hash_error);
 		return;
 	}
 	auto api_credential = MapHubCredentials::readToken(managed.server_url);
@@ -1708,29 +1709,15 @@ void MainWindow::checkpointMapHub(bool submit_after)
 		                     api_credential.error.isEmpty() ? tr("Reconnect this server in Settings → Map Hub.") : api_credential.error);
 		return;
 	}
-	auto lease_key = MapHubCredentials::workspaceLeaseKey(managed.server_url, managed.workspace_id);
-	auto lease = MapHubCredentials::readToken(lease_key);
-	if (lease.token.isEmpty())
-	{
-		QMessageBox::warning(
-		    this, tr("Editing lease required"),
-		    tr("Your local work is safe. Reopen this assignment from Map Hub "
-		       "to obtain a new lease before checkpointing."));
-		return;
-	}
-	bool needs_checkpoint = managed.active_revision_id.isEmpty()
-	                        || managed.active_sha256.compare(local_sha, Qt::CaseInsensitive) != 0;
+
 	auto* client = new MapHubApiClient(managed.server_url, api_credential.token, this);
-	auto submit_revision = [this, client, managed, lease_key, lease_token = lease.token](QString revision_id, ManagedMapWorkspace updated) mutable {
-		showStatusBarMessageImmediately(tr("Submitting Map Hub revision for review…"));
-		client->submitRevision(revision_id, lease_token, [this, client, updated, lease_key, revision_id](const QJsonObject& response, const MapHubApiClient::Error& error) mutable {
+	auto submit_revision = [this, client](QString revision_id, ManagedMapWorkspace updated) mutable {
+		showStatusBarMessageImmediately(tr("Sending Map Hub revision for review…"));
+		client->submitRevision(revision_id, {}, [this, client, updated, revision_id](const QJsonObject& response, const MapHubApiClient::Error& error) mutable {
 			if (error)
 			{
 				clearStatusBarMessage();
-				auto message = error.message;
-				if (error.code == QLatin1String("lease_required"))
-					message += tr("\n\nYour checkpoint is safe on the server. Reopen the assignment from Map Hub to obtain a fresh editing lease, then submit again from this file.");
-				QMessageBox::warning(this, tr("Could not submit map"), message);
+				QMessageBox::warning(this, tr("Could not submit map"), error.message);
 				client->deleteLater();
 				return;
 			}
@@ -1739,7 +1726,7 @@ void MainWindow::checkpointMapHub(bool submit_after)
 			{
 				clearStatusBarMessage();
 				QMessageBox::warning(this, tr("Invalid submission response"),
-				                     tr("Map Hub did not confirm submission of the exact checkpoint. The local workspace and lease were left intact."));
+				                     tr("Map Hub did not confirm submission of the exact saved map."));
 				client->deleteLater();
 				return;
 			}
@@ -1749,33 +1736,36 @@ void MainWindow::checkpointMapHub(bool submit_after)
 			if (!ManagedMapWorkspace::save(updated, &sidecar_error))
 			{
 				clearStatusBarMessage();
-				MapHubCredentials::removeToken(lease_key);
 				QMessageBox::warning(this, tr("Map submitted, but local status was not updated"),
 				                     tr("The server accepted the submission, but Mapper could not update its private workspace record: %1").arg(sidecar_error));
 				client->deleteLater();
 				return;
 			}
-			MapHubCredentials::removeToken(lease_key);
 			clearStatusBarMessage();
 			updateMapHubActions();
 			configureMapHubSync();
 			QMessageBox::information(this, tr("Submitted to Map Hub"),
-			                         tr("Revision r%1 is ready for librarian or director review. Your local .omap file remains unchanged.")
+			                         tr("Revision r%1 is ready for review. Your local .omap file remains unchanged.")
 			                           .arg(updated.active_revision_number));
 			client->deleteLater();
 		});
 	};
+
+	const bool needs_checkpoint = managed.active_revision_id.isEmpty()
+	                             || managed.active_sha256.compare(local_sha, Qt::CaseInsensitive) != 0;
 	if (!needs_checkpoint)
 	{
 		if (submit_after)
 			submit_revision(managed.active_revision_id, managed);
 		else
 		{
-			QMessageBox::information(this, tr("Map Hub checkpoint"), tr("This exact .omap file is already checkpointed as r%1.").arg(managed.active_revision_number));
+			QMessageBox::information(this, tr("Map Hub checkpoint"),
+			                         tr("This exact .omap file is already checkpointed as r%1.").arg(managed.active_revision_number));
 			client->deleteLater();
 		}
 		return;
 	}
+
 	bool accepted = false;
 	auto summary = QInputDialog::getMultiLineText(this,
 	                                             submit_after ? tr("Submit map for review") : tr("Checkpoint map"),
@@ -1785,73 +1775,57 @@ void MainWindow::checkpointMapHub(bool submit_after)
 		client->deleteLater();
 		return;
 	}
-	auto revision_base = managed.active_revision_id.isEmpty() ? managed.base_revision_id : managed.active_revision_id;
-		qint64 stream_sequence = 0;
-		QString stream_hash;
-		QString entity_index_sha256;
-		if (!map_hub_sync
-		    || !map_hub_sync->checkpointStreamHead(
-		      &stream_sequence, &stream_hash,
-		      &entity_index_sha256))
+
+	QString file_version_id;
+	if (!map_hub_sync || !map_hub_sync->checkpointFileVersion(&file_version_id))
 	{
 		QMessageBox::information(
-		  this, tr("Map Hub is still synchronizing"),
-		  tr("Your work is saved locally. Wait for “Synced to Map Hub,” "
-		     "then create the checkpoint."));
+		  this, tr("Map Hub is still saving"),
+		  tr("Your work is safe on this device. Wait for “Available on your other devices,” then try again."));
 		client->deleteLater();
 		return;
 	}
-		auto key_material = managed.workspace_id + QLatin1Char('|')
-		                  + revision_base + QLatin1Char('|')
-		                  + QString::number(stream_sequence) + QLatin1Char('|')
-		                  + stream_hash + QLatin1Char('|')
-		                  + entity_index_sha256 + QLatin1Char('|')
-		                  + local_sha;
-	auto idempotency_key = QStringLiteral("mapper-%1").arg(QString::fromLatin1(
+	const auto revision_base = managed.active_revision_id.isEmpty()
+	                         ? managed.base_revision_id : managed.active_revision_id;
+	const auto key_material = managed.workspace_id + QLatin1Char('|')
+	                        + revision_base + QLatin1Char('|')
+	                        + file_version_id + QLatin1Char('|') + local_sha;
+	const auto idempotency_key = QStringLiteral("mapper-%1").arg(QString::fromLatin1(
 	  QCryptographicHash::hash(key_material.toUtf8(), QCryptographicHash::Sha256).toHex().left(48)));
-	showStatusBarMessageImmediately(tr("Uploading verified .omap checkpoint to Map Hub…"));
-	client->checkpoint(managed.workspace_id, currentPath(), revision_base, lease.token,
-	                   submit_after ? tr("Submission checkpoint") : tr("Mapper checkpoint"), summary, idempotency_key,
-		                   stream_sequence, stream_hash,
-		                   managed.project_revision_id,
-		                   entity_index_sha256,
-	                   [this, client, managed, local_sha, submit_after, submit_revision]
-	                   (const QJsonObject& response, const MapHubApiClient::Error& error) mutable {
+	showStatusBarMessageImmediately(tr("Creating a reviewable Map Hub checkpoint…"));
+	client->checkpointFile(
+	  managed.workspace_id, currentPath(), revision_base, file_version_id,
+	  managed.client_instance_id,
+	  submit_after ? tr("Submission checkpoint") : tr("Mapper checkpoint"),
+	  summary, idempotency_key,
+	  [this, client, managed, local_sha, submit_after, submit_revision]
+	  (const QJsonObject& response, const MapHubApiClient::Error& error) mutable {
 		if (error)
 		{
 			clearStatusBarMessage();
 			auto message = error.message;
 			if (error.code == QLatin1String("stale_base"))
-				message += tr("\n\nThe server has a newer base. Your local file was not changed; open the assignment from Map Hub to compare before retrying.");
-			else if (error.code == QLatin1String("lease_required"))
-				message += tr("\n\nYour local file is safe. Reopen the assignment from Map Hub to obtain a fresh editing lease, then retry this checkpoint from the original file.");
+				message += tr("\n\nA newer review checkpoint exists. Your local file is unchanged; reopen Map Hub to compare.");
 			QMessageBox::warning(this, tr("Could not checkpoint map"), message);
 			client->deleteLater();
 			return;
 		}
-		auto returned_revision_id = response.value(QStringLiteral("revision_id")).toString();
-		auto returned_number = response.value(QStringLiteral("number")).toInt();
-		auto returned_sha = response.value(QStringLiteral("sha256")).toString();
-		auto returned_state = response.value(QStringLiteral("state")).toString();
-		auto valid_state = returned_state == QLatin1String("checkpoint")
-		                || returned_state == QLatin1String("draft")
-		                || returned_state == QLatin1String("rejected")
-		                || returned_state == QLatin1String("submitted");
+		const auto returned_revision_id = response.value(QStringLiteral("revision_id")).toString();
+		const auto returned_number = response.value(QStringLiteral("number")).toInt();
+		const auto returned_sha = response.value(QStringLiteral("sha256")).toString();
+		const auto returned_state = response.value(QStringLiteral("state")).toString();
+		const auto valid_state = returned_state == QLatin1String("checkpoint")
+		                    || returned_state == QLatin1String("draft")
+		                    || returned_state == QLatin1String("rejected")
+		                    || returned_state == QLatin1String("submitted");
 		static const QRegularExpression sha256_pattern(QStringLiteral("^[0-9a-fA-F]{64}$"));
 		if (QUuid(returned_revision_id).isNull() || returned_number <= 0
-		    || !sha256_pattern.match(returned_sha).hasMatch() || !valid_state)
+		    || !sha256_pattern.match(returned_sha).hasMatch() || !valid_state
+		    || returned_sha.compare(local_sha, Qt::CaseInsensitive) != 0)
 		{
 			clearStatusBarMessage();
 			QMessageBox::warning(this, tr("Invalid checkpoint response"),
-			                     tr("Map Hub did not return a complete verified revision record. Mapper did not advance or submit the local workspace."));
-			client->deleteLater();
-			return;
-		}
-		if (returned_sha.compare(local_sha, Qt::CaseInsensitive) != 0)
-		{
-			clearStatusBarMessage();
-			QMessageBox::warning(this, tr("Checkpoint checksum mismatch"),
-			                     tr("Map Hub stored bytes with a different checksum. Mapper did not advance the local workspace record; contact the server administrator before retrying."));
+			                     tr("Map Hub did not confirm the exact saved map. The local workspace was not advanced."));
 			client->deleteLater();
 			return;
 		}
@@ -1875,12 +1849,11 @@ void MainWindow::checkpointMapHub(bool submit_after)
 		else
 		{
 			clearStatusBarMessage();
-			showStatusBarMessage(tr("Map Hub checkpoint r%1 uploaded and verified.").arg(updated.active_revision_number), 10000);
+			showStatusBarMessage(tr("Map Hub checkpoint r%1 is ready to review.").arg(updated.active_revision_number), 10000);
 			client->deleteLater();
 		}
-	});
+	  });
 }
-
 void MainWindow::showOpenDialog()
 {
 	const auto selected = getOpenFileName(

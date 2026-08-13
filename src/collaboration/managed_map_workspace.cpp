@@ -70,15 +70,20 @@ QJsonObject ManagedMapWorkspace::toJson() const {
       {QStringLiteral("active_revision_number"), active_revision_number},
       {QStringLiteral("active_sha256"), active_sha256},
       {QStringLiteral("project_revision_id"), project_revision_id},
+      {QStringLiteral("file_protocol"), file_protocol},
+      {QStringLiteral("file_version_id"), file_version_id},
+      {QStringLiteral("file_generation"), QString::number(file_generation)},
+      {QStringLiteral("file_sha256"), file_sha256},
+      {QStringLiteral("file_size_bytes"), QString::number(file_size_bytes)},
+      {QStringLiteral("file_download_url"), file_download_url},
+      {QStringLiteral("file_etag"), file_etag},
       {QStringLiteral("sync_etag"), sync_etag},
       {QStringLiteral("sync_problem"), sync_problem},
       {QStringLiteral("stream_protocol"), stream_protocol},
-      {QStringLiteral("initial_snapshot_required"),
-       initial_snapshot_required},
+      {QStringLiteral("initial_snapshot_required"), initial_snapshot_required},
       {QStringLiteral("uncompacted_operations"),
        QString::number(uncompacted_operations)},
-      {QStringLiteral("compaction_recommended"),
-       compaction_recommended},
+      {QStringLiteral("compaction_recommended"), compaction_recommended},
       {QStringLiteral("compaction_required"), compaction_required},
       {QStringLiteral("stream_head_sequence"),
        QString::number(stream_head_sequence)},
@@ -157,8 +162,20 @@ ManagedMapWorkspace ManagedMapWorkspace::fromJson(const QJsonObject &object,
       object.value(QStringLiteral("active_sha256")).toString();
   workspace.project_revision_id =
       object.value(QStringLiteral("project_revision_id")).toString();
-  workspace.sync_etag =
-      object.value(QStringLiteral("sync_etag")).toString();
+  workspace.file_protocol =
+      object.value(QStringLiteral("file_protocol")).toString();
+  workspace.file_version_id =
+      object.value(QStringLiteral("file_version_id")).toString();
+  workspace.file_generation =
+      object.value(QStringLiteral("file_generation")).toString().toLongLong();
+  workspace.file_sha256 =
+      object.value(QStringLiteral("file_sha256")).toString();
+  workspace.file_size_bytes =
+      object.value(QStringLiteral("file_size_bytes")).toString().toLongLong();
+  workspace.file_download_url =
+      object.value(QStringLiteral("file_download_url")).toString();
+  workspace.file_etag = object.value(QStringLiteral("file_etag")).toString();
+  workspace.sync_etag = object.value(QStringLiteral("sync_etag")).toString();
   workspace.sync_problem =
       object.value(QStringLiteral("sync_problem")).toString();
   workspace.stream_protocol =
@@ -174,7 +191,9 @@ ManagedMapWorkspace ManagedMapWorkspace::fromJson(const QJsonObject &object,
   workspace.compaction_required =
       object.value(QStringLiteral("compaction_required")).toBool();
   workspace.stream_head_sequence =
-      object.value(QStringLiteral("stream_head_sequence")).toString().toLongLong();
+      object.value(QStringLiteral("stream_head_sequence"))
+          .toString()
+          .toLongLong();
   workspace.stream_head_hash =
       object.value(QStringLiteral("stream_head_hash")).toString();
   workspace.minimum_available_sequence =

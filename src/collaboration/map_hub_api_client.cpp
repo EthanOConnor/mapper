@@ -67,9 +67,8 @@ bool decodeJsonResponse(QNetworkReply *reply, QByteArray *body,
     return true;
 
   QString decompression_error;
-  auto decoded =
-      ZstdCodec::decompress(*body, max_json_response_bytes,
-                            &decompression_error);
+  auto decoded = ZstdCodec::decompress(*body, max_json_response_bytes,
+                                       &decompression_error);
   if (decoded.isEmpty() && !body->isEmpty()) {
     *error = {
         reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt(),
@@ -765,6 +764,53 @@ void MapHubApiClient::checkpoint(
   finishJson(reply, std::move(handler));
 }
 
+void MapHubApiClient::checkpointFile(
+    const QString &workspace_id, const QString &file_path,
+    const QString &base_revision_id, const QString &file_version_id,
+    const QString &client_instance_id, const QString &label,
+    const QString &change_summary, const QString &idempotency_key,
+    JsonHandler handler) {
+  if (!ensureReady(true, handler))
+    return;
+  if (!validStableId(workspace_id) || !validStableId(file_version_id) ||
+      !validStableId(client_instance_id) ||
+      (!base_revision_id.isEmpty() && !validStableId(base_revision_id)) ||
+      !validHeaderValue(idempotency_key, 120)) {
+    handler({}, invalidIdentifierError());
+    return;
+  }
+  auto req = request(
+      QStringLiteral("/api/v1/workspaces/%1/checkpoint").arg(workspace_id));
+  req.setRawHeader("Idempotency-Key", idempotency_key.toUtf8());
+  req.setRawHeader("X-Editing-Client-Instance", client_instance_id.toUtf8());
+  auto *multi = new QHttpMultiPart(QHttpMultiPart::FormDataType);
+  multi->append(textPart("protocol", QStringLiteral("omap-snapshot/1")));
+  multi->append(textPart("file_version_id", file_version_id));
+  multi->append(textPart("base_revision_id", base_revision_id));
+  multi->append(textPart("label", label));
+  multi->append(textPart("change_summary", change_summary));
+  QHttpPart file_part;
+  file_part.setHeader(
+      QNetworkRequest::ContentDispositionHeader,
+      QStringLiteral("form-data; name=\"file\"; filename=\"workspace.omap\""));
+  file_part.setHeader(QNetworkRequest::ContentTypeHeader,
+                      QStringLiteral("application/vnd.openorienteering.omap"));
+  auto *file = new QFile(file_path, multi);
+  if (!file->open(QIODevice::ReadOnly) || file->size() > max_artifact_bytes) {
+    const auto message =
+        file->isOpen() ? tr("The map workspace exceeds the 2 GiB upload limit.")
+                       : file->errorString();
+    delete multi;
+    handler({}, {0, QStringLiteral("local_file"), message});
+    return;
+  }
+  file_part.setBodyDevice(file);
+  multi->append(file_part);
+  auto *reply = network->post(req, multi);
+  multi->setParent(reply);
+  finishJson(reply, std::move(handler));
+}
+
 void MapHubApiClient::submitRevision(const QString &revision_id,
                                      const QString &editing_lease,
                                      JsonHandler handler) {
@@ -809,8 +855,7 @@ void MapHubApiClient::workspaceSyncState(const QString &workspace_id,
       }))
     return;
   if (!validStableId(workspace_id) ||
-      (!editing_lease.isEmpty() &&
-       !validHeaderValue(editing_lease, 4096))) {
+      (!editing_lease.isEmpty() && !validHeaderValue(editing_lease, 4096))) {
     handler({}, {}, false,
             {0, QStringLiteral("invalid_request_metadata"),
              tr("The workspace identifier or editing lease is invalid.")});
@@ -877,6 +922,100 @@ void MapHubApiClient::workspaceSyncState(const QString &workspace_id,
         }
         reply->deleteLater();
       });
+}
+
+void MapHubApiClient::workspaceFiles(const QString &workspace_id,
+                                     const QString &etag,
+                                     const QString &client_instance_id,
+                                     SyncStateHandler handler) {
+  if (!ensureReady(true, [handler](const QJsonObject &, const Error &error) {
+        handler({}, {}, false, error);
+      }))
+    return;
+  if (!validStableId(workspace_id) || !validStableId(client_instance_id)) {
+    handler({}, {}, false, invalidIdentifierError());
+    return;
+  }
+  auto req =
+      request(QStringLiteral("/api/v1/workspaces/%1/files").arg(workspace_id));
+  req.setRawHeader("X-Editing-Client-Instance", client_instance_id.toUtf8());
+  if (!etag.isEmpty())
+    req.setRawHeader("If-None-Match", etag.toUtf8());
+  auto *reply = network->get(req);
+  auto body = std::make_shared<QByteArray>();
+  connect(reply, &QNetworkReply::readyRead, this,
+          [reply, body] { body->append(reply->readAll()); });
+  connect(
+      reply, &QNetworkReply::finished, this,
+      [reply, body, handler = std::move(handler)]() mutable {
+        body->append(reply->readAll());
+        const auto status =
+            reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const auto response_etag = QString::fromUtf8(reply->rawHeader("ETag"));
+        if (status == 304) {
+          handler({}, response_etag, true, {});
+        } else if (reply->error() != QNetworkReply::NoError) {
+          handler({}, response_etag, false, replyError(reply, *body));
+        } else {
+          QJsonParseError parse_error;
+          const auto document = QJsonDocument::fromJson(*body, &parse_error);
+          if (parse_error.error != QJsonParseError::NoError ||
+              !document.isObject())
+            handler({}, response_etag, false,
+                    {status, QStringLiteral("invalid_response"),
+                     tr("Map Hub returned invalid saved-file state.")});
+          else
+            handler(document.object(), response_etag, false, {});
+        }
+        reply->deleteLater();
+      });
+}
+
+void MapHubApiClient::uploadWorkspaceFile(
+    const QString &workspace_id, const QString &file_path,
+    const QString &base_version_id, const QString &file_sha256,
+    const QString &client_instance_id, const QString &device_name,
+    const QString &idempotency_key, JsonHandler handler) {
+  if (!ensureReady(true, handler))
+    return;
+  static const QRegularExpression hash_pattern(
+      QStringLiteral("^[0-9a-f]{64}$"));
+  if (!validStableId(workspace_id) || !validStableId(client_instance_id) ||
+      (!base_version_id.isEmpty() && !validStableId(base_version_id)) ||
+      !hash_pattern.match(file_sha256).hasMatch() ||
+      !validHeaderValue(idempotency_key, 120)) {
+    handler({}, {0, QStringLiteral("invalid_request_metadata"),
+                 tr("The saved-map upload metadata is invalid.")});
+    return;
+  }
+  auto req =
+      request(QStringLiteral("/api/v1/workspaces/%1/files").arg(workspace_id));
+  req.setRawHeader("Idempotency-Key", idempotency_key.toUtf8());
+  req.setRawHeader("X-Editing-Client-Instance", client_instance_id.toUtf8());
+  auto *multi = new QHttpMultiPart(QHttpMultiPart::FormDataType);
+  multi->append(textPart("base_version_id", base_version_id));
+  multi->append(textPart("sha256", file_sha256));
+  multi->append(textPart("device_name", device_name.left(80)));
+  QHttpPart file_part;
+  file_part.setHeader(
+      QNetworkRequest::ContentDispositionHeader,
+      QStringLiteral("form-data; name=\"file\"; filename=\"map.omap\""));
+  file_part.setHeader(QNetworkRequest::ContentTypeHeader,
+                      QStringLiteral("application/vnd.openorienteering.omap"));
+  auto *file = new QFile(file_path, multi);
+  if (!file->open(QIODevice::ReadOnly) || file->size() > max_artifact_bytes) {
+    const auto message =
+        file->isOpen() ? tr("The map workspace exceeds the 2 GiB upload limit.")
+                       : file->errorString();
+    delete multi;
+    handler({}, {0, QStringLiteral("local_file"), message});
+    return;
+  }
+  file_part.setBodyDevice(file);
+  multi->append(file_part);
+  auto *reply = network->post(req, multi);
+  multi->setParent(reply);
+  finishJson(reply, std::move(handler));
 }
 
 void MapHubApiClient::workspaceEntityIndex(const QUrl &url,

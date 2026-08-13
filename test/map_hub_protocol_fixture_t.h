@@ -17,8 +17,7 @@ private slots:
   void rejectsMalformedEntityIndexes();
   void supportsAllAddressableEntityOperations();
   void journalsReplayAndRebasesCompactedPendingWork();
-  void controllerBootstrapsAndJournalsStructuralEdits();
-  void controllerReplaysDurableRemoteInbox();
+  void controllerStagesCompleteFileHandoffs();
 };
 
 #endif
