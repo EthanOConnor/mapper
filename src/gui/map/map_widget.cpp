@@ -150,6 +150,9 @@ MapWidget::MapWidget(bool show_help, QWidget* parent)
 	setSizePolicy(QSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding));
 	vello_canvas->setGeometry(rect());
 	vello_canvas->setPresentationCursor(cursor());
+	vello_canvas->setSurfaceGeometryChangedHandler([this]() {
+		scheduleFrameUpdate();
+	});
 	zoom_limit_feedback_timer.setSingleShot(true);
 	zoom_limit_feedback_timer.setInterval(450);
 	connect(&zoom_limit_feedback_timer, &QTimer::timeout, this, [this]() {

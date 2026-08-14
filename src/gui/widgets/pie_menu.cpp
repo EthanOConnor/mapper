@@ -302,10 +302,10 @@ void PieMenu::paintEvent(QPaintEvent* event)
 		if (action->isChecked())
 		{
 			mode = QIcon::Selected;
-			QPen pen(palette.color(QPalette::Dark));
-			pen.setWidth(1);
+			QPen pen(palette.color(QPalette::ButtonText));
+			pen.setWidth(2);
 			painter.setPen(pen);
-			painter.setBrush(palette.color(QPalette::Button).darker(120));
+			painter.setBrush(palette.brush(QPalette::Highlight));
 			painter.setOpacity(1.0);
 			painter.drawConvexPolygon(area);
 		}

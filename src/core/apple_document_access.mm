@@ -514,11 +514,14 @@ static std::atomic<quint64> next_conflict_token{1};
 	Q_UNUSED(outError)
 	@synchronized(self)
 	{
-		if (_pendingContents)
-			return _pendingContents;
-		if (_loadedContents)
-			return _loadedContents;
-		return [NSData data];
+		NSData* data = _pendingContents ? _pendingContents
+		                                : (_loadedContents ? _loadedContents
+		                                                   : [NSData data]);
+		// UIDocument may autosave these bytes when the app resigns active,
+		// outside Mapper's explicit-save bracket. Remember them so the ensuing
+		// presenter notification is recognized as our own write.
+		_expectedSelfSavedContents = [data copy];
+		return data;
 	}
 }
 

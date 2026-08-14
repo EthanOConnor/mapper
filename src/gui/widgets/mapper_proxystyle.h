@@ -25,7 +25,6 @@
 #include <QIcon>
 #include <QFont>
 #include <QObject>
-#include <QPalette>
 #include <QPixmap>
 #include <QPointer>
 #include <QProxyStyle>
@@ -37,6 +36,7 @@
 class QApplication;
 class QCommonStyle;
 class QPainter;
+class QPalette;
 class QStyleHintReturn;
 class QStyleOptionComplex;
 class QStyleOption;
@@ -88,6 +88,7 @@ public:
 	 */
 	MapperProxyStyle(QStyle* base_style = nullptr);
 	
+	/** Compatibility overload; the application owns palette lifecycle. */
 	MapperProxyStyle(const QPalette& palette, QStyle* base_style = nullptr);
 	
 	/**
@@ -194,7 +195,6 @@ private:
 	void fixupProxyChain(QStyle* proxy_style);
 	
 	QPointer<QCommonStyle> common_style;
-	QPalette default_palette;
 	ToolBarMetrics toolbar = {};
 	MenuMetrics menu       = {};
 	QFont original_font    = {};

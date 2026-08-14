@@ -21,6 +21,7 @@
 #ifndef OPENORIENTEERING_NMEA_PARSER_H
 #define OPENORIENTEERING_NMEA_PARSER_H
 
+#include <cmath>
 #include <cstdint>
 
 #include <QByteArray>
@@ -42,6 +43,7 @@ namespace OpenOrienteering {
 ///   - RMC: position, speed, course, date/time
 ///   - GSA: DOP values, fix mode
 ///   - GSV: satellites in view
+///   - GST: receiver error statistics, paired to GGA by epoch
 ///
 /// NMEA is the fallback protocol for non-u-blox receivers. When used with
 /// u-blox receivers, prefer UBX for richer metadata.
@@ -86,9 +88,16 @@ private:
 	void handleRMC(const char* sentence);
 	void handleGSA(const char* sentence);
 	void handleGSV(const char* sentence);
+	void handleGST(const char* sentence);
 
 	QByteArray m_lineBuffer;
 	Stats m_stats;
+	bool m_gstValid = false;
+	int m_gstHours = -1;
+	int m_gstMinutes = -1;
+	int m_gstSeconds = -1;
+	float m_gstHAccuracy = NAN;
+	float m_gstVAccuracy = NAN;
 
 	static constexpr int kMaxLineLength = 256;  // NMEA max is 82, generous buffer
 };

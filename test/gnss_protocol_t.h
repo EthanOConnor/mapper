@@ -56,6 +56,9 @@ private slots:
 	void nmeaGsaParsing();
 	void nmeaGsvParsing();
 	void nmeaBadChecksum();
+	void nmeaCoordinatePrecision();
+	void nmeaGstAccuracy();
+	void nmeaRtkUereFallback();
 
 	// Protocol detector tests
 	void detectUbx();

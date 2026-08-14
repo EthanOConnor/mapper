@@ -624,6 +624,65 @@ void GnssProtocolTest::nmeaGgaParsing()
 }
 
 
+void GnssProtocolTest::nmeaCoordinatePrecision()
+{
+	NmeaParser parser;
+	QSignalSpy spy(&parser, &NmeaParser::positionObservation);
+
+	// Five decimal places in NMEA minutes resolve to about 2 cm here. A float
+	// coordinate conversion would quantize this position by roughly 0.5 m.
+	parser.addData(QByteArray(
+	  "$GNGGA,123519.00,4735.44912,N,12213.59378,W,4,12,0.6,17.1,M,-19.1,M,1.0,0000*5D\r\n"));
+
+	QCOMPARE(spy.count(), 1);
+	auto observation = spy[0][0].value<GnssPositionObservation>();
+	const double expected_latitude = 47.0 + 35.44912 / 60.0;
+	const double expected_longitude = -(122.0 + 13.59378 / 60.0);
+	QVERIFY(std::abs(observation.position.latitude - expected_latitude) < 1e-9);
+	QVERIFY(std::abs(observation.position.longitude - expected_longitude) < 1e-9);
+	QVERIFY(std::abs(double(float(expected_latitude)) - expected_latitude) > 1e-7);
+}
+
+
+void GnssProtocolTest::nmeaGstAccuracy()
+{
+	NmeaParser parser;
+	QSignalSpy spy(&parser, &NmeaParser::positionObservation);
+
+	parser.addData(QByteArray(
+	  "$GNGST,123519.00,0.8,0.02,0.01,45.0,0.012,0.014,0.030*7B\r\n"));
+	parser.addData(QByteArray(
+	  "$GNGGA,123519.00,4735.44912,N,12213.59378,W,4,12,0.6,17.1,M,-19.1,M,1.0,0000*5D\r\n"));
+
+	QCOMPARE(spy.count(), 1);
+	auto observation = spy[0][0].value<GnssPositionObservation>();
+	QVERIFY(std::abs(observation.position.hAccuracy
+	                 - std::hypot(0.012f, 0.014f)) < 1e-5f);
+	QVERIFY(std::abs(observation.position.vAccuracy - 0.030f) < 1e-5f);
+	QVERIFY(!observation.meta.accuracyDerived);
+
+	// Never carry receiver statistics into a later fix epoch.
+	parser.addData(QByteArray(
+	  "$GNGGA,123520.00,4735.44912,N,12213.59378,W,4,12,0.6,17.1,M,-19.1,M,1.0,0000*57\r\n"));
+	QCOMPARE(spy.count(), 2);
+	QVERIFY(spy[1][0].value<GnssPositionObservation>().meta.accuracyDerived);
+}
+
+
+void GnssProtocolTest::nmeaRtkUereFallback()
+{
+	NmeaParser parser;
+	QSignalSpy spy(&parser, &NmeaParser::positionObservation);
+	parser.addData(QByteArray(
+	  "$GNGGA,123519.00,4735.44912,N,12213.59378,W,4,12,0.6,17.1,M,-19.1,M,1.0,0000*5D\r\n"));
+
+	QCOMPARE(spy.count(), 1);
+	auto observation = spy[0][0].value<GnssPositionObservation>();
+	QCOMPARE(observation.position.fixType, GnssFixType::RtkFixed);
+	QVERIFY(std::abs(observation.position.hAccuracy - 0.6f * 0.05f) < 1e-5f);
+}
+
+
 void GnssProtocolTest::nmeaRmcParsing()
 {
 	NmeaParser parser;

@@ -54,7 +54,14 @@ void TrackPoint::save(QXmlStreamWriter* stream) const
 	stream->writeAttribute(QStringLiteral("lon"), QString::number(latlon.longitude(), 'f', 12));
 	
 	if (datetime.isValid())
-		stream->writeTextElement(QStringLiteral("time"), datetime.toString(Qt::ISODate));
+	{
+		// Preserve sub-second fixes at multi-Hz logging rates without changing
+		// the established representation of exact whole-second timestamps.
+		stream->writeTextElement(
+		  QStringLiteral("time"),
+		  datetime.time().msec() != 0 ? datetime.toString(Qt::ISODateWithMs)
+		                               : datetime.toString(Qt::ISODate));
+	}
 	if (!qIsNaN(elevation))
 		stream->writeTextElement(QStringLiteral("ele"), QString::number(static_cast<qreal>(elevation), 'f', 3));
 	if (!qIsNaN(hDOP))

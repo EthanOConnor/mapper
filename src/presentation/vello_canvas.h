@@ -9,6 +9,7 @@
 
 #include <cstddef>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -52,6 +53,8 @@ public:
 	void setPresentationCursor(const QCursor& cursor);
 	QCursor presentationCursor() const;
 	static QEvent::Type touchGestureHandoffEventType() noexcept;
+	/** Re-plan after the asynchronous native surface resize catches up. */
+	void setSurfaceGeometryChangedHandler(std::function<void()> handler);
 
 private:
 	bool forwardInputEvent(QEvent* event);
@@ -65,6 +68,7 @@ private:
 	render::FramePacketPtr content_frame_;
 	render::Color background_ { 65535, 65535, 65535, 65535 };
 	NativeSurfaceState surface_state_;
+	std::function<void()> surface_geometry_changed_handler_;
 	QTimer completion_timer_;
 	QTimer retry_timer_;
 	std::deque<render::VelloFrameResult> results_;

@@ -53,6 +53,10 @@ VelloCanvas::VelloCanvas(QWidget* parent)
 	connect(&retry_timer_, &QTimer::timeout, surface_, &NativeSurfaceWindow::refreshState);
 
 	surface_->setStateHandler([this](auto const& state) {
+		const auto geometry_changed =
+		    state.physical_width != surface_state_.physical_width
+		    || state.physical_height != surface_state_.physical_height
+		    || state.device_pixel_ratio != surface_state_.device_pixel_ratio;
 		surface_state_ = state;
 		if (!renderer_->setSurface(state))
 			qFatal("Vello lifecycle queue rejected an ordered native surface state");
@@ -60,8 +64,15 @@ VelloCanvas::VelloCanvas(QWidget* parent)
 			submitCurrentFrame();
 		else
 			retry_timer_.stop();
+		if (geometry_changed && surface_geometry_changed_handler_)
+			surface_geometry_changed_handler_();
 	});
 	surface_->setInputHandler([this](QEvent* event) { return forwardInputEvent(event); });
+}
+
+void VelloCanvas::setSurfaceGeometryChangedHandler(std::function<void()> handler)
+{
+	surface_geometry_changed_handler_ = std::move(handler);
 }
 
 VelloCanvas::~VelloCanvas()

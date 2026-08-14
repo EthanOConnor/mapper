@@ -363,6 +363,9 @@ namespace Util
 	 * \see QTextDocument::toPlainText
 	 */
 	QString plainText(QString maybe_markup);
+
+	/** Re-resolves palette-based style sheets after system appearance changes. */
+	void keepStyleSheetsSynchronizedWithPalette(QWidget* root);
 	
 	
 	namespace ToolButton

@@ -34,6 +34,7 @@
 #include <QObject>
 #include <QString>
 #include <QTimeZone>
+#include <QXmlStreamWriter>
 
 #include "global.h"
 #include "test_config.h"
@@ -133,6 +134,19 @@ private slots:
 		QCOMPARE(actual_track, expected_track);
 		
 		QVERIFY(QFile::remove(filename_tmp));
+	}
+
+	void gpxMillisecondTimestampTest()
+	{
+		QByteArray output;
+		QXmlStreamWriter stream(&output);
+		stream.writeStartDocument();
+		stream.writeStartElement(QStringLiteral("trkpt"));
+		TrackPoint point{{50.0, 7.0}, base_datetime.addMSecs(250), 100};
+		point.save(&stream);
+		stream.writeEndElement();
+		stream.writeEndDocument();
+		QVERIFY(output.contains("<time>2010-01-01T00:00:00.250Z</time>"));
 	}
 	
 	

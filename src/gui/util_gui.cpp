@@ -31,6 +31,7 @@
 #include <QDir>
 #include <QDoubleSpinBox>
 #include <QDesktopServices>
+#include <QEvent>
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QIcon>
@@ -39,9 +40,11 @@
 #include <QLatin1String>
 #include <QLocale>
 #include <QMessageBox>
+#include <QObject>
 #include <QPainter>
 #include <QPen>
 #include <QPointF>
+#include <QPointer>
 #if !defined(MAPPER_MOBILE)
 #  include <QProcess>
 #  include <QProcessEnvironment>
@@ -52,6 +55,7 @@
 #include <QStringList>
 #include <QStyle>
 #include <QTextDocumentFragment>
+#include <QTimer>
 #include <QToolButton>
 #if defined(MAPPER_MOBILE)
 #include <QUrl>
@@ -88,6 +92,63 @@ QValidator::State DoubleValidator::validate(QString& input, int& pos) const
 
 
 namespace Util {
+
+namespace {
+
+class PaletteStyleSheetRefresher final : public QObject
+{
+public:
+	explicit PaletteStyleSheetRefresher(QWidget* root)
+	 : QObject(root), root(root)
+	{
+		root->installEventFilter(this);
+		QCoreApplication::instance()->installEventFilter(this);
+	}
+
+protected:
+	bool eventFilter(QObject* watched, QEvent* event) override
+	{
+		if ((watched == root || watched == QCoreApplication::instance())
+		    && !refreshing
+		    && (event->type() == QEvent::ApplicationPaletteChange
+		        || event->type() == QEvent::PaletteChange))
+		{
+			scheduleRefresh();
+		}
+		return QObject::eventFilter(watched, event);
+	}
+
+private:
+	void scheduleRefresh()
+	{
+		if (refresh_pending)
+			return;
+		refresh_pending = true;
+		QTimer::singleShot(0, this, [this] {
+			refresh_pending = false;
+			if (!root)
+				return;
+			refreshing = true;
+			auto widgets = root->findChildren<QWidget*>();
+			widgets.prepend(root);
+			for (auto* widget : widgets)
+			{
+				const auto style_sheet = widget->styleSheet();
+				if (style_sheet.isEmpty())
+					continue;
+				widget->setStyleSheet({});
+				widget->setStyleSheet(style_sheet);
+			}
+			refreshing = false;
+		});
+	}
+
+	QPointer<QWidget> root;
+	bool refresh_pending = false;
+	bool refreshing = false;
+};
+
+}  // namespace
 	
 #if 0
 	// Implementation moved to settings.cpp
@@ -365,6 +426,13 @@ namespace Util {
 			maybe_markup = QTextDocumentFragment::fromHtml(maybe_markup).toPlainText();
 		}
 		return maybe_markup;
+	}
+
+
+	void keepStyleSheetsSynchronizedWithPalette(QWidget* root)
+	{
+		Q_ASSERT(root);
+		new PaletteStyleSheetRefresher(root);
 	}
 
 

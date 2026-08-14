@@ -369,7 +369,7 @@ HomeScreenWidgetMobile::HomeScreenWidgetMobile(HomeScreenController *controller,
                                  "to Map Hub."),
                               content);
   subtitle->setWordWrap(true);
-  subtitle->setStyleSheet(QStringLiteral("color: palette(mid);"));
+  subtitle->setStyleSheet(QStringLiteral("color: palette(window-text);"));
   content_layout->addWidget(subtitle);
   content_layout->addSpacing(3);
 
@@ -571,6 +571,7 @@ HomeScreenWidgetMobile::HomeScreenWidgetMobile(HomeScreenController *controller,
 
   updateFileListWidget();
 #endif
+  Util::keepStyleSheetsSynchronizedWithPalette(this);
 }
 
 HomeScreenWidgetMobile::~HomeScreenWidgetMobile() = default;
@@ -674,7 +675,6 @@ void HomeScreenWidgetMobile::showExamples() {
   dialog.setWindowTitle(tr("Example maps"));
   if (auto *main_window = controller->getWindow()) {
     dialog.setAttribute(Qt::WA_WindowPropagation);
-    dialog.setPalette(main_window->palette());
     dialog.resize(main_window->size());
   }
   auto mobile_font = dialog.font();
@@ -687,13 +687,13 @@ void HomeScreenWidgetMobile::showExamples() {
       "QListWidget::item { padding: 13px 10px; border-bottom: 1px solid "
       "palette(midlight); }"
       "QPushButton#examplesQuiet { background: transparent; border: 0; "
-      "color: palette(highlight); padding: 10px 14px; }"));
+      "color: palette(link); padding: 10px 14px; }"));
 
   auto *intro = new QLabel(tr("These read-only examples are included with "
                               "Mapper. Choose one to open it."),
                            &dialog);
   intro->setWordWrap(true);
-  intro->setStyleSheet(QStringLiteral("color: palette(mid);"));
+  intro->setStyleSheet(QStringLiteral("color: palette(window-text);"));
   auto *list = new QListWidget(&dialog);
   QScroller::grabGesture(list->viewport(), QScroller::TouchGesture);
   list->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
@@ -725,6 +725,7 @@ void HomeScreenWidgetMobile::showExamples() {
   layout->addWidget(intro);
   layout->addWidget(list, 1);
   layout->addWidget(buttons);
+  Util::keepStyleSheetsSynchronizedWithPalette(&dialog);
   connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
   connect(list, &QListWidget::itemClicked, &dialog,
           [&dialog](QListWidgetItem *) { dialog.accept(); });

@@ -21,6 +21,7 @@
 #include "mapper_proxystyle.h"
 
 #include <algorithm>
+#include <cmath>
 #include <utility>
 
 #include <Qt>
@@ -39,7 +40,6 @@
 #include <QPainter>
 #include <QPalette>
 #include <QRect>
-#include <QRgb>
 #include <QScreen>
 #include <QSize>
 #include <QStyleOption>
@@ -82,6 +82,66 @@ int buttonSizePixel(const Settings& settings)
 	return qRound(Util::mmToPixelPhysical(size_mm));
 }
 
+qreal linearColorChannel(int channel)
+{
+	const auto value = channel / 255.0;
+	return value <= 0.04045 ? value / 12.92
+	                        : std::pow((value + 0.055) / 1.055, 2.4);
+}
+
+qreal relativeLuminance(const QColor& color)
+{
+	return 0.2126 * linearColorChannel(color.red())
+	       + 0.7152 * linearColorChannel(color.green())
+	       + 0.0722 * linearColorChannel(color.blue());
+}
+
+qreal contrastRatio(const QColor& first, const QColor& second)
+{
+	const auto first_luminance = relativeLuminance(first);
+	const auto second_luminance = relativeLuminance(second);
+	return (qMax(first_luminance, second_luminance) + 0.05)
+	       / (qMin(first_luminance, second_luminance) + 0.05);
+}
+
+QColor blendedColor(const QColor& background, const QColor& target, int amount)
+{
+	const auto blend = [amount](int background_channel, int target_channel) {
+		return background_channel
+		       + (target_channel - background_channel) * amount / 255;
+	};
+	return {blend(background.red(), target.red()),
+	        blend(background.green(), target.green()),
+	        blend(background.blue(), target.blue())};
+}
+
+QColor checkedToolCueColor(const QColor& background)
+{
+	const auto black = QColor{Qt::black};
+	const auto white = QColor{Qt::white};
+	const auto target = contrastRatio(background, black)
+	                          > contrastRatio(background, white)
+	                      ? black : white;
+	auto result = target;
+	auto low = 0;
+	auto high = 255;
+	while (low <= high)
+	{
+		const auto amount = (low + high) / 2;
+		const auto candidate = blendedColor(background, target, amount);
+		if (contrastRatio(background, candidate) >= 3.1)
+		{
+			result = candidate;
+			high = amount - 1;
+		}
+		else
+		{
+			low = amount + 1;
+		}
+	}
+	return result;
+}
+
 // Cf. qt_defaultDpiX in qfont.cpp
 [[maybe_unused]] int defaultDpi()
 {
@@ -108,13 +168,12 @@ qreal dpiScaled(qreal value)
 
 
 MapperProxyStyle::MapperProxyStyle(QStyle* base_style)
-: MapperProxyStyle(QApplication::palette(), base_style)
+: QProxyStyle(base_style)
 {
 }
 
-MapperProxyStyle::MapperProxyStyle(const QPalette& palette, QStyle* base_style)
-: QProxyStyle(base_style)
-, default_palette(palette)
+MapperProxyStyle::MapperProxyStyle(const QPalette& /* palette */, QStyle* base_style)
+: MapperProxyStyle(base_style)
 {
 }
 
@@ -129,7 +188,7 @@ void MapperProxyStyle::onSettingsChanged()
 	{
 #ifndef __clang_analyzer__
 		// No leak: QApplication takes ownership.
-		QApplication::setStyle(new MapperProxyStyle(default_palette));
+		QApplication::setStyle(new MapperProxyStyle());
 #endif
 	}
 }
@@ -155,7 +214,6 @@ void MapperProxyStyle::polish(QApplication* application)
 	
 	fixupProxyChain(baseStyle());
 	QProxyStyle::polish(application);
-	QApplication::setPalette(default_palette);
 	
 	auto& settings = Settings::getInstance();
 	connect(&settings, &Settings::settingsChanged, this, &MapperProxyStyle::onSettingsChanged);
@@ -215,7 +273,6 @@ void MapperProxyStyle::unpolish(QApplication* application)
 		QApplication::setFont(QApplication::font());
 	}
 	
-	QApplication::setPalette(default_palette);
 	QProxyStyle::unpolish(application);
 	
 	common_style = nullptr;
@@ -244,7 +301,7 @@ void MapperProxyStyle::drawPrimitive(QStyle::PrimitiveElement element, const QSt
 		    && option->state & State_On)
 		{
 			auto const& window_color = option->palette.window().color();
-			auto const fill = QBrush(qGray(window_color.rgb()) > 127 ? window_color.darker(125) : window_color.lighter(125));
+			auto const fill = QBrush(checkedToolCueColor(window_color));
 			painter->setPen(Qt::NoPen);
 			painter->setBrush(fill);
 			painter->drawRoundedRect(option->rect, 5.0, 5.0, Qt::AbsoluteSize);

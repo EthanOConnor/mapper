@@ -21,11 +21,14 @@
 #include <Qt>
 #include <QtGlobal>
 #include <QtTest>
+#include <QApplication>
+#include <QColor>
 #include <QDir>
 #include <QFileInfo>
 #include <QIcon>
 #include <QImage>
 #include <QObject>
+#include <QPalette>
 #include <QSize>
 #include <QString>
 #include <QStyle>
@@ -46,8 +49,58 @@ Q_OBJECT
 private slots:
 	void scalableActionIconTest();
 	void allActionIconsTest();
+	void paletteActionIconTest();
+	void paletteLifecycleTest();
 	void standardIconTest();
 };
+
+namespace {
+
+class ApplicationPaletteGuard
+{
+public:
+	ApplicationPaletteGuard() : original{QApplication::palette()} {}
+	~ApplicationPaletteGuard() { QApplication::setPalette(original); }
+
+private:
+	QPalette original;
+};
+
+QPalette sentinelPalette(const QColor& surface, const QColor& text)
+{
+	auto palette = QApplication::palette();
+	for (auto group : {QPalette::Active, QPalette::Inactive, QPalette::Disabled})
+	{
+		palette.setColor(group, QPalette::Window, surface);
+		palette.setColor(group, QPalette::WindowText, text);
+		palette.setColor(group, QPalette::Base, surface);
+		palette.setColor(group, QPalette::Text, text);
+		palette.setColor(group, QPalette::Button, surface);
+		palette.setColor(group, QPalette::ButtonText, text);
+	}
+	return palette;
+}
+
+QColor firstOpaquePixel(const QPixmap& pixmap)
+{
+	const auto image = pixmap.toImage().convertToFormat(QImage::Format_ARGB32);
+	for (auto y = 0; y < image.height(); ++y)
+	{
+		const auto* row = reinterpret_cast<const QRgb*>(image.constScanLine(y));
+		for (auto x = 0; x < image.width(); ++x)
+		{
+			if (qAlpha(row[x]) > 240)
+			{
+				auto color = QColor::fromRgba(row[x]);
+				color.setAlpha(255);
+				return color;
+			}
+		}
+	}
+	return {};
+}
+
+}  // namespace
 
 void StyleTest::scalableActionIconTest()
 {
@@ -91,6 +144,45 @@ void StyleTest::allActionIconsTest()
 		}
 		QVERIFY2(has_visible_pixel, qPrintable(name));
 	}
+}
+
+void StyleTest::paletteActionIconTest()
+{
+	Q_INIT_RESOURCE(resources);
+	ApplicationPaletteGuard guard;
+	auto dark = sentinelPalette(Qt::black, Qt::white);
+	dark.setColor(QPalette::Disabled, QPalette::ButtonText, Qt::gray);
+	QApplication::setPalette(dark);
+
+	const auto close = ActionIcon::fromName(u"close");
+	const auto semantic = ActionIcon::fromName(u"control");
+	const auto dark_close = close.pixmap(QSize{32, 32});
+	const auto dark_semantic = semantic.pixmap(QSize{32, 32});
+	QCOMPARE(firstOpaquePixel(dark_close), QColor{Qt::white});
+	QCOMPARE(firstOpaquePixel(close.pixmap(QSize{32, 32}, QIcon::Disabled)),
+	         QColor{Qt::gray});
+
+	QApplication::setPalette(sentinelPalette(Qt::white, Qt::black));
+	QCOMPARE(firstOpaquePixel(close.pixmap(QSize{32, 32})), QColor{Qt::black});
+	QVERIFY(dark_close.toImage() != close.pixmap(QSize{32, 32}).toImage());
+	QCOMPARE(dark_semantic.toImage(), semantic.pixmap(QSize{32, 32}).toImage());
+}
+
+void StyleTest::paletteLifecycleTest()
+{
+	ApplicationPaletteGuard guard;
+	const auto construction = sentinelPalette(
+	  QColor{0x12, 0x34, 0x56}, QColor{0xed, 0xcb, 0xa9});
+	const auto installation = sentinelPalette(
+	  QColor{0x24, 0x35, 0x46}, QColor{0xdb, 0xca, 0xb9});
+	QApplication::setPalette(construction);
+	auto* style = new MapperProxyStyle();
+	QApplication::setPalette(installation);
+	QApplication::setStyle(style);
+	QCOMPARE(QApplication::palette().color(QPalette::Window),
+	         installation.color(QPalette::Window));
+	QCOMPARE(QApplication::palette().color(QPalette::WindowText),
+	         installation.color(QPalette::WindowText));
 }
 
 /**

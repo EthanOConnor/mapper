@@ -56,12 +56,14 @@ Toast::Toast(QWidget* parent)
 	if (!parent)
 		setWindowFlags(Qt::FramelessWindowHint | Qt::WindowDoesNotAcceptFocus);
 	
-	QPalette text_palette;
+	auto text_palette = palette();
 	auto foreground = Qt::white;
 	auto background = Qt::black;
 	if (qGray(text_palette.color(QPalette::Window).rgb()) < 128)
 	    std::swap(foreground, background);
 	text_palette.setColor(QPalette::WindowText, foreground);
+	text_palette.setColor(QPalette::Link, foreground);
+	text_palette.setColor(QPalette::LinkVisited, foreground);
 	text_palette.setColor(QPalette::Window, background);
 	setPalette(text_palette);
 	

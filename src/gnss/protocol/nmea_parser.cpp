@@ -41,6 +41,20 @@ QString mergeLimitation(const QString& left, const QString& right)
 	return left + QStringLiteral(" | ") + right;
 }
 
+// minmea_tocoord() returns float, which quantizes WGS84 positions by roughly
+// half a metre at field latitudes. Preserve the sentence's actual precision.
+double toCoordDouble(const struct minmea_float* value)
+{
+	if (value->scale == 0 || value->scale > (INT_LEAST32_MAX / 100)
+	    || value->scale < (INT_LEAST32_MIN / 100))
+	{
+		return NAN;
+	}
+	const auto degrees = value->value / (value->scale * 100);
+	const auto minutes = value->value % (value->scale * 100);
+	return double(degrees) + double(minutes) / (60.0 * value->scale);
+}
+
 QByteArrayList splitSentenceFields(const char* sentence)
 {
 	QByteArray raw(sentence);
@@ -120,6 +134,9 @@ void NmeaParser::reset()
 {
 	m_lineBuffer.clear();
 	m_stats = {};
+	m_gstValid = false;
+	m_gstHours = m_gstMinutes = m_gstSeconds = -1;
+	m_gstHAccuracy = m_gstVAccuracy = NAN;
 }
 
 
@@ -145,6 +162,7 @@ void NmeaParser::processSentence(const QByteArray& sentence)
 	case MINMEA_SENTENCE_RMC: handleRMC(sentence.constData()); break;
 	case MINMEA_SENTENCE_GSA: handleGSA(sentence.constData()); break;
 	case MINMEA_SENTENCE_GSV: handleGSV(sentence.constData()); break;
+	case MINMEA_SENTENCE_GST: handleGST(sentence.constData()); break;
 	default: break;
 	}
 }
@@ -159,8 +177,8 @@ void NmeaParser::handleGGA(const char* sentence)
 	GnssPositionObservation observation;
 	observation.meta.source = GnssObservationSource::NmeaGga;
 	observation.meta.observedAt = QDateTime::currentDateTimeUtc();
-	observation.position.latitude = minmea_tocoord(&gga.latitude);
-	observation.position.longitude = minmea_tocoord(&gga.longitude);
+	observation.position.latitude = toCoordDouble(&gga.latitude);
+	observation.position.longitude = toCoordDouble(&gga.longitude);
 
 	// Altitude above MSL
 	if (gga.altitude.scale != 0)
@@ -187,20 +205,43 @@ void NmeaParser::handleGGA(const char* sentence)
 	observation.position.valid = (gga.fix_quality > 0);
 	observation.position.satellitesUsed = static_cast<std::uint8_t>(gga.satellites_tracked);
 
-	// HDOP — we can derive a rough accuracy estimate: hAcc ~ HDOP * 2.5m (typical UERE)
 	if (gga.hdop.scale != 0)
-	{
 		observation.position.hDOP = minmea_tofloat(&gga.hdop);
-		// Use HDOP-derived accuracy only if we have no better source.
-		// UERE ~2.5m for single-frequency, ~1.5m for dual-frequency.
-		// We use 2.0m as a reasonable middle ground.
-		observation.position.hAccuracy = observation.position.hDOP * 2.0f;
+
+	// GGA has no error estimate. Prefer receiver GST statistics from the same
+	// epoch; otherwise derive a conservative estimate appropriate to fix type.
+	const auto gst_matches_epoch = m_gstValid
+	    && m_gstHours == gga.time.hours
+	    && m_gstMinutes == gga.time.minutes
+	    && m_gstSeconds == gga.time.seconds;
+	if (gst_matches_epoch)
+	{
+		observation.position.hAccuracy = m_gstHAccuracy;
+		observation.position.vAccuracy = m_gstVAccuracy;
+		observation.position.accuracyBasis = GnssAccuracyBasis::Sigma68;
+		observation.position.computeP95();
+		observation.meta.accuracyDerived = false;
+		observation.meta.limitation = mergeLimitation(
+		    observation.meta.limitation,
+		    QStringLiteral("Horizontal accuracy from GST error statistics"));
+	}
+	else if (!std::isnan(observation.position.hDOP))
+	{
+		float uere = 2.0f;
+		switch (observation.position.fixType)
+		{
+		case GnssFixType::RtkFixed: uere = 0.05f; break;
+		case GnssFixType::RtkFloat: uere = 0.5f; break;
+		case GnssFixType::DGPS: uere = 1.0f; break;
+		default: break;
+		}
+		observation.position.hAccuracy = observation.position.hDOP * uere;
 		observation.position.accuracyBasis = GnssAccuracyBasis::Sigma68;
 		observation.position.computeP95();
 		observation.meta.accuracyDerived = true;
 		observation.meta.limitation = mergeLimitation(
 		    observation.meta.limitation,
-		    QStringLiteral("Horizontal accuracy derived from HDOP with assumed 2.0m UERE"));
+		    QStringLiteral("Horizontal accuracy derived from HDOP with fix-type UERE"));
 	}
 
 	// Correction age
@@ -249,8 +290,8 @@ void NmeaParser::handleRMC(const char* sentence)
 	GnssPositionObservation observation;
 	observation.meta.source = GnssObservationSource::NmeaRmc;
 	observation.meta.observedAt = QDateTime::currentDateTimeUtc();
-	observation.position.latitude = minmea_tocoord(&rmc.latitude);
-	observation.position.longitude = minmea_tocoord(&rmc.longitude);
+	observation.position.latitude = toCoordDouble(&rmc.latitude);
+	observation.position.longitude = toCoordDouble(&rmc.longitude);
 	observation.position.valid = rmc.valid;
 	observation.position.fixType = rmc.valid ? GnssFixType::Fix3D : GnssFixType::NoFix;
 
@@ -327,6 +368,35 @@ void NmeaParser::handleGSV(const char* sentence)
 	observation.meta.limitation = QStringLiteral("NMEA GSV reports visible satellites only");
 	observation.satellitesVisible = gsv.total_sats;
 	emit satelliteObservation(observation);
+}
+
+
+void NmeaParser::handleGST(const char* sentence)
+{
+	struct minmea_sentence_gst gst;
+	if (!minmea_parse_gst(&gst, sentence))
+		return;
+
+	m_gstValid = false;
+	if (gst.latitude_error_deviation.scale == 0
+	    || gst.longitude_error_deviation.scale == 0)
+	{
+		return;
+	}
+
+	const auto latitude_error = minmea_tofloat(&gst.latitude_error_deviation);
+	const auto longitude_error = minmea_tofloat(&gst.longitude_error_deviation);
+	if (!(latitude_error >= 0.0f) || !(longitude_error >= 0.0f))
+		return;
+
+	m_gstHAccuracy = std::hypot(latitude_error, longitude_error);
+	m_gstVAccuracy = gst.altitude_error_deviation.scale != 0
+	                     ? minmea_tofloat(&gst.altitude_error_deviation)
+	                     : NAN;
+	m_gstHours = gst.time.hours;
+	m_gstMinutes = gst.time.minutes;
+	m_gstSeconds = gst.time.seconds;
+	m_gstValid = true;
 }
 
 

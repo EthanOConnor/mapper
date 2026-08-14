@@ -68,6 +68,11 @@
 	</dict>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>bluetooth-central</string>
+		<string>location</string>
+	</array>
 
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Mapper uses your location to show your position and heading on the map.</string>

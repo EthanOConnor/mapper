@@ -89,7 +89,6 @@ NewMapDialog::NewMapDialog(QWidget *parent)
 #if defined(Q_OS_IOS)
   if (parent) {
     setAttribute(Qt::WA_WindowPropagation);
-    setPalette(parent->palette());
     resize(parent->size());
   }
   auto mobile_font = font();
@@ -101,11 +100,11 @@ NewMapDialog::NewMapDialog(QWidget *parent)
       "QComboBox, QListWidget { background: palette(window); border: 1px "
       "solid palette(midlight); border-radius: 10px; padding: 7px 9px; }"
       "QListWidget::item { padding: 11px 7px; }"
-      "QPushButton#newMapPrimary { background: palette(highlight); color: "
-      "palette(highlighted-text); border: 0; border-radius: 12px; "
+      "QPushButton#newMapPrimary { background: palette(button); color: "
+      "palette(button-text); border: 2px solid palette(accent); border-radius: 12px; "
       "padding: 10px 14px; }"
       "QPushButton#newMapQuiet { background: transparent; border: 0; "
-      "color: palette(highlight); padding: 10px 14px; }"
+      "color: palette(link); padding: 10px 14px; }"
       "QWidget#newMapFooter { background: palette(base); border-top: 1px "
       "solid palette(midlight); }"));
 
@@ -124,7 +123,7 @@ NewMapDialog::NewMapDialog(QWidget *parent)
                               "choose its name and location in Files."),
                            content);
   intro->setWordWrap(true);
-  intro->setStyleSheet(QStringLiteral("color: palette(mid);"));
+  intro->setStyleSheet(QStringLiteral("color: palette(window-text);"));
   content_layout->addWidget(intro);
   content_layout->addSpacing(10);
 
@@ -158,7 +157,8 @@ NewMapDialog::NewMapDialog(QWidget *parent)
                                    "standards. You can type a custom scale."),
                                 scale_card);
   scale_help->setWordWrap(true);
-  scale_help->setStyleSheet(QStringLiteral("color: palette(mid);"));
+  scale_help->setStyleSheet(
+      QStringLiteral("color: palette(window-text);"));
   scale_card_layout->addWidget(scale_help);
   scale_card_layout->addWidget(requirement_label);
   content_layout->addWidget(scale_card);
@@ -175,7 +175,8 @@ NewMapDialog::NewMapDialog(QWidget *parent)
                     "intended for advanced setup."),
                  symbols_card);
   symbols_help->setWordWrap(true);
-  symbols_help->setStyleSheet(QStringLiteral("color: palette(mid);"));
+  symbols_help->setStyleSheet(
+      QStringLiteral("color: palette(window-text);"));
   symbols_card_layout->addWidget(symbols_help);
   symbol_set_list->setMinimumHeight(260);
   symbols_card_layout->addWidget(symbol_set_list, 1);
@@ -222,6 +223,10 @@ NewMapDialog::NewMapDialog(QWidget *parent)
   create_button->setText(tr("Create"));
   layout->addWidget(button_box);
   setLayout(layout);
+#endif
+
+#if defined(Q_OS_IOS)
+  Util::keepStyleSheetsSynchronizedWithPalette(this);
 #endif
 
   loadSymbolSetMap();
