@@ -652,6 +652,7 @@ void FramePipelineTest::mapWidgetUsesTheFrameContract()
 
 	auto const frame_is_current = [canvas] {
 		return canvas->currentFrame() && canvas->lastResult()
+		       && !canvas->currentFrame()->vector_passes.empty()
 		       && canvas->lastResult()->completion.frame_id == canvas->currentFrame()->id
 		       && canvas->lastResult()->surface_sequence == canvas->surfaceState().sequence
 		       && canvas->lastResult()->completion.status == render::FrameStatus::Presented;
@@ -680,7 +681,6 @@ void FramePipelineTest::mapWidgetUsesTheFrameContract()
 		30000
 	);
 	auto const first_frame = canvas->currentFrame();
-	QVERIFY(!first_frame->vector_passes.empty());
 	QVERIFY2(canvas->lastError().empty(), canvas->lastError().c_str());
 
 	auto* object = fixture->map.getPart(0)->getObject(0);

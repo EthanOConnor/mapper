@@ -1318,7 +1318,10 @@ void MapHubWorkspaceTest::preservesPublishedTileMatrixLimits() {
            QStringLiteral("EPSG:6596"));
   auto result = imagery::OicCatalogReader::read(
       QJsonDocument(document).toJson(QJsonDocument::Compact));
-  QVERIFY(result.accepted());
+  QVERIFY2(result.accepted(),
+           qPrintable(result.diagnostics.isEmpty()
+                          ? QStringLiteral("catalog rejected without a diagnostic")
+                          : result.diagnostics.first().displayText()));
   QCOMPARE(result.supportedSourceCount(), qsizetype(1));
   QCOMPARE(result.catalog.sources.at(0).resolved_source->tile_matrix_set.crs,
            QStringLiteral("EPSG:6596"));
