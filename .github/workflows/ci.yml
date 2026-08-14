@@ -70,6 +70,7 @@ jobs:
           path: .vcpkg
 
       - name: Install Rust toolchain
+        shell: bash
         run: rustup toolchain install "$RUST_VERSION" --profile minimal --component clippy,rustfmt
 
       - name: Resolve cache identity
