@@ -6,6 +6,7 @@
 
 #include "map_hub_workspace_t.h"
 
+#include <algorithm>
 #include <limits>
 #include <utility>
 
@@ -33,11 +34,12 @@
 #include "collaboration/map_hub_imagery_catalog.h"
 #include "collaboration/map_hub_read_only_document.h"
 #include "collaboration/map_hub_sync_queue.h"
+#include "collaboration/map_hub_work_item_projection.h"
 #include "collaboration/map_hub_workspace.h"
 #include "collaboration/oom_json.h"
 #include "collaboration/zstd_codec.h"
-#include "imagery/oic_catalog.h"
 #include "imagery/imagery_catalog_repository.h"
+#include "imagery/oic_catalog.h"
 #include "imagery/tile_network_manager.h"
 
 using namespace OpenOrienteering;
@@ -72,24 +74,27 @@ private:
     const auto request_line = request.left(request.indexOf("\r\n"));
     QByteArray payload;
     if (request_count == 0) {
-      if (!request_line.startsWith(
-              "POST /api/v1/auth/mapper/connect HTTP/1.1"))
+      if (!request_line.startsWith("POST /api/v1/auth/mapper/connect HTTP/1.1"))
         error = QStringLiteral("unexpected start request");
-      payload = QStringLiteral(
-                    R"({"request_id":"11111111-1111-1111-1111-111111111111","device_secret":"a-connection-secret","user_code":"123456","verification_url":"%1/account/mapper/connect/11111111-1111-1111-1111-111111111111/","expires_in":10,"interval":1})")
-                    .arg(url())
-                    .toUtf8();
+      payload =
+          QStringLiteral(
+              R"({"request_id":"11111111-1111-1111-1111-111111111111","device_secret":"a-connection-secret","user_code":"123456","verification_url":"%1/account/mapper/connect/11111111-1111-1111-1111-111111111111/","expires_in":10,"interval":1})")
+              .arg(url())
+              .toUtf8();
       respond(socket, "201 Created", payload);
     } else if (request_count == 1) {
       if (!request_line.startsWith(
-              "POST /api/v1/auth/mapper/connect/11111111-1111-1111-1111-111111111111/exchange HTTP/1.1"))
+              "POST "
+              "/api/v1/auth/mapper/connect/"
+              "11111111-1111-1111-1111-111111111111/exchange HTTP/1.1"))
         error = QStringLiteral("unexpected exchange request");
       respond(socket, "202 Accepted",
               QByteArrayLiteral(R"({"status":"pending"})"));
     } else if (request_count == 2) {
-      respond(socket, "201 Created",
-              QByteArrayLiteral(
-                  R"({"status":"connected","token":"cocm_connected","organization":{"name":"Cascade Orienteering Club"}})"));
+      respond(
+          socket, "201 Created",
+          QByteArrayLiteral(
+              R"({"status":"connected","token":"cocm_connected","organization":{"name":"Cascade Orienteering Club"}})"));
     } else {
       error = QStringLiteral("unexpected extra connection request");
       respond(socket, "500 Internal Server Error", QByteArrayLiteral("{}"));
@@ -202,14 +207,14 @@ void MapHubWorkspaceTest::workspaceSyncStateDecodesBoundedZstd() {
               requests.push_back(bytes);
               const auto response_body =
                   requests.size() == 1 ? compressed : QByteArray("not-zstd");
-              socket->write(
-                  QByteArray("HTTP/1.1 200 OK\r\n"
-                             "Content-Type: application/json\r\n"
-                             "Content-Encoding: zstd\r\n"
-                             "ETag: \"sync-v1\"\r\n"
-                             "Content-Length: ") +
-                  QByteArray::number(response_body.size()) +
-                  QByteArray("\r\nConnection: close\r\n\r\n") + response_body);
+              socket->write(QByteArray("HTTP/1.1 200 OK\r\n"
+                                       "Content-Type: application/json\r\n"
+                                       "Content-Encoding: zstd\r\n"
+                                       "ETag: \"sync-v1\"\r\n"
+                                       "Content-Length: ") +
+                            QByteArray::number(response_body.size()) +
+                            QByteArray("\r\nConnection: close\r\n\r\n") +
+                            response_body);
               socket->disconnectFromHost();
             });
   });
@@ -243,12 +248,10 @@ void MapHubWorkspaceTest::workspaceSyncStateDecodesBoundedZstd() {
   loop.exec();
 
   QVERIFY(decoded);
-  QCOMPARE(corrupt_error.code,
-           QStringLiteral("invalid_compressed_response"));
+  QCOMPARE(corrupt_error.code, QStringLiteral("invalid_compressed_response"));
   QCOMPARE(requests.size(), 2);
   QVERIFY(requests[0].toLower().contains("accept-encoding: zstd"));
-  QVERIFY(requests[0].toLower().contains(
-      "if-none-match: \"sync-v0\""));
+  QVERIFY(requests[0].toLower().contains("if-none-match: \"sync-v0\""));
   QVERIFY(requests[0].contains("X-Editing-Lease: fixture-lease"));
 }
 
@@ -261,6 +264,173 @@ void MapHubWorkspaceTest::initTestCase() {
   qputenv("MAPPER_MANAGED_WORKSPACE_ROOT", record_directory.path().toUtf8());
   qputenv("MAPPER_MAP_HUB_SYNC_ROOT", record_directory.path().toUtf8());
   qputenv("MAPPER_MAP_HUB_READ_ONLY_ROOT", record_directory.path().toUtf8());
+}
+
+void MapHubWorkspaceTest::assignmentStartUsesResolvedEditingContext() {
+  QTcpServer server;
+  if (!server.listen(QHostAddress::LocalHost))
+    QSKIP("The test sandbox does not permit a loopback listener");
+
+  const auto assignment_id =
+      QStringLiteral("60000000-0000-4000-8000-000000000071");
+  const auto client_id = QStringLiteral("80000000-0000-4000-8000-000000000071");
+  const auto etag = QStringLiteral("\"") + QString(64, QLatin1Char('a')) +
+                    QStringLiteral("\"");
+  QList<QByteArray> requests;
+  QEventLoop loop;
+  bool completed = false;
+  MapHubApiClient::Error callback_error;
+
+  connect(&server, &QTcpServer::newConnection, this, [&] {
+    auto *socket = server.nextPendingConnection();
+    connect(socket, &QTcpSocket::readyRead, this,
+            [&, socket, bytes = QByteArray{}, responded = false]() mutable {
+              if (responded)
+                return;
+              bytes.append(socket->readAll());
+              const auto header_end = bytes.indexOf("\r\n\r\n");
+              if (header_end < 0)
+                return;
+              const QRegularExpression length_pattern(
+                  QStringLiteral("(?im)^Content-Length:\\s*(\\d+)\\s*$"));
+              const auto length_match = length_pattern.match(
+                  QString::fromLatin1(bytes.left(header_end)));
+              const auto content_length = length_match.hasMatch()
+                                              ? length_match.captured(1).toInt()
+                                              : 0;
+              if (bytes.size() < header_end + 4 + content_length)
+                return;
+              responded = true;
+              requests.append(bytes);
+              const auto first = requests.size() == 1;
+              const QByteArray body =
+                  first ? QByteArrayLiteral("{\"schema_version\":1}")
+                        : QByteArrayLiteral("{\"started\":true}");
+              QByteArray response =
+                  "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n";
+              if (first)
+                response += "ETag: " + etag.toUtf8() + "\r\n";
+              response += "Content-Length: " + QByteArray::number(body.size()) +
+                          "\r\nConnection: close\r\n\r\n" + body;
+              socket->write(response);
+              socket->disconnectFromHost();
+            });
+  });
+
+  MapHubApiClient client(
+      QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort()),
+      QStringLiteral("test-token"));
+  client.assignmentEditingContext(
+      assignment_id, client_id,
+      [&](const QJsonObject &, const QString &returned_etag,
+          const MapHubApiClient::Error &error) {
+        if (error) {
+          callback_error = error;
+          loop.quit();
+          return;
+        }
+        QCOMPARE(returned_etag, etag);
+        client.startAssignment(assignment_id, client_id, returned_etag,
+                               [&](const QJsonObject &,
+                                   const MapHubApiClient::Error &start_error) {
+                                 callback_error = start_error;
+                                 completed = true;
+                                 loop.quit();
+                               });
+      });
+  QTimer::singleShot(5000, &loop, &QEventLoop::quit);
+  loop.exec();
+
+  QVERIFY2(completed, "Assignment context/start exchange timed out");
+  QVERIFY2(!callback_error, qPrintable(callback_error.message));
+  QCOMPARE(requests.size(), 2);
+  const QByteArray context_request =
+      QByteArrayLiteral("GET /api/v1/assignments/") + assignment_id.toUtf8() +
+      QByteArrayLiteral("/editing-context ");
+  const QByteArray start_request =
+      QByteArrayLiteral("POST /api/v1/assignments/") + assignment_id.toUtf8() +
+      QByteArrayLiteral("/start ");
+  const QByteArray client_header =
+      QByteArrayLiteral("X-Editing-Client-Instance: ") + client_id.toUtf8();
+  QVERIFY(requests[0].startsWith(context_request));
+  QVERIFY(requests[0].contains(client_header));
+  QVERIFY(requests[1].startsWith(start_request));
+  const QByteArray etag_header =
+      QByteArrayLiteral("If-Match: ") + etag.toUtf8();
+  QVERIFY(requests[1].contains(etag_header));
+  QVERIFY(requests[1].contains(client_header));
+  QVERIFY(requests[1].endsWith("{}"));
+}
+
+void MapHubWorkspaceTest::consolidatesWorkItemsAndKeepsHistoryCollapsed() {
+  const auto project_id =
+      QStringLiteral("30000000-0000-4000-8000-000000000001");
+  const auto current_assignment =
+      QStringLiteral("60000000-0000-4000-8000-000000000001");
+  const auto old_assignment =
+      QStringLiteral("60000000-0000-4000-8000-000000000002");
+  const auto current_package =
+      QStringLiteral("50000000-0000-4000-8000-000000000001");
+  const auto old_package =
+      QStringLiteral("50000000-0000-4000-8000-000000000002");
+  const QJsonObject current_participation{
+      {QStringLiteral("assignment_id"), current_assignment},
+      {QStringLiteral("work_package_id"), current_package},
+      {QStringLiteral("status"), QStringLiteral("active")},
+      {QStringLiteral("assigned_at"), QStringLiteral("2026-08-13T11:00:00Z")},
+      {QStringLiteral("start_url"),
+       QStringLiteral("/api/v1/assignments/current/start")},
+      {QStringLiteral("editing_context_url"),
+       QStringLiteral("/api/v1/assignments/current/editing-context")}};
+  const QJsonObject old_participation{
+      {QStringLiteral("assignment_id"), old_assignment},
+      {QStringLiteral("work_package_id"), old_package},
+      {QStringLiteral("status"), QStringLiteral("complete")}};
+  const QJsonObject library{
+      {QStringLiteral("work_items"),
+       QJsonArray{QJsonObject{
+           {QStringLiteral("id"),
+            QStringLiteral("workspace:70000000-0000-4000-8000-000000000001")},
+           {QStringLiteral("project_id"), project_id},
+           {QStringLiteral("workspace_id"),
+            QStringLiteral("70000000-0000-4000-8000-000000000001")},
+           {QStringLiteral("lifecycle_bucket"), QStringLiteral("active")},
+           {QStringLiteral("actionable"), true},
+           {QStringLiteral("current_participation"), current_participation},
+           {QStringLiteral("current_participation_error"), QJsonValue::Null},
+           {QStringLiteral("participations"),
+            QJsonArray{current_participation, old_participation}},
+           {QStringLiteral("task_history"),
+            QJsonArray{
+                QJsonObject{
+                    {QStringLiteral("work_package_id"), current_package},
+                    {QStringLiteral("title"),
+                     QStringLiteral("Current field update")},
+                    {QStringLiteral("type"), QStringLiteral("update")},
+                    {QStringLiteral("status"), QStringLiteral("active")},
+                    {QStringLiteral("updated_at"),
+                     QStringLiteral("2026-08-13T12:00:00Z")}},
+                QJsonObject{
+                    {QStringLiteral("work_package_id"), old_package},
+                    {QStringLiteral("title"),
+                     QStringLiteral("Outdated assignment")},
+                    {QStringLiteral("type"), QStringLiteral("update")},
+                    {QStringLiteral("status"), QStringLiteral("complete")},
+                    {QStringLiteral("updated_at"),
+                     QStringLiteral("2026-08-12T12:00:00Z")}}}}}}}};
+
+  const auto projection = MapHubWorkItemProjection::fromLibrary(library);
+  QVERIFY(projection.contract_available);
+  QCOMPARE(projection.rows.size(), 1);
+  QCOMPARE(projection.rows[0].project_id, project_id);
+  QCOMPARE(projection.rows[0].assignment_id, current_assignment);
+  QCOMPARE(projection.rows[0].task_title,
+           QStringLiteral("Current field update"));
+  QVERIFY(projection.rows[0].actionable);
+  QVERIFY(std::none_of(
+      projection.rows.cbegin(), projection.rows.cend(), [](const auto &row) {
+        return row.task_title == QLatin1String("Outdated assignment");
+      }));
 }
 
 void MapHubWorkspaceTest::storesMacCredentialsInOwnerOnlyFile() {
@@ -491,23 +661,23 @@ void MapHubWorkspaceTest::completesBrowserMediatedConnection() {
   if (!server.start())
     QSKIP("The test sandbox does not permit a loopback listener");
 
-  MapHubDeviceAuthorization authorization(
-      server.url(), QStringLiteral("Mapper test"), this);
+  MapHubDeviceAuthorization authorization(server.url(),
+                                          QStringLiteral("Mapper test"), this);
   QUrl verification_url;
   QString user_code;
   MapHubDeviceAuthorization::Result result;
   MapHubApiClient::Error error;
   bool complete = false;
-  connect(&authorization, &MapHubDeviceAuthorization::verificationRequired,
-          this, [&verification_url, &user_code](const QUrl &url,
-                                                 const QString &code) {
-            verification_url = url;
-            user_code = code;
-          });
+  connect(
+      &authorization, &MapHubDeviceAuthorization::verificationRequired, this,
+      [&verification_url, &user_code](const QUrl &url, const QString &code) {
+        verification_url = url;
+        user_code = code;
+      });
   connect(&authorization, &MapHubDeviceAuthorization::completed, this,
-          [&result, &error, &complete](
-              const MapHubDeviceAuthorization::Result &connected,
-              const MapHubApiClient::Error &connection_error) {
+          [&result, &error,
+           &complete](const MapHubDeviceAuthorization::Result &connected,
+                      const MapHubApiClient::Error &connection_error) {
             result = connected;
             error = connection_error;
             complete = true;
@@ -1055,37 +1225,37 @@ void MapHubWorkspaceTest::preservesPublishedTileMatrixLimits() {
       {QStringLiteral("orderedAxes"),
        QJsonArray{QStringLiteral("E"), QStringLiteral("N")}},
       {QStringLiteral("tileMatrices"),
-       QJsonArray{QJsonObject{
-           {QStringLiteral("id"), QStringLiteral("0")},
-           {QStringLiteral("scaleDenominator"), 3265.7208171559198},
-           {QStringLiteral("cellSize"), 0.9144018288036575},
-           {QStringLiteral("pointOfOrigin"),
-            QJsonArray{394500.0, 67400.0}},
-           {QStringLiteral("cornerOfOrigin"), QStringLiteral("topLeft")},
-           {QStringLiteral("tileWidth"), 256},
-           {QStringLiteral("tileHeight"), 256},
-           {QStringLiteral("matrixWidth"), 1},
-           {QStringLiteral("matrixHeight"), 1},
-       }, QJsonObject{
-           {QStringLiteral("id"), QStringLiteral("1")},
-           {QStringLiteral("scaleDenominator"), 1632.8604085779599},
-           {QStringLiteral("cellSize"), 0.45720091440182875},
-           {QStringLiteral("pointOfOrigin"), QJsonArray{394500.0, 67400.0}},
-           {QStringLiteral("cornerOfOrigin"), QStringLiteral("topLeft")},
-           {QStringLiteral("tileWidth"), 256},
-           {QStringLiteral("tileHeight"), 256},
-           {QStringLiteral("matrixWidth"), 2},
-           {QStringLiteral("matrixHeight"), 2},
-       }}},
+       QJsonArray{
+           QJsonObject{
+               {QStringLiteral("id"), QStringLiteral("0")},
+               {QStringLiteral("scaleDenominator"), 3265.7208171559198},
+               {QStringLiteral("cellSize"), 0.9144018288036575},
+               {QStringLiteral("pointOfOrigin"), QJsonArray{394500.0, 67400.0}},
+               {QStringLiteral("cornerOfOrigin"), QStringLiteral("topLeft")},
+               {QStringLiteral("tileWidth"), 256},
+               {QStringLiteral("tileHeight"), 256},
+               {QStringLiteral("matrixWidth"), 1},
+               {QStringLiteral("matrixHeight"), 1},
+           },
+           QJsonObject{
+               {QStringLiteral("id"), QStringLiteral("1")},
+               {QStringLiteral("scaleDenominator"), 1632.8604085779599},
+               {QStringLiteral("cellSize"), 0.45720091440182875},
+               {QStringLiteral("pointOfOrigin"), QJsonArray{394500.0, 67400.0}},
+               {QStringLiteral("cornerOfOrigin"), QStringLiteral("topLeft")},
+               {QStringLiteral("tileWidth"), 256},
+               {QStringLiteral("tileHeight"), 256},
+               {QStringLiteral("matrixWidth"), 2},
+               {QStringLiteral("matrixHeight"), 2},
+           }}},
   };
   QJsonObject coverage{
       {QStringLiteral("type"), QStringLiteral("Polygon")},
       {QStringLiteral("coordinates"),
-       QJsonArray{QJsonArray{QJsonArray{-122.24, 47.56},
-                             QJsonArray{-122.22, 47.56},
-                             QJsonArray{-122.22, 47.58},
-                             QJsonArray{-122.24, 47.58},
-                             QJsonArray{-122.24, 47.56}}}},
+       QJsonArray{
+           QJsonArray{QJsonArray{-122.24, 47.56}, QJsonArray{-122.22, 47.56},
+                      QJsonArray{-122.22, 47.58}, QJsonArray{-122.24, 47.58},
+                      QJsonArray{-122.24, 47.56}}}},
   };
   QJsonObject manifest{
       {QStringLiteral("id"), QStringLiteral("project-id")},
@@ -1133,7 +1303,8 @@ void MapHubWorkspaceTest::preservesPublishedTileMatrixLimits() {
   auto source =
       document.value(QStringLiteral("sources")).toArray().at(0).toObject();
   QCOMPARE(source.value(QStringLiteral("tileMatrixLimits")).toArray(), limits);
-  QCOMPARE(source.value(QStringLiteral("tileMatrixSet")).toObject(), matrix_set);
+  QCOMPARE(source.value(QStringLiteral("tileMatrixSet")).toObject(),
+           matrix_set);
   QCOMPARE(source.value(QStringLiteral("coverage")).toObject(), coverage);
   QCOMPARE(source.value(QStringLiteral("format")).toString(),
            QStringLiteral("image/png"));
@@ -1151,7 +1322,8 @@ void MapHubWorkspaceTest::preservesPublishedTileMatrixLimits() {
   QCOMPARE(result.supportedSourceCount(), qsizetype(1));
   QCOMPARE(result.catalog.sources.at(0).resolved_source->tile_matrix_set.crs,
            QStringLiteral("EPSG:6596"));
-  QCOMPARE(result.catalog.sources.at(0).resolved_source->request.empty_http_status_codes,
+  QCOMPARE(result.catalog.sources.at(0)
+               .resolved_source->request.empty_http_status_codes,
            QVector<int>({204, 404}));
   QCOMPARE(result.catalog.sources.at(0).tile_limit_definitions.size(),
            qsizetype(1));
@@ -1181,16 +1353,20 @@ void MapHubWorkspaceTest::preservesNativeAndWebMercatorMatrixSemantics() {
            {QStringLiteral("format"), QStringLiteral("image/png")},
            {QStringLiteral("min_zoom"), 0},
            {QStringLiteral("max_zoom"), 19},
-           {QStringLiteral("tile_matrix_set"), QStringLiteral("WebMercatorQuad")},
+           {QStringLiteral("tile_matrix_set"),
+            QStringLiteral("WebMercatorQuad")},
        }}},
   };
   QString error;
   auto first = MapHubImageryCatalog::catalogDocument(
       manifest, QStringLiteral("https://maps.example.test/manifest"), &error);
   QVERIFY2(error.isEmpty(), qPrintable(error));
-  auto source = first.value(QStringLiteral("sources")).toArray().at(0).toObject();
-  QCOMPARE(source.value(QStringLiteral("tileMatrixSetURI")).toString(),
-           QStringLiteral("http://www.opengis.net/def/tilematrixset/OGC/1.0/WebMercatorQuad"));
+  auto source =
+      first.value(QStringLiteral("sources")).toArray().at(0).toObject();
+  QCOMPARE(
+      source.value(QStringLiteral("tileMatrixSetURI")).toString(),
+      QStringLiteral(
+          "http://www.opengis.net/def/tilematrixset/OGC/1.0/WebMercatorQuad"));
   QVERIFY(!source.contains(QStringLiteral("tileMatrixSet")));
   auto read = imagery::OicCatalogReader::read(
       QJsonDocument(first).toJson(QJsonDocument::Compact));
@@ -1199,15 +1375,18 @@ void MapHubWorkspaceTest::preservesNativeAndWebMercatorMatrixSemantics() {
            QStringLiteral("EPSG:3857"));
 
   auto changed = manifest;
-  changed.insert(QStringLiteral("imagery_generation"), QStringLiteral("generation-2"));
+  changed.insert(QStringLiteral("imagery_generation"),
+                 QStringLiteral("generation-2"));
   auto layers = changed.value(QStringLiteral("tile_layers")).toArray();
   auto layer = layers.at(0).toObject();
-  layer.insert(QStringLiteral("generation_token"), QString(64, QLatin1Char('b')));
+  layer.insert(QStringLiteral("generation_token"),
+               QString(64, QLatin1Char('b')));
   layers.replace(0, layer);
   changed.insert(QStringLiteral("tile_layers"), layers);
   auto second = MapHubImageryCatalog::catalogDocument(
       changed, QStringLiteral("https://maps.example.test/manifest"), &error);
-  QCOMPARE(first.value(QStringLiteral("id")), second.value(QStringLiteral("id")));
+  QCOMPARE(first.value(QStringLiteral("id")),
+           second.value(QStringLiteral("id")));
   QVERIFY(first.value(QStringLiteral("revision")) !=
           second.value(QStringLiteral("revision")));
   QCOMPARE(second.value(QStringLiteral("sources")).toArray().size(), 1);
@@ -1236,7 +1415,8 @@ void MapHubWorkspaceTest::rejectsManifestLayersWithoutMatrixMetadata() {
   QVERIFY(error.contains(QStringLiteral("will not guess a CRS")));
 }
 
-void MapHubWorkspaceTest::replacesAuthorizedProjectCatalogsWithoutStaleEntries() {
+void MapHubWorkspaceTest::
+    replacesAuthorizedProjectCatalogsWithoutStaleEntries() {
   QTemporaryDir directory;
   QVERIFY(directory.isValid());
   imagery::TileNetworkManager::Config network_config;
@@ -1245,8 +1425,8 @@ void MapHubWorkspaceTest::replacesAuthorizedProjectCatalogsWithoutStaleEntries()
   imagery::TileNetworkManager network(network_config);
   imagery::ImageryCatalogRepository repository(
       directory.filePath(QStringLiteral("catalogs")), &network);
-  QSignalSpy operations(
-      &repository, &imagery::ImageryCatalogRepository::operationFinished);
+  QSignalSpy operations(&repository,
+                        &imagery::ImageryCatalogRepository::operationFinished);
 
   auto layer = [](QString project_id, QString layer_id, QString generation) {
     return QJsonObject{
@@ -1258,23 +1438,27 @@ void MapHubWorkspaceTest::replacesAuthorizedProjectCatalogsWithoutStaleEntries()
         {QStringLiteral("title"), QStringLiteral("Aerial")},
         {QStringLiteral("type"), QStringLiteral("raster")},
         {QStringLiteral("url_template"),
-         QString(QStringLiteral("https://maps.example.test/tiles/") + project_id
-                 + QStringLiteral("/{z}/{x}/{y}.png"))},
+         QString(QStringLiteral("https://maps.example.test/tiles/") +
+                 project_id + QStringLiteral("/{z}/{x}/{y}.png"))},
         {QStringLiteral("format"), QStringLiteral("image/png")},
         {QStringLiteral("scheme"), QStringLiteral("xyz")},
         {QStringLiteral("tile_matrix_set_uri"),
-         QStringLiteral("http://www.opengis.net/def/tilematrixset/OGC/1.0/WebMercatorQuad")},
+         QStringLiteral("http://www.opengis.net/def/tilematrixset/OGC/1.0/"
+                        "WebMercatorQuad")},
         {QStringLiteral("min_zoom"), 0},
         {QStringLiteral("max_zoom"), 19},
-        {QStringLiteral("coverage_bbox"), QJsonArray{-122.3, 47.5, -122.2, 47.6}},
+        {QStringLiteral("coverage_bbox"),
+         QJsonArray{-122.3, 47.5, -122.2, 47.6}},
         {QStringLiteral("coverage_crs"), QStringLiteral("EPSG:4326")},
         {QStringLiteral("empty_http_status_codes"), QJsonArray{204, 404}},
     };
   };
   auto shared_layer = layer(QString(), QStringLiteral("shared-layer"),
                             QString(64, QLatin1Char('d')));
-  shared_layer.insert(QStringLiteral("project_id"), QJsonValue(QJsonValue::Null));
-  shared_layer.insert(QStringLiteral("project_title"), QJsonValue(QJsonValue::Null));
+  shared_layer.insert(QStringLiteral("project_id"),
+                      QJsonValue(QJsonValue::Null));
+  shared_layer.insert(QStringLiteral("project_title"),
+                      QJsonValue(QJsonValue::Null));
   QJsonObject first{
       {QStringLiteral("schema_version"), 1},
       {QStringLiteral("catalog_generation"), QString(64, QLatin1Char('a'))},
@@ -1293,24 +1477,32 @@ void MapHubWorkspaceTest::replacesAuthorizedProjectCatalogsWithoutStaleEntries()
   QTRY_COMPARE_WITH_TIMEOUT(operations.size(), 3, 3000);
   QTRY_COMPARE_WITH_TIMEOUT(repository.snapshot()->catalogs.size(), 3, 3000);
 
-  auto replacement_layer = layer(QStringLiteral("project-a"),
-                                 QStringLiteral("layer-a"),
-                                 QString(64, QLatin1Char('c')));
-  replacement_layer.insert(QStringLiteral("title"), QStringLiteral("New aerial"));
+  auto replacement_layer =
+      layer(QStringLiteral("project-a"), QStringLiteral("layer-a"),
+            QString(64, QLatin1Char('c')));
+  replacement_layer.insert(QStringLiteral("title"),
+                           QStringLiteral("New aerial"));
   QJsonObject second{
       {QStringLiteral("schema_version"), 1},
       {QStringLiteral("catalog_generation"), QString(64, QLatin1Char('b'))},
       {QStringLiteral("layers"), QJsonArray{replacement_layer}},
   };
   batch = MapHubImageryCatalog::installAuthorizedCatalog(
-      second, QStringLiteral("https://maps.example.test/api/v1/imagery/catalog"),
+      second,
+      QStringLiteral("https://maps.example.test/api/v1/imagery/catalog"),
       &repository);
   QVERIFY2(batch.error.isEmpty(), qPrintable(batch.error));
   QCOMPARE(batch.operation_ids.size(), 3);
   QTRY_COMPARE_WITH_TIMEOUT(operations.size(), 6, 3000);
   QTRY_COMPARE_WITH_TIMEOUT(repository.snapshot()->catalogs.size(), 1, 3000);
-  QCOMPARE(repository.snapshot()->catalogs.first().read_result.catalog.sources.size(), 1);
-  QCOMPARE(repository.snapshot()->catalogs.first().read_result.catalog.sources.first().metadata.name,
+  QCOMPARE(repository.snapshot()
+               ->catalogs.first()
+               .read_result.catalog.sources.size(),
+           1);
+  QCOMPARE(repository.snapshot()
+               ->catalogs.first()
+               .read_result.catalog.sources.first()
+               .metadata.name,
            QStringLiteral("New aerial"));
 }
 

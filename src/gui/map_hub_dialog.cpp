@@ -63,6 +63,7 @@
 #include "collaboration/map_hub_device_authorization.h"
 #include "collaboration/map_hub_imagery_catalog.h"
 #include "collaboration/map_hub_read_only_document.h"
+#include "collaboration/map_hub_work_item_projection.h"
 #include "collaboration/map_hub_workspace.h"
 #include "core/document_path.h"
 #include "fileformats/file_format_registry.h"
@@ -82,16 +83,16 @@ constexpr int package_type_role = Qt::UserRole + 3;
 constexpr int item_kind_role = Qt::UserRole + 4;
 constexpr int web_url_role = Qt::UserRole + 5;
 constexpr int title_role = Qt::UserRole + 6;
+constexpr int actionable_role = Qt::UserRole + 7;
+constexpr int workspace_id_role = Qt::UserRole + 8;
+constexpr int actionability_problem_role = Qt::UserRole + 9;
 
 bool assignmentCanStart(const QTreeWidgetItem *item) {
-  if (!item)
-    return false;
-  const auto status = item->data(0, status_role).toString();
-  const auto package_type = item->data(0, package_type_role).toString();
-  return MapHubApiClient::isMapperWorkspacePackageType(package_type) &&
-         (status == QLatin1String("offered") ||
-          status == QLatin1String("accepted") ||
-          status == QLatin1String("active"));
+  return item &&
+         item->data(0, item_kind_role).toString() ==
+             QLatin1String("work_item") &&
+         item->data(0, actionable_role).toBool() &&
+         !QUuid(item->data(0, id_role).toString()).isNull();
 }
 
 QString safeFileName(QString title) {
@@ -198,11 +199,10 @@ void configureMobileLibraryTree(QTreeWidget *tree) {
   properties.setScrollMetric(QScrollerProperties::FrameRate,
                              QScrollerProperties::Fps60);
   properties.setScrollMetric(QScrollerProperties::MaximumVelocity, 0.22);
-  properties.setScrollMetric(
-      QScrollerProperties::AcceleratingFlickMaximumTime, 0.0);
-  properties.setScrollMetric(
-      QScrollerProperties::HorizontalOvershootPolicy,
-      QScrollerProperties::OvershootAlwaysOff);
+  properties.setScrollMetric(QScrollerProperties::AcceleratingFlickMaximumTime,
+                             0.0);
+  properties.setScrollMetric(QScrollerProperties::HorizontalOvershootPolicy,
+                             QScrollerProperties::OvershootAlwaysOff);
   scroller->setScrollerProperties(properties);
 }
 
@@ -1247,8 +1247,7 @@ MapHubDialog::MapHubDialog(MainWindow *window)
       passkey_page);
   passkey_help->setWordWrap(true);
   passkey_layout->addWidget(passkey_help);
-  passkey_start =
-      new QPushButton(tr("Sign in with passkey…"), passkey_page);
+  passkey_start = new QPushButton(tr("Sign in with passkey…"), passkey_page);
   passkey_layout->addWidget(passkey_start);
   auto *code_heading = new QLabel(tr("Confirmation code:"), passkey_page);
   passkey_layout->addWidget(code_heading);
@@ -1306,7 +1305,6 @@ MapHubDialog::MapHubDialog(MainWindow *window)
                                  tr("Paste Mapper connection token"));
 #endif
 
-
   auto *first_use_close = new QPushButton(tr("Not now"), first_use_page);
 #if defined(MAPPER_MOBILE)
   first_use_close->setMinimumHeight(44);
@@ -1351,8 +1349,8 @@ MapHubDialog::MapHubDialog(MainWindow *window)
   connection_label->setWordWrap(true);
   activity_label->setWordWrap(true);
   assignment_list->setHeaderLabels(
-      {tr("Assignment"), tr("Map"), tr("Status"), tr("Due")});
-  assignment_list->setRootIsDecorated(false);
+      {tr("Map / task"), tr("Editing"), tr("Status"), tr("Due")});
+  assignment_list->setRootIsDecorated(true);
   project_list->setHeaderLabels({tr("Venue / map"), tr("City / type"),
                                  tr("Status"), tr("Revision"), tr("Events")});
   project_list->setRootIsDecorated(true);
@@ -1470,11 +1468,10 @@ MapHubDialog::MapHubDialog(MainWindow *window)
   connect(project_list, &QTreeWidget::itemSelectionChanged, this,
           &MapHubDialog::updateActions);
 #if defined(MAPPER_MOBILE)
-  connect(project_list, &QAbstractItemView::pressed, this,
-          [this] {
-            project_list->setCurrentItem(nullptr);
-            project_list->clearSelection();
-          });
+  connect(project_list, &QAbstractItemView::pressed, this, [this] {
+    project_list->setCurrentItem(nullptr);
+    project_list->clearSelection();
+  });
 #endif
   connect(event_list, &QTreeWidget::itemSelectionChanged, this,
           &MapHubDialog::updateActions);
@@ -1574,8 +1571,7 @@ void MapHubDialog::beginPasskeyConnection() {
 #else
   const auto client_name = tr("Mapper desktop");
 #endif
-  passkey_connection =
-      new MapHubDeviceAuthorization(server, client_name, this);
+  passkey_connection = new MapHubDeviceAuthorization(server, client_name, this);
   connect(passkey_connection, &MapHubDeviceAuthorization::verificationRequired,
           this, [this](const QUrl &url, const QString &user_code) {
             passkey_verification_url = url;
@@ -1598,34 +1594,33 @@ void MapHubDialog::beginPasskeyConnection() {
                   tr("Mapper could not open the browser. Use the button below "
                      "to try again."));
           });
-  connect(
-      passkey_connection, &MapHubDeviceAuthorization::completed, this,
-      [this](const MapHubDeviceAuthorization::Result &result,
-             const MapHubApiClient::Error &error) {
-        auto *connection = passkey_connection.data();
-        passkey_connection = nullptr;
-        if (connection)
-          connection->deleteLater();
-        if (error) {
-          setFirstUseBusy(
-              false,
-              error.http_status == 404
-                  ? tr("Passkey sign-in is not available on this Map Hub "
-                       "server yet. Use a connection token for now.")
-                  : error.message);
-          if (passkey_status)
-            passkey_status->setText(error.message);
-          return;
-        }
-        QString storage_error;
-        if (!saveFirstUseConnection(passkey_server, passkey_workspace_root,
-                                    result.token, storage_error)) {
-          passkey_status->setText(storage_error);
-          return;
-        }
-        clearPasskeyConnection();
-        refresh();
-      });
+  connect(passkey_connection, &MapHubDeviceAuthorization::completed, this,
+          [this](const MapHubDeviceAuthorization::Result &result,
+                 const MapHubApiClient::Error &error) {
+            auto *connection = passkey_connection.data();
+            passkey_connection = nullptr;
+            if (connection)
+              connection->deleteLater();
+            if (error) {
+              setFirstUseBusy(
+                  false,
+                  error.http_status == 404
+                      ? tr("Passkey sign-in is not available on this Map Hub "
+                           "server yet. Use a connection token for now.")
+                      : error.message);
+              if (passkey_status)
+                passkey_status->setText(error.message);
+              return;
+            }
+            QString storage_error;
+            if (!saveFirstUseConnection(passkey_server, passkey_workspace_root,
+                                        result.token, storage_error)) {
+              passkey_status->setText(storage_error);
+              return;
+            }
+            clearPasskeyConnection();
+            refresh();
+          });
   passkey_connection->start();
 }
 
@@ -1784,9 +1779,23 @@ void MapHubDialog::setBusy(bool value, const QString &message) {
 void MapHubDialog::showError(const QString &title,
                              const MapHubApiClient::Error &error) {
   auto detail = error.message;
+  if (error.code == QLatin1String("editing_context_precondition_required") ||
+      error.code == QLatin1String("editing_context_precondition_failed"))
+    detail = tr("Map Hub changed while Mapper was checking this work. Refresh "
+                "My work and try again. Nothing was opened or changed.");
+  else if (error.code == QLatin1String("unauthorized"))
+    detail = tr("This device's Map Hub connection has expired. Reconnect from "
+                "Map Hub, then try again. Your local maps are unchanged.");
+  else if (error.code == QLatin1String("network_error"))
+    detail = tr("Mapper could not reach Map Hub. Your work remains saved on "
+                "this device; try again when the connection is available.");
+  if (detail.isEmpty())
+    detail = tr("Map Hub could not complete that request. Nothing local was "
+                "discarded or overwritten.");
+  QMessageBox box(QMessageBox::Warning, title, detail, QMessageBox::Ok, this);
   if (!error.code.isEmpty())
-    detail += tr("\n\nError: %1").arg(error.code);
-  QMessageBox::warning(this, title, detail);
+    box.setDetailedText(tr("Map Hub diagnostic code: %1").arg(error.code));
+  box.exec();
 }
 
 void MapHubDialog::refresh() {
@@ -1849,8 +1858,7 @@ void MapHubDialog::populate(const QJsonObject &response) {
     for (const auto value :
          response.value(QStringLiteral("people")).toArray()) {
       const auto person = value.toObject();
-      if (person.value(QStringLiteral("id")).toString() ==
-          current_person_id) {
+      if (person.value(QStringLiteral("id")).toString() == current_person_id) {
         current_person_name =
             person.value(QStringLiteral("display_name")).toString();
         break;
@@ -1863,7 +1871,7 @@ void MapHubDialog::populate(const QJsonObject &response) {
         QStringLiteral("FieldSketches/MapHub/%1/")
             .arg(QString::fromLatin1(
                 QCryptographicHash::hash(server.toUtf8(),
-                                        QCryptographicHash::Sha256)
+                                         QCryptographicHash::Sha256)
                     .toHex()));
     QSettings settings;
     settings.setValue(account_key + QStringLiteral("person_id"),
@@ -1876,40 +1884,123 @@ void MapHubDialog::populate(const QJsonObject &response) {
       tr("Connected to %1")
           .arg(organization.value(QStringLiteral("name")).toString()));
   assignment_list->clear();
-  for (const auto value :
-       response.value(QStringLiteral("assignments")).toArray()) {
-    auto object = value.toObject();
-    auto *item = new QTreeWidgetItem({
-        object.value(QStringLiteral("title")).toString(),
-        projectTitle(object.value(QStringLiteral("project_id")).toString()),
-        object.value(QStringLiteral("status")).toString(),
-        object.value(QStringLiteral("due_on")).toString(),
-    });
-    item->setData(0, id_role, object.value(QStringLiteral("id")).toString());
-    item->setData(0, project_id_role,
-                  object.value(QStringLiteral("project_id")).toString());
-    item->setData(0, status_role,
-                  object.value(QStringLiteral("status")).toString());
-    item->setData(0, package_type_role,
-                  object.value(QStringLiteral("type")).toString());
-    item->setData(0, title_role,
-                  object.value(QStringLiteral("title")).toString());
-#if defined(MAPPER_MOBILE)
-    auto details =
-        projectTitle(object.value(QStringLiteral("project_id")).toString());
-    const auto status = object.value(QStringLiteral("status")).toString();
-    const auto due = object.value(QStringLiteral("due_on")).toString();
-    if (!status.isEmpty())
-      details += QStringLiteral("  •  ") + status;
-    if (!due.isEmpty())
-      details += tr("  •  due %1").arg(due);
-    item->setText(0, object.value(QStringLiteral("title")).toString() +
-                         QLatin1Char('\n') + details);
-#endif
-    assignment_list->addTopLevelItem(item);
+  const auto projection = MapHubWorkItemProjection::fromLibrary(response);
+  if (!projection.contract_available) {
+    auto *unavailable = new QTreeWidgetItem(
+        assignment_list,
+        {tr("My work is unavailable"), {}, tr("Map Hub update required"), {}});
+    unavailable->setFlags((unavailable->flags() | Qt::ItemIsEnabled) &
+                          ~Qt::ItemIsSelectable);
+    unavailable->setToolTip(
+        0, tr("Map Hub did not return its consolidated work-item list. "
+              "Nothing can be opened from the legacy assignment list."));
   }
-  assignment_list->resizeColumnToContents(0);
-  assignment_list->resizeColumnToContents(1);
+
+  QHash<QString, QVector<MapHubWorkItemRow>> open_work;
+  QHash<QString, QVector<MapHubWorkItemRow>> waiting_work;
+  QHash<QString, QVector<MapHubWorkItemRow>> history_work;
+  for (const auto &row : projection.rows) {
+    if (row.bucket == MapHubWorkItemRow::Bucket::Active ||
+        row.bucket == MapHubWorkItemRow::Bucket::Reconciliation)
+      open_work[row.project_id].append(row);
+    else if (row.bucket == MapHubWorkItemRow::Bucket::WaitingReview)
+      waiting_work[row.project_id].append(row);
+    else
+      history_work[row.project_id].append(row);
+  }
+
+  const auto display_enum = [](QString value) {
+    value.replace(QLatin1Char('_'), QLatin1Char(' '));
+    if (!value.isEmpty())
+      value[0] = value.at(0).toUpper();
+    return value;
+  };
+  const auto add_bucket = [this, &display_enum](
+                              const QHash<QString, QVector<MapHubWorkItemRow>>
+                                  &groups,
+                              const QString &title, const QString &detail,
+                              bool expanded) {
+    if (groups.isEmpty())
+      return;
+    int count = 0;
+    for (const auto &rows : groups)
+      count += int(rows.size());
+    auto *bucket = new QTreeWidgetItem(
+        assignment_list, {tr("%1 (%2)").arg(title).arg(count), {}, detail, {}});
+    bucket->setData(0, item_kind_role, QStringLiteral("assignment_bucket"));
+    bucket->setFlags((bucket->flags() | Qt::ItemIsEnabled) &
+                     ~Qt::ItemIsSelectable);
+    auto bucket_font = bucket->font(0);
+    bucket_font.setBold(true);
+    bucket->setFont(0, bucket_font);
+
+    auto project_ids = groups.keys();
+    std::sort(project_ids.begin(), project_ids.end(),
+              [this](const auto &a, const auto &b) {
+                return projectTitle(a).localeAwareCompare(projectTitle(b)) < 0;
+              });
+    for (const auto &project_id : project_ids) {
+      auto *project_item =
+          new QTreeWidgetItem(bucket, {projectTitle(project_id), {}, {}, {}});
+      project_item->setData(0, item_kind_role,
+                            QStringLiteral("assignment_project"));
+      project_item->setData(0, project_id_role, project_id);
+      project_item->setFlags((project_item->flags() | Qt::ItemIsEnabled) &
+                             ~Qt::ItemIsSelectable);
+      auto project_font = project_item->font(0);
+      project_font.setBold(true);
+      project_item->setFont(0, project_font);
+
+      for (const auto &row : groups.value(project_id)) {
+        auto task_title = row.task_title;
+        if (task_title.isEmpty())
+          task_title = row.bucket == MapHubWorkItemRow::Bucket::History
+                           ? tr("Previous map work")
+                       : row.bucket == MapHubWorkItemRow::Bucket::WaitingReview
+                           ? tr("Map work awaiting review")
+                           : tr("Map work needs attention");
+        const auto editing =
+            row.actionable ? tr("Ready")
+            : row.bucket == MapHubWorkItemRow::Bucket::WaitingReview
+                ? tr("Waiting for review")
+            : row.bucket == MapHubWorkItemRow::Bucket::History
+                ? tr("History")
+                : tr("Needs attention");
+        auto *item = new QTreeWidgetItem(
+            project_item, {task_title, editing,
+                           display_enum(row.assignment_status), row.due_on});
+        item->setData(0, id_role, row.assignment_id);
+        item->setData(0, project_id_role, row.project_id);
+        item->setData(0, status_role, row.assignment_status);
+        item->setData(0, package_type_role, row.package_type);
+        item->setData(0, title_role, task_title);
+        item->setData(0, actionable_role, row.actionable);
+        item->setData(0, workspace_id_role, row.workspace_id);
+        item->setData(0, actionability_problem_role, row.problem);
+        item->setData(0, item_kind_role, QStringLiteral("work_item"));
+        if (!row.problem.isEmpty())
+          item->setToolTip(0, row.problem);
+#if defined(MAPPER_MOBILE)
+        QStringList details{editing};
+        if (!row.assignment_status.isEmpty())
+          details.append(display_enum(row.assignment_status));
+        if (!row.due_on.isEmpty())
+          details.append(tr("Due %1").arg(row.due_on));
+        item->setText(0, task_title + QLatin1Char('\n') +
+                             details.join(QStringLiteral("  •  ")));
+#endif
+      }
+      project_item->setExpanded(true);
+    }
+    bucket->setExpanded(expanded);
+  };
+
+  add_bucket(open_work, tr("Open work"), tr("Continue or resolve"), true);
+  add_bucket(waiting_work, tr("Waiting for review"), tr("Review checkpoints"),
+             true);
+  add_bucket(history_work, tr("History"), tr("Completed and closed"), false);
+  for (int column = 0; column < assignment_list->columnCount(); ++column)
+    assignment_list->resizeColumnToContents(column);
   project_list->clear();
 #if defined(MAPPER_MOBILE)
   QHash<QString, QVector<QJsonObject>> projects_by_venue;
@@ -1942,9 +2033,8 @@ void MapHubDialog::populate(const QJsonObject &response) {
     details.append(city);
     details.append(tr("%n map(s)", nullptr, int(projects.size())));
     details.removeAll(QString{});
-    item->setText(
-        0, name + QLatin1Char('\n') +
-               details.join(QStringLiteral("  •  ")));
+    item->setText(0, name + QLatin1Char('\n') +
+                         details.join(QStringLiteral("  •  ")));
     item->setFlags(item->flags() & ~Qt::ItemIsSelectable);
     project_list->addTopLevelItem(item);
 
@@ -1960,8 +2050,7 @@ void MapHubDialog::populate(const QJsonObject &response) {
     more->setPopupMode(QToolButton::InstantPopup);
     auto *menu = new QMenu(more);
     for (const auto &project : projects) {
-      const auto project_id =
-          project.value(QStringLiteral("id")).toString();
+      const auto project_id = project.value(QStringLiteral("id")).toString();
       const auto project_title =
           project.value(QStringLiteral("title")).toString();
       const auto revision =
@@ -2006,12 +2095,10 @@ void MapHubDialog::populate(const QJsonObject &response) {
     project_list->setItemWidget(item, 4, more);
   };
 
-  for (const auto value :
-       response.value(QStringLiteral("venues")).toArray()) {
+  for (const auto value : response.value(QStringLiteral("venues")).toArray()) {
     const auto venue = value.toObject();
     const auto venue_id = venue.value(QStringLiteral("id")).toString();
-    add_venue(venue_id,
-              venue.value(QStringLiteral("name")).toString(),
+    add_venue(venue_id, venue.value(QStringLiteral("name")).toString(),
               venue.value(QStringLiteral("city")).toString(),
               projects_by_venue.value(venue_id));
   }
@@ -2230,16 +2317,14 @@ void MapHubDialog::updateActions() {
   start_button->setVisible(showing_assignments);
   start_button->setEnabled(showing_assignments && !busy &&
                            assignmentCanStart(assignment));
-  if (assignment && !MapHubApiClient::isMapperWorkspacePackageType(
-                        assignment->data(0, package_type_role).toString())) {
-    start_button->setToolTip(tr("Manage this assignment in Map Hub; it is not "
-                                "a Mapper map workspace."));
-  } else {
-    start_button->setToolTip(
-        assignment && !assignmentCanStart(assignment)
-            ? tr("This assignment is no longer open for editing.")
-            : tr("Open or resume the assignment's managed workspace."));
-  }
+  const auto actionability_problem =
+      assignment ? assignment->data(0, actionability_problem_role).toString()
+                 : QString{};
+  start_button->setToolTip(
+      !actionability_problem.isEmpty() ? actionability_problem
+      : assignment && !assignmentCanStart(assignment)
+          ? tr("Choose current open work, not its project or history.")
+          : tr("Open the latest saved map for this workstream."));
 #if defined(MAPPER_MOBILE)
   open_project_button->setVisible(false);
   request_access_button->setVisible(false);
@@ -2253,13 +2338,14 @@ void MapHubDialog::updateActions() {
   bool project_is_editable = false;
   if (project_selected) {
     const auto project_id = project->data(0, id_role).toString();
-    for (int i = 0; i < assignment_list->topLevelItemCount(); ++i) {
-      auto *candidate = assignment_list->topLevelItem(i);
-      if (candidate->data(0, project_id_role).toString() == project_id &&
-          assignmentCanStart(candidate)) {
+    QTreeWidgetItemIterator candidate(assignment_list);
+    while (*candidate) {
+      if ((*candidate)->data(0, project_id_role).toString() == project_id &&
+          assignmentCanStart(*candidate)) {
         project_is_editable = true;
         break;
       }
+      ++candidate;
     }
   }
   open_project_button->setText(tr("Open selected map read-only"));
@@ -2270,9 +2356,8 @@ void MapHubDialog::updateActions() {
 #endif
   request_access_button->setEnabled(showing_projects && !busy &&
                                     project_selected);
-  request_access_button->setText(project_is_editable
-                                      ? tr("Start editing")
-                                      : tr("Request editing access"));
+  request_access_button->setText(
+      project_is_editable ? tr("Start editing") : tr("Request editing access"));
   if (project_selected && window && !window->currentPath().isEmpty()) {
     QString document_error;
     const auto document = MapHubReadOnlyDocument::loadForMap(
@@ -2482,9 +2567,8 @@ void MapHubDialog::openProject(const QString &project_id,
           }
 
           if (cached.exists())
-            QFile::setPermissions(
-                destination,
-                QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+            QFile::setPermissions(destination, QFileDevice::ReadOwner |
+                                                   QFileDevice::WriteOwner);
           setBusy(true, tr("Downloading and verifying read-only revision r%1…")
                             .arg(document.revision_number));
           client->downloadArtifact(
@@ -2579,6 +2663,19 @@ void MapHubDialog::startSelectedAssignment() {
   if (!item || busy)
     return;
   if (!assignmentCanStart(item)) {
+    const auto problem =
+        item->data(0, actionability_problem_role).toString().trimmed();
+    if (!problem.isEmpty()) {
+      QMessageBox::information(this, tr("This work cannot be opened"), problem);
+      return;
+    }
+    if (item->data(0, item_kind_role).toString() !=
+        QLatin1String("work_item")) {
+      QMessageBox::information(
+          this, tr("Choose current work"),
+          tr("Choose an open task inside a project to continue editing."));
+      return;
+    }
     const auto package_type = item->data(0, package_type_role).toString();
     if (!MapHubApiClient::isMapperWorkspacePackageType(package_type)) {
       QMessageBox::information(
@@ -2599,56 +2696,138 @@ void MapHubDialog::startSelectedAssignment() {
   auto assignment_title = item->data(0, title_role).toString();
   if (assignment_title.isEmpty())
     assignment_title = item->text(0);
-  startAssignment(assignment_id, project_id, title, assignment_title);
+  startAssignment(assignment_id, project_id, title, assignment_title,
+                  item->data(0, workspace_id_role).toString());
 }
 
 void MapHubDialog::startAssignment(const QString &assignment_id,
                                    const QString &project_id,
                                    const QString &project_title,
-                                   const QString &assignment_title) {
-  auto server =
+                                   const QString &assignment_title,
+                                   const QString &workspace_id) {
+  const auto server =
       Settings::getInstance().getSetting(Settings::MapHub_ServerUrl).toString();
-  auto manifest_url = projectManifestUrl(server, project_id);
-  setBusy(true, tr("Opening the latest saved map for %1…").arg(assignment_title));
-  client->startAssignment(
-      assignment_id,
-      [this, assignment_id, project_id, project_title, manifest_url](
-          const QJsonObject &response, const MapHubApiClient::Error &error) {
-        if (error) {
+  const auto manifest_url = projectManifestUrl(server, project_id);
+  QString client_instance_id;
+  if (!QUuid(workspace_id).isNull()) {
+    const auto existing =
+        ManagedMapWorkspace::findForWorkspace(server, workspace_id);
+    if (!QUuid(existing.client_instance_id).isNull())
+      client_instance_id = existing.client_instance_id;
+  }
+  if (client_instance_id.isEmpty())
+    client_instance_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+
+  setBusy(
+      true,
+      tr("Checking the current Map Hub work for %1…").arg(assignment_title));
+  client->assignmentEditingContext(
+      assignment_id, client_instance_id,
+      [this, assignment_id, project_id, project_title, assignment_title,
+       workspace_id, manifest_url,
+       client_instance_id](const QJsonObject &context, const QString &etag,
+                           const MapHubApiClient::Error &context_error) {
+        if (context_error) {
           setBusy(false);
-          showError(tr("Could not start assignment"), error);
+          showError(tr("Could not check current map work"), context_error);
           return;
         }
-        setBusy(true, tr("Synchronizing project-authorized tiled sources…"));
-        client->projectManifest(
-            project_id,
-            [this, response, assignment_id, project_title,
-             manifest_url](const QJsonObject &manifest,
-                           const MapHubApiClient::Error &manifest_error) {
-              ManagedMapWorkspace defaults;
-              if (!manifest_error) {
-                auto target =
-                    manifest.value(QStringLiteral("target")).toObject();
-                defaults.target_crs =
-                    target.value(QStringLiteral("crs")).toString();
-                defaults.target_scale =
-                    target.value(QStringLiteral("scale")).toInt();
-                defaults.symbol_standard =
-                    target.value(QStringLiteral("symbol_standard")).toString();
-                auto installed =
-                    MapHubImageryCatalog::install(manifest, manifest_url);
-                if (!installed)
-                  QMessageBox::warning(this,
-                                       tr("Map opened without project tiles"),
-                                       installed.error);
-              } else {
-                QMessageBox::warning(
-                    this, tr("Map opened without project metadata"),
-                    tr("Mapper could not synchronize this project's target "
-                       "settings or tiled sources: %1")
-                        .arg(manifest_error.message));
+        static const QRegularExpression strong_etag(
+            QStringLiteral("^\"[0-9a-f]{64}\"$"));
+        const auto context_workspace_id =
+            context.value(QStringLiteral("workspace_id")).toString();
+        const auto assignment_status =
+            context.value(QStringLiteral("assignment_status")).toString();
+        const auto identity =
+            context.value(QStringLiteral("journal_identity")).toObject();
+        const auto context_workstream =
+            context.value(QStringLiteral("workstream_id"));
+        const auto context_workspace =
+            context.value(QStringLiteral("workspace_id"));
+        const auto organization =
+            library_response.value(QStringLiteral("organization")).toObject();
+        const auto valid_context =
+            context.value(QStringLiteral("schema_version")).toInt() == 1 &&
+            context.value(QStringLiteral("assignment_id")).toString() ==
+                assignment_id &&
+            context.value(QStringLiteral("project_id")).toString() ==
+                project_id &&
+            ((context_workspace.isNull() && workspace_id.isEmpty()) ||
+             (!QUuid(context_workspace_id).isNull() &&
+              (workspace_id.isEmpty() ||
+               context_workspace_id == workspace_id))) &&
+            !QUuid(context.value(QStringLiteral("work_package_id")).toString())
+                 .isNull() &&
+            (context_workstream.isNull() ||
+             !QUuid(context_workstream.toString()).isNull()) &&
+            (assignment_status == QLatin1String("offered") ||
+             assignment_status == QLatin1String("accepted") ||
+             assignment_status == QLatin1String("active")) &&
+            identity.value(QStringLiteral("organization_id")).toString() ==
+                organization.value(QStringLiteral("id")).toString() &&
+            identity.value(QStringLiteral("person_id")).toString() ==
+                library_response.value(QStringLiteral("current_person_id"))
+                    .toString() &&
+            strong_etag.match(etag).hasMatch();
+        if (!valid_context) {
+          setBusy(false);
+          QMessageBox::warning(
+              this, tr("Could not verify current map work"),
+              tr("Map Hub returned incomplete or mismatched work details. "
+                 "Nothing was opened or changed; refresh My work and try "
+                 "again."));
+          return;
+        }
+
+        setBusy(
+            true,
+            tr("Opening the latest saved map for %1…").arg(assignment_title));
+        client->startAssignment(
+            assignment_id, client_instance_id, etag,
+            [this, assignment_id, project_id, project_title, manifest_url,
+             client_instance_id](const QJsonObject &response,
+                                 const MapHubApiClient::Error &error) {
+              if (error) {
+                setBusy(false);
+                showError(tr("Could not start assignment"), error);
+                return;
               }
-              beginWorkspace(response, assignment_id, project_title, defaults);
+              setBusy(true,
+                      tr("Synchronizing project-authorized tiled sources…"));
+              client->projectManifest(
+                  project_id,
+                  [this, response, assignment_id, project_title, manifest_url,
+                   client_instance_id](
+                      const QJsonObject &manifest,
+                      const MapHubApiClient::Error &manifest_error) {
+                    ManagedMapWorkspace defaults;
+                    if (!manifest_error) {
+                      auto target =
+                          manifest.value(QStringLiteral("target")).toObject();
+                      defaults.target_crs =
+                          target.value(QStringLiteral("crs")).toString();
+                      defaults.target_scale =
+                          target.value(QStringLiteral("scale")).toInt();
+                      defaults.symbol_standard =
+                          target.value(QStringLiteral("symbol_standard"))
+                              .toString();
+                      auto installed =
+                          MapHubImageryCatalog::install(manifest, manifest_url);
+                      if (!installed)
+                        QMessageBox::warning(
+                            this, tr("Map opened without project tiles"),
+                            installed.error);
+                    } else {
+                      QMessageBox::warning(
+                          this, tr("Map opened without project metadata"),
+                          tr("Mapper could not synchronize this project's "
+                             "target "
+                             "settings or tiled sources: %1")
+                              .arg(manifest_error.message));
+                    }
+                    beginWorkspace(response, assignment_id, project_title,
+                                   client_instance_id, defaults);
+                  });
             });
       });
 }
@@ -2656,6 +2835,7 @@ void MapHubDialog::startAssignment(const QString &assignment_id,
 void MapHubDialog::beginWorkspace(const QJsonObject &response,
                                   const QString &assignment_id,
                                   const QString &project_title,
+                                  const QString &client_instance_id,
                                   const ManagedMapWorkspace &defaults) {
   const auto sync_state_key = QStringLiteral("_mapper_sync_state");
   if (!response.contains(sync_state_key)) {
@@ -2667,13 +2847,15 @@ void MapHubDialog::beginWorkspace(const QJsonObject &response,
       setBusy(false);
       QMessageBox::warning(
           this, tr("Invalid workspace response"),
-          tr("Map Hub did not return a stable workspace identifier. Nothing was downloaded or created locally."));
+          tr("Map Hub did not return a stable workspace identifier. Nothing "
+             "was downloaded or created locally."));
       return;
     }
     setBusy(true, tr("Finding the latest saved map…"));
     client->workspaceSyncState(
         workspace_id, {}, {},
-        [this, response, assignment_id, project_title, defaults,
+        [this, response, assignment_id, project_title, client_instance_id,
+         defaults,
          sync_state_key](const QJsonObject &sync_state, const QString &, bool,
                          const MapHubApiClient::Error &error) mutable {
           if (error) {
@@ -2684,7 +2866,7 @@ void MapHubDialog::beginWorkspace(const QJsonObject &response,
           auto hydrated_response = response;
           hydrated_response.insert(sync_state_key, sync_state);
           beginWorkspace(hydrated_response, assignment_id, project_title,
-                         defaults);
+                         client_instance_id, defaults);
         });
     return;
   }
@@ -2752,14 +2934,14 @@ void MapHubDialog::beginWorkspace(const QJsonObject &response,
     setBusy(false);
     QMessageBox::warning(
         this, tr("Invalid workspace response"),
-        tr("Map Hub did not return a complete saved-map record. Nothing was downloaded or changed locally."));
+        tr("Map Hub did not return a complete saved-map record. Nothing was "
+           "downloaded or changed locally."));
     return;
   }
 
   if (has_current_file) {
     effective_revision = {
-        {QStringLiteral("id"),
-         active_revision.value(QStringLiteral("id"))},
+        {QStringLiteral("id"), active_revision.value(QStringLiteral("id"))},
         {QStringLiteral("number"),
          active_revision.value(QStringLiteral("number"))},
         {QStringLiteral("sha256"), current_file_sha},
@@ -2790,13 +2972,16 @@ void MapHubDialog::beginWorkspace(const QJsonObject &response,
   managed.work_package_id = work_package_id;
   managed.workspace_id = workspace_id;
   managed.assignment_id = assignment_id;
+  managed.client_instance_id = client_instance_id;
   managed.manifest_url = projectManifestUrl(server, managed.project_id);
   managed.status = sync_workspace.value(QStringLiteral("status")).toString();
   if (managed.status.isEmpty())
-    managed.status = workspace_object.value(QStringLiteral("status")).toString();
+    managed.status =
+        workspace_object.value(QStringLiteral("status")).toString();
   managed.exclusive_editing =
-      sync_workspace.value(QStringLiteral("exclusive_editing")).toBool(
-          workspace_object.value(QStringLiteral("exclusive_editing")).toBool());
+      sync_workspace.value(QStringLiteral("exclusive_editing"))
+          .toBool(workspace_object.value(QStringLiteral("exclusive_editing"))
+                      .toBool());
   managed.base_revision_id =
       original_base.value(QStringLiteral("id")).toString();
   managed.base_revision_number =
@@ -2859,9 +3044,9 @@ void MapHubDialog::beginWorkspace(const QJsonObject &response,
   }
   if (baseline == MapHubApiClient::WorkspaceBaseline::IncompleteRevision) {
     setBusy(false);
-    QMessageBox::warning(
-        this, tr("Incomplete map baseline"),
-        tr("Map Hub did not provide a complete downloadable map. Nothing was created locally."));
+    QMessageBox::warning(this, tr("Incomplete map baseline"),
+                         tr("Map Hub did not provide a complete downloadable "
+                            "map. Nothing was created locally."));
     return;
   }
   static const QRegularExpression sha256_pattern(
@@ -2870,9 +3055,9 @@ void MapHubDialog::beginWorkspace(const QJsonObject &response,
       effective_revision.value(QStringLiteral("sha256")).toString();
   if (!sha256_pattern.match(effective_sha).hasMatch()) {
     setBusy(false);
-    QMessageBox::warning(
-        this, tr("Could not verify map"),
-        tr("Map Hub returned map bytes without a valid checksum. Nothing was downloaded."));
+    QMessageBox::warning(this, tr("Could not verify map"),
+                         tr("Map Hub returned map bytes without a valid "
+                            "checksum. Nothing was downloaded."));
     return;
   }
   const auto extension = artifactExtension(effective_revision);
@@ -2880,10 +3065,10 @@ void MapHubDialog::beginWorkspace(const QJsonObject &response,
       managed.base_artifact_kind != QLatin1String("ocad") &&
       !managed.base_artifact_kind.isEmpty()) {
     setBusy(false);
-    QMessageBox::warning(
-        this, tr("Unsupported map baseline"),
-        tr("Map Hub returned a %1 artifact where an .omap or OCAD map was required.")
-            .arg(managed.base_artifact_kind));
+    QMessageBox::warning(this, tr("Unsupported map baseline"),
+                         tr("Map Hub returned a %1 artifact where an .omap or "
+                            "OCAD map was required.")
+                             .arg(managed.base_artifact_kind));
     return;
   }
   const auto destination = uniqueDestination(
@@ -2957,7 +3142,7 @@ void MapHubDialog::createConnectedMap() {
   setBusy(true, tr("Creating the Map Hub project before the local map…"));
   client->createProject(
       payload, idempotency_key,
-      [this, title, workspace_defaults, start_locally, assignee_name](
+      [this, title, start_locally, assignee_name](
           const QJsonObject &response, const MapHubApiClient::Error &error) {
         if (error) {
           setBusy(false);
@@ -2979,7 +3164,11 @@ void MapHubDialog::createConnectedMap() {
         }
         auto assignment_id =
             response.value(QStringLiteral("assignment_id")).toString();
-        if (assignment_id.isEmpty()) {
+        const auto project_id =
+            response.value(QStringLiteral("project_id")).toString();
+        const auto workspace_id =
+            response.value(QStringLiteral("workspace_id")).toString();
+        if (QUuid(assignment_id).isNull() || QUuid(project_id).isNull()) {
           setBusy(false);
           QMessageBox::warning(
               this, tr("Project created, but local work could not start"),
@@ -2988,20 +3177,7 @@ void MapHubDialog::createConnectedMap() {
                  "it."));
           return;
         }
-        setBusy(true, tr("Project created. Starting its managed workspace…"));
-        client->startAssignment(
-            assignment_id, [this, assignment_id, title, workspace_defaults](
-                               const QJsonObject &started,
-                               const MapHubApiClient::Error &start_error) {
-              if (start_error) {
-                setBusy(false);
-                showError(
-                    tr("Project created, but its workspace could not start"),
-                    start_error);
-                return;
-              }
-              beginWorkspace(started, assignment_id, title, workspace_defaults);
-            });
+        startAssignment(assignment_id, project_id, title, title, workspace_id);
       });
 }
 

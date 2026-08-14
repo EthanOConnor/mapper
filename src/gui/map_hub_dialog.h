@@ -60,10 +60,12 @@ private:
   void populate(const QJsonObject &response);
   void beginWorkspace(const QJsonObject &response, const QString &assignment_id,
                       const QString &project_title,
+                      const QString &client_instance_id,
                       const ManagedMapWorkspace &defaults);
   void startAssignment(const QString &assignment_id, const QString &project_id,
                        const QString &project_title,
-                       const QString &assignment_title);
+                       const QString &assignment_title,
+                       const QString &workspace_id = {});
   void openProject(const QString &project_id, const QString &project_title);
   void requestProjectAccess(const QString &project_id,
                             const QString &project_title);

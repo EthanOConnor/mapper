@@ -38,6 +38,8 @@ public:
   };
 
   using JsonHandler = std::function<void(const QJsonObject &, const Error &)>;
+  using JsonEtagHandler = std::function<void(
+      const QJsonObject &, const QString &etag, const Error &)>;
   using DownloadHandler = std::function<void(const QString &, const Error &)>;
   using SyncStateHandler =
       std::function<void(const QJsonObject &, const QString &etag,
@@ -68,7 +70,13 @@ public:
   void cancelEditAccessRequest(const QString &request_id, JsonHandler handler);
   void createProject(const QJsonObject &project, const QString &idempotency_key,
                      JsonHandler handler);
-  void startAssignment(const QString &assignment_id, JsonHandler handler);
+  void assignmentEditingContext(const QString &assignment_id,
+                                const QString &client_instance_id,
+                                JsonEtagHandler handler);
+  void startAssignment(const QString &assignment_id,
+                       const QString &client_instance_id,
+                       const QString &editing_context_etag,
+                       JsonHandler handler);
   void checkpoint(const QString &workspace_id, const QString &file_path,
                   const QString &base_revision_id, const QString &editing_lease,
                   const QString &label, const QString &change_summary,
@@ -138,6 +146,7 @@ private:
                           bool authenticated = true) const;
   QNetworkRequest request(const QUrl &url, bool authenticated = true) const;
   void finishJson(QNetworkReply *reply, JsonHandler handler);
+  void finishJsonWithEtag(QNetworkReply *reply, JsonEtagHandler handler);
   void sendJson(const QByteArray &method, const QString &relative_path,
                 const QJsonObject &body, bool authenticated,
                 JsonHandler handler);

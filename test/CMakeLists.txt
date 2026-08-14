@@ -192,6 +192,7 @@ add_unit_test(map_hub_workspace_t
 	../src/collaboration/map_hub_device_authorization
 	../src/collaboration/map_hub_imagery_catalog
 	../src/collaboration/map_hub_sync_queue
+	../src/collaboration/map_hub_work_item_projection
 	../src/collaboration/map_hub_workspace
 	../src/collaboration/oom_json
 	../src/collaboration/zstd_codec

@@ -23,6 +23,8 @@ private slots:
   void hashesArtifactsExactly();
   void completesBrowserMediatedConnection();
   void editAccessUsesNativeIdempotentEndpoints();
+  void assignmentStartUsesResolvedEditingContext();
+  void consolidatesWorkItemsAndKeepsHistoryCollapsed();
   void verifiedDownloadRequiresBoundRevisionHeaders();
   void checkpointCarriesStreamProjectionDigest();
   void snapshotCompressesEntityIndex();

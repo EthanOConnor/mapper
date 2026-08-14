@@ -132,6 +132,7 @@ set(Mapper_Common_SRCS
 	collaboration/oom_json.cpp
 	collaboration/zstd_codec.cpp
 	collaboration/map_hub_workspace.cpp
+	collaboration/map_hub_work_item_projection.cpp
   
   core/autosave.cpp
   core/crs_template.cpp
