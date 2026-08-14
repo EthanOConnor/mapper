@@ -956,6 +956,7 @@ void MapHubApiClient::renewLease(const QString &workspace_id,
 }
 
 void MapHubApiClient::workspaceSyncState(const QString &workspace_id,
+                                         const QString &client_instance_id,
                                          const QString &etag,
                                          const QString &editing_lease,
                                          SyncStateHandler handler) {
@@ -963,7 +964,7 @@ void MapHubApiClient::workspaceSyncState(const QString &workspace_id,
         handler({}, {}, false, error);
       }))
     return;
-  if (!validStableId(workspace_id) ||
+  if (!validStableId(workspace_id) || !validStableId(client_instance_id) ||
       (!editing_lease.isEmpty() && !validHeaderValue(editing_lease, 4096))) {
     handler({}, {}, false,
             {0, QStringLiteral("invalid_request_metadata"),
@@ -972,6 +973,8 @@ void MapHubApiClient::workspaceSyncState(const QString &workspace_id,
   }
   auto req = request(
       QStringLiteral("/api/v1/workspaces/%1/sync-state").arg(workspace_id));
+  req.setRawHeader("X-Editing-Client-Instance",
+                   client_instance_id.toUtf8());
   if (!etag.isEmpty() && validHeaderValue(etag, 512))
     req.setRawHeader("If-None-Match", etag.toUtf8());
   if (!editing_lease.isEmpty())

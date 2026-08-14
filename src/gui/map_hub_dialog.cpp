@@ -2867,7 +2867,7 @@ void MapHubDialog::beginWorkspace(const QJsonObject &response,
     }
     setBusy(true, tr("Finding the latest saved map…"));
     client->workspaceSyncState(
-        workspace_id, {}, {},
+        workspace_id, client_instance_id, {}, {},
         [this, response, assignment_id, project_title, client_instance_id,
          defaults,
          sync_state_key](const QJsonObject &sync_state, const QString &, bool,

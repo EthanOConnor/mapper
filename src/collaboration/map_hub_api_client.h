@@ -94,8 +94,9 @@ public:
                       JsonHandler handler);
   void renewLease(const QString &workspace_id, const QString &editing_lease,
                   JsonHandler handler);
-  void workspaceSyncState(const QString &workspace_id, const QString &etag,
-                          const QString &editing_lease,
+  void workspaceSyncState(const QString &workspace_id,
+                          const QString &client_instance_id,
+                          const QString &etag, const QString &editing_lease,
                           SyncStateHandler handler);
   void workspaceFiles(const QString &workspace_id, const QString &etag,
                       const QString &client_instance_id,
