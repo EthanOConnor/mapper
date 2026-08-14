@@ -1,7 +1,7 @@
 {
   "name": "openorienteering-mapper",
   "version-semver": "0.9.7",
-  "builtin-baseline": "4b866ceb02b989365b916f93db4f76146a8ec438",
+  "builtin-baseline": "9e593bb18ea69cc5095e012465dcd675a822ed0d",
   "dependencies": [
     {
       "name": "gdal",

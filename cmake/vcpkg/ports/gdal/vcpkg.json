@@ -1,6 +1,6 @@
 {
   "name": "gdal",
-  "version-semver": "3.13.1",
+  "version-semver": "3.13.2",
   "description": "GDAL is a translator library for raster and vector geospatial data formats.",
   "homepage": "https://gdal.org/",
   "license": "MIT",

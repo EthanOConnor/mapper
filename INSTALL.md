@@ -2,7 +2,7 @@
 
 Mapper uses one CMake build on Linux, macOS, Windows, Android, and iOS. Ninja
 drives the desktop and Android builds; iOS uses CMake's Xcode generator and the
-official Qt iOS toolchain. The project baseline is CMake 4.4.0, Ninja 1.13.0,
+official Qt iOS toolchain. The project baseline is CMake 4.4.2, Ninja 1.13.2,
 a C++23 compiler, and Qt 6.10.3 for desktop and Android. The validated iOS
 baseline is the official Qt 6.11.1 kit. The same checked-in presets drive local
 and hosted builds.
@@ -22,21 +22,22 @@ guide together when changing either baseline.
 ## Dependencies
 
 The distributable-build dependency set is declared in `vcpkg.json` and pinned
-by its builtin baseline. It currently resolves PROJ 9.8.1, GDAL 3.13.1, and ICU
-78.3. Clipper2 2.0.1 and KDSingleApplication 1.2.1 are content-addressed CMake
+by its builtin baseline. It currently resolves PROJ 9.8.1, GDAL 3.13.2,
+SQLite 3.53.4, and ICU 78.3. Clipper2 2.0.1 and KDSingleApplication 1.2.1 are content-addressed CMake
 dependencies. Qt is installed from the official Qt binary repository. The
 portable CMake and Ninja tools used by CI are pinned in
-`requirements-build.txt`; weekly dependency updates cover that file too.
-Ninja 1.13.0 is deliberate: 1.13.2 was unavailable from the selected simple
-PyPI install channel, and a custom download path was not justified merely to
-claim a newer version.
+`requirements-build.txt` and `cmake/install_ninja.cmake`. CMake comes from its
+official PyPI distribution; Ninja comes from its official release archives,
+with a published SHA-256 selected for each host architecture. This avoids
+coupling the Ninja baseline to the independently maintained PyPI wrapper.
 
-The Rust dependency intent is declared in `src/render/vello/Cargo.toml`, and
+The Rust 1.97.1 build toolchain is pinned in `rust-toolchain.toml`. Dependency
+intent is declared in `src/render/vello/Cargo.toml`, and
 the committed `src/render/vello/Cargo.lock` is the exact dependency-graph
 authority. It currently resolves Vello 0.9.0 with wgpu 29.0.4. Corrosion 0.6.1
 is hash-pinned by CMake and provides the ordinary Cargo/CMake integration.
 
-GDAL 3.13.1 temporarily uses `cmake/vcpkg/ports/gdal`; remove that overlay as
+GDAL 3.13.2 temporarily uses `cmake/vcpkg/ports/gdal`; remove that overlay as
 soon as the pinned vcpkg baseline provides the same or a newer release.
 
 ## Reproducible desktop build
@@ -50,6 +51,15 @@ git clone https://github.com/microsoft/vcpkg.git .vcpkg
 git -C .vcpkg checkout "$(python3 -c 'import json; print(json.load(open("vcpkg.json"))["builtin-baseline"])')"
 .vcpkg/bootstrap-vcpkg.sh -disableMetrics
 export VCPKG_ROOT="$PWD/.vcpkg"
+```
+
+When Ninja 1.13.2 is not already installed, install the checksum-pinned
+official archive into a user-selected tools directory and add it to `PATH`:
+
+```sh
+python -m pip install --requirement requirements-build.txt
+cmake -DINSTALL_DIR="$PWD/build/tools/ninja-1.13.2" -P cmake/install_ninja.cmake
+export PATH="$PWD/build/tools/ninja-1.13.2:$PATH"
 ```
 
 On Windows PowerShell, use the same manifest-owned baseline:
@@ -67,6 +77,15 @@ Select the managed preset for the host:
 cmake --preset dev-macos-vcpkg
 cmake --build --preset dev-macos-vcpkg
 ctest --preset dev-macos-vcpkg
+```
+
+CMake 4.4's generated `test_prep/<test-name>` targets are enabled by the base
+preset. They build the executable and explicit dependencies for one test
+without requiring a full build, for example:
+
+```sh
+cmake --build --preset dev-macos-vcpkg --target test_prep/vello_renderer_t
+ctest --preset dev-macos-vcpkg -R '^vello_renderer_t$'
 ```
 
 The corresponding presets are `dev-linux-vcpkg` and `dev-windows-vcpkg`.

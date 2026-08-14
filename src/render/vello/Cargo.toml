@@ -10,7 +10,7 @@ license = "GPL-3.0-or-later"
 crate-type = ["staticlib"]
 
 [dependencies]
-cxx = "1.0.197"
+cxx = "1.0.199"
 flume = { version = "0.12.0", default-features = false, features = ["select"] }
 pollster = "1.0.1"
 raw-window-handle = "0.6.2"

@@ -1,11 +1,11 @@
 # Temporary latest-release overlay. Delete this port as soon as the pinned
-# vcpkg baseline contains GDAL 3.13.1 or newer.
+# vcpkg baseline contains GDAL 3.13.2 or newer.
 set(gdal_builtin_port_dir "${VCPKG_ROOT_DIR}/ports/gdal")
 
 vcpkg_download_distfile(gdal_archive
 	URLS "https://github.com/OSGeo/gdal/releases/download/v${VERSION}/gdal-${VERSION}.tar.gz"
 	FILENAME "gdal-${VERSION}.tar.gz"
-	SHA512 36efa05298a4f37edd157f01d7a71121b530aa32a4c5f1e76ae24d91b95712c2b98d7d17a442eb7f8e8c82a7c4282742670385b724d1ce55f4e79a58f655cd10
+	SHA512 a66ccad9c11be77ef77f19865afab3d3cad61216a5cff50dc34a394ade656d34bc8e1f06d0853508b19462df06e1a2d5d23e5e6aff6d4f1d1746076f6a294daa
 )
 vcpkg_extract_source_archive(
 	SOURCE_PATH
@@ -15,7 +15,7 @@ vcpkg_extract_source_archive(
 		"${gdal_builtin_port_dir}/iconv.diff"
 		"${gdal_builtin_port_dir}/libarchive.diff"
 		"${gdal_builtin_port_dir}/libkml.patch"
-		"${CMAKE_CURRENT_LIST_DIR}/sqlite3-3.13.1.diff"
+		"${CMAKE_CURRENT_LIST_DIR}/sqlite3-3.13.2.diff"
 		"${gdal_builtin_port_dir}/target-is-valid.patch"
 )
 

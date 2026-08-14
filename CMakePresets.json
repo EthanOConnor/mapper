@@ -1,9 +1,9 @@
 {
-  "version": 6,
+  "version": 12,
   "cmakeMinimumRequired": {
     "major": 4,
     "minor": 4,
-    "patch": 0
+    "patch": 2
   },
   "configurePresets": [
     {
@@ -11,8 +11,12 @@
       "hidden": true,
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/${presetName}",
+      "warnings": {
+        "installAbsoluteDestination": true
+      },
       "cacheVariables": {
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "CMAKE_TEST_BUILD_DEPENDS": "ON",
         "Mapper_MANUAL_QTHELP": "OFF"
       }
     },

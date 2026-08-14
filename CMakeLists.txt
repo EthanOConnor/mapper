@@ -10,7 +10,7 @@
 #    (at your option) any later version.
 #
 
-cmake_minimum_required(VERSION 4.4)
+cmake_minimum_required(VERSION 4.4.2)
 
 project(Mapper VERSION 0.1.0 LANGUAGES C CXX)
 
@@ -177,7 +177,7 @@ if(Mapper_USE_GDAL)
 	find_package(LibLZMA REQUIRED)
 	find_package(JPEG REQUIRED)
 	find_package(TIFF REQUIRED)
-	find_package(GDAL 3.13.1 CONFIG REQUIRED)
+	find_package(GDAL 3.13.2 CONFIG REQUIRED)
 endif()
 
 find_path(Mapper_PROJ_DATA_DIR

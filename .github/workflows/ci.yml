@@ -15,11 +15,12 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  CACHE_SCHEMA: v3
+  CACHE_SCHEMA: v4
   CARGO_ABOUT_VERSION: "0.9.1"
   CMAKE_BUILD_PARALLEL_LEVEL: 4
   # Newest stable Qt release supported by the complete public installer matrix.
   QT_VERSION: "6.10.3"
+  RUST_VERSION: "1.97.1"
   VCPKG_MAX_CONCURRENCY: 4
   VCPKG_ROOT: ${{ github.workspace }}/.vcpkg
   VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.vcpkg-cache
@@ -54,7 +55,7 @@ jobs:
 
     steps:
       - name: Check out Mapper
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Read vcpkg baseline
         id: vcpkg_baseline
@@ -62,14 +63,14 @@ jobs:
         run: python -c 'import json; print("sha=" + json.load(open("vcpkg.json", encoding="utf-8"))["builtin-baseline"])' >> "$GITHUB_OUTPUT"
 
       - name: Check out vcpkg
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: microsoft/vcpkg
           ref: ${{ steps.vcpkg_baseline.outputs.sha }}
           path: .vcpkg
 
       - name: Install Rust toolchain
-        run: rustup toolchain install stable --profile minimal --component clippy,rustfmt
+        run: rustup toolchain install "$RUST_VERSION" --profile minimal --component clippy,rustfmt
 
       - name: Resolve cache identity
         id: cache_identity
@@ -136,9 +137,9 @@ jobs:
           key: mapper-${{ env.CACHE_SCHEMA }}-cargo-about-${{ matrix.os }}-${{ runner.arch }}-${{ matrix.preset }}-${{ env.CARGO_ABOUT_VERSION }}-${{ steps.cache_identity.outputs.rust }}
 
       - name: Set up Python for Qt installation
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.13.3"
+          python-version: "3.14.6"
 
       - name: Install Qt
         uses: jurplel/install-qt-action/action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4.3.1
@@ -150,7 +151,12 @@ jobs:
           install-deps: true
 
       - name: Install CMake and Ninja
-        run: python -m pip install --disable-pip-version-check --requirement requirements-build.txt
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check --requirement requirements-build.txt
+          ninja_root="$RUNNER_TEMP/ninja-1.13.2"
+          cmake -DINSTALL_DIR="$ninja_root" -P cmake/install_ninja.cmake
+          echo "$ninja_root" >> "$GITHUB_PATH"
 
       - name: Prepare build caches
         run: cmake -E make_directory .vcpkg-cache
@@ -223,15 +229,22 @@ jobs:
           # backend against current Microsoft WARP, Agility SDK, and DXC bits.
           $runtime = Join-Path $env:RUNNER_TEMP 'mapper-gpu-test'
           New-Item -ItemType Directory -Force $runtime | Out-Null
+          function Assert-Sha256($path, $expected) {
+            $actual = (Get-FileHash -Algorithm SHA256 $path).Hash.ToLowerInvariant()
+            if ($actual -ne $expected) { throw "SHA-256 mismatch for ${path}: ${actual}" }
+          }
 
           curl.exe -L --retry 5 https://www.nuget.org/api/v2/package/Microsoft.Direct3D.WARP/1.0.20 -o (Join-Path $runtime 'warp.zip')
+          Assert-Sha256 (Join-Path $runtime 'warp.zip') 'e5fe5de661ce98b58ef9cfb736e73c0a7a2623d3bbf5f14839b2d55566d87e40'
           tar.exe -xf (Join-Path $runtime 'warp.zip') -C $runtime build/native/bin/x64/d3d10warp.dll
           Copy-Item (Join-Path $runtime 'build/native/bin/x64/d3d10warp.dll') build/ci-windows/test/Release/
 
-          curl.exe -L --retry 5 https://www.nuget.org/api/v2/package/Microsoft.Direct3D.D3D12/1.619.0 -o (Join-Path $runtime 'agility.zip')
+          curl.exe -L --retry 5 https://www.nuget.org/api/v2/package/Microsoft.Direct3D.D3D12/1.619.5 -o (Join-Path $runtime 'agility.zip')
+          Assert-Sha256 (Join-Path $runtime 'agility.zip') '0e9bcf32aac9a79343ede9b21e4864950ee54577e3d8e19bfcdf002bb4e9bfd6'
           tar.exe -xf (Join-Path $runtime 'agility.zip') -C $runtime build/native/bin/x64
 
-          curl.exe -L --retry 5 https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.8.2505.1/dxc_2025_07_14.zip -o (Join-Path $runtime 'dxc.zip')
+          curl.exe -L --retry 5 https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.9.2607/dxc_2026_07_29.zip -o (Join-Path $runtime 'dxc.zip')
+          Assert-Sha256 (Join-Path $runtime 'dxc.zip') 'a1dfb116ba3eeae6a1582291b53a8e7bf65ad760676bd3194685c8f7367cd241'
           Expand-Archive (Join-Path $runtime 'dxc.zip') -DestinationPath (Join-Path $runtime 'dxc')
 
           "WGPU_BACKEND=dx12" | Out-File -Append $env:GITHUB_ENV
@@ -552,7 +565,7 @@ jobs:
 
     steps:
       - name: Check out Mapper
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Read vcpkg baseline
         id: vcpkg_baseline
@@ -560,7 +573,7 @@ jobs:
         run: python -c 'import json; print("sha=" + json.load(open("vcpkg.json", encoding="utf-8"))["builtin-baseline"])' >> "$GITHUB_OUTPUT"
 
       - name: Check out vcpkg
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: microsoft/vcpkg
           ref: ${{ steps.vcpkg_baseline.outputs.sha }}
@@ -568,8 +581,8 @@ jobs:
 
       - name: Install Rust toolchain
         run: |
-          rustup toolchain install stable --profile minimal --component rustfmt
-          rustup target add aarch64-linux-android
+          rustup toolchain install "$RUST_VERSION" --profile minimal --component rustfmt
+          rustup target add --toolchain "$RUST_VERSION" aarch64-linux-android
 
       - name: Resolve cache identity
         id: cache_identity
@@ -622,15 +635,15 @@ jobs:
           key: mapper-${{ env.CACHE_SCHEMA }}-cargo-about-ubuntu-24.04-${{ runner.arch }}-ci-android-${{ env.CARGO_ABOUT_VERSION }}-${{ steps.cache_identity.outputs.rust }}
 
       - name: Install JDK 21
-        uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5.5.0
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
           distribution: temurin
           java-version: 21
 
       - name: Set up Python for Qt installation
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.13.3"
+          python-version: "3.14.6"
 
       - name: Install host Qt tools
         uses: jurplel/install-qt-action/action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4.3.1
@@ -659,6 +672,9 @@ jobs:
       - name: Install Android and build tools
         run: |
           python -m pip install --disable-pip-version-check --requirement requirements-build.txt
+          ninja_root="$RUNNER_TEMP/ninja-1.13.2"
+          cmake -DINSTALL_DIR="$ninja_root" -P cmake/install_ninja.cmake
+          echo "$ninja_root" >> "$GITHUB_PATH"
           cmake -E make_directory .vcpkg-cache
           sudo apt-get update
           sudo apt-get install --yes doxygen graphviz
@@ -838,7 +854,7 @@ jobs:
 
     steps:
       - name: Check out Mapper
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Read vcpkg baseline
         id: vcpkg_baseline
@@ -846,7 +862,7 @@ jobs:
         run: python -c 'import json; print("sha=" + json.load(open("vcpkg.json", encoding="utf-8"))["builtin-baseline"])' >> "$GITHUB_OUTPUT"
 
       - name: Check out vcpkg
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: microsoft/vcpkg
           ref: ${{ steps.vcpkg_baseline.outputs.sha }}
@@ -883,8 +899,8 @@ jobs:
 
       - name: Install Rust toolchain
         run: |
-          rustup toolchain install stable --profile minimal --component rustfmt
-          rustup target add aarch64-apple-ios x86_64-apple-ios
+          rustup toolchain install "$RUST_VERSION" --profile minimal --component rustfmt
+          rustup target add --toolchain "$RUST_VERSION" aarch64-apple-ios x86_64-apple-ios
 
       - name: Resolve cache identity
         id: cache_identity
@@ -942,9 +958,9 @@ jobs:
           key: mapper-${{ env.CACHE_SCHEMA }}-cargo-about-${{ matrix.lane }}-${{ runner.arch }}-ios-${{ env.CARGO_ABOUT_VERSION }}-${{ steps.cache_identity.outputs.rust }}
 
       - name: Set up Python for Qt installation
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.13.3"
+          python-version: "3.14.6"
 
       - name: Install host Qt tools
         uses: jurplel/install-qt-action/action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4.3.1
@@ -990,6 +1006,9 @@ jobs:
         shell: bash
         run: |
           python -m pip install --disable-pip-version-check --requirement requirements-build.txt
+          ninja_root="$RUNNER_TEMP/ninja-1.13.2"
+          cmake -DINSTALL_DIR="$ninja_root" -P cmake/install_ninja.cmake
+          echo "$ninja_root" >> "$GITHUB_PATH"
           brew install doxygen
           cmake -E make_directory .vcpkg-cache
           test -f "$QT_ROOT_DIR/lib/cmake/Qt6/Qt6Config.cmake"
@@ -1379,7 +1398,7 @@ jobs:
           merge-multiple: true
 
       - name: Attest packages
-        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: release-assets/**/*
 
