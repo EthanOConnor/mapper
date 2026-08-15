@@ -245,6 +245,7 @@ TemplateTrack::TemplateTrack(const QString& path, Map* map)
 TemplateTrack::TemplateTrack(const TemplateTrack& proto)
 : Template(proto)
 , track(proto.track)
+, display_mode(proto.display_mode)
 , track_crs_spec(proto.track_crs_spec)
 , projected_crs_spec(proto.projected_crs_spec)
 {
@@ -298,18 +299,18 @@ bool TemplateTrack::hasGnssQualityData() const
 
 void TemplateTrack::saveTypeSpecificTemplateConfiguration(QXmlStreamWriter& xml) const
 {
-	if (preserved_georef)
-	{
-		// Preserve explicit georeferencing from OgrTemplate.
-		preserved_georef->save(xml);
-		return;
-	}
-
 	if (display_mode != TrackDisplayMode::Classic)
 	{
 		xml.writeStartElement(QString::fromLatin1("display"));
 		xml.writeAttribute(QString::fromLatin1("mode"), displayModeName(display_mode));
 		xml.writeEndElement(/*display*/);
+	}
+
+	if (preserved_georef)
+	{
+		// Preserve explicit georeferencing from OgrTemplate.
+		preserved_georef->save(xml);
+		return;
 	}
 
 	// Follow map georeferencing XML structure
@@ -501,6 +502,8 @@ std::shared_ptr<const render::RenderIR> TemplateTrack::buildRenderIR(
 	auto const stroke_run = [this, &builder](int segment, int from, int to,
 	                                         double width, const QColor& color,
 	                                         std::vector<double> dash_pattern) {
+		if (from < 0 || to < from)
+			return;
 		render::PathBuilder path;
 		for (int i = from; i <= to; ++i)
 		{

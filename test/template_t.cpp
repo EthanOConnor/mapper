@@ -505,6 +505,8 @@ private slots:
 		QCOMPARE(original->getTrackDisplayMode(), TemplateTrack::TrackDisplayMode::Classic);
 
 		original->setTrackDisplayMode(TemplateTrack::TrackDisplayMode::FixAware);
+		auto const duplicate = std::unique_ptr<TemplateTrack>{original->duplicate()};
+		QCOMPARE(duplicate->getTrackDisplayMode(), TemplateTrack::TrackDisplayMode::FixAware);
 
 		QBuffer buffer;
 		QVERIFY(buffer.open(QIODevice::WriteOnly));
@@ -519,6 +521,31 @@ private slots:
 		auto const* const reloaded = qobject_cast<const TemplateTrack*>(restored.getTemplate(0));
 		QVERIFY(reloaded);
 		QCOMPARE(reloaded->getTrackDisplayMode(), TemplateTrack::TrackDisplayMode::FixAware);
+
+		// Migrated OGR tracks preserve an explicit georeferencing block. The
+		// display choice must survive alongside it rather than being skipped.
+		Map ogr_map;
+		MapView ogr_view{ &ogr_map };
+		QVERIFY(ogr_map.loadFrom(map_file, &ogr_view));
+		auto* const ogr_track = qobject_cast<TemplateTrack*>(ogr_map.getTemplate(2));
+		QVERIFY(ogr_track);
+		ogr_track->setTrackDisplayMode(TemplateTrack::TrackDisplayMode::AccuracyBand);
+
+		QBuffer ogr_buffer;
+		QVERIFY(ogr_buffer.open(QIODevice::WriteOnly));
+		QVERIFY(ogr_map.exportToIODevice(ogr_buffer));
+		ogr_buffer.close();
+
+		Map restored_ogr;
+		QVERIFY(ogr_buffer.open(QIODevice::ReadOnly));
+		QVERIFY(restored_ogr.importFromIODevice(ogr_buffer));
+		ogr_buffer.close();
+
+		auto const* const reloaded_ogr =
+			qobject_cast<const TemplateTrack*>(restored_ogr.getTemplate(2));
+		QVERIFY(reloaded_ogr);
+		QCOMPARE(reloaded_ogr->getTrackDisplayMode(),
+		         TemplateTrack::TrackDisplayMode::AccuracyBand);
 	}
 
 #ifdef MAPPER_USE_GDAL
