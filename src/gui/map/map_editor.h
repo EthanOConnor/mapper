@@ -30,6 +30,7 @@
 #include <QObject>
 #include <QPointer>
 #include <QScopedPointer>
+#include <QSet>
 #include <QString>
 #include <QTimer>
 
@@ -215,6 +216,8 @@ public:
 	
 	/** Returns the map on which this controller operates. */
 	inline Map* getMap() const {return map;}
+	/** Retries app-recorded GPX tracks that are not yet available in Map Hub. */
+	void syncPendingFieldTracks();
 	/** Returns the main map widget (which is currently the only map widget). */
 	inline MapWidget* getMainWidget() const {return map_widget;}
 	/** Returns this controller's symbol widget, where the symbol selection happens. */
@@ -519,7 +522,7 @@ public slots:
 	void enableGPSDisplay(bool enable);
 	void refreshGnssStatusOverlay();
 	/** Uploads a finished GNSS tracklog when the map belongs to Map Hub. */
-	void uploadFieldCheckTrack(TemplateTrack* track);
+	void uploadFieldCheckTrack(TemplateTrack* track, bool report_status = true);
 	void positionGnssStatusOverlay();
 	/** Returns whether location updates and their visible UI are active. */
 	bool isGPSDisplayEnabled() const;
@@ -879,6 +882,7 @@ private:
 	GPSTemporaryMarkers* gps_marker_display;
 	GPSDisplay* gps_display;
 	GPSTrackRecorder* gps_track_recorder;
+	QSet<QString> map_hub_field_assets_uploading;
 	GnssStatusOverlay* gnss_status_overlay;
 	QAction* compass_action = {};
 	CompassDisplay* compass_display;

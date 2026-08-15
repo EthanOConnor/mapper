@@ -4395,7 +4395,25 @@ void MapEditorController::refreshGnssStatusOverlay()
 		positionGnssStatusOverlay();
 }
 
-void MapEditorController::uploadFieldCheckTrack(TemplateTrack* track)
+void MapEditorController::syncPendingFieldTracks()
+{
+	static const QRegularExpression recorded_name_pattern(
+	  QStringLiteral(" - GPS-\\d{4}-\\d{2}-\\d{2}\\.gpx$"),
+	  QRegularExpression::CaseInsensitiveOption);
+	for (int i = 0; map && i < map->getNumTemplates(); ++i)
+	{
+		auto* track = qobject_cast<TemplateTrack*>(map->getTemplate(i));
+		if (!track)
+			continue;
+		const QFileInfo file(track->getTemplatePath());
+		if (file.exists()
+		    && recorded_name_pattern.match(file.fileName()).hasMatch())
+			uploadFieldCheckTrack(track, false);
+	}
+}
+
+void MapEditorController::uploadFieldCheckTrack(TemplateTrack* track,
+                                                bool report_status)
 {
 	if (!track || !window || window->currentPath().isEmpty())
 		return;
@@ -4411,21 +4429,25 @@ void MapEditorController::uploadFieldCheckTrack(TemplateTrack* track)
 		return;
 	const auto credential = MapHubCredentials::readToken(managed.server_url);
 	if (!credential || credential.token.isEmpty())
+	{
+		if (report_status)
+			window->showStatusBarMessage(
+			  tr("GPS track saved on this device; reconnect Map Hub to share it."),
+			  12000);
 		return;
+	}
 
 	// Recorded range and accuracy-basis summary from the track data.
 	const auto& data = track->getTrack();
 	QDateTime recorded_start;
 	QDateTime recorded_end;
 	QString accuracy_basis;
-	auto point_count = 0;
 	for (int segment = 0; segment < data.getNumSegments(); ++segment)
 	{
 		const auto segment_size = data.getSegmentPointCount(segment);
 		for (int i = 0; i < segment_size; ++i)
 		{
 			const auto& point = data.getSegmentPoint(segment, i);
-			++point_count;
 			if (point.datetime.isValid())
 			{
 				if (!recorded_start.isValid() || point.datetime < recorded_start)
@@ -4437,9 +4459,6 @@ void MapEditorController::uploadFieldCheckTrack(TemplateTrack* track)
 				accuracy_basis = point.accuracyBasis;
 		}
 	}
-	if (point_count == 0)
-		return;
-
 	QString sha_error;
 	const auto sha256 = MapHubApiClient::sha256ForFile(gpx_path, &sha_error);
 	const auto size_bytes = QFileInfo(gpx_path).size();
@@ -4451,6 +4470,9 @@ void MapEditorController::uploadFieldCheckTrack(TemplateTrack* track)
 	const auto resource_identity = FieldAssetStore::resourceIdentityFor(sha256);
 	if (track->resourceIdentity() == resource_identity)
 		return;  // These exact bytes were already uploaded.
+	if (map_hub_field_assets_uploading.contains(sha256))
+		return;
+	map_hub_field_assets_uploading.insert(sha256);
 
 	QJsonObject device;
 	device.insert(QStringLiteral("receiver"),
@@ -4462,17 +4484,26 @@ void MapEditorController::uploadFieldCheckTrack(TemplateTrack* track)
 		new MapHubApiClient(managed.server_url, credential.token, this);
 	QPointer<TemplateTrack> track_guard(track);
 	client->uploadFieldAsset(
-		managed.project_id, gpx_path, sha256, size_bytes,
+		managed.project_id, managed.assignment_id, gpx_path, sha256, size_bytes,
 		QStringLiteral("field_check"), recorded_start, recorded_end, device,
 		QFileInfo(gpx_path).fileName(),
-		[client, track_guard, resource_identity](
+		[client, track_guard, resource_identity, sha256,
+		 controller_guard = QPointer<MapEditorController>(this),
+		 window_guard = QPointer<MainWindow>(window), report_status](
 			const QJsonObject& /*response*/,
 			const MapHubApiClient::Error& api_error) {
 			client->deleteLater();
+			if (controller_guard)
+				controller_guard->map_hub_field_assets_uploading.remove(sha256);
 			if (api_error)
 			{
 				qWarning("Field-asset upload failed: %s",
 				         qUtf8Printable(api_error.message));
+				if (report_status && window_guard)
+					window_guard->showStatusBarMessage(
+					  MapEditorController::tr(
+					    "GPS track saved on this device; Map Hub will retry automatically."),
+					  12000);
 				return;
 			}
 			if (track_guard
@@ -4482,6 +4513,9 @@ void MapEditorController::uploadFieldCheckTrack(TemplateTrack* track)
 				if (auto* target_map = track_guard->getMap())
 					target_map->setTemplatesDirty();
 			}
+			if (report_status && window_guard)
+				window_guard->showStatusBarMessage(
+				  MapEditorController::tr("GPS track available in Map Hub"), 5000);
 		});
 }
 

@@ -21,6 +21,7 @@ private slots:
   void identifiesMapperWorkspacePackageTypes();
   void classifiesWorkspaceBaselines();
   void hashesArtifactsExactly();
+  void storesFieldAssetsByDigest();
   void completesBrowserMediatedConnection();
   void editAccessUsesNativeIdempotentEndpoints();
   void assignmentStartUsesResolvedEditingContext();

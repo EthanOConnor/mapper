@@ -185,6 +185,7 @@ add_unit_test(grid_t ../src/util/util)
 add_unit_test(key_value_container_t ../src/util/key_value_container)
 add_unit_test(locale_t ../src/util/translation_util)
 add_unit_test(map_hub_workspace_t
+	../src/collaboration/field_asset_store
 	../src/collaboration/managed_map_workspace
 	../src/collaboration/map_hub_read_only_document
 	../src/collaboration/map_hub_api_client

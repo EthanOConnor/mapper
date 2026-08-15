@@ -135,7 +135,9 @@ public:
   /** Uploads a GPX field asset (tracklog) to a project. Idempotent by
    * (project, sha256): re-uploading the same bytes returns the existing
    * asset. recorded_start/recorded_end and device are optional. */
-  void uploadFieldAsset(const QString &project_id, const QString &file_path,
+  void uploadFieldAsset(const QString &project_id,
+                        const QString &assignment_id,
+                        const QString &file_path,
                         const QString &sha256, qint64 size_bytes,
                         const QString &purpose,
                         const QDateTime &recorded_start,

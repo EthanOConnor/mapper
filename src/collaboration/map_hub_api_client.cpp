@@ -483,7 +483,8 @@ void MapHubApiClient::uploadWorkspaceSnapshot(
 }
 
 void MapHubApiClient::uploadFieldAsset(
-    const QString &project_id, const QString &file_path,
+    const QString &project_id, const QString &assignment_id,
+    const QString &file_path,
     const QString &sha256, qint64 size_bytes, const QString &purpose,
     const QDateTime &recorded_start, const QDateTime &recorded_end,
     const QJsonObject &device, const QString &original_name,
@@ -507,6 +508,14 @@ void MapHubApiClient::uploadFieldAsset(
   multi->append(textPart("purpose", purpose.isEmpty()
                                         ? QStringLiteral("field_check")
                                         : purpose));
+  if (!assignment_id.isEmpty()) {
+    if (!validStableId(assignment_id)) {
+      delete multi;
+      handler({}, invalidIdentifierError());
+      return;
+    }
+    multi->append(textPart("assignment_id", assignment_id));
+  }
   if (recorded_start.isValid())
     multi->append(textPart(
         "recorded_start",

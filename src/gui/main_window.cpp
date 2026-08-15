@@ -39,6 +39,7 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QInputDialog>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QLabel>
 #include <QMessageBox>
@@ -1686,6 +1687,8 @@ void MainWindow::refreshMapHubFieldAssets()
 	auto const credential = MapHubCredentials::readToken(managed.server_url);
 	if (!credential.error.isEmpty() || credential.token.isEmpty())
 		return;
+	if (auto* editor = qobject_cast<MapEditorController*>(controller))
+		editor->syncPendingFieldTracks();
 
 	struct FieldAssetItem
 	{
@@ -1699,9 +1702,9 @@ void MainWindow::refreshMapHubFieldAssets()
 	auto* client =
 		new MapHubApiClient(managed.server_url, credential.token, this);
 	const auto expected_path = DocumentPath::canonical(currentPath());
-	const auto request_generation = map_hub_document_generation;
-	const auto stale = [this, expected_path, request_generation] {
-		return request_generation != map_hub_document_generation
+	auto* const expected_controller = controller;
+	const auto stale = [this, expected_path, expected_controller] {
+		return controller != expected_controller
 		       || DocumentPath::canonical(currentPath()) != expected_path;
 	};
 	const auto finish = [this, client] {
@@ -1772,7 +1775,7 @@ void MainWindow::refreshMapHubFieldAssets()
 			}
 			auto items = std::make_shared<std::vector<FieldAssetItem>>();
 			const auto array =
-				response.value(QStringLiteral("items")).toArray();
+				response.value(QStringLiteral("field_assets")).toArray();
 			for (const auto& value : array)
 			{
 				const auto object = value.toObject();
@@ -1792,7 +1795,7 @@ void MainWindow::refreshMapHubFieldAssets()
 			}
 			// Fetch missing assets one at a time, then integrate.
 			auto next = std::make_shared<std::function<void(std::size_t)>>();
-			*next = [this, client, stale, finish, integrate, items, next](
+			*next = [client, stale, finish, integrate, items, next](
 				std::size_t index) {
 				// Deferred so the self-referencing chain is released without
 				// destroying the running function object.

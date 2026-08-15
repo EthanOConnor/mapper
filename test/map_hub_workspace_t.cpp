@@ -27,6 +27,7 @@
 #include <QUuid>
 #include <QtTest>
 
+#include "collaboration/field_asset_store.h"
 #include "collaboration/managed_map_workspace.h"
 #include "collaboration/map_hub_api_client.h"
 #include "collaboration/map_hub_credentials.h"
@@ -662,6 +663,34 @@ void MapHubWorkspaceTest::hashesArtifactsExactly() {
       QStringLiteral(
           "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"));
   QVERIFY(error.isEmpty());
+}
+
+void MapHubWorkspaceTest::storesFieldAssetsByDigest() {
+  QTemporaryDir directory;
+  QVERIFY(directory.isValid());
+  FieldAssetStore store(directory.path());
+  const auto digest = QStringLiteral(
+      "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+  QCOMPARE(FieldAssetStore::sha256FromResourceIdentity(
+               FieldAssetStore::resourceIdentityFor(digest)),
+           digest);
+  QVERIFY(FieldAssetStore::resourceIdentityFor(QStringLiteral("bad")).isEmpty());
+
+  const auto staging = store.stagingPathFor(digest);
+  QVERIFY(!staging.isEmpty());
+  QFile file(staging);
+  QVERIFY(file.open(QIODevice::WriteOnly));
+  QCOMPARE(file.write("abc"), qint64(3));
+  file.close();
+  QString error;
+  QVERIFY2(store.promote(digest, QStringLiteral("../Morning: loop.GPX"),
+                         staging, &error),
+           qPrintable(error));
+  QVERIFY(store.has(digest));
+  const auto stored = store.pathFor(digest);
+  QVERIFY(QFileInfo::exists(stored));
+  QVERIFY(stored.endsWith(QStringLiteral("Morning loop.GPX")));
+  QCOMPARE(MapHubApiClient::sha256ForFile(stored), digest);
 }
 
 void MapHubWorkspaceTest::completesBrowserMediatedConnection() {
