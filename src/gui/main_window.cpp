@@ -1765,7 +1765,7 @@ void MainWindow::refreshMapHubFieldAssets()
 
 	client->listFieldAssets(
 		managed.project_id,
-		[this, client, stale, finish, integrate](
+		[client, stale, finish, integrate](
 			const QJsonObject& response,
 			const MapHubApiClient::Error& api_error) {
 			if (api_error || stale())
