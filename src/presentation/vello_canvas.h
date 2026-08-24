@@ -7,6 +7,7 @@
 #ifndef OPENORIENTEERING_VELLO_CANVAS_H
 #define OPENORIENTEERING_VELLO_CANVAS_H
 
+#include <chrono>
 #include <cstddef>
 #include <deque>
 #include <functional>
@@ -60,6 +61,7 @@ private:
 	bool forwardInputEvent(QEvent* event);
 	void submitCurrentFrame();
 	void pollResults();
+	void checkContentStaleness();
 
 	NativeSurfaceWindow* surface_ = nullptr;
 	QWidget* container_ = nullptr;
@@ -73,6 +75,10 @@ private:
 	QTimer retry_timer_;
 	std::deque<render::VelloFrameResult> results_;
 	std::optional<render::VelloFrameResult> last_result_;
+	render::Revision awaited_revision_ = 0;
+	render::Revision last_presented_revision_ = 0;
+	std::chrono::steady_clock::time_point awaited_since_;
+	bool stale_warning_issued_ = false;
 	bool forwarding_single_touch_ = false;
 	QPointF single_touch_position_;
 	QPointF single_touch_global_position_;

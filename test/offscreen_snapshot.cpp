@@ -52,22 +52,25 @@ int main(int argc, char** argv)
 	QApplication app(argc, argv);
 	Q_INIT_RESOURCE(resources);
 	doStaticInitializations();
-	if (app.arguments().size() < 2 || app.arguments().size() > 6)
+	auto arguments = app.arguments();
+	auto const simulate_overprinting =
+	    arguments.removeAll(QStringLiteral("--overprinting")) > 0;
+	if (arguments.size() < 2 || arguments.size() > 6)
 		return 2;
 
 	bool valid = true;
-	auto const iterations = app.arguments().value(2, QStringLiteral("60")).toInt(&valid);
+	auto const iterations = arguments.value(2, QStringLiteral("60")).toInt(&valid);
 	if (!valid || iterations < 2)
 		return 2;
-	auto const width = app.arguments().value(3, QStringLiteral("1024")).toInt(&valid);
+	auto const width = arguments.value(3, QStringLiteral("1024")).toInt(&valid);
 	if (!valid || width < 1 || width > 8192)
 		return 2;
-	auto const height = app.arguments().value(4, QStringLiteral("768")).toInt(&valid);
+	auto const height = arguments.value(4, QStringLiteral("768")).toInt(&valid);
 	if (!valid || height < 1 || height > 8192)
 		return 2;
 
 	Map map;
-	if (!map.loadFrom(app.arguments()[1]))
+	if (!map.loadFrom(arguments[1]))
 		return 3;
 	auto const snapshot = map.publishRenderSnapshot();
 	if (!snapshot)
@@ -95,7 +98,7 @@ int main(int argc, char** argv)
 			RenderConfig::Screen | RenderConfig::HelperSymbols,
 			1,
 		},
-		false,
+		simulate_overprinting,
 	});
 
 	render::VelloRenderer renderer;
@@ -112,8 +115,8 @@ int main(int argc, char** argv)
 		            rendered->rgba8.data() + std::size_t(y) * rendered->width * 4,
 		            std::size_t(rendered->width) * 4);
 	}
-	auto const out = app.arguments().size() == 6
-	               ? app.arguments()[5]
+	auto const out = arguments.size() == 6
+	               ? arguments[5]
 	               : QStringLiteral("offscreen_snapshot.png");
 	image.save(out);
 	std::cout << "{\"width\": " << rendered->width

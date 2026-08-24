@@ -202,7 +202,9 @@ const FRAME_SURFACE_LOST: u8 = 4;
 const FRAME_ERROR: u8 = 5;
 
 pub struct SceneBuilder {
+    scenes: Vec<Scene>,
     scene: Scene,
+    group_depth: usize,
     revision: u64,
     command_count: u64,
     transforms: Vec<Affine>,
@@ -210,7 +212,7 @@ pub struct SceneBuilder {
 }
 
 pub struct RetainedScene {
-    scene: Arc<Scene>,
+    scenes: Arc<Vec<Scene>>,
     revision: u64,
     command_count: u64,
 }
@@ -225,7 +227,7 @@ pub struct FrameBuilder {
 }
 
 struct FramePass {
-    scene: Arc<Scene>,
+    scenes: Arc<Vec<Scene>>,
     blend: u8,
     opacity: f32,
     isolated: bool,
@@ -350,11 +352,26 @@ impl SceneBuilder {
     fn viewport(&self) -> Rect {
         self.world_bounds
     }
+
+    /// Seals the current sub-scene once it reaches the bump-safe encoding
+    /// budget, so no retained scene forces an over-budget vello submission.
+    /// Splitting is only sound between top-level draws: an open clip or blend
+    /// group must stay within one sub-scene.
+    fn split_before_append(&mut self) {
+        if self.group_depth == 0
+            && u64::from(self.scene.encoding().n_path_segments) >= batch_segment_budget()
+        {
+            self.scenes
+                .push(std::mem::replace(&mut self.scene, Scene::new()));
+        }
+    }
 }
 
 fn begin_scene(revision: u64, world_bounds: ffi::Rect) -> Box<SceneBuilder> {
     Box::new(SceneBuilder {
+        scenes: Vec::new(),
         scene: Scene::new(),
+        group_depth: 0,
         revision,
         command_count: 0,
         transforms: vec![Affine::IDENTITY],
@@ -380,6 +397,8 @@ fn scene_pop_transform(scene: &mut SceneBuilder) {
 
 fn scene_push_clip(scene: &mut SceneBuilder, rule: u8, elements: &[ffi::PathElement]) {
     scene.command_count += 1;
+    scene.split_before_append();
+    scene.group_depth += 1;
     if let Some(path) = path(elements) {
         scene
             .scene
@@ -394,11 +413,14 @@ fn scene_push_clip(scene: &mut SceneBuilder, rule: u8, elements: &[ffi::PathElem
 
 fn scene_pop_clip(scene: &mut SceneBuilder) {
     scene.command_count += 1;
+    scene.group_depth = scene.group_depth.saturating_sub(1);
     scene.scene.pop_layer();
 }
 
 fn scene_push_layer(scene: &mut SceneBuilder, opacity: f64, blend: u8) {
     scene.command_count += 1;
+    scene.split_before_append();
+    scene.group_depth += 1;
     let clip = scene.viewport();
     scene.scene.push_layer(
         Fill::NonZero,
@@ -411,6 +433,7 @@ fn scene_push_layer(scene: &mut SceneBuilder, opacity: f64, blend: u8) {
 
 fn scene_pop_layer(scene: &mut SceneBuilder) {
     scene.command_count += 1;
+    scene.group_depth = scene.group_depth.saturating_sub(1);
     scene.scene.pop_layer();
 }
 
@@ -421,6 +444,7 @@ fn scene_fill_path(
     brush: ffi::Color,
 ) {
     scene.command_count += 1;
+    scene.split_before_append();
     if let Some(path) = path(elements) {
         scene.scene.fill(
             fill_rule(rule),
@@ -441,6 +465,7 @@ fn scene_stroke_path(
     dash_offset: f64,
 ) {
     scene.command_count += 1;
+    scene.split_before_append();
     let valid_dashes =
         dash_offset.is_finite() && dashes.iter().all(|value| value.is_finite() && *value > 0.0);
     if let (Some(path), Some(mut stroke)) = (path(elements), stroke(style))
@@ -456,6 +481,7 @@ fn scene_stroke_path(
 
 fn scene_fill_ellipse(scene: &mut SceneBuilder, bounds: ffi::Rect, brush: ffi::Color) {
     scene.command_count += 1;
+    scene.split_before_append();
     if let Some(bounds) = rect(bounds) {
         scene.scene.fill(
             Fill::NonZero,
@@ -474,6 +500,7 @@ fn scene_stroke_ellipse(
     style: ffi::Stroke,
 ) {
     scene.command_count += 1;
+    scene.split_before_append();
     if let (Some(bounds), Some(stroke)) = (rect(bounds), stroke(style)) {
         scene.scene.stroke(
             &stroke,
@@ -542,6 +569,7 @@ fn scene_draw_image(
     opacity: f64,
 ) -> bool {
     scene.command_count += 1;
+    scene.split_before_append();
     let Some(source) = rect(source) else {
         return false;
     };
@@ -591,6 +619,7 @@ fn scene_draw_line_pattern(
     style: ffi::LinePatternStyle,
 ) {
     scene.command_count += 1;
+    scene.split_before_append();
     let Some(path) = path(outline) else {
         return;
     };
@@ -654,8 +683,10 @@ fn scene_draw_line_pattern(
 }
 
 fn finish_scene(scene: Box<SceneBuilder>) -> Box<RetainedScene> {
+    let mut scenes = scene.scenes;
+    scenes.push(scene.scene);
     Box::new(RetainedScene {
-        scene: Arc::new(scene.scene),
+        scenes: Arc::new(scenes),
         revision: scene.revision,
         command_count: scene.command_count,
     })
@@ -691,7 +722,7 @@ fn frame_add_pass(
         return;
     }
     frame.passes.push(FramePass {
-        scene: Arc::clone(&scene.scene),
+        scenes: Arc::clone(&scene.scenes),
         blend,
         opacity: opacity.clamp(0.0, 1.0) as f32,
         isolated,
@@ -729,6 +760,7 @@ struct SurfaceTarget {
     renderer: VelloRenderer,
     blitter: TextureBlitter,
     blend_blitter: TextureBlitter,
+    compositor: GroupCompositor,
     config: wgpu::SurfaceConfiguration,
     render_texture: Option<RenderTexture>,
     platform: u8,
@@ -743,7 +775,265 @@ struct OffscreenTarget {
     renderer: VelloRenderer,
     blitter: TextureBlitter,
     blend_blitter: TextureBlitter,
+    compositor: GroupCompositor,
     resources: Option<OffscreenResources>,
+}
+
+const GROUP_COMPOSITE_SHADER: &str = "\
+@group(0) @binding(0) var content: texture_2d<f32>;
+@group(0) @binding(1) var<uniform> opacity: vec4<f32>;
+
+@vertex
+fn vs_main(@builtin(vertex_index) index: u32) -> @builtin(position) vec4<f32> {
+    let x = f32(i32(index & 1u) * 4 - 1);
+    let y = f32(i32(index >> 1u) * 4 - 1);
+    return vec4<f32>(x, y, 0.0, 1.0);
+}
+
+@fragment
+fn fs_main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
+    return textureLoad(content, vec2<i32>(position.xy), 0) * opacity.x;
+}
+";
+
+struct GroupTexture {
+    _texture: wgpu::Texture,
+    view: wgpu::TextureView,
+    bind_group: wgpu::BindGroup,
+    width: u32,
+    height: u32,
+}
+
+/// Applies a split pass's blend mode and opacity while compositing its
+/// accumulated intermediate texture onto the frame.
+///
+/// A pass recorded as a single sub-scene applies blend and opacity in a
+/// vello layer. Once recording splits a pass, that layer cannot span the
+/// resulting submissions, so the group's content accumulates source-over in
+/// an intermediate texture and this compositor applies the pass blend and
+/// opacity in the fixed-function blend units instead.
+///
+/// Source-over composites with premultiplied-alpha blending after the
+/// fragment shader scales the sample by the group opacity. Multiply follows
+/// the isolated-group formula `Co = Cs·Cb + Cs·(1−αb) + Cb·(1−αs)` in two
+/// fixed-function passes over the same source: the first contributes
+/// `Cs·Cb + Cb·(1−αs)` while leaving the backdrop alpha in place, and the
+/// second adds `Cs·(1−αb)` and resolves the union alpha
+/// `αs + αb − αs·αb`.
+struct GroupCompositor {
+    format: wgpu::TextureFormat,
+    layout: wgpu::BindGroupLayout,
+    source_over: wgpu::RenderPipeline,
+    multiply_backdrop: wgpu::RenderPipeline,
+    multiply_source: wgpu::RenderPipeline,
+    opacity: wgpu::Buffer,
+    target: Option<GroupTexture>,
+}
+
+impl GroupCompositor {
+    fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Mapper Vello group composite"),
+            source: wgpu::ShaderSource::Wgsl(GROUP_COMPOSITE_SHADER.into()),
+        });
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Mapper Vello group composite"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(16),
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Mapper Vello group composite"),
+            bind_group_layouts: &[Some(&layout)],
+            immediate_size: 0,
+        });
+        let pipeline = |label: &'static str, blend: wgpu::BlendState| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(label),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    buffers: &[],
+                },
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend: Some(blend),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        let source_over = pipeline(
+            "Mapper Vello group source-over",
+            wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING,
+        );
+        let backdrop_blend = wgpu::BlendComponent {
+            src_factor: wgpu::BlendFactor::Dst,
+            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+            operation: wgpu::BlendOperation::Add,
+        };
+        let multiply_backdrop = pipeline(
+            "Mapper Vello group multiply backdrop",
+            wgpu::BlendState {
+                color: backdrop_blend,
+                alpha: backdrop_blend,
+            },
+        );
+        let source_blend = wgpu::BlendComponent {
+            src_factor: wgpu::BlendFactor::OneMinusDstAlpha,
+            dst_factor: wgpu::BlendFactor::One,
+            operation: wgpu::BlendOperation::Add,
+        };
+        let multiply_source = pipeline(
+            "Mapper Vello group multiply source",
+            wgpu::BlendState {
+                color: source_blend,
+                alpha: source_blend,
+            },
+        );
+        let opacity = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Mapper Vello group opacity"),
+            size: 16,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        Self {
+            format,
+            layout,
+            source_over,
+            multiply_backdrop,
+            multiply_source,
+            opacity,
+            target: None,
+        }
+    }
+
+    fn target_view(&mut self, device: &wgpu::Device, width: u32, height: u32) -> wgpu::TextureView {
+        let recreate = self
+            .target
+            .as_ref()
+            .is_none_or(|target| target.width != width || target.height != height);
+        if recreate {
+            let texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("Mapper Vello group target"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: self.format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Mapper Vello group composite"),
+                layout: &self.layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: self.opacity.as_entire_binding(),
+                    },
+                ],
+            });
+            self.target = Some(GroupTexture {
+                _texture: texture,
+                view,
+                bind_group,
+                width,
+                height,
+            });
+        }
+        self.target
+            .as_ref()
+            .expect("group target exists")
+            .view
+            .clone()
+    }
+
+    fn composite(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        output: &wgpu::TextureView,
+        blend: u8,
+        opacity: f32,
+    ) {
+        let target = self.target.as_ref().expect("group target exists");
+        let mut opacity_data = [0u8; 16];
+        opacity_data[..4].copy_from_slice(&opacity.clamp(0.0, 1.0).to_le_bytes());
+        queue.write_buffer(&self.opacity, 0, &opacity_data);
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Mapper Vello group composite"),
+        });
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Mapper Vello group composite"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: output,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            let pipelines: &[&wgpu::RenderPipeline] = if blend == 1 {
+                &[&self.multiply_backdrop, &self.multiply_source]
+            } else {
+                &[&self.source_over]
+            };
+            for pipeline in pipelines {
+                pass.set_pipeline(pipeline);
+                pass.set_bind_group(0, &target.bind_group, &[]);
+                pass.draw(0..3, 0..1);
+            }
+        }
+        queue.submit(Some(encoder.finish()));
+    }
 }
 
 struct OffscreenResources {
@@ -947,9 +1237,13 @@ fn create_surface_target(
     )
     .map_err(|error| format!("Vello renderer creation failed: {error}"))?;
     let blitter = TextureBlitter::new(&device, config.format);
+    // vello's fine stage stores straight (unpremultiplied) alpha, so batch
+    // accumulation must blend with straight-alpha source factors; the result
+    // accumulates as premultiplied color.
     let blend_blitter = wgpu::util::TextureBlitterBuilder::new(&device, config.format)
-        .blend_state(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING)
+        .blend_state(wgpu::BlendState::ALPHA_BLENDING)
         .build();
+    let compositor = GroupCompositor::new(&device, config.format);
     Ok(SurfaceTarget {
         _instance: instance,
         surface,
@@ -958,6 +1252,7 @@ fn create_surface_target(
         renderer,
         blitter,
         blend_blitter,
+        compositor,
         config,
         render_texture: None,
         platform: state.platform,
@@ -987,10 +1282,12 @@ fn create_offscreen_target() -> Result<OffscreenTarget, String> {
     )
     .map_err(|error| format!("headless Vello renderer creation failed: {error}"))?;
     let blitter = TextureBlitter::new(&device, wgpu::TextureFormat::Rgba8Unorm);
+    // Straight-alpha source blending; see create_surface_target.
     let blend_blitter =
         wgpu::util::TextureBlitterBuilder::new(&device, wgpu::TextureFormat::Rgba8Unorm)
-            .blend_state(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING)
+            .blend_state(wgpu::BlendState::ALPHA_BLENDING)
             .build();
+    let compositor = GroupCompositor::new(&device, wgpu::TextureFormat::Rgba8Unorm);
     Ok(OffscreenTarget {
         _instance: instance,
         device,
@@ -998,6 +1295,7 @@ fn create_offscreen_target() -> Result<OffscreenTarget, String> {
         renderer,
         blitter,
         blend_blitter,
+        compositor,
         resources: None,
     })
 }
@@ -1093,15 +1391,70 @@ fn frame_result(frame: &FrameBuilder, status: u8) -> ffi::FrameResult {
 /// "hand picked to accommodate the vello test scenes" (vello_encoding
 /// config.rs). A whole-basemap frame overflows them, and the overflow is
 /// silent: the affected stages bail and the output stays blank while the
-/// render still reports success. Rendering the frame's passes in batches
-/// bounded by their encoded segment count keeps every single vello submission
-/// far below those capacities. Batches after the first render over a
-/// transparent base and are composited onto the target with premultiplied
-/// source-over blending, which is exactly how the passes would combine inside
-/// one scene.
+/// render still reports success. Recording splits every retained scene into
+/// sub-scenes below this encoded segment count, and rendering combines them
+/// into batches bounded by it, so no single vello submission approaches
+/// those capacities. Batches render over a transparent base and are
+/// composited onto the target with straight-alpha source-over blending
+/// (vello stores unpremultiplied output), which is exactly how the passes
+/// would combine inside one scene.
 const BATCH_ENCODED_SEGMENT_BUDGET: u64 = 250_000;
 
-fn compose_batches(frame: &FrameBuilder) -> Result<Vec<Scene>, &'static str> {
+/// The active budget: the compiled default, or the `MAPPER_VELLO_SEGMENT_BUDGET`
+/// environment override for diagnosing suspected bump overflows and for
+/// forcing the split machinery onto small scenes in tests.
+fn batch_segment_budget() -> u64 {
+    use std::sync::OnceLock;
+    static BUDGET: OnceLock<u64> = OnceLock::new();
+    *BUDGET.get_or_init(|| {
+        std::env::var("MAPPER_VELLO_SEGMENT_BUDGET")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(BATCH_ENCODED_SEGMENT_BUDGET)
+    })
+}
+
+/// One bump-safe unit of frame rendering.
+///
+/// A `Batch` is submitted to vello directly and composited onto the frame
+/// with source-over. A `Group` is one pass which must composite against the
+/// whole accumulated frame: every pass with a non-source-over blend mode
+/// (inside a batch it would only see that batch's content as its backdrop),
+/// and every pass whose recording was split across several sub-scenes while
+/// its opacity must apply to the content as a whole. The group's batches
+/// accumulate in an intermediate texture first, and the pass blend and
+/// opacity apply when that texture is composited onto the frame.
+enum RenderStep {
+    Batch(Scene),
+    Group {
+        batches: Vec<Scene>,
+        blend: u8,
+        opacity: f32,
+    },
+}
+
+/// A sealed sub-scene normally holds the budget plus at most one draw, so
+/// well beyond that only an indivisible unit remains: a single draw or an
+/// open clip/blend group which alone exceeds the budget. Such a scene still
+/// risks the silent bump overflow, so make it visible in diagnostics output.
+fn indivisible_segment_warn_threshold() -> u64 {
+    2 * batch_segment_budget()
+}
+
+fn warn_indivisible_scene(segments: u64) {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static MAX_WARNED: AtomicU64 = AtomicU64::new(0);
+    if segments > MAX_WARNED.fetch_max(segments, Ordering::Relaxed) {
+        eprintln!(
+            "Mapper Vello: an indivisible scene unit encodes {segments} path segments, \
+             above the bump-safe budget; \
+             its render may be silently incomplete"
+        );
+    }
+}
+
+fn compose_steps(frame: &FrameBuilder) -> Result<Vec<RenderStep>, &'static str> {
     finite_transform(frame.header.world_to_surface).ok_or("frame camera is not finite")?;
     let viewport = Rect::new(
         0.0,
@@ -1109,38 +1462,86 @@ fn compose_batches(frame: &FrameBuilder) -> Result<Vec<Scene>, &'static str> {
         f64::from(frame.header.width),
         f64::from(frame.header.height),
     );
-    let mut batches = Vec::new();
+    let mut steps = Vec::new();
     let mut scene = Scene::new();
     let mut batch_segments: u64 = 0;
-    let mut batch_passes: usize = 0;
+    let mut batch_appends: usize = 0;
     for pass in &frame.passes {
-        let pass_segments = u64::from(pass.scene.encoding().n_path_segments);
-        if batch_passes > 0 && batch_segments + pass_segments > BATCH_ENCODED_SEGMENT_BUDGET {
-            batches.push(std::mem::replace(&mut scene, Scene::new()));
-            batch_segments = 0;
-            batch_passes = 0;
+        // A non-source-over blend reads its backdrop, which must be the
+        // whole accumulated frame — inside a batch it would only see the
+        // content of that batch. Opacity applies to the pass content as a
+        // whole, so it stays inline only while the content is one scene.
+        let composited = pass.blend != 0 || (pass.opacity < 1.0 && pass.scenes.len() > 1);
+        if composited {
+            if batch_appends > 0 {
+                steps.push(RenderStep::Batch(std::mem::replace(&mut scene, Scene::new())));
+                batch_segments = 0;
+                batch_appends = 0;
+            }
+            let mut batches = Vec::new();
+            let mut group_scene = Scene::new();
+            let mut group_segments: u64 = 0;
+            let mut group_appends: usize = 0;
+            for sub_scene in pass.scenes.iter() {
+                let segments = u64::from(sub_scene.encoding().n_path_segments);
+                if segments > indivisible_segment_warn_threshold() {
+                    warn_indivisible_scene(segments);
+                }
+                if group_appends > 0
+                    && group_segments + segments > batch_segment_budget()
+                {
+                    batches.push(std::mem::replace(&mut group_scene, Scene::new()));
+                    group_segments = 0;
+                    group_appends = 0;
+                }
+                group_scene.append(sub_scene, Some(pass.transform));
+                group_segments += segments;
+                group_appends += 1;
+            }
+            if group_appends > 0 || batches.is_empty() {
+                batches.push(group_scene);
+            }
+            steps.push(RenderStep::Group {
+                batches,
+                blend: pass.blend,
+                opacity: pass.opacity,
+            });
+            continue;
         }
-        let grouped = pass.isolated || pass.blend != 0 || pass.opacity < 1.0;
-        if grouped {
-            scene.push_layer(
-                Fill::NonZero,
-                blend_mode(pass.blend),
-                pass.opacity,
-                Affine::IDENTITY,
-                &viewport,
-            );
+        // Isolation without blend or opacity composites as plain source-over,
+        // so sub-scenes of such a pass may flatten into shared batches.
+        let wrap = pass.isolated || pass.opacity < 1.0;
+        for sub_scene in pass.scenes.iter() {
+            let segments = u64::from(sub_scene.encoding().n_path_segments);
+            if segments > indivisible_segment_warn_threshold() {
+                warn_indivisible_scene(segments);
+            }
+            if batch_appends > 0 && batch_segments + segments > batch_segment_budget() {
+                steps.push(RenderStep::Batch(std::mem::replace(&mut scene, Scene::new())));
+                batch_segments = 0;
+                batch_appends = 0;
+            }
+            if wrap {
+                scene.push_layer(
+                    Fill::NonZero,
+                    blend_mode(pass.blend),
+                    pass.opacity,
+                    Affine::IDENTITY,
+                    &viewport,
+                );
+            }
+            scene.append(sub_scene, Some(pass.transform));
+            if wrap {
+                scene.pop_layer();
+            }
+            batch_segments += segments;
+            batch_appends += 1;
         }
-        scene.append(&pass.scene, Some(pass.transform));
-        if grouped {
-            scene.pop_layer();
-        }
-        batch_segments += pass_segments;
-        batch_passes += 1;
     }
-    if batch_passes > 0 || batches.is_empty() {
-        batches.push(scene);
+    if batch_appends > 0 || steps.is_empty() {
+        steps.push(RenderStep::Batch(scene));
     }
-    Ok(batches)
+    Ok(steps)
 }
 
 fn acquire_surface_texture(target: &mut SurfaceTarget) -> Result<wgpu::SurfaceTexture, u8> {
@@ -1160,6 +1561,153 @@ fn acquire_surface_texture(target: &mut SurfaceTarget) -> Result<wgpu::SurfaceTe
     }
 }
 
+fn clear_color(value: ffi::Color) -> wgpu::Color {
+    wgpu::Color {
+        r: f64::from(value.red) / 65535.0,
+        g: f64::from(value.green) / 65535.0,
+        b: f64::from(value.blue) / 65535.0,
+        a: f64::from(value.alpha) / 65535.0,
+    }
+}
+
+struct StepContext<'a> {
+    device: &'a wgpu::Device,
+    queue: &'a wgpu::Queue,
+    renderer: &'a mut VelloRenderer,
+    blitter: &'a TextureBlitter,
+    blend_blitter: &'a TextureBlitter,
+    compositor: &'a mut GroupCompositor,
+    render_view: &'a wgpu::TextureView,
+    output_view: &'a wgpu::TextureView,
+    width: u32,
+    height: u32,
+}
+
+fn render_steps(
+    ctx: &mut StepContext,
+    background: ffi::Color,
+    steps: &[RenderStep],
+) -> Result<(), vello::Error> {
+    // A leading plain batch lays down the frame background as its vello base
+    // color, compositing its content at full precision as one submission.
+    // Otherwise — the first step is a blended group — the background is
+    // cleared first so the group composites onto initialized frame pixels.
+    let first_batch_carries_background = matches!(steps.first(), Some(RenderStep::Batch(_)));
+    if !first_batch_carries_background {
+        let mut encoder = ctx
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Mapper Vello background"),
+            });
+        encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("Mapper Vello background"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: ctx.output_view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(clear_color(background)),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        ctx.queue.submit(Some(encoder.finish()));
+    }
+
+    let params = RenderParams {
+        base_color: Color::TRANSPARENT,
+        width: ctx.width,
+        height: ctx.height,
+        antialiasing_method: AaConfig::Area,
+    };
+    for (index, step) in steps.iter().enumerate() {
+        match step {
+            RenderStep::Batch(scene) => {
+                let carries_background = index == 0 && first_batch_carries_background;
+                let batch_params = RenderParams {
+                    base_color: if carries_background {
+                        color(background, 1.0)
+                    } else {
+                        Color::TRANSPARENT
+                    },
+                    ..params
+                };
+                ctx.renderer.render_to_texture(
+                    ctx.device,
+                    ctx.queue,
+                    scene,
+                    ctx.render_view,
+                    &batch_params,
+                )?;
+                let mut encoder =
+                    ctx.device
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("Mapper Vello batch composite"),
+                        });
+                let blitter = if carries_background {
+                    ctx.blitter
+                } else {
+                    ctx.blend_blitter
+                };
+                blitter.copy(ctx.device, &mut encoder, ctx.render_view, ctx.output_view);
+                ctx.queue.submit(Some(encoder.finish()));
+            }
+            RenderStep::Group {
+                batches,
+                blend,
+                opacity,
+            } => {
+                // The group texture accumulates the pass content as
+                // premultiplied color over transparent: each batch's
+                // straight-alpha vello output blends in with straight-alpha
+                // source factors.
+                let group_view = ctx.compositor.target_view(ctx.device, ctx.width, ctx.height);
+                let mut encoder =
+                    ctx.device
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("Mapper Vello group clear"),
+                        });
+                encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("Mapper Vello group clear"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &group_view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                ctx.queue.submit(Some(encoder.finish()));
+                for scene in batches {
+                    ctx.renderer
+                        .render_to_texture(ctx.device, ctx.queue, scene, ctx.render_view, &params)?;
+                    let mut encoder =
+                        ctx.device
+                            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                                label: Some("Mapper Vello group accumulate"),
+                            });
+                    ctx.blend_blitter
+                        .copy(ctx.device, &mut encoder, ctx.render_view, &group_view);
+                    ctx.queue.submit(Some(encoder.finish()));
+                }
+                ctx.compositor
+                    .composite(ctx.device, ctx.queue, ctx.output_view, *blend, *opacity);
+            }
+        }
+    }
+    Ok(())
+}
+
 fn render_frame(target: &mut SurfaceTarget, frame: &FrameBuilder) -> Result<(), u8> {
     let width = frame.header.width.max(1);
     let height = frame.header.height.max(1);
@@ -1168,42 +1716,21 @@ fn render_frame(target: &mut SurfaceTarget, frame: &FrameBuilder) -> Result<(), 
     let output_view = output
         .texture
         .create_view(&wgpu::TextureViewDescriptor::default());
-    let batches = compose_batches(frame).map_err(|_| FRAME_ERROR)?;
+    let steps = compose_steps(frame).map_err(|_| FRAME_ERROR)?;
     let render_view = target.render_texture(width, height).clone();
-    for (index, scene) in batches.iter().enumerate() {
-        let base_color = if index == 0 {
-            color(frame.header.background, 1.0)
-        } else {
-            Color::TRANSPARENT
-        };
-        target
-            .renderer
-            .render_to_texture(
-                &target.device,
-                &target.queue,
-                scene,
-                &render_view,
-                &RenderParams {
-                    base_color,
-                    width,
-                    height,
-                    antialiasing_method: AaConfig::Area,
-                },
-            )
-            .map_err(|_| FRAME_ERROR)?;
-        let mut encoder = target
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Mapper Vello present"),
-            });
-        let blitter = if index == 0 {
-            &target.blitter
-        } else {
-            &target.blend_blitter
-        };
-        blitter.copy(&target.device, &mut encoder, &render_view, &output_view);
-        target.queue.submit(Some(encoder.finish()));
-    }
+    let mut ctx = StepContext {
+        device: &target.device,
+        queue: &target.queue,
+        renderer: &mut target.renderer,
+        blitter: &target.blitter,
+        blend_blitter: &target.blend_blitter,
+        compositor: &mut target.compositor,
+        render_view: &render_view,
+        output_view: &output_view,
+        width,
+        height,
+    };
+    render_steps(&mut ctx, frame.header.background, &steps).map_err(|_| FRAME_ERROR)?;
     output.present();
     Ok(())
 }
@@ -1211,7 +1738,7 @@ fn render_frame(target: &mut SurfaceTarget, frame: &FrameBuilder) -> Result<(), 
 fn render_offscreen(target: &mut OffscreenTarget, frame: &FrameBuilder) -> Result<Vec<u8>, String> {
     let width = frame.header.width.max(1);
     let height = frame.header.height.max(1);
-    let batches = compose_batches(frame).map_err(str::to_owned)?;
+    let steps = compose_steps(frame).map_err(str::to_owned)?;
     let recreate = target
         .resources
         .as_ref()
@@ -1273,49 +1800,31 @@ fn render_offscreen(target: &mut OffscreenTarget, frame: &FrameBuilder) -> Resul
             padded_bytes_per_row,
         });
     }
+    let (render_view, output_view) = {
+        let resources = target
+            .resources
+            .as_ref()
+            .expect("offscreen resources exist");
+        (resources.render_view.clone(), resources.view.clone())
+    };
+    let mut ctx = StepContext {
+        device: &target.device,
+        queue: &target.queue,
+        renderer: &mut target.renderer,
+        blitter: &target.blitter,
+        blend_blitter: &target.blend_blitter,
+        compositor: &mut target.compositor,
+        render_view: &render_view,
+        output_view: &output_view,
+        width,
+        height,
+    };
+    render_steps(&mut ctx, frame.header.background, &steps)
+        .map_err(|error| format!("Vello offscreen render failed: {error}"))?;
     let resources = target
         .resources
         .as_ref()
         .expect("offscreen resources exist");
-    for (index, scene) in batches.iter().enumerate() {
-        let base_color = if index == 0 {
-            color(frame.header.background, 1.0)
-        } else {
-            Color::TRANSPARENT
-        };
-        target
-            .renderer
-            .render_to_texture(
-                &target.device,
-                &target.queue,
-                scene,
-                &resources.render_view,
-                &RenderParams {
-                    base_color,
-                    width,
-                    height,
-                    antialiasing_method: AaConfig::Area,
-                },
-            )
-            .map_err(|error| format!("Vello offscreen render failed: {error}"))?;
-        let mut encoder = target
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Mapper Vello offscreen composite"),
-            });
-        let blitter = if index == 0 {
-            &target.blitter
-        } else {
-            &target.blend_blitter
-        };
-        blitter.copy(
-            &target.device,
-            &mut encoder,
-            &resources.render_view,
-            &resources.view,
-        );
-        target.queue.submit(Some(encoder.finish()));
-    }
     let mut encoder = target
         .device
         .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -1772,6 +2281,154 @@ mod tests {
             height: 1,
             ..ffi::FrameHeader::default()
         })
+    }
+
+    fn zigzag_path(lines: usize) -> Vec<ffi::PathElement> {
+        let mut elements = vec![ffi::PathElement {
+            verb: 0,
+            ..ffi::PathElement::default()
+        }];
+        for index in 0..lines {
+            elements.push(ffi::PathElement {
+                verb: 1,
+                x1: index as f64,
+                y1: (index % 2) as f64,
+                ..ffi::PathElement::default()
+            });
+        }
+        elements
+    }
+
+    /// Records `fills` fill commands of `lines_each` segments at the top
+    /// level of a fresh scene and returns the retained result.
+    fn recorded_fills(fills: usize, lines_each: usize) -> Box<RetainedScene> {
+        let mut builder = begin_scene(1, ffi::Rect::default());
+        let path = zigzag_path(lines_each);
+        for _ in 0..fills {
+            scene_fill_path(&mut builder, 1, &path, ffi::Color::default());
+        }
+        finish_scene(builder)
+    }
+
+    #[test]
+    fn recording_splits_over_budget_scenes_at_top_level() {
+        let budget = usize::try_from(BATCH_ENCODED_SEGMENT_BUDGET).unwrap();
+        let lines_each = 10_000;
+        let fills = 2 * budget / lines_each + 2;
+        let retained = recorded_fills(fills, lines_each);
+        assert!(retained.scenes.len() >= 2, "{} sub-scenes", retained.scenes.len());
+        assert_eq!(retained.command_count, fills as u64);
+        for sub_scene in retained.scenes.iter() {
+            let segments = u64::from(sub_scene.encoding().n_path_segments);
+            assert!(
+                segments <= BATCH_ENCODED_SEGMENT_BUDGET + 2 * lines_each as u64,
+                "sub-scene encodes {segments} segments"
+            );
+        }
+    }
+
+    #[test]
+    fn recording_never_splits_inside_clip_groups() {
+        let budget = usize::try_from(BATCH_ENCODED_SEGMENT_BUDGET).unwrap();
+        let lines_each = 10_000;
+        let fills = budget / lines_each + 2;
+        let mut builder = begin_scene(1, ffi::Rect::default());
+        let path = zigzag_path(lines_each);
+        scene_push_clip(&mut builder, 1, &path);
+        for _ in 0..fills {
+            scene_fill_path(&mut builder, 1, &path, ffi::Color::default());
+        }
+        scene_pop_clip(&mut builder);
+        let retained = finish_scene(builder);
+        assert_eq!(retained.scenes.len(), 1);
+    }
+
+    #[test]
+    fn split_blended_pass_becomes_a_composited_group() {
+        let budget = usize::try_from(BATCH_ENCODED_SEGMENT_BUDGET).unwrap();
+        let lines_each = 10_000;
+        let fills = 2 * budget / lines_each + 2;
+        let split = recorded_fills(fills, lines_each);
+        assert!(split.scenes.len() >= 2);
+        let small = recorded_fills(1, 8);
+
+        let mut builder = frame(1);
+        frame_add_pass(
+            &mut builder,
+            &small,
+            0,
+            1.0,
+            false,
+            ffi::Transform {
+                m11: 1.0,
+                m22: 1.0,
+                ..ffi::Transform::default()
+            },
+        );
+        frame_add_pass(
+            &mut builder,
+            &split,
+            1,
+            1.0,
+            true,
+            ffi::Transform {
+                m11: 1.0,
+                m22: 1.0,
+                ..ffi::Transform::default()
+            },
+        );
+        let steps = compose_steps(&builder).unwrap();
+        assert_eq!(steps.len(), 2);
+        assert!(matches!(steps[0], RenderStep::Batch(_)));
+        match &steps[1] {
+            RenderStep::Group {
+                batches,
+                blend,
+                opacity,
+            } => {
+                assert_eq!(batches.len(), split.scenes.len());
+                assert_eq!(*blend, 1);
+                assert_eq!(*opacity, 1.0);
+            }
+            RenderStep::Batch(_) => panic!("split blended pass was not grouped"),
+        }
+    }
+
+    #[test]
+    fn split_plain_pass_flattens_into_bounded_batches() {
+        let budget = usize::try_from(BATCH_ENCODED_SEGMENT_BUDGET).unwrap();
+        let lines_each = 10_000;
+        let fills = 2 * budget / lines_each + 2;
+        let split = recorded_fills(fills, lines_each);
+        assert!(split.scenes.len() >= 2);
+
+        let mut builder = frame(1);
+        frame_add_pass(
+            &mut builder,
+            &split,
+            0,
+            1.0,
+            false,
+            ffi::Transform {
+                m11: 1.0,
+                m22: 1.0,
+                ..ffi::Transform::default()
+            },
+        );
+        let steps = compose_steps(&builder).unwrap();
+        assert_eq!(steps.len(), split.scenes.len());
+        for step in &steps {
+            match step {
+                RenderStep::Batch(scene) => {
+                    let segments = u64::from(scene.encoding().n_path_segments);
+                    assert!(
+                        segments <= BATCH_ENCODED_SEGMENT_BUDGET + 2 * lines_each as u64,
+                        "batch encodes {segments} segments"
+                    );
+                }
+                RenderStep::Group { .. } => panic!("plain pass must not need compositing"),
+            }
+        }
     }
 
     #[test]

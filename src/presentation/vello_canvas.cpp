@@ -6,6 +6,8 @@
 
 #include "presentation/vello_canvas.h"
 
+#include <algorithm>
+#include <chrono>
 #include <utility>
 
 #include <QtGlobal>
@@ -89,6 +91,9 @@ void VelloCanvas::setFrame(render::FramePacketPtr frame, render::Color backgroun
 	frame_ = std::move(frame);
 	content_frame_ = frame_;
 	background_ = background;
+	awaited_revision_ = frame_ ? frame_->revision : 0;
+	awaited_since_ = std::chrono::steady_clock::now();
+	stale_warning_issued_ = false;
 	submitCurrentFrame();
 }
 
@@ -365,6 +370,7 @@ void VelloCanvas::submitCurrentFrame()
 
 void VelloCanvas::pollResults()
 {
+	checkContentStaleness();
 	while (auto result = renderer_->takeResult())
 	{
 		last_result_ = *result;
@@ -373,6 +379,8 @@ void VelloCanvas::pollResults()
 		results_.push_back(*result);
 		if (result->completion.status == render::FrameStatus::Failed)
 			qFatal("Vello frame failed: %s", renderer_->lastError().c_str());
+		if (result->completion.status == render::FrameStatus::Presented)
+			last_presented_revision_ = std::max(last_presented_revision_, result->revision);
 		if (!frame_ || result->completion.frame_id < frame_->id)
 			continue;
 		switch (result->completion.status)
@@ -398,6 +406,35 @@ void VelloCanvas::pollResults()
 			break;
 		}
 	}
+}
+
+void VelloCanvas::checkContentStaleness()
+{
+	// A camera frame legitimately re-presents the previous content generation
+	// while a newer one is still encoding, so staleness is only reported when
+	// the newest submitted content has not been presented for several seconds
+	// of active polling. Revision comparison is monotonic per document; after
+	// a reload resets revisions the check merely stays silent until they
+	// catch up again.
+	if (stale_warning_issued_
+	    || awaited_revision_ == 0
+	    || last_presented_revision_ >= awaited_revision_)
+	{
+		return;
+	}
+	auto const elapsed = std::chrono::steady_clock::now() - awaited_since_;
+	if (elapsed < std::chrono::seconds(3))
+		return;
+	stale_warning_issued_ = true;
+	auto const error = renderer_->lastError();
+	qWarning("VelloCanvas: content revision %llu was submitted %lld ms ago but the newest "
+	         "presented revision is still %llu; the canvas may be showing stale content%s%s",
+	         static_cast<unsigned long long>(awaited_revision_),
+	         static_cast<long long>(
+	             std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count()),
+	         static_cast<unsigned long long>(last_presented_revision_),
+	         error.empty() ? "" : "; last renderer error: ",
+	         error.c_str());
 }
 
 }  // namespace OpenOrienteering::presentation
