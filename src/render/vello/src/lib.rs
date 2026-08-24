@@ -728,6 +728,7 @@ struct SurfaceTarget {
     queue: wgpu::Queue,
     renderer: VelloRenderer,
     blitter: TextureBlitter,
+    blend_blitter: TextureBlitter,
     config: wgpu::SurfaceConfiguration,
     render_texture: Option<RenderTexture>,
     platform: u8,
@@ -740,12 +741,16 @@ struct OffscreenTarget {
     device: wgpu::Device,
     queue: wgpu::Queue,
     renderer: VelloRenderer,
+    blitter: TextureBlitter,
+    blend_blitter: TextureBlitter,
     resources: Option<OffscreenResources>,
 }
 
 struct OffscreenResources {
     texture: wgpu::Texture,
     view: wgpu::TextureView,
+    _render_texture: wgpu::Texture,
+    render_view: wgpu::TextureView,
     buffer: wgpu::Buffer,
     width: u32,
     height: u32,
@@ -942,6 +947,9 @@ fn create_surface_target(
     )
     .map_err(|error| format!("Vello renderer creation failed: {error}"))?;
     let blitter = TextureBlitter::new(&device, config.format);
+    let blend_blitter = wgpu::util::TextureBlitterBuilder::new(&device, config.format)
+        .blend_state(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING)
+        .build();
     Ok(SurfaceTarget {
         _instance: instance,
         surface,
@@ -949,6 +957,7 @@ fn create_surface_target(
         queue,
         renderer,
         blitter,
+        blend_blitter,
         config,
         render_texture: None,
         platform: state.platform,
@@ -977,11 +986,18 @@ fn create_offscreen_target() -> Result<OffscreenTarget, String> {
         },
     )
     .map_err(|error| format!("headless Vello renderer creation failed: {error}"))?;
+    let blitter = TextureBlitter::new(&device, wgpu::TextureFormat::Rgba8Unorm);
+    let blend_blitter =
+        wgpu::util::TextureBlitterBuilder::new(&device, wgpu::TextureFormat::Rgba8Unorm)
+            .blend_state(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING)
+            .build();
     Ok(OffscreenTarget {
         _instance: instance,
         device,
         queue,
         renderer,
+        blitter,
+        blend_blitter,
         resources: None,
     })
 }
@@ -1073,7 +1089,19 @@ fn frame_result(frame: &FrameBuilder, status: u8) -> ffi::FrameResult {
     }
 }
 
-fn compose_frame(frame: &FrameBuilder) -> Result<Scene, &'static str> {
+/// vello 0.9 sizes several GPU bump buffers with fixed capacities that were
+/// "hand picked to accommodate the vello test scenes" (vello_encoding
+/// config.rs). A whole-basemap frame overflows them, and the overflow is
+/// silent: the affected stages bail and the output stays blank while the
+/// render still reports success. Rendering the frame's passes in batches
+/// bounded by their encoded segment count keeps every single vello submission
+/// far below those capacities. Batches after the first render over a
+/// transparent base and are composited onto the target with premultiplied
+/// source-over blending, which is exactly how the passes would combine inside
+/// one scene.
+const BATCH_ENCODED_SEGMENT_BUDGET: u64 = 250_000;
+
+fn compose_batches(frame: &FrameBuilder) -> Result<Vec<Scene>, &'static str> {
     finite_transform(frame.header.world_to_surface).ok_or("frame camera is not finite")?;
     let viewport = Rect::new(
         0.0,
@@ -1081,8 +1109,17 @@ fn compose_frame(frame: &FrameBuilder) -> Result<Scene, &'static str> {
         f64::from(frame.header.width),
         f64::from(frame.header.height),
     );
+    let mut batches = Vec::new();
     let mut scene = Scene::new();
+    let mut batch_segments: u64 = 0;
+    let mut batch_passes: usize = 0;
     for pass in &frame.passes {
+        let pass_segments = u64::from(pass.scene.encoding().n_path_segments);
+        if batch_passes > 0 && batch_segments + pass_segments > BATCH_ENCODED_SEGMENT_BUDGET {
+            batches.push(std::mem::replace(&mut scene, Scene::new()));
+            batch_segments = 0;
+            batch_passes = 0;
+        }
         let grouped = pass.isolated || pass.blend != 0 || pass.opacity < 1.0;
         if grouped {
             scene.push_layer(
@@ -1097,8 +1134,13 @@ fn compose_frame(frame: &FrameBuilder) -> Result<Scene, &'static str> {
         if grouped {
             scene.pop_layer();
         }
+        batch_segments += pass_segments;
+        batch_passes += 1;
     }
-    Ok(scene)
+    if batch_passes > 0 || batches.is_empty() {
+        batches.push(scene);
+    }
+    Ok(batches)
 }
 
 fn acquire_surface_texture(target: &mut SurfaceTarget) -> Result<wgpu::SurfaceTexture, u8> {
@@ -1126,32 +1168,42 @@ fn render_frame(target: &mut SurfaceTarget, frame: &FrameBuilder) -> Result<(), 
     let output_view = output
         .texture
         .create_view(&wgpu::TextureViewDescriptor::default());
-    let scene = compose_frame(frame).map_err(|_| FRAME_ERROR)?;
+    let batches = compose_batches(frame).map_err(|_| FRAME_ERROR)?;
     let render_view = target.render_texture(width, height).clone();
-    target
-        .renderer
-        .render_to_texture(
-            &target.device,
-            &target.queue,
-            &scene,
-            &render_view,
-            &RenderParams {
-                base_color: color(frame.header.background, 1.0),
-                width,
-                height,
-                antialiasing_method: AaConfig::Area,
-            },
-        )
-        .map_err(|_| FRAME_ERROR)?;
-    let mut encoder = target
-        .device
-        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Mapper Vello present"),
-        });
-    target
-        .blitter
-        .copy(&target.device, &mut encoder, &render_view, &output_view);
-    target.queue.submit(Some(encoder.finish()));
+    for (index, scene) in batches.iter().enumerate() {
+        let base_color = if index == 0 {
+            color(frame.header.background, 1.0)
+        } else {
+            Color::TRANSPARENT
+        };
+        target
+            .renderer
+            .render_to_texture(
+                &target.device,
+                &target.queue,
+                scene,
+                &render_view,
+                &RenderParams {
+                    base_color,
+                    width,
+                    height,
+                    antialiasing_method: AaConfig::Area,
+                },
+            )
+            .map_err(|_| FRAME_ERROR)?;
+        let mut encoder = target
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Mapper Vello present"),
+            });
+        let blitter = if index == 0 {
+            &target.blitter
+        } else {
+            &target.blend_blitter
+        };
+        blitter.copy(&target.device, &mut encoder, &render_view, &output_view);
+        target.queue.submit(Some(encoder.finish()));
+    }
     output.present();
     Ok(())
 }
@@ -1159,7 +1211,7 @@ fn render_frame(target: &mut SurfaceTarget, frame: &FrameBuilder) -> Result<(), 
 fn render_offscreen(target: &mut OffscreenTarget, frame: &FrameBuilder) -> Result<Vec<u8>, String> {
     let width = frame.header.width.max(1);
     let height = frame.header.height.max(1);
-    let scene = compose_frame(frame).map_err(str::to_owned)?;
+    let batches = compose_batches(frame).map_err(str::to_owned)?;
     let recreate = target
         .resources
         .as_ref()
@@ -1184,10 +1236,25 @@ fn render_offscreen(target: &mut OffscreenTarget, frame: &FrameBuilder) -> Resul
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let render_texture = target.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Mapper Vello offscreen frame target"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let render_view = render_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let buffer = target.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Mapper Vello offscreen readback"),
             size: buffer_size,
@@ -1197,6 +1264,8 @@ fn render_offscreen(target: &mut OffscreenTarget, frame: &FrameBuilder) -> Resul
         target.resources = Some(OffscreenResources {
             texture,
             view,
+            _render_texture: render_texture,
+            render_view,
             buffer,
             width,
             height,
@@ -1208,21 +1277,45 @@ fn render_offscreen(target: &mut OffscreenTarget, frame: &FrameBuilder) -> Resul
         .resources
         .as_ref()
         .expect("offscreen resources exist");
-    target
-        .renderer
-        .render_to_texture(
+    for (index, scene) in batches.iter().enumerate() {
+        let base_color = if index == 0 {
+            color(frame.header.background, 1.0)
+        } else {
+            Color::TRANSPARENT
+        };
+        target
+            .renderer
+            .render_to_texture(
+                &target.device,
+                &target.queue,
+                scene,
+                &resources.render_view,
+                &RenderParams {
+                    base_color,
+                    width,
+                    height,
+                    antialiasing_method: AaConfig::Area,
+                },
+            )
+            .map_err(|error| format!("Vello offscreen render failed: {error}"))?;
+        let mut encoder = target
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Mapper Vello offscreen composite"),
+            });
+        let blitter = if index == 0 {
+            &target.blitter
+        } else {
+            &target.blend_blitter
+        };
+        blitter.copy(
             &target.device,
-            &target.queue,
-            &scene,
+            &mut encoder,
+            &resources.render_view,
             &resources.view,
-            &RenderParams {
-                base_color: color(frame.header.background, 1.0),
-                width,
-                height,
-                antialiasing_method: AaConfig::Area,
-            },
-        )
-        .map_err(|error| format!("Vello offscreen render failed: {error}"))?;
+        );
+        target.queue.submit(Some(encoder.finish()));
+    }
     let mut encoder = target
         .device
         .create_command_encoder(&wgpu::CommandEncoderDescriptor {

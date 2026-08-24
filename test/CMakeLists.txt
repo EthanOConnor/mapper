@@ -351,3 +351,13 @@ if(IOF_3_XSD_FILE)
 		COMMAND "${XMLLINT}" --schema "${IOF_3_XSD_FILE}" "${CMAKE_CURRENT_SOURCE_DIR}/data/export/iof-3.0-course.xml"
 	)
 endif()
+
+add_executable(map_widget_probe EXCLUDE_FROM_ALL map_widget_probe.cpp)
+mapper_target_defaults(map_widget_probe)
+target_link_libraries(map_widget_probe PRIVATE Mapper_Common Qt6::Test Qt6::Widgets)
+
+add_executable(offscreen_snapshot EXCLUDE_FROM_ALL offscreen_snapshot.cpp)
+mapper_target_defaults(offscreen_snapshot)
+target_link_libraries(offscreen_snapshot PRIVATE
+	Mapper_Common Mapper::VelloBackend Qt6::Widgets
+)
