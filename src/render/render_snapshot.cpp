@@ -55,13 +55,15 @@ MapRenderSnapshot::MapRenderSnapshot(Revision revision,
 	                                 std::map<int, SnapshotColor> colors,
 	                                 std::vector<SnapshotObjectBlockPtr> object_blocks,
 	                                 std::map<int, SnapshotObjectIds> color_objects,
-	                                 std::size_t object_count)
+	                                 std::size_t object_count,
+	                                 std::vector<Revision> block_revisions)
  : revision_(revision)
  , identity_(nextSnapshotIdentity())
  , colors_(std::move(colors))
  , object_blocks_(std::move(object_blocks))
  , color_objects_(std::move(color_objects))
  , object_count_(object_count)
+ , block_revisions_(std::move(block_revisions))
 {
 	// All collections are immutable and structurally shared with adjacent revisions.
 }
@@ -102,10 +104,39 @@ const SnapshotObject* MapRenderSnapshot::object(ObjectId id) const noexcept
 	return object_blocks_[block_index]->objects[index % snapshot_object_block_size].get();
 }
 
+const std::map<int, SnapshotObjectIds>& MapRenderSnapshot::colorObjects() const noexcept
+{
+	return color_objects_;
+}
+
+Revision MapRenderSnapshot::blockRevision(std::size_t block_index) const noexcept
+{
+	return block_index < block_revisions_.size() ? block_revisions_[block_index] : 0;
+}
+
 const SnapshotColor* MapRenderSnapshot::color(int priority) const
 {
 	auto const found = colors_.find(priority);
 	return found == colors_.end() ? nullptr : &found->second;
+}
+
+std::optional<Color> MapRenderSnapshot::drawColor(int priority, RenderConfig::Options options) const
+{
+	auto const* map_color = color(priority);
+	if (!map_color || priority == MapColor::Reserved)
+		return {};
+	if (options.testFlag(RenderConfig::RequireSpotColor)
+	    && (priority < 0 || map_color->spot_method == SpotMethod::Undefined))
+	{
+		return {};
+	}
+
+	auto draw_color = map_color->color;
+	if (priority >= 0 && map_color->opacity < 1)
+		draw_color = draw_color.withAlpha(map_color->opacity);
+	if (options.testFlag(RenderConfig::Highlighted))
+		draw_color = highlighted(draw_color);
+	return draw_color;
 }
 
 bool MapRenderSnapshot::appendObjectColor(RenderIRBuilder& builder,
@@ -156,6 +187,26 @@ bool MapRenderSnapshot::appendObjectColor(RenderIRBuilder& builder,
 	return emitted;
 }
 
+void MapRenderSnapshot::appendSpan(RenderIRBuilder& builder,
+	                               int priority,
+	                               Color draw_color,
+	                               std::span<const ObjectId> ids,
+	                               const RenderRequest& request) const
+{
+	for (auto object_id : ids)
+	{
+		auto const* object_ptr = object(object_id);
+		if (!object_ptr)
+			continue;
+		auto const& object = *object_ptr;
+		if (!request.options.testFlag(RenderConfig::HelperSymbols) && object.helper_symbol)
+			continue;
+		if (object.hidden_symbol || !object.extent.intersects(request.bounding_box))
+			continue;
+		appendObjectColor(builder, object, priority, draw_color, request);
+	}
+}
+
 std::shared_ptr<const RenderIR> MapRenderSnapshot::buildIR(const RenderRequest& request) const
 {
 	RenderIRBuilder builder(revision_, request.bounding_box);
@@ -165,39 +216,27 @@ std::shared_ptr<const RenderIR> MapRenderSnapshot::buildIR(const RenderRequest& 
 	for (auto color_bucket = color_objects_.rbegin(); color_bucket != color_objects_.rend(); ++color_bucket)
 	{
 		auto const priority = color_bucket->first;
-		auto const* map_color = color(priority);
-		if (!map_color || priority == MapColor::Reserved)
+		auto const draw_color = drawColor(priority, request.options);
+		if (!draw_color || !color_bucket->second)
 			continue;
-		if (request.options.testFlag(RenderConfig::RequireSpotColor)
-		    && (priority < 0 || map_color->spot_method == SpotMethod::Undefined))
-		{
-			continue;
-		}
-
-		auto draw_color = map_color->color;
-		if (priority >= 0 && map_color->opacity < 1)
-			draw_color = draw_color.withAlpha(map_color->opacity);
-		if (request.options.testFlag(RenderConfig::Highlighted))
-			draw_color = highlighted(draw_color);
-
-		if (!color_bucket->second)
-			continue;
-		for (auto object_id : *color_bucket->second)
-		{
-			auto const* object_ptr = object(object_id);
-			if (!object_ptr)
-				continue;
-			auto const& object = *object_ptr;
-			if (!request.options.testFlag(RenderConfig::HelperSymbols) && object.helper_symbol)
-				continue;
-			if (object.hidden_symbol || !object.extent.intersects(request.bounding_box))
-				continue;
-			appendObjectColor(builder, object, priority, draw_color, request);
-		}
+		appendSpan(builder, priority, *draw_color, *color_bucket->second, request);
 	}
 
 	if (request.opacity != 1)
 		builder.popLayer();
+	return builder.finish();
+}
+
+std::shared_ptr<const RenderIR> MapRenderSnapshot::buildSpanIR(const RenderRequest& request,
+	                                                           int priority,
+	                                                           Color draw_color,
+	                                                           std::span<const ObjectId> ids,
+	                                                           std::size_t reserve_hint) const
+{
+	RenderIRBuilder builder(revision_, request.bounding_box);
+	if (reserve_hint > 0)
+		builder.reserve(reserve_hint);
+	appendSpan(builder, priority, draw_color, ids, request);
 	return builder.finish();
 }
 

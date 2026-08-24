@@ -327,6 +327,7 @@ void MapRenderables::clear(bool mark_area_as_dirty)
 	color_object_ids.clear();
 	next_object_id = 1;
 	snapshot_blocks.clear();
+	snapshot_block_revisions.clear();
 	dirty_blocks.clear();
 	snapshot_color_objects.clear();
 	dirty_color_priorities.clear();
@@ -361,6 +362,9 @@ std::shared_ptr<const render::MapRenderSnapshot> MapRenderables::snapshot() cons
 	{
 		if (snapshot_blocks.size() <= block_index)
 			snapshot_blocks.resize(block_index + 1);
+		if (snapshot_block_revisions.size() <= block_index)
+			snapshot_block_revisions.resize(block_index + 1, 0);
+		snapshot_block_revisions[block_index] = current_revision;
 		auto block = std::make_shared<render::SnapshotObjectBlock>();
 		auto const first_id = render::ObjectId(block_index * render::snapshot_object_block_size + 1);
 		auto const end_id = first_id + render::snapshot_object_block_size;
@@ -412,7 +416,8 @@ std::shared_ptr<const render::MapRenderSnapshot> MapRenderables::snapshot() cons
 		std::move(colors),
 		snapshot_blocks,
 		snapshot_color_objects,
-		objects.size()
+		objects.size(),
+		snapshot_block_revisions
 	);
 	return published_snapshot;
 }

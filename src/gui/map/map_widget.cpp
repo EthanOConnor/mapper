@@ -1325,10 +1325,25 @@ void MapWidget::renderFrame()
 		-map_view_rect.height() * 0.5,
 		map_view_rect.width() * 0.5,
 		map_view_rect.height() * 0.5);
+	// The vector scenes are recorded against a grid-quantized superset of the
+	// overscanned viewport. Panning inside the overscan then repeats the exact
+	// request, so the planner and the backends keep every retained map scene
+	// and only the camera changes. Templates and grid keep the tight rect.
+	auto vector_map_rect = content_map_rect;
+	auto const quantum = 0.5 * std::max(map_view_rect.width(), map_view_rect.height());
+	if (quantum > 0)
+	{
+		auto const left = std::floor(content_map_rect.left() / quantum) * quantum;
+		auto const top = std::floor(content_map_rect.top() / quantum) * quantum;
+		vector_map_rect.setLeft(left);
+		vector_map_rect.setTop(top);
+		vector_map_rect.setRight(std::ceil(content_map_rect.right() / quantum) * quantum);
+		vector_map_rect.setBottom(std::ceil(content_map_rect.bottom() / quantum) * quantum);
+	}
 	RenderConfig::Options options(RenderConfig::Screen | RenderConfig::HelperSymbols);
 	auto const map_visibility = view->effectiveMapVisibility();
 	auto const render_request = render::RenderRequest {
-		render::fromQRectF(content_map_rect),
+		render::fromQRectF(vector_map_rect),
 		view->calculateFinalZoomFactor() * (pinching ? pinching_factor : 1),
 		options,
 		map_visibility.visible ? double(map_visibility.opacity) : 0,

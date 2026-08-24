@@ -650,8 +650,8 @@ void VelloRendererTest::nativeSurfaceLifecyclePresentsCurrentFrame()
 	QCOMPARE(first_result->completion.status, render::FrameStatus::Presented);
 	QCOMPARE(first_result->revision, first->revision);
 	QCOMPARE(first_result->surface_sequence, canvas.surfaceState().sequence);
-	QCOMPARE(first_result->scene_count, std::uint32_t(1));
-	QCOMPARE(canvas.encodedSceneCount(), std::size_t(1));
+	QCOMPARE(first_result->scene_count, std::uint32_t(first->vector_passes.size()));
+	QCOMPARE(canvas.encodedSceneCount(), first->vector_passes.size());
 
 	host.hide();
 	QTRY_COMPARE(canvas.surfaceState().phase, presentation::SurfacePhase::Hidden);

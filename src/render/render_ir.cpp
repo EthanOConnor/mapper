@@ -213,6 +213,11 @@ void RenderIRBuilder::append(const RenderIR& scene)
 	ir_->commands.insert(ir_->commands.end(), scene.commands.begin(), scene.commands.end());
 }
 
+void RenderIRBuilder::reserve(std::size_t command_count)
+{
+	ir_->commands.reserve(command_count);
+}
+
 std::size_t RenderIRBuilder::commandCount() const noexcept
 {
 	return ir_->commands.size();

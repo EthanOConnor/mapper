@@ -65,6 +65,8 @@ struct Color
 	std::uint16_t alpha = 65535;
 
 	Color withAlpha(double opacity) const noexcept;
+
+	friend bool operator==(const Color&, const Color&) noexcept = default;
 };
 
 enum class FillRule : std::uint8_t
@@ -351,6 +353,7 @@ public:
 	void drawLinePattern(PathPtr outline, Color color, double angle,
 	                     double spacing, double offset, double line_width);
 	void append(const RenderIR& scene);
+	void reserve(std::size_t command_count);
 
 	std::size_t commandCount() const noexcept;
 	std::shared_ptr<const RenderIR> finish();

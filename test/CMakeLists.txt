@@ -313,6 +313,12 @@ target_link_libraries(vello_benchmark PRIVATE
 	Mapper_Common Mapper::VelloBackend Qt6::Widgets
 )
 
+add_executable(interaction_benchmark EXCLUDE_FROM_ALL interaction_benchmark.cpp)
+mapper_target_defaults(interaction_benchmark)
+target_link_libraries(interaction_benchmark PRIVATE
+	Mapper_Common Mapper::VelloBackend Qt6::Widgets
+)
+
 if(Mapper_USE_GDAL)
 	add_executable(raster_benchmark EXCLUDE_FROM_ALL raster_benchmark.cpp)
 	mapper_target_defaults(raster_benchmark)

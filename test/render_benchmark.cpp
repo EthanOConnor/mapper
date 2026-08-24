@@ -115,12 +115,15 @@ int main(int argc, char** argv)
 		frame_plan.push_back(milliseconds(planned - recorded));
 		object_count = snapshot->objectCount();
 		command_count = ir->commands.size();
-		if (frame->vector_passes.size() != 1
-		    || !frame->vector_passes.front().scene
-		    || frame->vector_passes.front().scene->commands.size() != command_count)
+		auto planned_commands = std::size_t(0);
+		for (auto const& pass : frame->vector_passes)
 		{
-			return 5;
+			if (!pass.scene)
+				return 5;
+			planned_commands += pass.scene->commands.size();
 		}
+		if (frame->vector_passes.empty() || planned_commands != command_count)
+			return 5;
 	}
 
 	std::cout << "{\n  \"iterations\": " << iterations

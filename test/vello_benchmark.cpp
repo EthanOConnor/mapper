@@ -119,9 +119,12 @@ int main(int argc, char** argv)
 		samples.push_back(milliseconds(finished - started));
 	}
 
-	auto const command_count = base_frame->vector_passes.empty()
-	                         ? 0
-	                         : base_frame->vector_passes.front().scene->commands.size();
+	auto command_count = std::size_t(0);
+	for (auto const& pass : base_frame->vector_passes)
+	{
+		if (pass.scene)
+			command_count += pass.scene->commands.size();
+	}
 	std::cout << "{\n"
 	          << "  \"iterations\": " << iterations << ",\n"
 	          << "  \"width\": " << width << ",\n"
@@ -133,5 +136,6 @@ int main(int argc, char** argv)
 	          << ", \"p95_ms\": " << percentile(samples, 0.95)
 	          << ", \"max_ms\": " << *std::ranges::max_element(samples)
 	          << "}\n}\n";
-	return renderer.encodedSceneCount() == 1 ? 0 : 7;
+	// One retained encoding per planned map scene; camera motion adds none.
+	return renderer.encodedSceneCount() == base_frame->vector_passes.size() ? 0 : 7;
 }

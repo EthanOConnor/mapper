@@ -196,6 +196,7 @@ private:
 	render::ObjectId next_object_id = 1;
 	render::Revision current_revision = 1;
 	mutable std::vector<std::shared_ptr<const render::SnapshotObjectBlock>> snapshot_blocks;
+	mutable std::vector<render::Revision> snapshot_block_revisions;
 	mutable std::set<std::size_t> dirty_blocks;
 	mutable std::map<int, std::shared_ptr<const std::vector<render::ObjectId>>> snapshot_color_objects;
 	mutable std::set<int> dirty_color_priorities;

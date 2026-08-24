@@ -299,7 +299,20 @@ void FramePipelineTest::packetIsCompleteAndMonotonic()
 	QCOMPARE(normal->id, render::FrameId(1));
 	QCOMPARE(overprint->id, render::FrameId(2));
 	QCOMPARE(normal->revision, snapshot->revision());
-	QCOMPARE(normal->vector_passes.size(), std::size_t(1));
+	// The normal map pass is recorded as one scene per color span, and their
+	// concatenation must equal the monolithic recording of the same request.
+	QVERIFY(!normal->vector_passes.empty());
+	auto const monolithic = snapshot->buildIR(fixture->render_request);
+	auto planned_commands = std::size_t(0);
+	for (auto const& pass : normal->vector_passes)
+	{
+		QVERIFY(pass.scene);
+		QCOMPARE(pass.blend, render::BlendMode::SourceOver);
+		QCOMPARE(pass.opacity, 1.0);
+		QVERIFY(!pass.isolated);
+		planned_commands += pass.scene->commands.size();
+	}
+	QCOMPARE(planned_commands, monolithic->commands.size());
 	QVERIFY(overprint->vector_passes.size() > 1);
 	QVERIFY(std::ranges::any_of(overprint->vector_passes, [](auto const& pass) {
 		return pass.blend == render::BlendMode::Multiply;
@@ -317,6 +330,57 @@ void FramePipelineTest::packetIsCompleteAndMonotonic()
 	object->move(1000, 0);
 	fixture->map.publishRenderSnapshot();
 	QVERIFY(!renderFrame(*fixture, *overprint).isNull());
+}
+
+void FramePipelineTest::chunkedMapPassesRetainUnchangedScenes()
+{
+	auto fixture = makeFixture(example(QStringLiteral("complete map.omap")));
+	QVERIFY(fixture);
+	render::FramePlanner planner;
+	auto const first = planner.plan(
+		*fixture->map.publishRenderSnapshot(),
+		{ fixture->view, fixture->render_request, false });
+	QVERIFY(first->vector_passes.size() > 1);
+
+	auto* object = fixture->map.getPart(0)->getObject(0);
+	QVERIFY(object);
+	object->move(1, 0);
+	auto const snapshot = fixture->map.publishRenderSnapshot();
+	QVERIFY(snapshot->revision() > first->revision);
+	auto const second = planner.plan(
+		*snapshot, { fixture->view, fixture->render_request, false });
+
+	// The edit invalidates at most the spans covering the edited object's
+	// block; every other pass keeps its scene identity, which is what lets
+	// backends retain their encodings across revisions.
+	QCOMPARE(second->vector_passes.size(), first->vector_passes.size());
+	auto retained = std::size_t(0);
+	for (auto const& pass : second->vector_passes)
+	{
+		retained += std::ranges::count_if(first->vector_passes,
+			[&](auto const& other) { return other.scene == pass.scene; });
+	}
+	QVERIFY(retained > 0);
+	QVERIFY(retained < second->vector_passes.size());
+
+	// The retained-and-refreshed passes still concatenate to the monolithic
+	// recording of the new revision.
+	auto const monolithic = snapshot->buildIR(fixture->render_request);
+	auto planned_commands = std::size_t(0);
+	for (auto const& pass : second->vector_passes)
+		planned_commands += pass.scene->commands.size();
+	QCOMPARE(planned_commands, monolithic->commands.size());
+
+	// A request change re-records everything.
+	auto shifted_request = fixture->render_request;
+	shifted_request.bounding_box.x += 1;
+	auto const third = planner.plan(
+		*snapshot, { fixture->view, shifted_request, false });
+	for (auto const& pass : third->vector_passes)
+	{
+		QCOMPARE(std::ranges::count_if(second->vector_passes,
+			[&](auto const& other) { return other.scene == pass.scene; }), 0);
+	}
 }
 
 void FramePipelineTest::cameraPacketIsConstantSizeAndMonotonic()
