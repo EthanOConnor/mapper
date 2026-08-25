@@ -26,7 +26,7 @@ int main(int argc, char** argv)
 	QApplication app(argc, argv);
 	Q_INIT_RESOURCE(resources);
 	doStaticInitializations();
-	if (app.arguments().size() != 2)
+	if (app.arguments().size() < 2)
 		return 2;
 
 	Map map;
@@ -69,7 +69,12 @@ int main(int argc, char** argv)
 		          << ", \"frame_revision\": " << (frame ? frame->revision : 0)
 		          << ", \"vector_passes\": " << passes
 		          << ", \"commands\": " << commands
-		          << ", \"encoded_scenes\": " << canvas->encodedSceneCount();
+		          << ", \"encoded_scenes\": " << canvas->encodedSceneCount()
+		          << ", \"surface_phase\": " << int(canvas->surfaceState().phase)
+		          << ", \"surface_seq\": " << canvas->surfaceState().sequence
+		          << ", \"surface_px\": [" << canvas->surfaceState().physical_width
+		          << ", " << canvas->surfaceState().physical_height << "]"
+		          << ", \"content_pending\": " << (canvas->contentPending() ? "true" : "false");
 		auto const& result = canvas->lastResult();
 		if (result)
 		{
@@ -93,6 +98,22 @@ int main(int argc, char** argv)
 	widget.adjustViewToRect(map.calculateExtent(true), MapWidget::ContinuousZoom);
 	QTest::qWait(2000);
 	report("whole_map");
+
+	if (app.arguments().size() > 2)
+	{
+		// Trailing arguments are absolute zoom factors to visit in order.
+		for (int i = 2; i < app.arguments().size(); ++i)
+		{
+			bool valid = false;
+			auto const zoom = app.arguments()[i].toDouble(&valid);
+			if (!valid || zoom <= 0)
+				continue;
+			view.setZoom(zoom);
+			QTest::qWait(4000);
+			report(("zoom_" + app.arguments()[i]).toUtf8().constData());
+		}
+		return 0;
+	}
 
 	view.setZoom(view.getZoom() * 2);
 	QTest::qWait(2000);

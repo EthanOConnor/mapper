@@ -285,7 +285,7 @@ public:
 			scenes.erase(found);
 		}
 
-		auto builder = ffi::begin_scene(ir->revision, ffiRect(ir->world_bounds));
+		auto builder = ffi::begin_scene(ir->revision, ffiRect(ir->world_bounds), ir->scale_hint);
 		PathCache paths;
 		for (auto const& command : ir->commands)
 		{

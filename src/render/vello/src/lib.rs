@@ -113,7 +113,7 @@ mod ffi {
         type FrameBuilder;
         type Renderer;
 
-        fn begin_scene(revision: u64, world_bounds: Rect) -> Box<SceneBuilder>;
+        fn begin_scene(revision: u64, world_bounds: Rect, scale_hint: f64) -> Box<SceneBuilder>;
         fn scene_push_transform(scene: &mut SceneBuilder, transform: Transform);
         fn scene_pop_transform(scene: &mut SceneBuilder);
         fn scene_push_clip(scene: &mut SceneBuilder, fill_rule: u8, path: &[PathElement]);
@@ -201,10 +201,19 @@ const FRAME_DROPPED_STALE: u8 = 3;
 const FRAME_SURFACE_LOST: u8 = 4;
 const FRAME_ERROR: u8 = 5;
 
-pub struct SceneBuilder {
-    scenes: Vec<Scene>,
+/// One bump-safe recording unit: a vello scene plus the scale-independent
+/// tallies from which its GPU bump load at any display scale is estimated.
+struct SubScene {
     scene: Scene,
+    load: LoadTally,
+}
+
+pub struct SceneBuilder {
+    scenes: Vec<SubScene>,
+    scene: Scene,
+    load: LoadTally,
     group_depth: usize,
+    scale_hint: f64,
     revision: u64,
     command_count: u64,
     transforms: Vec<Affine>,
@@ -212,7 +221,7 @@ pub struct SceneBuilder {
 }
 
 pub struct RetainedScene {
-    scenes: Arc<Vec<Scene>>,
+    scenes: Arc<Vec<SubScene>>,
     revision: u64,
     command_count: u64,
 }
@@ -227,7 +236,7 @@ pub struct FrameBuilder {
 }
 
 struct FramePass {
-    scenes: Arc<Vec<Scene>>,
+    scenes: Arc<Vec<SubScene>>,
     blend: u8,
     opacity: f32,
     isolated: bool,
@@ -344,6 +353,146 @@ fn stroke(value: ffi::Stroke) -> Option<Stroke> {
     Some(stroke)
 }
 
+/// The largest per-axis scale factor of an affine map, as an upper bound on
+/// how much it stretches lengths.
+fn affine_scale(transform: Affine) -> f64 {
+    let [m11, m12, m21, m22, ..] = transform.as_coeffs();
+    let x = f64::hypot(m11, m12);
+    let y = f64::hypot(m21, m22);
+    let scale = x.max(y);
+    if scale.is_finite() && scale > 0.0 {
+        scale
+    } else {
+        1.0
+    }
+}
+
+/// Zoom-scalable estimate of the GPU bump work recorded content needs.
+///
+/// vello flattens curves and counts line-to-tile crossings on the GPU, so
+/// both grow with the display scale even though the encoding stays fixed.
+/// (vello's own `bump_estimate` feature is unusable here: its `LineTo`
+/// crossing estimate measures from the subpath's first point instead of the
+/// previous point, which inflates long polylines quadratically.) The tallies
+/// are kept in scene units: `lines` counts flattened lines from straight
+/// geometry, joins, caps and dash pieces; `curve_subdivisions` scales with
+/// the square root of the display scale (Wang-style curve flattening); and
+/// `flat_units` is the Manhattan length of drawn geometry, from which tile
+/// crossings follow as at most `d / 16 + 2` per line of device Manhattan
+/// length `d`.
+#[derive(Clone, Copy, Default)]
+struct LoadTally {
+    lines: f64,
+    curve_subdivisions: f64,
+    flat_units: f64,
+}
+
+/// Estimated bump-buffer element use of content at one display scale.
+#[derive(Clone, Copy, Default)]
+struct BumpUse {
+    lines: u64,
+    crossings: u64,
+}
+
+impl LoadTally {
+    fn add(&mut self, other: LoadTally) {
+        self.lines += other.lines;
+        self.curve_subdivisions += other.curve_subdivisions;
+        self.flat_units += other.flat_units;
+    }
+
+    fn estimate(&self, scale: f64) -> BumpUse {
+        let scale = if scale.is_finite() && scale > 0.0 {
+            scale
+        } else {
+            1.0
+        };
+        let lines = self.lines + self.curve_subdivisions * scale.sqrt();
+        let crossings = 2.0 * lines + self.flat_units * scale * 0.0625;
+        BumpUse {
+            lines: lines.min(u64::MAX as f64) as u64,
+            crossings: crossings.min(u64::MAX as f64) as u64,
+        }
+    }
+}
+
+/// Per-path geometry totals in scene units (the recording transform is
+/// already applied via `scale`).
+#[derive(Clone, Copy, Default)]
+struct PathMeasure {
+    lines: f64,
+    curve_subdivisions: f64,
+    flat_units: f64,
+}
+
+impl PathMeasure {
+    fn line(&mut self, from: (f64, f64), to: (f64, f64), scale: f64) {
+        let d = ((to.0 - from.0).abs() + (to.1 - from.1).abs()) * scale;
+        if d.is_finite() {
+            self.lines += 1.0;
+            self.flat_units += d;
+        }
+    }
+
+    fn curve(&mut self, control_manhattan: f64, scale: f64) {
+        let d = control_manhattan * scale;
+        if d.is_finite() {
+            self.curve_subdivisions += 2.0 * d.max(0.0).sqrt();
+            self.flat_units += d;
+        }
+    }
+}
+
+fn measure_path(elements: &[ffi::PathElement], scale: f64) -> PathMeasure {
+    let mut measure = PathMeasure::default();
+    let mut first = (0.0, 0.0);
+    let mut last = (0.0, 0.0);
+    let mut open = false;
+    for element in elements {
+        match element.verb {
+            0 => {
+                if open {
+                    measure.line(last, first, scale);
+                }
+                first = (element.x1, element.y1);
+                last = first;
+                open = false;
+            }
+            1 => {
+                let to = (element.x1, element.y1);
+                measure.line(last, to, scale);
+                last = to;
+                open = true;
+            }
+            2 => {
+                let p1 = (element.x1, element.y1);
+                let p2 = (element.x2, element.y2);
+                let p3 = (element.x3, element.y3);
+                let control = (p1.0 - last.0).abs()
+                    + (p1.1 - last.1).abs()
+                    + (p2.0 - p1.0).abs()
+                    + (p2.1 - p1.1).abs()
+                    + (p3.0 - p2.0).abs()
+                    + (p3.1 - p2.1).abs();
+                measure.curve(control, scale);
+                last = p3;
+                open = true;
+            }
+            3 => {
+                measure.line(last, first, scale);
+                last = first;
+                open = false;
+            }
+            _ => {}
+        }
+    }
+    if open {
+        // Fills close open subpaths implicitly.
+        measure.line(last, first, scale);
+    }
+    measure
+}
+
 impl SceneBuilder {
     fn transform(&self) -> Affine {
         self.transforms.last().copied().unwrap_or(Affine::IDENTITY)
@@ -353,25 +502,51 @@ impl SceneBuilder {
         self.world_bounds
     }
 
+    /// The measurement scale for the current recording transform.
+    fn measure_scale(&self) -> f64 {
+        affine_scale(self.transform())
+    }
+
     /// Seals the current sub-scene once it reaches the bump-safe encoding
-    /// budget, so no retained scene forces an over-budget vello submission.
-    /// Splitting is only sound between top-level draws: an open clip or blend
-    /// group must stay within one sub-scene.
+    /// budget — by encoded segment count, or by estimated bump-buffer load
+    /// at the scale this scene was recorded for (flattened lines and tile
+    /// crossings grow with zoom, so high-zoom recordings must split much
+    /// finer than the encoded segment count alone suggests). The record
+    /// share is far below the compose-time budget to leave headroom for the
+    /// device pixel ratio, for transient camera zoom beyond the recorded
+    /// scale, and for estimate error. Splitting is only sound between
+    /// top-level draws: an open clip or blend group must stay within one
+    /// sub-scene.
     fn split_before_append(&mut self) {
-        if self.group_depth == 0
-            && u64::from(self.scene.encoding().n_path_segments) >= batch_segment_budget()
-        {
-            self.scenes
-                .push(std::mem::replace(&mut self.scene, Scene::new()));
+        if self.group_depth != 0 {
+            return;
+        }
+        let seal = u64::from(self.scene.encoding().n_path_segments) >= batch_segment_budget()
+            || {
+                let bump = self.load.estimate(self.scale_hint);
+                bump.lines >= BUMP_LINES_CAPACITY / 8
+                    || bump.crossings >= BUMP_SEGMENTS_CAPACITY / 8
+            };
+        if seal {
+            self.scenes.push(SubScene {
+                scene: std::mem::replace(&mut self.scene, Scene::new()),
+                load: std::mem::take(&mut self.load),
+            });
         }
     }
 }
 
-fn begin_scene(revision: u64, world_bounds: ffi::Rect) -> Box<SceneBuilder> {
+fn begin_scene(revision: u64, world_bounds: ffi::Rect, scale_hint: f64) -> Box<SceneBuilder> {
     Box::new(SceneBuilder {
         scenes: Vec::new(),
         scene: Scene::new(),
+        load: LoadTally::default(),
         group_depth: 0,
+        scale_hint: if scale_hint.is_finite() && scale_hint > 0.0 {
+            scale_hint
+        } else {
+            1.0
+        },
         revision,
         command_count: 0,
         transforms: vec![Affine::IDENTITY],
@@ -400,6 +575,12 @@ fn scene_push_clip(scene: &mut SceneBuilder, rule: u8, elements: &[ffi::PathElem
     scene.split_before_append();
     scene.group_depth += 1;
     if let Some(path) = path(elements) {
+        let measure = measure_path(elements, scene.measure_scale());
+        scene.load.add(LoadTally {
+            lines: measure.lines,
+            curve_subdivisions: measure.curve_subdivisions,
+            flat_units: measure.flat_units,
+        });
         scene
             .scene
             .push_clip_layer(fill_rule(rule), scene.transform(), &path);
@@ -421,6 +602,10 @@ fn scene_push_layer(scene: &mut SceneBuilder, opacity: f64, blend: u8) {
     scene.command_count += 1;
     scene.split_before_append();
     scene.group_depth += 1;
+    scene.load.add(LoadTally {
+        lines: 4.0,
+        ..LoadTally::default()
+    });
     let clip = scene.viewport();
     scene.scene.push_layer(
         Fill::NonZero,
@@ -446,6 +631,12 @@ fn scene_fill_path(
     scene.command_count += 1;
     scene.split_before_append();
     if let Some(path) = path(elements) {
+        let measure = measure_path(elements, scene.measure_scale());
+        scene.load.add(LoadTally {
+            lines: measure.lines,
+            curve_subdivisions: measure.curve_subdivisions,
+            flat_units: measure.flat_units,
+        });
         scene.scene.fill(
             fill_rule(rule),
             scene.transform(),
@@ -471,6 +662,24 @@ fn scene_stroke_path(
     if let (Some(path), Some(mut stroke)) = (path(elements), stroke(style))
         && valid_dashes
     {
+        let scale = scene.measure_scale();
+        let measure = measure_path(elements, scale);
+        let width = style.width * scale;
+        // Both offset sides plus join and cap fans; dashing splits the
+        // stroke into capped pieces whose count follows the pattern period
+        // in path units.
+        let dash_period: f64 = dashes.iter().sum();
+        let dash_pieces = if dash_period > 0.0 && scale > 0.0 {
+            measure.flat_units / (dash_period * scale)
+        } else {
+            0.0
+        };
+        scene.load.add(LoadTally {
+            lines: 4.0 * measure.lines + 4.0 * dash_pieces,
+            curve_subdivisions: 2.0 * measure.curve_subdivisions,
+            flat_units: 2.0 * measure.flat_units
+                + (3.0 * measure.lines + 2.0 * dash_pieces) * width,
+        });
         stroke.dash_pattern.extend_from_slice(dashes);
         stroke.dash_offset = dash_offset;
         scene
@@ -483,6 +692,13 @@ fn scene_fill_ellipse(scene: &mut SceneBuilder, bounds: ffi::Rect, brush: ffi::C
     scene.command_count += 1;
     scene.split_before_append();
     if let Some(bounds) = rect(bounds) {
+        let perimeter =
+            2.0 * (bounds.width() + bounds.height()) * scene.measure_scale();
+        scene.load.add(LoadTally {
+            lines: 4.0,
+            curve_subdivisions: 4.0 * perimeter.max(0.0).sqrt(),
+            flat_units: perimeter,
+        });
         scene.scene.fill(
             Fill::NonZero,
             scene.transform(),
@@ -502,6 +718,13 @@ fn scene_stroke_ellipse(
     scene.command_count += 1;
     scene.split_before_append();
     if let (Some(bounds), Some(stroke)) = (rect(bounds), stroke(style)) {
+        let scale = scene.measure_scale();
+        let perimeter = 2.0 * (bounds.width() + bounds.height()) * scale;
+        scene.load.add(LoadTally {
+            lines: 8.0,
+            curve_subdivisions: 8.0 * perimeter.max(0.0).sqrt(),
+            flat_units: 2.0 * perimeter + 4.0 * style.width * scale,
+        });
         scene.scene.stroke(
             &stroke,
             scene.transform(),
@@ -593,6 +816,12 @@ fn scene_draw_image(
     if source.width() <= 0.0 || source.height() <= 0.0 {
         return false;
     }
+    let image_scale = affine_scale(scene.transform() * image_to_scene);
+    scene.load.add(LoadTally {
+        lines: 4.0,
+        curve_subdivisions: 0.0,
+        flat_units: 2.0 * (source.width() + source.height()) * image_scale,
+    });
     let brush = ImageBrush {
         image,
         sampler: ImageSampler {
@@ -632,6 +861,12 @@ fn scene_draw_line_pattern(
     {
         return;
     }
+    let measure = measure_path(outline, scene.measure_scale());
+    scene.load.add(LoadTally {
+        lines: measure.lines,
+        curve_subdivisions: measure.curve_subdivisions,
+        flat_units: measure.flat_units,
+    });
     if style.line_width >= style.spacing {
         scene.scene.fill(
             fill_rule(rule),
@@ -684,7 +919,10 @@ fn scene_draw_line_pattern(
 
 fn finish_scene(scene: Box<SceneBuilder>) -> Box<RetainedScene> {
     let mut scenes = scene.scenes;
-    scenes.push(scene.scene);
+    scenes.push(SubScene {
+        scene: scene.scene,
+        load: scene.load,
+    });
     Box::new(RetainedScene {
         scenes: Arc::new(scenes),
         revision: scene.revision,
@@ -1434,22 +1672,68 @@ enum RenderStep {
     },
 }
 
-/// A sealed sub-scene normally holds the budget plus at most one draw, so
-/// well beyond that only an indivisible unit remains: a single draw or an
-/// open clip/blend group which alone exceeds the budget. Such a scene still
-/// risks the silent bump overflow, so make it visible in diagnostics output.
-fn indivisible_segment_warn_threshold() -> u64 {
-    2 * batch_segment_budget()
+/// Fixed bump-buffer capacities from vello_encoding config.rs
+/// (`BufferSizes::new`, "hand picked to accommodate the vello test scenes").
+const BUMP_LINES_CAPACITY: u64 = 1 << 21;
+const BUMP_SEGMENTS_CAPACITY: u64 = 1 << 21;
+
+/// Bump-buffer load of one prospective vello submission.
+///
+/// The encoded segment count is transform-independent, but the flattened
+/// line count and especially the line-to-tile-crossing count grow with the
+/// display scale: zooming far into a map overflows the fixed capacities even
+/// though the encoded segment count per submission stays modest.
+#[derive(Clone, Copy, Default)]
+struct BatchLoad {
+    encoded_segments: u64,
+    lines: u64,
+    crossings: u64,
 }
 
-fn warn_indivisible_scene(segments: u64) {
+impl BatchLoad {
+    fn of(sub_scene: &SubScene, transform: Affine) -> Self {
+        let bump = sub_scene.load.estimate(affine_scale(transform));
+        Self {
+            encoded_segments: u64::from(sub_scene.scene.encoding().n_path_segments),
+            lines: bump.lines,
+            crossings: bump.crossings,
+        }
+    }
+
+    fn add(&mut self, other: Self) {
+        self.encoded_segments += other.encoded_segments;
+        self.lines += other.lines;
+        self.crossings += other.crossings;
+    }
+
+    /// Whether adding `other` would push one submission beyond the safe
+    /// share of any bump buffer.
+    fn saturated_by(&self, other: Self) -> bool {
+        self.encoded_segments + other.encoded_segments > batch_segment_budget()
+            || self.lines + other.lines > BUMP_LINES_CAPACITY / 2
+            || self.crossings + other.crossings > BUMP_SEGMENTS_CAPACITY / 2
+    }
+
+    /// Whether this load alone risks the silent overflow. Only an
+    /// indivisible unit — a single draw or one clip/blend group — reaches
+    /// this despite the record-time split.
+    fn over_capacity(&self) -> bool {
+        self.encoded_segments > 2 * batch_segment_budget()
+            || self.lines > BUMP_LINES_CAPACITY
+            || self.crossings > BUMP_SEGMENTS_CAPACITY
+    }
+}
+
+fn warn_over_capacity_scene(load: BatchLoad) {
     use std::sync::atomic::{AtomicU64, Ordering};
     static MAX_WARNED: AtomicU64 = AtomicU64::new(0);
-    if segments > MAX_WARNED.fetch_max(segments, Ordering::Relaxed) {
+    let worst = load.encoded_segments.max(load.lines).max(load.crossings);
+    if worst > MAX_WARNED.fetch_max(worst, Ordering::Relaxed) {
         eprintln!(
-            "Mapper Vello: an indivisible scene unit encodes {segments} path segments, \
-             above the bump-safe budget; \
-             its render may be silently incomplete"
+            "Mapper Vello: an indivisible scene unit ({} encoded path segments, \
+             estimated {} lines and {} tile crossings at the current zoom) exceeds \
+             a fixed GPU bump capacity; its render may be silently incomplete",
+            load.encoded_segments, load.lines, load.crossings,
         );
     }
 }
@@ -1464,7 +1748,7 @@ fn compose_steps(frame: &FrameBuilder) -> Result<Vec<RenderStep>, &'static str> 
     );
     let mut steps = Vec::new();
     let mut scene = Scene::new();
-    let mut batch_segments: u64 = 0;
+    let mut batch_load = BatchLoad::default();
     let mut batch_appends: usize = 0;
     for pass in &frame.passes {
         // A non-source-over blend reads its backdrop, which must be the
@@ -1475,27 +1759,25 @@ fn compose_steps(frame: &FrameBuilder) -> Result<Vec<RenderStep>, &'static str> 
         if composited {
             if batch_appends > 0 {
                 steps.push(RenderStep::Batch(std::mem::replace(&mut scene, Scene::new())));
-                batch_segments = 0;
+                batch_load = BatchLoad::default();
                 batch_appends = 0;
             }
             let mut batches = Vec::new();
             let mut group_scene = Scene::new();
-            let mut group_segments: u64 = 0;
+            let mut group_load = BatchLoad::default();
             let mut group_appends: usize = 0;
             for sub_scene in pass.scenes.iter() {
-                let segments = u64::from(sub_scene.encoding().n_path_segments);
-                if segments > indivisible_segment_warn_threshold() {
-                    warn_indivisible_scene(segments);
+                let load = BatchLoad::of(sub_scene, pass.transform);
+                if load.over_capacity() {
+                    warn_over_capacity_scene(load);
                 }
-                if group_appends > 0
-                    && group_segments + segments > batch_segment_budget()
-                {
+                if group_appends > 0 && group_load.saturated_by(load) {
                     batches.push(std::mem::replace(&mut group_scene, Scene::new()));
-                    group_segments = 0;
+                    group_load = BatchLoad::default();
                     group_appends = 0;
                 }
-                group_scene.append(sub_scene, Some(pass.transform));
-                group_segments += segments;
+                group_scene.append(&sub_scene.scene, Some(pass.transform));
+                group_load.add(load);
                 group_appends += 1;
             }
             if group_appends > 0 || batches.is_empty() {
@@ -1512,13 +1794,13 @@ fn compose_steps(frame: &FrameBuilder) -> Result<Vec<RenderStep>, &'static str> 
         // so sub-scenes of such a pass may flatten into shared batches.
         let wrap = pass.isolated || pass.opacity < 1.0;
         for sub_scene in pass.scenes.iter() {
-            let segments = u64::from(sub_scene.encoding().n_path_segments);
-            if segments > indivisible_segment_warn_threshold() {
-                warn_indivisible_scene(segments);
+            let load = BatchLoad::of(sub_scene, pass.transform);
+            if load.over_capacity() {
+                warn_over_capacity_scene(load);
             }
-            if batch_appends > 0 && batch_segments + segments > batch_segment_budget() {
+            if batch_appends > 0 && batch_load.saturated_by(load) {
                 steps.push(RenderStep::Batch(std::mem::replace(&mut scene, Scene::new())));
-                batch_segments = 0;
+                batch_load = BatchLoad::default();
                 batch_appends = 0;
             }
             if wrap {
@@ -1530,11 +1812,11 @@ fn compose_steps(frame: &FrameBuilder) -> Result<Vec<RenderStep>, &'static str> 
                     &viewport,
                 );
             }
-            scene.append(sub_scene, Some(pass.transform));
+            scene.append(&sub_scene.scene, Some(pass.transform));
             if wrap {
                 scene.pop_layer();
             }
-            batch_segments += segments;
+            batch_load.add(load);
             batch_appends += 1;
         }
     }
@@ -2301,13 +2583,17 @@ mod tests {
 
     /// Records `fills` fill commands of `lines_each` segments at the top
     /// level of a fresh scene and returns the retained result.
-    fn recorded_fills(fills: usize, lines_each: usize) -> Box<RetainedScene> {
-        let mut builder = begin_scene(1, ffi::Rect::default());
+    fn recorded_fills_at(fills: usize, lines_each: usize, scale_hint: f64) -> Box<RetainedScene> {
+        let mut builder = begin_scene(1, ffi::Rect::default(), scale_hint);
         let path = zigzag_path(lines_each);
         for _ in 0..fills {
             scene_fill_path(&mut builder, 1, &path, ffi::Color::default());
         }
         finish_scene(builder)
+    }
+
+    fn recorded_fills(fills: usize, lines_each: usize) -> Box<RetainedScene> {
+        recorded_fills_at(fills, lines_each, 1.0)
     }
 
     #[test]
@@ -2319,7 +2605,7 @@ mod tests {
         assert!(retained.scenes.len() >= 2, "{} sub-scenes", retained.scenes.len());
         assert_eq!(retained.command_count, fills as u64);
         for sub_scene in retained.scenes.iter() {
-            let segments = u64::from(sub_scene.encoding().n_path_segments);
+            let segments = u64::from(sub_scene.scene.encoding().n_path_segments);
             assert!(
                 segments <= BATCH_ENCODED_SEGMENT_BUDGET + 2 * lines_each as u64,
                 "sub-scene encodes {segments} segments"
@@ -2332,7 +2618,7 @@ mod tests {
         let budget = usize::try_from(BATCH_ENCODED_SEGMENT_BUDGET).unwrap();
         let lines_each = 10_000;
         let fills = budget / lines_each + 2;
-        let mut builder = begin_scene(1, ffi::Rect::default());
+        let mut builder = begin_scene(1, ffi::Rect::default(), 1.0);
         let path = zigzag_path(lines_each);
         scene_push_clip(&mut builder, 1, &path);
         for _ in 0..fills {
@@ -2386,7 +2672,12 @@ mod tests {
                 blend,
                 opacity,
             } => {
-                assert_eq!(batches.len(), split.scenes.len());
+                assert!(
+                    batches.len() >= 2 && batches.len() <= split.scenes.len(),
+                    "{} batches for {} sub-scenes",
+                    batches.len(),
+                    split.scenes.len()
+                );
                 assert_eq!(*blend, 1);
                 assert_eq!(*opacity, 1.0);
             }
@@ -2416,7 +2707,12 @@ mod tests {
             },
         );
         let steps = compose_steps(&builder).unwrap();
-        assert_eq!(steps.len(), split.scenes.len());
+        assert!(
+            steps.len() >= 2 && steps.len() <= split.scenes.len(),
+            "{} steps for {} sub-scenes",
+            steps.len(),
+            split.scenes.len()
+        );
         for step in &steps {
             match step {
                 RenderStep::Batch(scene) => {
@@ -2429,6 +2725,46 @@ mod tests {
                 RenderStep::Group { .. } => panic!("plain pass must not need compositing"),
             }
         }
+    }
+
+    #[test]
+    fn high_scale_hint_splits_recording_finer() {
+        let coarse = recorded_fills_at(60, 1_000, 1.0);
+        let fine = recorded_fills_at(60, 1_000, 1_000.0);
+        assert_eq!(coarse.scenes.len(), 1);
+        assert!(
+            fine.scenes.len() > coarse.scenes.len(),
+            "hint 1000 produced {} sub-scenes",
+            fine.scenes.len()
+        );
+    }
+
+    #[test]
+    fn high_zoom_transform_shrinks_batches() {
+        let split = recorded_fills_at(60, 1_000, 1_000.0);
+        assert!(split.scenes.len() >= 2);
+        let compose_at = |scale: f64| {
+            let mut builder = frame(1);
+            frame_add_pass(
+                &mut builder,
+                &split,
+                0,
+                1.0,
+                false,
+                ffi::Transform {
+                    m11: scale,
+                    m22: scale,
+                    ..ffi::Transform::default()
+                },
+            );
+            compose_steps(&builder).unwrap().len()
+        };
+        assert!(
+            compose_at(1_000.0) > compose_at(1.0),
+            "batches: {} at 1000x vs {} at 1x",
+            compose_at(1_000.0),
+            compose_at(1.0)
+        );
     }
 
     #[test]

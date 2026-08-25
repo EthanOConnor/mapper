@@ -128,7 +128,7 @@ std::shared_ptr<const render::RenderIR> MapGrid::buildRenderIR(
 		                       final_rotation, draw_line);
 	}
 
-	render::RenderIRBuilder builder(revision, render::fromQRectF(bounding_box));
+	render::RenderIRBuilder builder(revision, render::fromQRectF(bounding_box), view_scale);
 	auto stroke = render::StrokeStyle{};
 	stroke.width = 1.0 / std::max(view_scale, 1.0e-9);
 	builder.strokePath(

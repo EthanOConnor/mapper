@@ -324,6 +324,14 @@ void NativeSurfaceWindow::publishState(bool force)
 		qFatal("Native surface lifecycle sequence space exhausted");
 	next.sequence = next_sequence_++;
 	state_ = next;
+	if (qEnvironmentVariableIsSet("MAPPER_SURFACE_TRACE"))
+	{
+		qWarning("NativeSurfaceWindow: seq %llu phase %d exposed %d visible %d size %ux%u window %p",
+		         static_cast<unsigned long long>(state_.sequence), int(state_.phase),
+		         int(isExposed()), int(isVisible()),
+		         state_.physical_width, state_.physical_height,
+		         reinterpret_cast<void*>(state_.native.window));
+	}
 	if (state_handler_)
 		state_handler_(state_);
 }

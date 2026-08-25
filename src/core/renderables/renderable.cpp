@@ -110,7 +110,7 @@ void ObjectRenderables::detach()
 std::shared_ptr<const render::RenderIR> ObjectRenderables::buildIR(
 	int map_color, render::Color color, const render::RenderRequest& request) const
 {
-	render::RenderIRBuilder builder(0, request.bounding_box);
+	render::RenderIRBuilder builder(0, request.bounding_box, request.scaling);
 	auto const bounding_box = render::toQRectF(request.bounding_box);
 	if (!extent.intersects(bounding_box))
 		return builder.finish();

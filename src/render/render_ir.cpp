@@ -110,11 +110,13 @@ PathPtr PathBuilder::finish()
 	return std::make_shared<const Path>(std::move(elements_), fill_rule_, bounds);
 }
 
-RenderIRBuilder::RenderIRBuilder(Revision revision, Rect world_bounds)
+RenderIRBuilder::RenderIRBuilder(Revision revision, Rect world_bounds, double scale_hint)
  : ir_(std::make_shared<RenderIR>())
 {
 	ir_->revision = revision;
 	ir_->world_bounds = world_bounds;
+	if (std::isfinite(scale_hint) && scale_hint > 0)
+		ir_->scale_hint = scale_hint;
 }
 
 void RenderIRBuilder::pushTransform(Transform transform)
@@ -210,6 +212,7 @@ void RenderIRBuilder::drawLinePattern(PathPtr outline, Color color, double angle
 
 void RenderIRBuilder::append(const RenderIR& scene)
 {
+	ir_->scale_hint = std::max(ir_->scale_hint, scene.scale_hint);
 	ir_->commands.insert(ir_->commands.end(), scene.commands.begin(), scene.commands.end());
 }
 

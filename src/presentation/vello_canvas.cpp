@@ -145,6 +145,11 @@ std::size_t VelloCanvas::encodedSceneCount() const noexcept
 	return renderer_->encodedSceneCount();
 }
 
+bool VelloCanvas::contentPending() const noexcept
+{
+	return renderer_->contentPending();
+}
+
 void VelloCanvas::setPresentationCursor(const QCursor& cursor)
 {
 	setCursor(cursor);
@@ -412,27 +417,30 @@ void VelloCanvas::checkContentStaleness()
 {
 	// A camera frame legitimately re-presents the previous content generation
 	// while a newer one is still encoding, so staleness is only reported when
-	// the newest submitted content has not been presented for several seconds
-	// of active polling. Revision comparison is monotonic per document; after
-	// a reload resets revisions the check merely stays silent until they
+	// several seconds of active polling pass with the newest submitted
+	// content either still encoding (a wedged encode also stalls
+	// same-revision re-requests, such as zoom changes) or completed but never
+	// presented. Revision comparison is monotonic per document; after a
+	// reload resets revisions that check merely stays silent until they
 	// catch up again.
-	if (stale_warning_issued_
-	    || awaited_revision_ == 0
-	    || last_presented_revision_ >= awaited_revision_)
-	{
+	if (stale_warning_issued_ || awaited_revision_ == 0)
 		return;
-	}
+	auto const encode_stalled = renderer_->contentPending();
+	auto const presentation_stalled = last_presented_revision_ < awaited_revision_;
+	if (!encode_stalled && !presentation_stalled)
+		return;
 	auto const elapsed = std::chrono::steady_clock::now() - awaited_since_;
 	if (elapsed < std::chrono::seconds(3))
 		return;
 	stale_warning_issued_ = true;
 	auto const error = renderer_->lastError();
-	qWarning("VelloCanvas: content revision %llu was submitted %lld ms ago but the newest "
-	         "presented revision is still %llu; the canvas may be showing stale content%s%s",
+	qWarning("VelloCanvas: content revision %llu was submitted %lld ms ago but %s; "
+	         "the canvas may be showing stale content%s%s",
 	         static_cast<unsigned long long>(awaited_revision_),
 	         static_cast<long long>(
 	             std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count()),
-	         static_cast<unsigned long long>(last_presented_revision_),
+	         encode_stalled ? "its encode has not completed"
+	                        : "a newer revision has not been presented",
 	         error.empty() ? "" : "; last renderer error: ",
 	         error.c_str());
 }

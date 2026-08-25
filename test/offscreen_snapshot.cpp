@@ -55,6 +55,18 @@ int main(int argc, char** argv)
 	auto arguments = app.arguments();
 	auto const simulate_overprinting =
 	    arguments.removeAll(QStringLiteral("--overprinting")) > 0;
+	// Renders the extent center at fit-scale times this factor.
+	double zoom_multiplier = 1;
+	if (auto const index = arguments.indexOf(QStringLiteral("--zoom-mult")); index >= 0)
+	{
+		if (index + 1 >= arguments.size())
+			return 2;
+		bool valid = false;
+		zoom_multiplier = arguments[index + 1].toDouble(&valid);
+		if (!valid || zoom_multiplier <= 0)
+			return 2;
+		arguments.remove(index, 2);
+	}
 	if (arguments.size() < 2 || arguments.size() > 6)
 		return 2;
 
@@ -79,11 +91,17 @@ int main(int argc, char** argv)
 	auto const scale = std::min(
 		(width - 40.0) / extent.width(),
 		(height - 40.0) / extent.height()
-	);
+	) * zoom_multiplier;
 	QTransform transform;
 	transform.translate(width / 2.0, height / 2.0);
 	transform.scale(scale, scale);
 	transform.translate(-extent.center().x(), -extent.center().y());
+	// Zoomed renders request only the visible world rect, like MapWidget does.
+	auto const visible = zoom_multiplier == 1
+	    ? QRectF(extent)
+	    : QRectF(extent.center().x() - width / (2 * scale),
+	             extent.center().y() - height / (2 * scale),
+	             width / scale, height / scale);
 	render::FramePlanner planner;
 	auto const base_frame = planner.plan(*snapshot, {
 		{
@@ -93,7 +111,7 @@ int main(int argc, char** argv)
 			render::fromQTransform(transform),
 		},
 		{
-			render::fromQRectF(extent),
+			render::fromQRectF(visible),
 			scale,
 			RenderConfig::Screen | RenderConfig::HelperSymbols,
 			1,

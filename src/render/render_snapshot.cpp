@@ -209,7 +209,7 @@ void MapRenderSnapshot::appendSpan(RenderIRBuilder& builder,
 
 std::shared_ptr<const RenderIR> MapRenderSnapshot::buildIR(const RenderRequest& request) const
 {
-	RenderIRBuilder builder(revision_, request.bounding_box);
+	RenderIRBuilder builder(revision_, request.bounding_box, request.scaling);
 	if (request.opacity != 1)
 		builder.pushLayer(request.opacity);
 
@@ -233,7 +233,7 @@ std::shared_ptr<const RenderIR> MapRenderSnapshot::buildSpanIR(const RenderReque
 	                                                           std::span<const ObjectId> ids,
 	                                                           std::size_t reserve_hint) const
 {
-	RenderIRBuilder builder(revision_, request.bounding_box);
+	RenderIRBuilder builder(revision_, request.bounding_box, request.scaling);
 	if (reserve_hint > 0)
 		builder.reserve(reserve_hint);
 	appendSpan(builder, priority, draw_color, ids, request);
@@ -245,7 +245,7 @@ std::shared_ptr<const RenderIR> MapRenderSnapshot::buildColorSeparationIR(
 	int separation_priority,
 	bool use_color) const
 {
-	RenderIRBuilder builder(revision_, request.bounding_box);
+	RenderIRBuilder builder(revision_, request.bounding_box, request.scaling);
 	auto drawing_started = false;
 	auto const* separation = color(separation_priority);
 	if (!separation)

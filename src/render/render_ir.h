@@ -322,13 +322,20 @@ class RenderIR
 public:
 	Revision revision = 0;
 	Rect world_bounds;
+	/**
+	 * The approximate device pixels per world unit this scene was recorded
+	 * for. Backends whose GPU resource needs grow with the display scale use
+	 * it to bound their per-submission workload while recording.
+	 */
+	double scale_hint = 1;
 	std::vector<Command> commands;
 };
 
 class RenderIRBuilder
 {
 public:
-	explicit RenderIRBuilder(Revision revision = 0, Rect world_bounds = {});
+	explicit RenderIRBuilder(Revision revision = 0, Rect world_bounds = {},
+	                         double scale_hint = 1);
 
 	void pushTransform(Transform transform);
 	void popTransform();

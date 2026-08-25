@@ -51,6 +51,8 @@ public:
 	std::string lastError() const;
 	const NativeSurfaceState& surfaceState() const noexcept;
 	std::size_t encodedSceneCount() const noexcept;
+	/** Diagnostic: whether a submitted content generation is still encoding. */
+	bool contentPending() const noexcept;
 	void setPresentationCursor(const QCursor& cursor);
 	QCursor presentationCursor() const;
 	static QEvent::Type touchGestureHandoffEventType() noexcept;
