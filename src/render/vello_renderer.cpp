@@ -13,6 +13,7 @@
 #include <deque>
 #include <limits>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <thread>
 #include <type_traits>
@@ -122,6 +123,35 @@ private:
 	std::vector<ffi::PathElement> empty_;
 };
 
+/** The inverse map, or nullopt for a (nearly) singular transform. */
+std::optional<Transform> inverted(const Transform& transform)
+{
+	auto const det = transform.m11 * transform.m22 - transform.m12 * transform.m21;
+	if (!std::isfinite(det) || std::abs(det) < 1e-12)
+		return std::nullopt;
+	Transform result;
+	result.m11 = transform.m22 / det;
+	result.m12 = -transform.m12 / det;
+	result.m21 = -transform.m21 / det;
+	result.m22 = transform.m11 / det;
+	result.dx = -(transform.dx * result.m11 + transform.dy * result.m21);
+	result.dy = -(transform.dx * result.m12 + transform.dy * result.m22);
+	return result;
+}
+
+/** The map p -> second(first(p)), in QTransform convention (x' = m11*x + m21*y + dx). */
+Transform composed(const Transform& first, const Transform& second)
+{
+	Transform result;
+	result.m11 = first.m11 * second.m11 + first.m12 * second.m21;
+	result.m12 = first.m11 * second.m12 + first.m12 * second.m22;
+	result.m21 = first.m21 * second.m11 + first.m22 * second.m21;
+	result.m22 = first.m21 * second.m12 + first.m22 * second.m22;
+	result.dx = first.dx * second.m11 + first.dy * second.m21 + second.dx;
+	result.dy = first.dx * second.m12 + first.dy * second.m22 + second.dy;
+	return result;
+}
+
 ffi::SurfaceState ffiSurface(const presentation::NativeSurfaceState& state)
 {
 	ffi::SurfaceState out;
@@ -196,6 +226,8 @@ public:
 		Revision revision = 0;
 		/** Keeps immutable IR, image storage, and raster accounting leases alive. */
 		FramePacketPtr source;
+		/** The camera the generation's viewport-space content was recorded for. */
+		Transform content_world_to_viewport;
 		std::vector<PreparedPass> passes;
 	};
 
@@ -390,6 +422,7 @@ public:
 		auto generation = std::make_shared<PreparedGeneration>();
 		generation->revision = frame->revision;
 		generation->source = frame;
+		generation->content_world_to_viewport = frame->view.world_to_viewport;
 		generation->passes.reserve(frame->vector_passes.size());
 		for (auto const& pass : frame->vector_passes)
 		{
@@ -416,9 +449,18 @@ public:
 		world_transform.m22 *= device_pixel_ratio;
 		world_transform.dx *= device_pixel_ratio;
 		world_transform.dy *= device_pixel_ratio;
-		Transform const viewport_transform {
+		// Viewport-space passes were recorded with the generation's camera
+		// baked into their geometry. Presenting them under the current camera
+		// applies the delta from the recorded camera, so world-anchored
+		// overlay content (selection highlights, edit previews, markers)
+		// follows camera-only frames live instead of sticking to its old
+		// screen position until the next content generation. When the camera
+		// is unchanged this composes to the plain device-pixel scale.
+		auto viewport_transform = Transform {
 			device_pixel_ratio, 0, 0, device_pixel_ratio, 0, 0
 		};
+		if (auto const content_inverse = inverted(generation.content_world_to_viewport))
+			viewport_transform = composed(*content_inverse, world_transform);
 
 		ffi::FrameHeader header;
 		header.frame_id = submission.frame_id;
