@@ -52,6 +52,15 @@ HyfixReceiver::HyfixReceiver(QObject* parent)
 	m_correction_timer.setSingleShot(false);
 	m_correction_timer.setInterval(HyfixProtocol::kCorrectionChunkIntervalMs);
 	connect(&m_correction_timer, &QTimer::timeout, this, &HyfixReceiver::drainCorrections);
+
+	m_release_fallback_timer.setSingleShot(true);
+	m_release_fallback_timer.setInterval(kCorrectionReleaseFallbackMs);
+	connect(&m_release_fallback_timer, &QTimer::timeout, this, [this]() {
+		if (m_corrections_released)
+			return;
+		emit errorOccurred(tr("Starting corrections without a work mode acknowledgement from the receiver"));
+		releaseCorrections();
+	});
 }
 
 
@@ -63,6 +72,9 @@ HyfixCorrectionLink HyfixReceiver::linkForTransport(const QString& transport_typ
 	const auto normalized = transport_type.trimmed().toUpper();
 	if (normalized.contains(QLatin1String("SERIAL")) || normalized.contains(QLatin1String("USB")))
 		return HyfixCorrectionLink::UsbC;
+	// No Mapper transport reaches a GEO-PULSE over TCP, and the WIFI token is
+	// unverified against firmware (its native network path reports NTRIPCLI);
+	// the mapping exists only so an unexpected transport type is visible.
 	if (normalized.contains(QLatin1String("TCP")))
 		return HyfixCorrectionLink::Wifi;
 	// BLE and Bluetooth SPP both terminate on the receiver's Bluetooth stack.
@@ -88,6 +100,9 @@ void HyfixReceiver::begin()
 	m_line_buffer.clear();
 	m_bring_up_started = false;
 	m_info = {};
+
+	m_corrections_released = false;
+	m_release_fallback_timer.stop();
 
 	enqueueCommand(kConnectSettleMs, HyfixProtocol::queryVersion());
 	m_command_timer.start(m_command_queue.first().delay_ms);
@@ -132,10 +147,12 @@ void HyfixReceiver::stop()
 {
 	m_command_timer.stop();
 	m_correction_timer.stop();
+	m_release_fallback_timer.stop();
 	m_command_queue.clear();
 	m_correction_queue.clear();
 	m_line_buffer.clear();
 	m_bring_up_started = false;
+	m_corrections_released = false;
 }
 
 
@@ -160,6 +177,16 @@ void HyfixReceiver::sendNextCommand()
 
 void HyfixReceiver::handleIncomingData(const QByteArray& data)
 {
+	// RTCM and other binary records share this stream, and a 0x2b frame byte
+	// looks like the '+' that opens a reply. The accumulator therefore
+	// resynchronizes aggressively on the `+HYFIX,` prefix: a '+' always
+	// restarts it (a genuine reply never contains one past position 0, so a
+	// later '+' means the current accumulation was binary noise in front of a
+	// real reply), and any byte that breaks the prefix discards the
+	// accumulation instead of letting frame bytes hide a reply behind it.
+	static const char kReplyPrefix[] = "+HYFIX,";
+	constexpr int kReplyPrefixLength = int(sizeof(kReplyPrefix)) - 1;
+
 	for (char c : data)
 	{
 		if (c == '\n')
@@ -174,15 +201,26 @@ void HyfixReceiver::handleIncomingData(const QByteArray& data)
 			continue;
 		}
 
-		// RTCM and other binary records share this stream. Only text can start
-		// a `+HYFIX` line, so anything else resets the accumulator instead of
-		// filling it with frame bytes.
-		if (m_line_buffer.isEmpty() && c != '+')
+		if (c == '+')
+		{
+			m_line_buffer.clear();
+			m_line_buffer.append(c);
+			continue;
+		}
+
+		if (m_line_buffer.isEmpty())
 			continue;
 
 		m_line_buffer.append(c);
-		if (m_line_buffer.size() > kMaxLineLength)
+		if (m_line_buffer.size() <= kReplyPrefixLength
+		    && !std::equal(m_line_buffer.cbegin(), m_line_buffer.cend(), kReplyPrefix))
+		{
 			m_line_buffer.clear();
+		}
+		else if (m_line_buffer.size() > kMaxLineLength)
+		{
+			m_line_buffer.clear();
+		}
 	}
 }
 
@@ -199,6 +237,18 @@ void HyfixReceiver::handleLine(const QByteArray& line)
 
 	if (!m_info.lastError.isEmpty() && m_info.lastError != previous_error)
 		emit errorOccurred(m_info.lastError);
+
+	// The proven RTK bring-up delivered no RTCM before the receiver had
+	// acknowledged the work mode naming the host link, so that reply is what
+	// releases the correction hold-off: either the `OK` acknowledgement of
+	// our own WORKMODE command, or a readback confirming the expected link.
+	if (!m_corrections_released && reply.verb == QLatin1String("WORKMODE"))
+	{
+		const auto acknowledged = !reply.fields.isEmpty()
+		                          && reply.fields.first() == QLatin1String("OK");
+		if (acknowledged || m_info.correctionLink == HyfixProtocol::linkToken(m_link))
+			releaseCorrections();
+	}
 
 	// The first reply of any kind confirms a GEO-PULSE is on the far end.
 	startBringUp();
@@ -228,10 +278,17 @@ void HyfixReceiver::sendCorrections(const QByteArray& rtcm)
 	if (rtcm.isEmpty())
 		return;
 
-	if (!pacesCorrections())
+	if (m_link == HyfixCorrectionLink::UsbC && !m_usb_warning_emitted)
 	{
-		emit writeRequested(rtcm);
-		return;
+		// Bench-proven on GPv2 3.8.2: with a USB data connection attached the
+		// receiver was never observed to reach an RTK solution, while the
+		// same receiver and corrections work over Bluetooth with power-only
+		// USB. USB corrections stay wired up as experimental, but the user
+		// gets told once per session rather than debugging a silent failure.
+		m_usb_warning_emitted = true;
+		emit errorOccurred(tr("USB corrections are experimental on this receiver: "
+		                      "it has not been observed to reach RTK while a USB data "
+		                      "connection is attached. Prefer Bluetooth for corrections."));
 	}
 
 	m_correction_queue.append(rtcm);
@@ -242,7 +299,20 @@ void HyfixReceiver::sendCorrections(const QByteArray& rtcm)
 		m_dropped_bytes += excess;
 	}
 
-	if (!m_correction_timer.isActive())
+	if (!m_corrections_released)
+	{
+		// Held until the WORKMODE acknowledgement; the fallback keeps a
+		// non-acknowledging device from holding corrections forever.
+		if (!m_release_fallback_timer.isActive())
+			m_release_fallback_timer.start();
+		return;
+	}
+
+	if (!pacesCorrections())
+	{
+		drainCorrections();
+	}
+	else if (!m_correction_timer.isActive())
 	{
 		// Send the first chunk immediately; the timer meters the rest.
 		drainCorrections();
@@ -252,17 +322,41 @@ void HyfixReceiver::sendCorrections(const QByteArray& rtcm)
 }
 
 
+void HyfixReceiver::releaseCorrections()
+{
+	m_corrections_released = true;
+	m_release_fallback_timer.stop();
+
+	if (m_correction_queue.isEmpty())
+		return;
+
+	if (!pacesCorrections())
+	{
+		drainCorrections();
+	}
+	else if (!m_correction_timer.isActive())
+	{
+		drainCorrections();
+		if (!m_correction_queue.isEmpty())
+			m_correction_timer.start();
+	}
+}
+
+
 void HyfixReceiver::drainCorrections()
 {
-	if (m_correction_queue.isEmpty())
+	if (m_correction_queue.isEmpty() || !m_corrections_released)
 	{
 		m_correction_timer.stop();
 		return;
 	}
 
-	const auto chunk_size = std::min<qsizetype>(
-	    HyfixProtocol::kCorrectionChunkBytes, m_correction_queue.size());
-	emit writeRequested(m_correction_queue.left(int(chunk_size)));
+	// A metered link goes out one vendor-sized chunk at a time; any other
+	// link takes the whole backlog in one write.
+	const auto chunk_size = pacesCorrections()
+	    ? std::min<qsizetype>(HyfixProtocol::kCorrectionChunkBytes, m_correction_queue.size())
+	    : m_correction_queue.size();
+	emit correctionWriteRequested(m_correction_queue.left(int(chunk_size)));
 	m_correction_queue.remove(0, int(chunk_size));
 
 	if (m_correction_queue.isEmpty())

@@ -1175,18 +1175,26 @@ void GnssProtocolTest::hyfixPacesCorrectionsOverBluetooth()
 
 	// NTRIP starts with the transport, before the receiver has answered the
 	// probe. A device whose advertised name already says GEO-PULSE must have
-	// its corrections paced from the first block, not from the first reply.
+	// its corrections queued from the first block, not from the first reply.
 	QVERIFY(!receiver.handlesCorrections());
 	receiver.setExpected(true);
 	QVERIFY(receiver.handlesCorrections());
 
-	QSignalSpy writes(&receiver, &HyfixReceiver::writeRequested);
+	QSignalSpy writes(&receiver, &HyfixReceiver::correctionWriteRequested);
 
-	// A caster block larger than one BLE write.
+	// A caster block larger than one BLE write arrives before the receiver
+	// has acknowledged the work mode: it is held, not written. The only
+	// bench-proven RTK bring-up delivered no RTCM before that reply.
 	const QByteArray block(1500, '\xd3');
 	receiver.sendCorrections(block);
+	QVERIFY(!receiver.correctionsReleased());
+	QCOMPARE(writes.count(), 0);
+	QCOMPARE(receiver.pendingCorrectionBytes(), 1500);
 
-	// The first chunk leaves immediately, capped at the vendor chunk size.
+	// The WORKMODE acknowledgement releases the hold; the first chunk leaves
+	// immediately, capped at the vendor chunk size.
+	receiver.handleIncomingData("+HYFIX,WORKMODE,OK#\r\n");
+	QVERIFY(receiver.correctionsReleased());
 	QCOMPARE(writes.count(), 1);
 	QCOMPARE(writes.at(0).at(0).toByteArray().size(), HyfixProtocol::kCorrectionChunkBytes);
 	QCOMPARE(receiver.pendingCorrectionBytes(), 1500 - HyfixProtocol::kCorrectionChunkBytes);
@@ -1209,20 +1217,60 @@ void GnssProtocolTest::hyfixPacesCorrectionsOverBluetooth()
 
 void GnssProtocolTest::hyfixWritesCorrectionsDirectlyOverSerial()
 {
-	// Only the BLE path needs metering; a serial link takes the block whole.
+	// Only the BLE path needs metering; a serial link takes the backlog
+	// whole — but the work-mode hold applies to every link, and USB
+	// corrections announce themselves as experimental: the bench result is
+	// that a USB data connection prevents RTK on this hardware.
 	HyfixReceiver receiver;
 	receiver.setCorrectionLink(HyfixCorrectionLink::UsbC);
+	receiver.setExpected(true);
 	QVERIFY(!receiver.pacesCorrections());
-	QSignalSpy writes(&receiver, &HyfixReceiver::writeRequested);
+	QSignalSpy writes(&receiver, &HyfixReceiver::correctionWriteRequested);
+	QSignalSpy errors(&receiver, &HyfixReceiver::errorOccurred);
 
 	const QByteArray block(1500, '\xd3');
 	receiver.sendCorrections(block);
+	QCOMPARE(writes.count(), 0);
+	QCOMPARE(receiver.pendingCorrectionBytes(), 1500);
+	QCOMPARE(errors.count(), 1);  // the one-per-session experimental warning
+	QVERIFY(errors.at(0).at(0).toString().contains(QStringLiteral("experimental")));
+
+	// A readback confirming the expected link also releases the hold.
+	receiver.handleIncomingData("+HYFIX,WORKMODE,ROVER,NTRIPCLI,USBC#\r\n");
 	QCOMPARE(writes.count(), 1);
 	QCOMPARE(writes.at(0).at(0).toByteArray(), block);
 	QCOMPARE(receiver.pendingCorrectionBytes(), 0);
 
 	QCOMPARE(HyfixReceiver::linkForTransport(QStringLiteral("Serial")), HyfixCorrectionLink::UsbC);
 	QCOMPARE(HyfixReceiver::linkForTransport(QStringLiteral("BLE")), HyfixCorrectionLink::Bluetooth);
+}
+
+
+void GnssProtocolTest::hyfixReplyExtractorResyncsInBinaryStream()
+{
+	// The GP100 interleaves binary RTCM with NMEA and +HYFIX replies on one
+	// stream, and RTCM payload bytes can include 0x2b ('+'). A stray '+'
+	// that opens the accumulator must not swallow the genuine reply that
+	// follows before the next newline.
+	HyfixReceiver receiver;
+
+	QByteArray noise;
+	noise.append('\xd3');            // RTCM preamble
+	noise.append('+');               // payload byte that looks like a reply start
+	noise.append('\x13');            // breaks the +HYFIX, prefix -> resync
+	noise.append("+HY");             // a second lookalike, cut short by...
+	noise.append("+HYFIX,VERSION,GPv2-3.8.2@20260415,3.8.2,GPv2,v2.0#\r\n");
+	receiver.handleIncomingData(noise);
+	QVERIFY(receiver.isIdentified());
+	QCOMPARE(receiver.info().productFirmware, QStringLiteral("3.8.2"));
+
+	// Binary that never resolves into a reply identifies nothing.
+	HyfixReceiver quiet;
+	QByteArray binary;
+	for (int i = 0; i < 2048; ++i)
+		binary.append(char(i * 37 + 11));
+	quiet.handleIncomingData(binary);
+	QVERIFY(!quiet.isIdentified());
 }
 
 

@@ -119,6 +119,27 @@ void GnssSession::setupParsers()
 				appendRawEntry('T', data);
 		}
 	});
+	// Correction chunks are accounted here, against the actual transport
+	// write result, not when a caster block is accepted into the pacer:
+	// "sent to receiver" means the transport took the bytes, nothing earlier.
+	connect(m_hyfix.get(), &HyfixReceiver::correctionWriteRequested,
+	        this, [this](const QByteArray& data) {
+		const auto connected = m_transport
+		                       && m_transport->state() == GnssTransport::State::Connected;
+		if (connected && m_transport->write(data))
+		{
+			appendRawEntry('T', data);
+			if (m_ntrip)
+				m_ntrip->addBytesSentToReceiver(data.size());
+			m_state.ntripBytesSentToReceiver = m_ntrip ? m_ntrip->totalBytesSentToReceiver()
+			                                           : m_state.ntripBytesSentToReceiver + data.size();
+		}
+		else
+		{
+			m_state.ntripBytesDroppedToReceiver += data.size();
+		}
+		m_state.hyfixQueuedCorrectionBytes = m_hyfix->pendingCorrectionBytes();
+	});
 	connect(m_hyfix.get(), &HyfixReceiver::infoChanged,
 	        this, [this](const OpenOrienteering::HyfixDeviceInfo& info) {
 		m_state.hyfix = info;
@@ -508,18 +529,13 @@ void GnssSession::onNtripCorrectionData(const QByteArray& data)
 
 	appendRawEntry('C', data);
 
-	// Forward corrections to the receiver
-	if (m_transport && m_transport->state() == GnssTransport::State::Connected
-	    && writeCorrections(data))
-	{
-		appendRawEntry('T', data);
-		if (m_ntrip)
-			m_ntrip->addBytesSentToReceiver(data.size());
-	}
+	// Forward corrections to the receiver. Delivery accounting happens where
+	// the write result is known: in writeCorrections() for a direct write,
+	// or in the correctionWriteRequested handler for the GEO-PULSE path.
+	if (m_transport && m_transport->state() == GnssTransport::State::Connected)
+		writeCorrections(data);
 	else
-	{
 		m_state.ntripBytesDroppedToReceiver += data.size();
-	}
 
 	m_state.lastCorrectionTime = QDateTime::currentDateTimeUtc();
 
@@ -796,8 +812,11 @@ bool GnssSession::writeCorrections(const QByteArray& data)
 	if (!m_transport)
 		return false;
 
-	// A GEO-PULSE needs its corrections metered; everything else takes the
-	// caster block as it arrives.
+	// A GEO-PULSE takes its corrections through the receiver driver, which
+	// holds them until the work mode is acknowledged, meters them on BLE,
+	// and drops them when they go stale. Only "accepted for delivery" can be
+	// reported from here; delivered bytes are counted per actual transport
+	// write in the correctionWriteRequested handler.
 	if (m_hyfix && m_hyfix->handlesCorrections())
 	{
 		m_hyfix->sendCorrections(data);
@@ -814,7 +833,16 @@ bool GnssSession::writeCorrections(const QByteArray& data)
 		return true;
 	}
 
-	return m_transport->write(data);
+	// Everything else takes the caster block as it arrives.
+	if (m_transport->write(data))
+	{
+		appendRawEntry('T', data);
+		if (m_ntrip)
+			m_ntrip->addBytesSentToReceiver(data.size());
+		return true;
+	}
+	m_state.ntripBytesDroppedToReceiver += data.size();
+	return false;
 }
 
 

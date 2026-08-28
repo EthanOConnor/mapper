@@ -49,7 +49,9 @@ enum class GnssAccuracyBasis : std::uint8_t
 	Sigma68 = 0,
 	/// 50% confidence (Circular Error Probable).
 	CEP50   = 1,
-	/// Unknown; we assume 68% as the most common GNSS convention.
+	/// The source did not document its confidence basis (e.g. $PQTMEPE).
+	/// P95 values derived from it rest on an assumed 68% — the most common
+	/// GNSS convention — and are estimates, not receiver-grounded figures.
 	Unknown = 2,
 };
 
@@ -137,7 +139,8 @@ struct GnssPosition
 		case GnssAccuracyBasis::CEP50:
 			return reported * kP95FromCEP50;
 		case GnssAccuracyBasis::Unknown:
-			// Assume 68% — the most common GNSS convention.
+			// Assumption, not a receiver-grounded conversion: treat the
+			// undocumented basis as 68%, the most common GNSS convention.
 			return reported * kP95FromSigma68;
 		}
 		return reported * kP95FromSigma68;

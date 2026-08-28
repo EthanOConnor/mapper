@@ -42,7 +42,10 @@ enum class HyfixCorrectionLink : std::uint8_t
 {
 	Bluetooth = 0,  ///< `BT` — corrections written to the NUS RX characteristic
 	UsbC      = 1,  ///< `USBC` — corrections written to the USB serial endpoint
-	Wifi      = 2,  ///< `WIFI` — receiver-side network link (not used by Mapper)
+	/// `WIFI` — placeholder only. No firmware acceptance of this token has
+	/// been observed; the receiver's native network correction path reports
+	/// `NTRIPCLI` in this field instead. Mapper never sends it.
+	Wifi      = 2,
 };
 
 
@@ -137,6 +140,9 @@ public:
 	/// `+HYFIX,WORKMODE,ROVER,NTRIPCLI,<link>#` — rover taking corrections
 	/// from the host link. This leaves the receiver's own NTRIP client stopped.
 	static QByteArray setRoverMode(HyfixCorrectionLink link);
+
+	/// The WORKMODE token for a correction link: "BT", "USBC", "WIFI".
+	static QString linkToken(HyfixCorrectionLink link);
 
 	/// `+HYFIX,GNSSMSG,NMEA,<intervalMs>#` — position fix and NMEA output
 	/// interval. Only the intervals in supportedNmeaIntervalsMs() are accepted;

@@ -43,6 +43,11 @@ namespace OpenOrienteering {
 ///  3. Paced correction writes. Its BLE receive path drops bytes if RTCM is
 ///     pushed faster than roughly one 509-byte chunk per 80 ms, so corrections
 ///     are queued and metered rather than written straight through.
+///  4. A correction hold-off. The firmware only forwards host RTCM to the
+///     GNSS module after the work mode names the host link, so corrections
+///     are held in the queue until the receiver acknowledges (or reads back)
+///     the WORKMODE we set. The only bench-proven RTK bring-up delivered no
+///     RTCM before that acknowledgement.
 ///
 /// This class owns all three and stays transport-agnostic: it asks its owner to
 /// write bytes and is fed the lines that come back.
@@ -106,8 +111,15 @@ public:
 	/// Record dead-reckoning state decoded from $PQTMDRCAL.
 	void setDeadReckoningState(int calibration_state, int navigation_type);
 
-	/// Hand correction bytes to the receiver, metered when the link needs it.
+	/// Hand correction bytes to the receiver. Bytes are queued, held until the
+	/// receiver has acknowledged the work mode (see correctionsReleased()),
+	/// and metered out when the link needs it.
 	void sendCorrections(const QByteArray& rtcm);
+
+	/// Whether queued corrections may flow to the transport. False from
+	/// begin() until a WORKMODE acknowledgement or readback arrives, or until
+	/// kCorrectionReleaseFallbackMs elapses without one.
+	bool correctionsReleased() const { return m_corrections_released; }
 
 	const HyfixDeviceInfo& info() const { return m_info; }
 
@@ -125,9 +137,22 @@ public:
 	/// from the front rather than delivered late.
 	static constexpr int kMaxQueuedCorrectionBytes = 32 * 1024;
 
+	/// How long corrections stay held waiting for a WORKMODE acknowledgement
+	/// before flowing anyway. A receiver that never acknowledges is either
+	/// not forwarding corrections at all — in which case sending them is
+	/// harmless — or running firmware that skips the acknowledgement, in
+	/// which case holding forever would be worse.
+	static constexpr int kCorrectionReleaseFallbackMs = 15000;
+
 signals:
-	/// Bytes the owner should write to the transport.
+	/// Command bytes the owner should write to the transport.
 	void writeRequested(const QByteArray& data);
+
+	/// Correction bytes the owner should write to the transport. Kept apart
+	/// from writeRequested so the owner can account delivered correction
+	/// bytes against the actual transport write result rather than at
+	/// enqueue time.
+	void correctionWriteRequested(const QByteArray& data);
 
 	/// Emitted when any receiver fact changed.
 	void infoChanged(const OpenOrienteering::HyfixDeviceInfo& info);
@@ -139,6 +164,7 @@ private:
 	void enqueueCommand(int delay_ms, const QByteArray& command);
 	void startBringUp();
 	void sendNextCommand();
+	void releaseCorrections();
 	void drainCorrections();
 	void handleLine(const QByteArray& line);
 
@@ -161,7 +187,10 @@ private:
 
 	QByteArray m_correction_queue;
 	QTimer m_correction_timer;
+	QTimer m_release_fallback_timer;
 	qint64 m_dropped_bytes = 0;
+	bool m_corrections_released = false;
+	bool m_usb_warning_emitted = false;
 
 	static constexpr int kMaxLineLength = 512;
 };

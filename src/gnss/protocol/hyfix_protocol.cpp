@@ -29,16 +29,6 @@ namespace {
 
 const char* const kNamePrefixes[] = { "GEOPULSE_", "LITERTK_", "BOOSTER_" };
 
-QString linkToken(HyfixCorrectionLink link)
-{
-	switch (link) {
-	case HyfixCorrectionLink::Bluetooth: return QStringLiteral("BT");
-	case HyfixCorrectionLink::UsbC:      return QStringLiteral("USBC");
-	case HyfixCorrectionLink::Wifi:      return QStringLiteral("WIFI");
-	}
-	return QStringLiteral("BT");
-}
-
 /// Parse a decimal integer field, returning -1 for anything unparseable.
 int toInterval(const QString& field)
 {
@@ -111,6 +101,17 @@ QByteArray HyfixProtocol::queryWorkMode()         { return command("WORKMODE?");
 QByteArray HyfixProtocol::queryMessageConfig()    { return command("GNSSMSG?"); }
 QByteArray HyfixProtocol::queryNtripClientStatus(){ return command("NTRIPCLISTATUS?"); }
 QByteArray HyfixProtocol::queryAntenna()          { return command("GNSSANT?"); }
+
+
+QString HyfixProtocol::linkToken(HyfixCorrectionLink link)
+{
+	switch (link) {
+	case HyfixCorrectionLink::Bluetooth: return QStringLiteral("BT");
+	case HyfixCorrectionLink::UsbC:      return QStringLiteral("USBC");
+	case HyfixCorrectionLink::Wifi:      return QStringLiteral("WIFI");
+	}
+	return QStringLiteral("BT");
+}
 
 
 QByteArray HyfixProtocol::setRoverMode(HyfixCorrectionLink link)
@@ -245,10 +246,15 @@ bool HyfixProtocol::applyReply(const HyfixReply& reply, HyfixDeviceInfo& info)
 	}
 	else if (reply.verb == QLatin1String("WORKMODE"))
 	{
-		// +HYFIX,WORKMODE,ROVER,NTRIPCLI,USBC#
-		changed |= assign(info.workMode, field(0));
-		changed |= assign(info.correctionMode, field(1));
-		changed |= assign(info.correctionLink, field(2));
+		// +HYFIX,WORKMODE,ROVER,NTRIPCLI,USBC# — a readback.
+		// +HYFIX,WORKMODE,OK# — the acknowledgement of a set command; it
+		// confirms the mode took but carries no state to fold in.
+		if (field(0) != QLatin1String("OK"))
+		{
+			changed |= assign(info.workMode, field(0));
+			changed |= assign(info.correctionMode, field(1));
+			changed |= assign(info.correctionLink, field(2));
+		}
 	}
 	else if (reply.verb == QLatin1String("GNSSMSG"))
 	{

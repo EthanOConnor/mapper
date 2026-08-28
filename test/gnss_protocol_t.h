@@ -69,6 +69,7 @@ private slots:
 	void hyfixIdentifiesFromStreamAndBringsUp();
 	void hyfixPacesCorrectionsOverBluetooth();
 	void hyfixWritesCorrectionsDirectlyOverSerial();
+	void hyfixReplyExtractorResyncsInBinaryStream();
 	void nmeaEpeAccuracy();
 	void nmeaDrPvaParsing();
 	void nmeaDrCalParsing();
