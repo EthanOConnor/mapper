@@ -143,6 +143,22 @@ public:
 	/// anything else is answered with `+HYFIX,GNSSMSG,ERR,-1(ESP_FAIL)#`.
 	static QByteArray setNmeaIntervalMs(int interval_ms);
 
+	/// `$PAIR080` navigation modes: the module's GNSS dynamic model.
+	/// Verified live: setting Fitness answers `$PAIR001,080,0` and the
+	/// readback (`$PAIR081`) reflects it; the position rate is unaffected.
+	enum class NavigationMode : int
+	{
+		Normal     = 0,  ///< Driving-class dynamics (receiver default)
+		Fitness    = 1,  ///< Walking/running; damps low-speed movement noise
+		Stationary = 4,
+		Drone      = 5,
+		Swimming   = 7,
+		Bike       = 9,
+	};
+
+	/// `$PAIR080,<mode>` through the pass-through: set the GNSS dynamic model.
+	static QByteArray setNavigationMode(NavigationMode mode);
+
 	/// `+HYFIX,TRANS,GNSS,<sentence>*<checksum>#` — pass a raw Quectel
 	/// sentence through the MCU to the GNSS module. The MCU acknowledges with
 	/// `+HYFIX,TRANS,GNSS,OK#` and the module answers separately, typically

@@ -1144,14 +1144,20 @@ void GnssProtocolTest::hyfixIdentifiesFromStreamAndBringsUp()
 	QVERIFY(receiver.isIdentified());
 	QCOMPARE(receiver.info().productFirmware, QStringLiteral("3.8.2"));
 
-	// The bring-up sequence follows, and it configures the link and the rate.
-	QTRY_VERIFY_WITH_TIMEOUT(writes.count() >= 9, 10000);
+	// The bring-up sequence follows, and it configures the link, the rate,
+	// and the foot-survey dynamic model.
+	QTRY_VERIFY_WITH_TIMEOUT(writes.count() >= 10, 15000);
 	QByteArrayList sent;
 	for (const auto& call : writes)
 		sent.append(call.at(0).toByteArray());
 	QVERIFY(sent.contains(HyfixProtocol::setRoverMode(HyfixCorrectionLink::UsbC)));
 	QVERIFY(sent.contains(HyfixProtocol::setNmeaIntervalMs(200)));
 	QVERIFY(sent.contains(HyfixProtocol::queryMessageConfig()));
+	// $PAIR080,1 = Fitness, sent last so the rate change's GNSS engine
+	// restart cannot swallow it. Checksum verified live.
+	QVERIFY(sent.last() == QByteArray("+HYFIX,TRANS,GNSS,$PAIR080,1*2F#\r\n"));
+	QCOMPARE(HyfixProtocol::setNavigationMode(HyfixProtocol::NavigationMode::Fitness),
+	         QByteArray("+HYFIX,TRANS,GNSS,$PAIR080,1*2F#\r\n"));
 	// The bring-up runs once, not once per reply.
 	receiver.handleIncomingData("+HYFIX,GNSSANT,0#\r\n");
 	const auto count_after = writes.count();

@@ -36,6 +36,10 @@ constexpr int kConnectSettleMs = 800;
 /// one is due, so this only keeps the MCU's command parser from being flooded.
 constexpr int kCommandSpacingMs = 500;
 
+/// Extra settling before the navigation-mode command: the preceding rate
+/// change restarts the GNSS engine, and a command sent mid-restart is lost.
+constexpr int kNavigationModeSettleMs = 2000;
+
 }  // namespace
 
 
@@ -108,6 +112,13 @@ void HyfixReceiver::startBringUp()
 	enqueueCommand(kCommandSpacingMs, HyfixProtocol::setNmeaIntervalMs(m_nmea_interval_ms));
 	enqueueCommand(kCommandSpacingMs, HyfixProtocol::queryMessageConfig());
 	enqueueCommand(kCommandSpacingMs, HyfixProtocol::queryNtripClientStatus());
+	// Last, after the rate change's GNSS engine restart has settled: the
+	// dynamic model for foot survey. Dead reckoning is deliberately left
+	// alone — this firmware rejects $PQTMCFGDR with "unsupported command"
+	// (two-wheel builds cannot disable DR), and uncalibrated DR is inert:
+	// it never engages without sustained vehicle motion.
+	enqueueCommand(kNavigationModeSettleMs,
+	               HyfixProtocol::setNavigationMode(m_navigation_mode));
 
 	if (!m_command_timer.isActive() && !m_command_queue.isEmpty())
 		m_command_timer.start(m_command_queue.first().delay_ms);

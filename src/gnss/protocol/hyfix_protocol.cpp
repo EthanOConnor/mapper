@@ -125,6 +125,12 @@ QByteArray HyfixProtocol::setNmeaIntervalMs(int interval_ms)
 }
 
 
+QByteArray HyfixProtocol::setNavigationMode(NavigationMode mode)
+{
+	return transparentGnssCommand("PAIR080," + QByteArray::number(int(mode)));
+}
+
+
 QByteArray HyfixProtocol::transparentGnssCommand(const QByteArray& body)
 {
 	return command("TRANS,GNSS,$" + body + '*' + nmeaChecksum(body));

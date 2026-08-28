@@ -64,6 +64,14 @@ public:
 	void setNmeaIntervalMs(int interval_ms);
 	int nmeaIntervalMs() const { return m_nmea_interval_ms; }
 
+	/// GNSS dynamic model applied during bring-up. Defaults to Fitness:
+	/// Mapper's survey use is on foot, where the low-speed model measurably
+	/// helps and the driving-class default does not. Applied per session and
+	/// never persisted to the receiver's NVM, so the vendor app finds the
+	/// device unchanged.
+	void setNavigationMode(HyfixProtocol::NavigationMode mode) { m_navigation_mode = mode; }
+	HyfixProtocol::NavigationMode navigationMode() const { return m_navigation_mode; }
+
 	/// Whether corrections need metering on this link. True for BLE only.
 	bool pacesCorrections() const { return m_link == HyfixCorrectionLink::Bluetooth; }
 
@@ -143,6 +151,7 @@ private:
 	HyfixDeviceInfo m_info;
 	HyfixCorrectionLink m_link = HyfixCorrectionLink::Bluetooth;
 	int m_nmea_interval_ms = HyfixProtocol::kDefaultNmeaIntervalMs;
+	HyfixProtocol::NavigationMode m_navigation_mode = HyfixProtocol::NavigationMode::Fitness;
 
 	QByteArray m_line_buffer;
 	QList<PendingCommand> m_command_queue;
