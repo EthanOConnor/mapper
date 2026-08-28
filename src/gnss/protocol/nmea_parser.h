@@ -51,6 +51,9 @@ namespace OpenOrienteering {
 /// GEO-PULSE) are decoded too:
 ///   - PQTMDRPVA: dead-reckoning position/velocity/attitude and solution type
 ///   - PQTMDRCAL: dead-reckoning calibration state and navigation type
+///   - PQTMEPE:   receiver-estimated position error, folded into the next
+///                GGA epoch's accuracy (preferred over the HDOP heuristic;
+///                GST, when a receiver emits it, still takes precedence)
 ///   - PQTMTXT:   receiver status text
 ///   - PAIR001:   acknowledgement of a $PAIR command
 ///
@@ -124,6 +127,7 @@ private:
 	bool handleProprietary(const QByteArray& sentence);
 	void handleDrPva(const QByteArrayList& fields);
 	void handleDrCal(const QByteArrayList& fields);
+	void handleEpe(const QByteArrayList& fields);
 
 	QByteArray m_lineBuffer;
 	Stats m_stats;
@@ -133,6 +137,14 @@ private:
 	int m_gstSeconds = -1;
 	float m_gstHAccuracy = NAN;
 	float m_gstVAccuracy = NAN;
+	// $PQTMEPE carries no timestamp, so it is paired to GGA by arrival time.
+	float m_epeHAccuracy = NAN;
+	float m_epeVAccuracy = NAN;
+	qint64 m_epeArrivalMs = 0;
+
+	/// How long a $PQTMEPE stays usable for the following GGA. Covers one
+	/// epoch at the slowest supported rate (1 Hz) plus delivery jitter.
+	static constexpr qint64 kEpeFreshMs = 1500;
 
 	static constexpr int kMaxLineLength = 256;  // NMEA max is 82, generous buffer
 };

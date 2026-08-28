@@ -159,6 +159,12 @@ public:
 	/// `$PAIR080,<mode>` through the pass-through: set the GNSS dynamic model.
 	static QByteArray setNavigationMode(NavigationMode mode);
 
+	/// `$PQTMCFGMSGRATE,W,PQTMEPE,1,2` through the pass-through: output the
+	/// receiver's own estimated position error every fix. Verified live:
+	/// $PQTMEPE v2 (north/east/down/2D/3D meters) follows at the position
+	/// rate. Like all GNSSMSG-layer settings it resets on power cycle.
+	static QByteArray enableEstimatedPositionError();
+
 	/// `+HYFIX,TRANS,GNSS,<sentence>*<checksum>#` — pass a raw Quectel
 	/// sentence through the MCU to the GNSS module. The MCU acknowledges with
 	/// `+HYFIX,TRANS,GNSS,OK#` and the module answers separately, typically

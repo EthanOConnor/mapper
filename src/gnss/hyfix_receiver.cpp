@@ -112,12 +112,15 @@ void HyfixReceiver::startBringUp()
 	enqueueCommand(kCommandSpacingMs, HyfixProtocol::setNmeaIntervalMs(m_nmea_interval_ms));
 	enqueueCommand(kCommandSpacingMs, HyfixProtocol::queryMessageConfig());
 	enqueueCommand(kCommandSpacingMs, HyfixProtocol::queryNtripClientStatus());
-	// Last, after the rate change's GNSS engine restart has settled: the
-	// dynamic model for foot survey. Dead reckoning is deliberately left
-	// alone — this firmware rejects $PQTMCFGDR with "unsupported command"
-	// (two-wheel builds cannot disable DR), and uncalibrated DR is inert:
-	// it never engages without sustained vehicle motion.
+	// After the rate change's GNSS engine restart has settled: enable the
+	// receiver's own position error estimate, then the dynamic model for
+	// foot survey. Dead reckoning is deliberately left alone — this firmware
+	// rejects $PQTMCFGDR with "unsupported command" (two-wheel builds cannot
+	// disable DR), and uncalibrated DR is inert: it never engages without
+	// sustained vehicle motion.
 	enqueueCommand(kNavigationModeSettleMs,
+	               HyfixProtocol::enableEstimatedPositionError());
+	enqueueCommand(kCommandSpacingMs,
 	               HyfixProtocol::setNavigationMode(m_navigation_mode));
 
 	if (!m_command_timer.isActive() && !m_command_queue.isEmpty())

@@ -131,6 +131,12 @@ QByteArray HyfixProtocol::setNavigationMode(NavigationMode mode)
 }
 
 
+QByteArray HyfixProtocol::enableEstimatedPositionError()
+{
+	return transparentGnssCommand("PQTMCFGMSGRATE,W,PQTMEPE,1,2");
+}
+
+
 QByteArray HyfixProtocol::transparentGnssCommand(const QByteArray& body)
 {
 	return command("TRANS,GNSS,$" + body + '*' + nmeaChecksum(body));

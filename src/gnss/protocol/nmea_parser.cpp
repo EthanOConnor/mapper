@@ -137,6 +137,8 @@ void NmeaParser::reset()
 	m_gstValid = false;
 	m_gstHours = m_gstMinutes = m_gstSeconds = -1;
 	m_gstHAccuracy = m_gstVAccuracy = NAN;
+	m_epeHAccuracy = m_epeVAccuracy = NAN;
+	m_epeArrivalMs = 0;
 }
 
 
@@ -193,6 +195,12 @@ bool NmeaParser::handleProprietary(const QByteArray& sentence)
 	{
 		emit sentenceDecoded(QStringLiteral("PQTMDRCAL"));
 		handleDrCal(fields);
+		return true;
+	}
+	if (identifier == "PQTMEPE")
+	{
+		emit sentenceDecoded(QStringLiteral("PQTMEPE"));
+		handleEpe(fields);
 		return true;
 	}
 	if (identifier == "PQTMTXT")
@@ -292,6 +300,26 @@ void NmeaParser::handleDrPva(const QByteArrayList& fields)
 }
 
 
+void NmeaParser::handleEpe(const QByteArrayList& fields)
+{
+	// $PQTMEPE,<MsgVer>,<EPE_North>,<EPE_East>,<EPE_Down>,<EPE_2D>,<EPE_3D>
+	// All values in meters. Verified live on the GEO-PULSE (LC29HBA).
+	// fields[0] is the sentence identifier itself.
+	if (fields.size() < 7)
+		return;
+
+	auto number = [&fields](int index) -> float {
+		bool ok = false;
+		const auto value = fields.at(index).toFloat(&ok);
+		return ok ? value : NAN;
+	};
+
+	m_epeHAccuracy = number(5);  // 2D error
+	m_epeVAccuracy = number(4);  // down-component error
+	m_epeArrivalMs = QDateTime::currentMSecsSinceEpoch();
+}
+
+
 void NmeaParser::handleDrCal(const QByteArrayList& fields)
 {
 	// $PQTMDRCAL,<MsgVer>,<CalState>,<NavType>
@@ -369,6 +397,20 @@ void NmeaParser::handleGGA(const char* sentence)
 		observation.meta.limitation = mergeLimitation(
 		    observation.meta.limitation,
 		    QStringLiteral("Horizontal accuracy from GST error statistics"));
+	}
+	else if (!std::isnan(m_epeHAccuracy)
+	         && QDateTime::currentMSecsSinceEpoch() - m_epeArrivalMs <= kEpeFreshMs)
+	{
+		// Receiver-estimated position error. No timestamp on the sentence,
+		// so freshness is by arrival; at worst the estimate is one epoch old.
+		observation.position.hAccuracy = m_epeHAccuracy;
+		observation.position.vAccuracy = m_epeVAccuracy;
+		observation.position.accuracyBasis = GnssAccuracyBasis::Unknown;
+		observation.position.computeP95();
+		observation.meta.accuracyDerived = false;
+		observation.meta.limitation = mergeLimitation(
+		    observation.meta.limitation,
+		    QStringLiteral("Accuracy from receiver-estimated position error (PQTMEPE)"));
 	}
 	else if (!std::isnan(observation.position.hDOP))
 	{

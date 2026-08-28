@@ -1146,7 +1146,7 @@ void GnssProtocolTest::hyfixIdentifiesFromStreamAndBringsUp()
 
 	// The bring-up sequence follows, and it configures the link, the rate,
 	// and the foot-survey dynamic model.
-	QTRY_VERIFY_WITH_TIMEOUT(writes.count() >= 10, 15000);
+	QTRY_VERIFY_WITH_TIMEOUT(writes.count() >= 11, 15000);
 	QByteArrayList sent;
 	for (const auto& call : writes)
 		sent.append(call.at(0).toByteArray());
@@ -1156,6 +1156,7 @@ void GnssProtocolTest::hyfixIdentifiesFromStreamAndBringsUp()
 	// $PAIR080,1 = Fitness, sent last so the rate change's GNSS engine
 	// restart cannot swallow it. Checksum verified live.
 	QVERIFY(sent.last() == QByteArray("+HYFIX,TRANS,GNSS,$PAIR080,1*2F#\r\n"));
+	QVERIFY(sent.contains(HyfixProtocol::enableEstimatedPositionError()));
 	QCOMPARE(HyfixProtocol::setNavigationMode(HyfixProtocol::NavigationMode::Fitness),
 	         QByteArray("+HYFIX,TRANS,GNSS,$PAIR080,1*2F#\r\n"));
 	// The bring-up runs once, not once per reply.
@@ -1222,6 +1223,33 @@ void GnssProtocolTest::hyfixWritesCorrectionsDirectlyOverSerial()
 
 	QCOMPARE(HyfixReceiver::linkForTransport(QStringLiteral("Serial")), HyfixCorrectionLink::UsbC);
 	QCOMPARE(HyfixReceiver::linkForTransport(QStringLiteral("BLE")), HyfixCorrectionLink::Bluetooth);
+}
+
+
+void GnssProtocolTest::nmeaEpeAccuracy()
+{
+	NmeaParser parser;
+	QSignalSpy spy(&parser, &NmeaParser::positionObservation);
+
+	// Without EPE, GGA accuracy falls back to the HDOP heuristic.
+	parser.addData("$GNGGA,193009.000,4728.045452,N,12145.534330,W,1,06,1.28,121.529,M,-17.177,M,,*43\r\n");
+	QCOMPARE(spy.count(), 1);
+	QVERIFY(spy.at(0).at(0).value<GnssPositionObservation>().meta.accuracyDerived);
+
+	// A live-captured EPE applies to the following GGA epoch.
+	parser.addData("$PQTMEPE,2,1.532,1.365,3.888,2.052,4.396*56\r\n");
+	parser.addData("$GNGGA,193010.000,4728.045662,N,12145.534501,W,1,06,1.28,121.524,M,-17.177,M,,*43\r\n");
+	QCOMPARE(spy.count(), 2);
+	const auto observation = spy.at(1).at(0).value<GnssPositionObservation>();
+	QVERIFY(!observation.meta.accuracyDerived);
+	QVERIFY(std::abs(observation.position.hAccuracy - 2.052f) < 0.001f);
+	QVERIFY(std::abs(observation.position.vAccuracy - 3.888f) < 0.001f);
+	QVERIFY(observation.meta.limitation.contains(QStringLiteral("PQTMEPE")));
+
+	// The bring-up command that turns the sentence on, checksum as accepted
+	// live by the receiver.
+	QCOMPARE(HyfixProtocol::enableEstimatedPositionError(),
+	         QByteArray("+HYFIX,TRANS,GNSS,$PQTMCFGMSGRATE,W,PQTMEPE,1,2*1D#\r\n"));
 }
 
 
