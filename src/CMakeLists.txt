@@ -407,7 +407,10 @@ target_link_libraries(Mapper_Common
   Mapper::ImageryCore
   Mapper::ImageryNetwork
   Mapper::RenderIR
-  ${PROJ_LIBRARIES}
+  # Link the imported target, not ${PROJ_LIBRARIES}: GDAL's bundled FindPROJ
+  # module overwrites that variable with the bare library path (no SQLite3/TIFF
+  # interface) when find_package(GDAL) runs after find_package(PROJ).
+  PROJ::proj
   Qt6::Widgets
   Qt6::Svg
   PRIVATE
@@ -464,6 +467,20 @@ if(WIN32)
 endif()
 
 qt_add_executable(Mapper WIN32 MACOSX_BUNDLE ${Mapper_SRCS})
+
+if(APPLE AND NOT IOS)
+	# CMake's default bundle plist has no privacy usage descriptions, and
+	# macOS terminates an app that touches CoreBluetooth without
+	# NSBluetoothAlwaysUsageDescription. iOS gets its own plist below.
+	set_target_properties(Mapper PROPERTIES
+		MACOSX_BUNDLE_INFO_PLIST "${PROJECT_SOURCE_DIR}/packaging/macos/Info.plist.in"
+		MACOSX_BUNDLE_BUNDLE_NAME "OpenOrienteering Mapper"
+		MACOSX_BUNDLE_BUNDLE_VERSION "${Mapper_VERSION}"
+		MACOSX_BUNDLE_COPYRIGHT "${Mapper_COPYRIGHT}"
+		MACOSX_BUNDLE_GUI_IDENTIFIER "org.openorienteering.mapper"
+		MACOSX_BUNDLE_SHORT_VERSION_STRING "${Mapper_VERSION}"
+	)
+endif()
 
 if(NOT Mapper_MOBILE)
 	target_compile_definitions(Mapper PRIVATE MAPPER_USE_KDSINGLEAPPLICATION)
@@ -581,6 +598,39 @@ if(ANDROID)
 	set(mapper_android_package_dir "${CMAKE_CURRENT_BINARY_DIR}/android-package")
 	file(COPY "${PROJECT_SOURCE_DIR}/packaging/android/"
 		DESTINATION "${mapper_android_package_dir}")
+	# USB serial driver library for the Android GNSS transport
+	# (MapperUsbSerial.java). The AAR is code-only, so its classes.jar is
+	# staged as a plain jar in libs/, which the Qt gradle template links
+	# without any build.gradle customization.
+	# License: MPL 2.0 (GPLv3-compatible).
+	set(usb_serial_version "3.10.0")
+	set(usb_serial_aar
+		"${CMAKE_CURRENT_BINARY_DIR}/usb-serial-for-android-${usb_serial_version}.aar")
+	if(NOT EXISTS "${usb_serial_aar}")
+		file(DOWNLOAD
+			"https://jitpack.io/com/github/mik3y/usb-serial-for-android/${usb_serial_version}/usb-serial-for-android-${usb_serial_version}.aar"
+			"${usb_serial_aar}"
+			EXPECTED_HASH SHA256=0397e1a9ef44ab986ce93aea7631e75cd42eeb45d65618144197ffff06e34959
+			STATUS usb_serial_download_status
+		)
+		list(GET usb_serial_download_status 0 usb_serial_download_code)
+		if(NOT usb_serial_download_code EQUAL 0)
+			file(REMOVE "${usb_serial_aar}")
+			message(FATAL_ERROR "Could not download usb-serial-for-android: ${usb_serial_download_status}")
+		endif()
+	endif()
+	file(MAKE_DIRECTORY "${mapper_android_package_dir}/libs")
+	execute_process(
+		COMMAND "${CMAKE_COMMAND}" -E tar xf "${usb_serial_aar}" classes.jar
+		WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+		RESULT_VARIABLE usb_serial_extract_result
+	)
+	if(NOT usb_serial_extract_result EQUAL 0)
+		message(FATAL_ERROR "Could not extract classes.jar from usb-serial-for-android")
+	endif()
+	file(COPY_FILE "${CMAKE_CURRENT_BINARY_DIR}/classes.jar"
+		"${mapper_android_package_dir}/libs/usb-serial-for-android-${usb_serial_version}.jar")
+	file(REMOVE "${CMAKE_CURRENT_BINARY_DIR}/classes.jar")
 	file(COPY "${Mapper_PROJ_DATA_DIR}/"
 		DESTINATION "${mapper_android_package_dir}/assets/proj")
 	if(Mapper_USE_GDAL)

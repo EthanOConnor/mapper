@@ -23,6 +23,8 @@
 
 #include <QWidget>
 
+#include "gnss/protocol/hyfix_protocol.h"
+
 class QComboBox;
 class QEvent;
 class QLabel;
@@ -117,6 +119,16 @@ private:
 	QLabel* receiver_protocol_label;
 	QLabel* receiver_last_data_label;
 	QPushButton* connect_button;
+
+	// GEO-PULSE section — shown only while a HYFIX receiver is connected
+	QWidget* hyfix_section;
+	QLabel* hyfix_firmware_label;
+	QLabel* hyfix_rate_label;
+	QLabel* hyfix_mode_label;
+	QLabel* hyfix_dr_label;
+
+	/// Human-readable dead-reckoning calibration and navigation state.
+	static QString hyfixDeadReckoningText(const HyfixDeviceInfo& info);
 };
 
 

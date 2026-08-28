@@ -8,9 +8,15 @@
 #define OPENORIENTEERING_GNSS_CONTROLLER_H
 
 #include <QPointer>
+#include <memory>
+
 #include <QObject>
 
 class QWidget;
+
+#if defined(MAPPER_GNSS_BLE)
+class QBluetoothDeviceDiscoveryAgent;
+#endif
 
 namespace OpenOrienteering {
 
@@ -20,6 +26,7 @@ class GnssSession;
 #if defined(MAPPER_GNSS_BLE_COREBLUETOOTH)
 class BleDiscoveryAgent;
 #endif
+class GnssTransport;
 
 /**
  * Application-scoped owner for the external GNSS connection.
@@ -62,6 +69,9 @@ private:
 	~GnssController() override;
 
 	void ensureSession();
+	/// A transport for the receiver already stored in the settings, or null
+	/// when none is stored or its transport is not available in this build.
+	std::unique_ptr<GnssTransport> createSavedTransport();
 	void loadActiveNtripProfile();
 	void startDiscovery(QWidget* parent, bool force_picker = false);
 	void showDevicePicker(QWidget* parent);
@@ -74,6 +84,9 @@ private:
 	QPointer<GnssDeviceDialog> m_device_dialog;
 #if defined(MAPPER_GNSS_BLE_COREBLUETOOTH)
 	BleDiscoveryAgent* m_discovery = nullptr;
+#endif
+#if defined(MAPPER_GNSS_BLE)
+	QBluetoothDeviceDiscoveryAgent* m_qt_discovery = nullptr;
 #endif
 	QPointer<QWidget> m_picker_parent;
 	quint64 m_discovery_generation = 0;

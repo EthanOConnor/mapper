@@ -55,6 +55,8 @@ enum class GnssObservationSource : std::uint8_t
 	OsLocation            = 12,
 	StructuredHub         = 13,
 	Replay                = 14,
+	QuectelDrPva          = 15,
+	QuectelDrCal          = 16,
 };
 
 
@@ -127,6 +129,25 @@ struct GnssStatusObservation
 };
 
 
+/// Dead-reckoning / inertial-fusion facts from a DR-capable receiver.
+///
+/// Quectel LC29H-class modules report these through $PQTMDRPVA (solution type
+/// and attitude) and $PQTMDRCAL (calibration state). They describe how the
+/// solution was produced; they never carry an RTK fix type, so they augment a
+/// primary position rather than replacing one.
+struct GnssDeadReckoningObservation
+{
+	GnssObservationMetadata meta;
+	/// 0 not calibrated, 1 lightly, 2 fully, 3 fully with high-precision heading; -1 unknown.
+	int calibrationState = -1;
+	/// 0 no position, 1 GNSS only, 2 DR only, 3 GNSS + DR; -1 unknown.
+	int navigationType = -1;
+	float roll    = NAN;  ///< Degrees
+	float pitch   = NAN;  ///< Degrees
+	float heading = NAN;  ///< Degrees from north, clockwise
+};
+
+
 /// Receiver version / model information.
 struct GnssVersionObservation
 {
@@ -146,6 +167,7 @@ Q_DECLARE_METATYPE(OpenOrienteering::GnssDopObservation)
 Q_DECLARE_METATYPE(OpenOrienteering::GnssSatelliteObservation)
 Q_DECLARE_METATYPE(OpenOrienteering::GnssCovarianceObservation)
 Q_DECLARE_METATYPE(OpenOrienteering::GnssStatusObservation)
+Q_DECLARE_METATYPE(OpenOrienteering::GnssDeadReckoningObservation)
 Q_DECLARE_METATYPE(OpenOrienteering::GnssVersionObservation)
 
 #endif

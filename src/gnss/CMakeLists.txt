@@ -82,6 +82,7 @@ set(MAPPER_GNSS_SOURCES
   protocol/nmea_parser.cpp
   protocol/protocol_detector.cpp
   protocol/rtcm_framer.cpp
+  protocol/hyfix_protocol.cpp
   # Transport layer
   transport/gnss_transport.cpp
   transport/tcp_transport.cpp
@@ -96,7 +97,7 @@ set(MAPPER_GNSS_SOURCES
   gnss_fusion_engine.cpp
   gnss_controller.cpp
   gnss_session.cpp
-  gnss_position_source.cpp
+  hyfix_receiver.cpp
   gnss_raw_logger.cpp
   # UI
   ui/gnss_status_overlay.cpp

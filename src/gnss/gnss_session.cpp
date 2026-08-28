@@ -31,6 +31,7 @@
 #include "correction/ntrip_client.h"
 #include "gga_generator.h"
 #include "gnss_raw_logger.h"
+#include "hyfix_receiver.h"
 #include "protocol/ubx_config.h"
 #include "protocol/ubx_parser.h"
 #include "protocol/nmea_parser.h"
@@ -94,9 +95,45 @@ void GnssSession::setupParsers()
 	connect(m_nmeaParser.get(), &NmeaParser::satelliteObservation,
 	        this, &GnssSession::onSatelliteObservation);
 
+	connect(m_nmeaParser.get(), &NmeaParser::deadReckoningObservation,
+	        this, &GnssSession::onDeadReckoningObservation);
+	// Sentence-level statistics: the proprietary Quectel sentences never reach
+	// an observation slot on their own, but the message mix is what tells a
+	// user in the field whether the receiver is configured the way they think.
+	connect(m_nmeaParser.get(), &NmeaParser::sentenceDecoded,
+	        this, &GnssSession::recordMessage);
+
 	// RTCM framer signals
 	connect(m_rtcmFramer.get(), &RtcmFramer::frameValidated,
 	        this, &GnssSession::onRtcmFrameValidated);
+
+	// HYFIX GEO-PULSE support. The receiver probes every link it is started on
+	// and stays dormant unless a GEO-PULSE answers, so it costs one inert
+	// command per session on other hardware.
+	m_hyfix = std::make_unique<HyfixReceiver>(this);
+	connect(m_hyfix.get(), &HyfixReceiver::writeRequested,
+	        this, [this](const QByteArray& data) {
+		if (m_transport && m_transport->state() == GnssTransport::State::Connected)
+		{
+			if (m_transport->write(data))
+				appendRawEntry('T', data);
+		}
+	});
+	connect(m_hyfix.get(), &HyfixReceiver::infoChanged,
+	        this, [this](const OpenOrienteering::HyfixDeviceInfo& info) {
+		m_state.hyfix = info;
+		if (!info.productFirmware.isEmpty())
+			m_state.receiverSwVersion = info.productFirmware;
+		if (!info.hardwareModel.isEmpty())
+			m_state.receiverHwVersion = info.hardwareModel;
+		if (m_state.receiverModel.isEmpty())
+			m_state.receiverModel = QStringLiteral("HYFIX GEO-PULSE");
+		emitStateChanged();
+	});
+	connect(m_hyfix.get(), &HyfixReceiver::errorOccurred,
+	        this, [this](const QString& message) {
+		emit errorOccurred(tr("HYFIX GEO-PULSE"), message);
+	});
 }
 
 
@@ -240,6 +277,8 @@ void GnssSession::onTransportDataReceived(const QByteArray& data)
 	// particular, startup noise must never delay or suppress a valid fix.
 	m_ubxParser->addData(data);
 	m_nmeaParser->addData(data);
+	if (m_hyfix)
+		m_hyfix->handleIncomingData(data);
 
 	bool protocolChanged = false;
 	if (!m_protocolDetected)
@@ -446,6 +485,15 @@ void GnssSession::onVersionObservation(const GnssVersionObservation& observation
 }
 
 
+void GnssSession::onDeadReckoningObservation(const OpenOrienteering::GnssDeadReckoningObservation& observation)
+{
+	m_fusion.ingest(observation);
+	if (m_hyfix)
+		m_hyfix->setDeadReckoningState(observation.calibrationState, observation.navigationType);
+	updateSolution();
+}
+
+
 // ---- NTRIP callbacks ----
 
 
@@ -461,15 +509,12 @@ void GnssSession::onNtripCorrectionData(const QByteArray& data)
 	appendRawEntry('C', data);
 
 	// Forward corrections to the receiver
-	if (m_transport && m_transport->state() == GnssTransport::State::Connected)
+	if (m_transport && m_transport->state() == GnssTransport::State::Connected
+	    && writeCorrections(data))
 	{
-		if (m_transport->write(data) && m_ntrip)
-		{
-			appendRawEntry('T', data);
+		appendRawEntry('T', data);
+		if (m_ntrip)
 			m_ntrip->addBytesSentToReceiver(data.size());
-		}
-		else
-			m_state.ntripBytesDroppedToReceiver += data.size();
 	}
 	else
 	{
@@ -563,6 +608,8 @@ void GnssSession::resetSessionState()
 	m_ubxParser->reset();
 	m_nmeaParser->reset();
 	m_rtcmFramer->reset();
+	if (m_hyfix)
+		m_hyfix->stop();
 	m_rawRing.clear();
 	m_rawRingBytes = 0;
 }
@@ -744,9 +791,51 @@ void GnssSession::handleForegroundResume()
 // ---- UBX configuration ----
 
 
+bool GnssSession::writeCorrections(const QByteArray& data)
+{
+	if (!m_transport)
+		return false;
+
+	// A GEO-PULSE needs its corrections metered; everything else takes the
+	// caster block as it arrives.
+	if (m_hyfix && m_hyfix->handlesCorrections())
+	{
+		m_hyfix->sendCorrections(data);
+		m_state.hyfixQueuedCorrectionBytes = m_hyfix->pendingCorrectionBytes();
+		// The pacer drops stale corrections when its queue overflows. Those
+		// bytes never reach the receiver, so they belong in the dropped total
+		// rather than being reported as delivered.
+		const auto dropped = m_hyfix->droppedCorrectionBytes();
+		if (dropped > m_hyfixDroppedReported)
+		{
+			m_state.ntripBytesDroppedToReceiver += dropped - m_hyfixDroppedReported;
+			m_hyfixDroppedReported = dropped;
+		}
+		return true;
+	}
+
+	return m_transport->write(data);
+}
+
+
 void GnssSession::configureReceiver()
 {
 	if (!m_transport || m_transport->state() != GnssTransport::State::Connected)
+		return;
+
+	// Probe for a HYFIX GEO-PULSE. Nothing further happens unless one answers.
+	if (m_hyfix)
+	{
+		m_hyfix->setCorrectionLink(HyfixReceiver::linkForTransport(m_transport->typeName()));
+		m_hyfix->setExpected(HyfixProtocol::isHyfixDeviceName(m_transport->deviceName()));
+		m_hyfix->begin();
+	}
+
+	// A GEO-PULSE has its own command protocol and ignores UBX, so skip the
+	// u-blox initialization when the device announced itself as one. On any
+	// other device the name test fails and the UBX sequence goes out as usual;
+	// a GEO-PULSE that is only identified later simply receives it once.
+	if (HyfixProtocol::isHyfixDeviceName(m_transport->deviceName()))
 		return;
 
 	// Send UBX configuration to enable richer data (covariance, satellite

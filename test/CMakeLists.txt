@@ -58,7 +58,8 @@ function(add_test_helper testname)
 	  "${CMAKE_CURRENT_BINARY_DIR}"
 	)
 	target_link_libraries(${testname} PRIVATE
-	  ${PROJ_LIBRARIES}
+	  # PROJ::proj, not ${PROJ_LIBRARIES}: see src/CMakeLists.txt.
+	  PROJ::proj
 	  Qt6::Test
 	  Qt6::Gui
 	  Clipper2::Clipper2

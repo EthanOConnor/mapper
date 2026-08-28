@@ -154,6 +154,14 @@ void NmeaParser::processSentence(const QByteArray& sentence)
 
 	++m_stats.sentencesParsed;
 
+	// Proprietary sentences ($P...) have no talker ID and are invisible to
+	// minmea's sentence table, so they are dispatched by full identifier first.
+	if (sentence.size() > 2 && sentence[1] == 'P')
+	{
+		if (handleProprietary(sentence))
+			return;
+	}
+
 	// Determine sentence type (minmea uses the talker-agnostic ID)
 	auto sentenceId = minmea_sentence_id(sentence.constData(), false);
 
@@ -165,6 +173,143 @@ void NmeaParser::processSentence(const QByteArray& sentence)
 	case MINMEA_SENTENCE_GST: handleGST(sentence.constData()); break;
 	default: break;
 	}
+}
+
+
+bool NmeaParser::handleProprietary(const QByteArray& sentence)
+{
+	auto fields = splitSentenceFields(sentence.constData());
+	if (fields.isEmpty())
+		return false;
+
+	const auto identifier = fields.first();
+	if (identifier == "PQTMDRPVA")
+	{
+		emit sentenceDecoded(QStringLiteral("PQTMDRPVA"));
+		handleDrPva(fields);
+		return true;
+	}
+	if (identifier == "PQTMDRCAL")
+	{
+		emit sentenceDecoded(QStringLiteral("PQTMDRCAL"));
+		handleDrCal(fields);
+		return true;
+	}
+	if (identifier == "PQTMTXT")
+	{
+		emit sentenceDecoded(QStringLiteral("PQTMTXT"));
+		// $PQTMTXT,<MsgVer>,<TotalSentences>,<Index>,<Severity>,<text>...
+		if (fields.size() > 5)
+		{
+			QByteArrayList text = fields.mid(5);
+			emit receiverStatusText(QString::fromLatin1(text.join(',')));
+		}
+		return true;
+	}
+	if (identifier == "PAIR001")
+	{
+		emit sentenceDecoded(QStringLiteral("PAIR001"));
+		if (fields.size() >= 3)
+		{
+			bool id_ok = false;
+			bool result_ok = false;
+			const int command_id = fields.at(1).toInt(&id_ok);
+			const int result = fields.at(2).toInt(&result_ok);
+			if (id_ok && result_ok)
+				emit commandAcknowledged(command_id, result);
+		}
+		return true;
+	}
+	if (identifier.startsWith("PQTM") || identifier.startsWith("PAIR"))
+	{
+		// Recognized family, no decoder yet: still count it so message-rate
+		// statistics and the diagnostics panel show the real sentence mix.
+		//
+		// Only sentences that carried a checksum are counted. minmea_check()
+		// accepts a checksum-less sentence, and a receiver really does emit
+		// truncated ones: a GEO-PULSE restarting its GNSS engine cuts the
+		// stream mid-sentence, leaving fragments such as "$PAIR0". Counting
+		// those would fill the bounded statistics table with noise.
+		if (!sentence.contains('*'))
+			return true;
+		emit sentenceDecoded(QString::fromLatin1(identifier));
+		return true;
+	}
+	return false;
+}
+
+
+void NmeaParser::handleDrPva(const QByteArrayList& fields)
+{
+	// $PQTMDRPVA,<MsgVer>,<Timestamp>,<Time>,<SolType>,<Lat>,<Lon>,<Alt>,<Sep>,
+	//            <VelN>,<VelE>,<VelD>,<Spd>,<Roll>,<Pitch>,<Heading>
+	// Every value field is empty when invalid.
+	constexpr int kFieldCount = 16;
+	if (fields.size() < kFieldCount)
+		return;
+
+	auto number = [&fields](int index) -> float {
+		bool ok = false;
+		const auto value = fields.at(index).toFloat(&ok);
+		return ok ? value : NAN;
+	};
+
+	// PQTMDRPVA's SolType and PQTMDRCAL's NavType disagree on the meaning of
+	// 2 and 3: SolType 2 is GNSS+DR and 3 is DR-only, while NavType 2 is
+	// DR-only and 3 is GNSS+DR. GnssDeadReckoningObservation carries the
+	// NavType encoding, so SolType 2 and 3 are swapped on the way in.
+	bool sol_ok = false;
+	const int solution_type = fields.at(4).toInt(&sol_ok);
+	int navigation_type = sol_ok ? solution_type : -1;
+	if (navigation_type == 2)
+		navigation_type = 3;
+	else if (navigation_type == 3)
+		navigation_type = 2;
+
+	GnssDeadReckoningObservation observation;
+	observation.meta.source = GnssObservationSource::QuectelDrPva;
+	observation.meta.observedAt = QDateTime::currentDateTimeUtc();
+	observation.navigationType = navigation_type;
+	observation.roll = number(13);
+	observation.pitch = number(14);
+	observation.heading = number(15);
+
+	switch (observation.navigationType) {
+	case 0:
+		observation.meta.limitation = QStringLiteral("Receiver reports no dead-reckoning solution");
+		break;
+	case 2:
+		observation.meta.limitation = QStringLiteral("Dead-reckoning-only solution; no GNSS fix");
+		break;
+	case 3:
+		observation.meta.limitation = QStringLiteral("Solution fused from GNSS and dead reckoning");
+		break;
+	default:
+		break;
+	}
+
+	emit deadReckoningObservation(observation);
+}
+
+
+void NmeaParser::handleDrCal(const QByteArrayList& fields)
+{
+	// $PQTMDRCAL,<MsgVer>,<CalState>,<NavType>
+	if (fields.size() < 4)
+		return;
+
+	bool cal_ok = false;
+	bool nav_ok = false;
+	const int calibration_state = fields.at(2).toInt(&cal_ok);
+	const int navigation_type = fields.at(3).toInt(&nav_ok);
+
+	GnssDeadReckoningObservation observation;
+	observation.meta.source = GnssObservationSource::QuectelDrCal;
+	observation.meta.observedAt = QDateTime::currentDateTimeUtc();
+	observation.calibrationState = cal_ok ? calibration_state : -1;
+	observation.navigationType = nav_ok ? navigation_type : -1;
+
+	emit deadReckoningObservation(observation);
 }
 
 

@@ -57,6 +57,8 @@ QString gnssObservationSourceName(GnssObservationSource source)
 	case GnssObservationSource::NmeaGsa: return QStringLiteral("NMEA GSA");
 	case GnssObservationSource::NmeaGsv: return QStringLiteral("NMEA GSV");
 	case GnssObservationSource::NmeaGgaRmcComposite: return QStringLiteral("NMEA GGA+RMC");
+	case GnssObservationSource::QuectelDrPva: return QStringLiteral("Quectel PQTMDRPVA");
+	case GnssObservationSource::QuectelDrCal: return QStringLiteral("Quectel PQTMDRCAL");
 	case GnssObservationSource::OsLocation: return QStringLiteral("OS Location");
 	case GnssObservationSource::StructuredHub: return QStringLiteral("Structured Hub");
 	case GnssObservationSource::Replay: return QStringLiteral("Replay");
@@ -121,6 +123,22 @@ void GnssFusionEngine::ingest(const GnssSatelliteObservation& observation)
 		break;
 	}
 
+	recompute();
+}
+
+
+void GnssFusionEngine::ingest(const GnssDeadReckoningObservation& observation)
+{
+	if (observation.meta.source == GnssObservationSource::QuectelDrCal)
+	{
+		m_drCalibration.available = true;
+		m_drCalibration.value = observation;
+	}
+	else
+	{
+		m_drAttitude.available = true;
+		m_drAttitude.value = observation;
+	}
 	recompute();
 }
 
@@ -286,6 +304,35 @@ void GnssFusionEngine::applyStatus(const GnssStatusObservation& observation, con
 }
 
 
+void GnssFusionEngine::applyDeadReckoning(const QDateTime& now)
+{
+	const bool attitudeFresh = m_drAttitude.available
+	    && isFresh(m_drAttitude.value.meta.observedAt, kAuxiliaryFreshMs, now);
+	const bool calibrationFresh = m_drCalibration.available
+	    && isFresh(m_drCalibration.value.meta.observedAt, kAuxiliaryFreshMs, now);
+
+	if (attitudeFresh)
+	{
+		const auto& pva = m_drAttitude.value;
+		m_solution.drNavigationType = pva.navigationType;
+		m_solution.attitudeRoll = pva.roll;
+		m_solution.attitudePitch = pva.pitch;
+		m_solution.attitudeHeading = pva.heading;
+		m_solution.deadReckoningSource = makeFieldSource(pva.meta, now);
+	}
+	if (calibrationFresh)
+	{
+		const auto& cal = m_drCalibration.value;
+		m_solution.drCalibrationState = cal.calibrationState;
+		if (!attitudeFresh)
+		{
+			m_solution.drNavigationType = cal.navigationType;
+			m_solution.deadReckoningSource = makeFieldSource(cal.meta, now);
+		}
+	}
+}
+
+
 void GnssFusionEngine::recompute()
 {
 	m_solution = {};
@@ -337,6 +384,8 @@ void GnssFusionEngine::recompute()
 
 	if (m_ubxStatus.available && isFresh(m_ubxStatus.value.meta.observedAt, kAuxiliaryFreshMs, now))
 		applyStatus(m_ubxStatus.value, now);
+
+	applyDeadReckoning(now);
 }
 
 

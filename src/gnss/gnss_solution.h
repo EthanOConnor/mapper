@@ -21,6 +21,8 @@
 #ifndef OPENORIENTEERING_GNSS_SOLUTION_H
 #define OPENORIENTEERING_GNSS_SOLUTION_H
 
+#include <cmath>
+
 #include <QDateTime>
 #include <QMetaType>
 #include <QString>
@@ -60,12 +62,20 @@ struct GnssSolutionSnapshot
 	GnssFieldSource dopSource;
 	GnssFieldSource satelliteSource;
 	GnssFieldSource statusSource;
+	GnssFieldSource deadReckoningSource;
 
 	bool hasFreshPosition = false;
 	bool fixOK = false;
 	bool differentialSolution = false;
 	int carrierSolution = 0;
 	int spoofDetection = 0;
+
+	// -- Dead reckoning (DR-capable receivers only; -1 / NAN when unreported) --
+	int drCalibrationState = -1;
+	int drNavigationType   = -1;
+	float attitudeRoll     = NAN;
+	float attitudePitch    = NAN;
+	float attitudeHeading  = NAN;
 
 	QString summaryLimitation;
 };

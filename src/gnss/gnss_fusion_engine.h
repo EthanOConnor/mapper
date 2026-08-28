@@ -44,6 +44,7 @@ public:
 	void ingest(const GnssSatelliteObservation& observation);
 	void ingest(const GnssCovarianceObservation& observation);
 	void ingest(const GnssStatusObservation& observation);
+	void ingest(const GnssDeadReckoningObservation& observation);
 
 	const GnssSolutionSnapshot& solution() const { return m_solution; }
 
@@ -65,6 +66,7 @@ private:
 	void applySatellites(const GnssSatelliteObservation& observation, const QDateTime& now);
 	void applyCovariance(const GnssCovarianceObservation& observation, const QDateTime& now);
 	void applyStatus(const GnssStatusObservation& observation, const QDateTime& now);
+	void applyDeadReckoning(const QDateTime& now);
 
 	Slot<GnssPositionObservation> m_ubxPosition;
 	Slot<GnssPositionObservation> m_nmeaGga;
@@ -75,6 +77,11 @@ private:
 	Slot<GnssSatelliteObservation> m_nmeaSatellites;
 	Slot<GnssCovarianceObservation> m_ubxCovariance;
 	Slot<GnssStatusObservation> m_ubxStatus;
+	// PQTMDRPVA (attitude + solution type) and PQTMDRCAL (calibration state)
+	// are stored separately so each keeps its own freshness and neither
+	// overwrites fields only the other one carries.
+	Slot<GnssDeadReckoningObservation> m_drAttitude;
+	Slot<GnssDeadReckoningObservation> m_drCalibration;
 
 	GnssSolutionSnapshot m_solution;
 };

@@ -25,7 +25,9 @@
 #include <cstdint>
 
 #include <QByteArray>
+#include <QByteArrayList>
 #include <QObject>
+#include <QString>
 
 #include "gnss/gnss_observation.h"
 
@@ -44,6 +46,17 @@ namespace OpenOrienteering {
 ///   - GSA: DOP values, fix mode
 ///   - GSV: satellites in view
 ///   - GST: receiver error statistics, paired to GGA by epoch
+///
+/// Quectel proprietary sentences (LC29H-class modules, including the HYFIX
+/// GEO-PULSE) are decoded too:
+///   - PQTMDRPVA: dead-reckoning position/velocity/attitude and solution type
+///   - PQTMDRCAL: dead-reckoning calibration state and navigation type
+///   - PQTMTXT:   receiver status text
+///   - PAIR001:   acknowledgement of a $PAIR command
+///
+/// PQTMDRPVA never reports an RTK fix type, so it contributes velocity and
+/// attitude rather than a primary position: taking its solution type as the
+/// fix type would silently demote an RTK-fixed GGA to a plain 3D fix.
 ///
 /// NMEA is the fallback protocol for non-u-blox receivers. When used with
 /// u-blox receivers, prefer UBX for richer metadata.
@@ -80,6 +93,23 @@ signals:
 	/// Emitted when GSV provides satellite count.
 	void satelliteObservation(const OpenOrienteering::GnssSatelliteObservation& observation);
 
+	/// Emitted when a Quectel PQTMDRPVA or PQTMDRCAL sentence reports
+	/// dead-reckoning state.
+	void deadReckoningObservation(const OpenOrienteering::GnssDeadReckoningObservation& observation);
+
+	/// Emitted for each decoded proprietary sentence, by identifier
+	/// (e.g. "PQTMDRPVA"). Standard sentences are already counted through
+	/// their observations; these have no observation path of their own, and
+	/// their presence is what shows whether the receiver is configured as
+	/// expected. Used for message-rate statistics.
+	void sentenceDecoded(const QString& identifier);
+
+	/// Emitted for a receiver status text sentence ($PQTMTXT).
+	void receiverStatusText(const QString& text);
+
+	/// Emitted for a $PAIR001 acknowledgement: command id and result code.
+	void commandAcknowledged(int command_id, int result);
+
 private:
 	/// Process a single complete NMEA sentence (including $ and checksum).
 	void processSentence(const QByteArray& sentence);
@@ -89,6 +119,11 @@ private:
 	void handleGSA(const char* sentence);
 	void handleGSV(const char* sentence);
 	void handleGST(const char* sentence);
+	/// Returns true when the sentence was recognized as a Quectel proprietary
+	/// sentence, whether or not any observation could be extracted from it.
+	bool handleProprietary(const QByteArray& sentence);
+	void handleDrPva(const QByteArrayList& fields);
+	void handleDrCal(const QByteArrayList& fields);
 
 	QByteArray m_lineBuffer;
 	Stats m_stats;

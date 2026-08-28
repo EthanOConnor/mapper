@@ -17,12 +17,15 @@
 namespace OpenOrienteering {
 
 /**
- * Persists non-secret NTRIP profile fields in application preferences while
- * keeping passwords in the native credential store.
+ * Persists non-secret NTRIP profile fields in application preferences.
+ *
+ * Passwords go to the native credential store on Apple platforms (Keychain).
+ * Elsewhere they are kept in application preferences, scrambled — obfuscation
+ * rather than encryption; see the implementation for the rationale.
  *
  * Existing prototype profiles are migrated opportunistically: a legacy
- * plaintext password is copied into Keychain and removed from QSettings after
- * the secure write succeeds.
+ * plaintext password is copied into the password store and removed from its
+ * old preferences key after the write succeeds.
  */
 class NtripProfileStore
 {

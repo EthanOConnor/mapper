@@ -28,6 +28,7 @@
 
 #include "gnss/gnss_observation.h"
 #include "gnss/gnss_position.h"
+#include "gnss/gnss_fusion_engine.h"
 #include "gnss/gnss_session.h"
 #include "gnss/gnss_state.h"
 #include "gnss/correction/ntrip_client.h"
@@ -35,6 +36,8 @@
 #include "gnss/protocol/ubx_parser.h"
 #include "gnss/protocol/ubx_config.h"
 #include "gnss/protocol/ubx_messages.h"
+#include "gnss/hyfix_receiver.h"
+#include "gnss/protocol/hyfix_protocol.h"
 #include "gnss/protocol/nmea_parser.h"
 #include "gnss/protocol/protocol_detector.h"
 #include "gnss/protocol/rtcm_framer.h"
@@ -987,6 +990,359 @@ void GnssProtocolTest::p95Ellipse()
 	// NAN handling
 	float nanVal = GnssPosition::toP95(NAN, GnssAccuracyBasis::Sigma68);
 	QVERIFY(std::isnan(nanVal));
+}
+
+
+// ---- HYFIX GEO-PULSE ----
+//
+// The literal sentences and replies below are verbatim captures from a
+// GEO-PULSE running GPv2 3.8.2 (GNSS firmware 11.04 / R11A04S_CSA2) over its
+// USB serial endpoint on 2026-08-27.
+
+void GnssProtocolTest::hyfixDeviceNameRecognition()
+{
+	QVERIFY(HyfixProtocol::isHyfixDeviceName(QStringLiteral("GEOPULSE_38182BF816ED")));
+	QVERIFY(HyfixProtocol::isHyfixDeviceName(QStringLiteral("geopulse_38182bf816ed")));
+	QVERIFY(HyfixProtocol::isHyfixDeviceName(QStringLiteral("LiteRTK_001122334455")));
+	QVERIFY(!HyfixProtocol::isHyfixDeviceName(QStringLiteral("ArduSimple BLE")));
+	QVERIFY(!HyfixProtocol::isHyfixDeviceName(QString{}));
+
+	QCOMPARE(HyfixProtocol::friendlyName(QStringLiteral("GEOPULSE_38182BF816ED")),
+	         QStringLiteral("HYFIX GEO-PULSE (38182BF816ED)"));
+	// Unrelated names pass through untouched.
+	QCOMPARE(HyfixProtocol::friendlyName(QStringLiteral("ArduSimple BLE")),
+	         QStringLiteral("ArduSimple BLE"));
+}
+
+
+void GnssProtocolTest::hyfixCommandFraming()
+{
+	QCOMPARE(HyfixProtocol::queryVersion(), QByteArray("+HYFIX,VERSION?#\r\n"));
+	QCOMPARE(HyfixProtocol::queryMessageConfig(), QByteArray("+HYFIX,GNSSMSG?#\r\n"));
+	QCOMPARE(HyfixProtocol::setRoverMode(HyfixCorrectionLink::Bluetooth),
+	         QByteArray("+HYFIX,WORKMODE,ROVER,NTRIPCLI,BT#\r\n"));
+	QCOMPARE(HyfixProtocol::setRoverMode(HyfixCorrectionLink::UsbC),
+	         QByteArray("+HYFIX,WORKMODE,ROVER,NTRIPCLI,USBC#\r\n"));
+	QCOMPARE(HyfixProtocol::setNmeaIntervalMs(200),
+	         QByteArray("+HYFIX,GNSSMSG,NMEA,200#\r\n"));
+
+	// The pass-through wraps a Quectel sentence with its NMEA checksum. This
+	// checksum was accepted by the receiver on the bench.
+	QCOMPARE(HyfixProtocol::nmeaChecksum("PAIR050,333"), QByteArray("20"));
+	QCOMPARE(HyfixProtocol::transparentGnssCommand("PAIR050,333"),
+	         QByteArray("+HYFIX,TRANS,GNSS,$PAIR050,333*20#\r\n"));
+	// Single-digit checksums keep their leading zero.
+	QCOMPARE(HyfixProtocol::nmeaChecksum("A").size(), 2);
+}
+
+
+void GnssProtocolTest::hyfixReplyParsing()
+{
+	HyfixDeviceInfo info;
+	HyfixReply reply;
+
+	QVERIFY(!HyfixProtocol::isReplyLine("$GNGGA,193009.000,4728.045452,N"));
+	QVERIFY(!HyfixProtocol::parseReply("$GNGGA,193009.000", reply));
+
+	QVERIFY(HyfixProtocol::parseReply("+HYFIX,VERSION,GPv2-3.8.2@20260415,3.8.2,GPv2,v2.0#\r", reply));
+	QCOMPARE(reply.verb, QStringLiteral("VERSION"));
+	QVERIFY(HyfixProtocol::applyReply(reply, info));
+	QVERIFY(info.identified);
+	QCOMPARE(info.productBanner, QStringLiteral("GPv2-3.8.2@20260415"));
+	QCOMPARE(info.productFirmware, QStringLiteral("3.8.2"));
+	QCOMPARE(info.hardwareModel, QStringLiteral("GPv2"));
+
+	QVERIFY(HyfixProtocol::parseReply("+HYFIX,GNSSVERSION,11.04,R11A04S_CSA2#", reply));
+	QVERIFY(HyfixProtocol::applyReply(reply, info));
+	QCOMPARE(info.gnssFirmware, QStringLiteral("11.04"));
+	QCOMPARE(info.gnssFirmwareBuild, QStringLiteral("R11A04S_CSA2"));
+
+	QVERIFY(HyfixProtocol::parseReply("+HYFIX,WORKMODE,ROVER,NTRIPCLI,USBC#", reply));
+	QVERIFY(HyfixProtocol::applyReply(reply, info));
+	QCOMPARE(info.workMode, QStringLiteral("ROVER"));
+	QCOMPARE(info.correctionLink, QStringLiteral("USBC"));
+
+	// The serial number is kept; the account-binding ciphertext beside it is not.
+	QVERIFY(HyfixProtocol::parseReply("+HYFIX,SN,38182BF816ED,CR18io9aiHlzDUfmLGdHSg==#", reply));
+	QVERIFY(HyfixProtocol::applyReply(reply, info));
+	QCOMPARE(info.serialNumber, QStringLiteral("38182BF816ED"));
+	QCOMPARE(reply.fields.size(), 2);
+
+	// Re-applying the same reply reports no change.
+	QVERIFY(!HyfixProtocol::applyReply(reply, info));
+
+	QVERIFY(HyfixProtocol::parseReply("+HYFIX,GNSSANT,0#", reply));
+	QVERIFY(HyfixProtocol::applyReply(reply, info));
+	QCOMPARE(info.antennaGear, 0);
+}
+
+
+void GnssProtocolTest::hyfixMessageConfigReplies()
+{
+	// The four lines a GNSSMSG? query answers with.
+	HyfixDeviceInfo info;
+	HyfixReply reply;
+	for (const char* line : {"+HYFIX,GNSSMSG,NMEA,200#",
+	                         "+HYFIX,GNSSMSG,RTCM,0#",
+	                         "+HYFIX,GNSSMSG,IMU,10#",
+	                         "+HYFIX,GNSSMSG,DR,1000#"})
+	{
+		QVERIFY(HyfixProtocol::parseReply(QByteArray(line), reply));
+		HyfixProtocol::applyReply(reply, info);
+	}
+	QCOMPARE(info.nmeaIntervalMs, 200);
+	QCOMPARE(info.rtcmIntervalMs, 0);
+	QCOMPARE(info.imuRateHz, 10);
+	QCOMPARE(info.drIntervalMs, 1000);
+	QVERIFY(info.lastError.isEmpty());
+
+	// A rejected rate is reported, not silently ignored.
+	QVERIFY(HyfixProtocol::parseReply("+HYFIX,GNSSMSG,ERR,-1(ESP_FAIL)#", reply));
+	QVERIFY(HyfixProtocol::applyReply(reply, info));
+	QVERIFY(info.lastError.contains(QStringLiteral("ESP_FAIL")));
+	// The rejected value did not replace the configured one.
+	QCOMPARE(info.nmeaIntervalMs, 200);
+}
+
+
+void GnssProtocolTest::hyfixRateSnapsToSupportedInterval()
+{
+	// The firmware accepts only these four intervals; ~3 Hz (333 ms) is not
+	// among them and the module rejects it through the pass-through too.
+	QCOMPARE(HyfixProtocol::supportedNmeaIntervalsMs(), (QVector<int>{100, 200, 500, 1000}));
+	QCOMPARE(HyfixProtocol::nearestSupportedNmeaIntervalMs(333), 200);
+	QCOMPARE(HyfixProtocol::nearestSupportedNmeaIntervalMs(1000), 1000);
+	QCOMPARE(HyfixProtocol::nearestSupportedNmeaIntervalMs(50), 100);
+	QCOMPARE(HyfixProtocol::nearestSupportedNmeaIntervalMs(10000), 1000);
+	QCOMPARE(HyfixProtocol::kDefaultNmeaIntervalMs, 200);
+
+	HyfixReceiver receiver;
+	receiver.setNmeaIntervalMs(333);
+	QCOMPARE(receiver.nmeaIntervalMs(), 200);
+}
+
+
+void GnssProtocolTest::hyfixIdentifiesFromStreamAndBringsUp()
+{
+	HyfixReceiver receiver;
+	receiver.setCorrectionLink(HyfixCorrectionLink::UsbC);
+	receiver.setNmeaIntervalMs(333);
+	QSignalSpy writes(&receiver, &HyfixReceiver::writeRequested);
+
+	receiver.begin();
+	QVERIFY(!receiver.isIdentified());
+	// The probe goes out after the settling delay and nothing else does.
+	QVERIFY(writes.wait(3000));
+	QCOMPARE(writes.count(), 1);
+	QCOMPARE(writes.at(0).at(0).toByteArray(), HyfixProtocol::queryVersion());
+
+	// NMEA in the stream must not be mistaken for a reply.
+	receiver.handleIncomingData("$GNGGA,193009.000,4728.045452,N,12145.534330,W,1,06,1.28,121.529,M,-17.177,M,,*43\r\n");
+	QVERIFY(!receiver.isIdentified());
+
+	receiver.handleIncomingData("+HYFIX,VERSION,GPv2-3.8.2@20260415,3.8.2,GPv2,v2.0#\r\n");
+	QVERIFY(receiver.isIdentified());
+	QCOMPARE(receiver.info().productFirmware, QStringLiteral("3.8.2"));
+
+	// The bring-up sequence follows, and it configures the link and the rate.
+	QTRY_VERIFY_WITH_TIMEOUT(writes.count() >= 9, 10000);
+	QByteArrayList sent;
+	for (const auto& call : writes)
+		sent.append(call.at(0).toByteArray());
+	QVERIFY(sent.contains(HyfixProtocol::setRoverMode(HyfixCorrectionLink::UsbC)));
+	QVERIFY(sent.contains(HyfixProtocol::setNmeaIntervalMs(200)));
+	QVERIFY(sent.contains(HyfixProtocol::queryMessageConfig()));
+	// The bring-up runs once, not once per reply.
+	receiver.handleIncomingData("+HYFIX,GNSSANT,0#\r\n");
+	const auto count_after = writes.count();
+	QTest::qWait(200);
+	QCOMPARE(writes.count(), count_after);
+}
+
+
+void GnssProtocolTest::hyfixPacesCorrectionsOverBluetooth()
+{
+	HyfixReceiver receiver;
+	receiver.setCorrectionLink(HyfixCorrectionLink::Bluetooth);
+	QVERIFY(receiver.pacesCorrections());
+
+	// NTRIP starts with the transport, before the receiver has answered the
+	// probe. A device whose advertised name already says GEO-PULSE must have
+	// its corrections paced from the first block, not from the first reply.
+	QVERIFY(!receiver.handlesCorrections());
+	receiver.setExpected(true);
+	QVERIFY(receiver.handlesCorrections());
+
+	QSignalSpy writes(&receiver, &HyfixReceiver::writeRequested);
+
+	// A caster block larger than one BLE write.
+	const QByteArray block(1500, '\xd3');
+	receiver.sendCorrections(block);
+
+	// The first chunk leaves immediately, capped at the vendor chunk size.
+	QCOMPARE(writes.count(), 1);
+	QCOMPARE(writes.at(0).at(0).toByteArray().size(), HyfixProtocol::kCorrectionChunkBytes);
+	QCOMPARE(receiver.pendingCorrectionBytes(), 1500 - HyfixProtocol::kCorrectionChunkBytes);
+
+	// The rest is metered out rather than pushed at the receiver at once.
+	QTRY_COMPARE_WITH_TIMEOUT(receiver.pendingCorrectionBytes(), 0, 2000);
+	QCOMPARE(writes.count(), 3);
+	qsizetype total = 0;
+	for (const auto& call : writes)
+		total += call.at(0).toByteArray().size();
+	QCOMPARE(total, block.size());
+
+	// A backlog beyond the cap is dropped from the front: stale corrections
+	// are worse than none.
+	receiver.sendCorrections(QByteArray(HyfixReceiver::kMaxQueuedCorrectionBytes + 4096, '\xd3'));
+	QVERIFY(receiver.pendingCorrectionBytes() <= HyfixReceiver::kMaxQueuedCorrectionBytes);
+	QVERIFY(receiver.droppedCorrectionBytes() > 0);
+}
+
+
+void GnssProtocolTest::hyfixWritesCorrectionsDirectlyOverSerial()
+{
+	// Only the BLE path needs metering; a serial link takes the block whole.
+	HyfixReceiver receiver;
+	receiver.setCorrectionLink(HyfixCorrectionLink::UsbC);
+	QVERIFY(!receiver.pacesCorrections());
+	QSignalSpy writes(&receiver, &HyfixReceiver::writeRequested);
+
+	const QByteArray block(1500, '\xd3');
+	receiver.sendCorrections(block);
+	QCOMPARE(writes.count(), 1);
+	QCOMPARE(writes.at(0).at(0).toByteArray(), block);
+	QCOMPARE(receiver.pendingCorrectionBytes(), 0);
+
+	QCOMPARE(HyfixReceiver::linkForTransport(QStringLiteral("Serial")), HyfixCorrectionLink::UsbC);
+	QCOMPARE(HyfixReceiver::linkForTransport(QStringLiteral("BLE")), HyfixCorrectionLink::Bluetooth);
+}
+
+
+void GnssProtocolTest::nmeaDrPvaParsing()
+{
+	NmeaParser parser;
+	QSignalSpy spy(&parser, &NmeaParser::deadReckoningObservation);
+	QSignalSpy sentences(&parser, &NmeaParser::sentenceDecoded);
+
+	parser.addData("$PQTMDRPVA,1,168835,193009.000,1,47.46742420,-121.75890550,121.529,"
+	               "-17.177,0.458,0.006,0.023,0.458,0.000000,0.000000,0.719060*64\r\n");
+	QCOMPARE(spy.count(), 1);
+	QCOMPARE(sentences.count(), 1);
+	QCOMPARE(sentences.at(0).at(0).toString(), QStringLiteral("PQTMDRPVA"));
+
+	const auto observation = spy.at(0).at(0).value<GnssDeadReckoningObservation>();
+	QCOMPARE(observation.meta.source, GnssObservationSource::QuectelDrPva);
+	QCOMPARE(observation.navigationType, 1);  // GNSS only
+	QVERIFY(std::abs(observation.heading - 0.71906f) < 0.0001f);
+	QCOMPARE(observation.roll, 0.0f);
+	QCOMPARE(observation.pitch, 0.0f);
+
+	// The no-fix form has every value field empty and must not be mistaken
+	// for a zeroed attitude.
+	spy.clear();
+	parser.addData("$PQTMDRPVA,1,1000,163355.000,0,,,,,,,,,,,*7C\r\n");
+	QCOMPARE(spy.count(), 1);
+	const auto empty = spy.at(0).at(0).value<GnssDeadReckoningObservation>();
+	QCOMPARE(empty.navigationType, 0);
+	QVERIFY(std::isnan(empty.heading));
+	QVERIFY(std::isnan(empty.roll));
+}
+
+
+void GnssProtocolTest::nmeaDrCalParsing()
+{
+	NmeaParser parser;
+	QSignalSpy spy(&parser, &NmeaParser::deadReckoningObservation);
+
+	parser.addData("$PQTMDRCAL,1,0,1*5C\r\n");
+	QCOMPARE(spy.count(), 1);
+	const auto observation = spy.at(0).at(0).value<GnssDeadReckoningObservation>();
+	QCOMPARE(observation.meta.source, GnssObservationSource::QuectelDrCal);
+	QCOMPARE(observation.calibrationState, 0);  // not calibrated
+	QCOMPARE(observation.navigationType, 1);    // GNSS only
+
+	// A status text and a command acknowledgement are recognized too.
+	QSignalSpy texts(&parser, &NmeaParser::receiverStatusText);
+	QSignalSpy acks(&parser, &NmeaParser::commandAcknowledged);
+	QSignalSpy sentences(&parser, &NmeaParser::sentenceDecoded);
+	parser.addData("$PQTMTXT,1,01,01,01,0x002A0001,0x000A0001.*5C\r\n");
+	parser.addData("$PAIR001,050,2*3C\r\n");
+	QCOMPARE(texts.count(), 1);
+	QCOMPARE(acks.count(), 1);
+	QCOMPARE(acks.at(0).at(0).toInt(), 50);
+	QCOMPARE(acks.at(0).at(1).toInt(), 2);
+
+	// A GEO-PULSE restarting its GNSS engine truncates the stream
+	// mid-sentence. minmea accepts a checksum-less sentence, so the fragment
+	// must be rejected here or it would be counted as a distinct message type
+	// and crowd the bounded statistics table.
+	const auto counted = sentences.count();
+	parser.addData("$PAIR0\r\n");
+	QCOMPARE(sentences.count(), counted);
+}
+
+
+void GnssProtocolTest::nmeaDrSolutionTypeEncodingIsNormalized()
+{
+	// PQTMDRPVA's SolType and PQTMDRCAL's NavType swap the meanings of 2 and 3.
+	// Both must arrive normalized to the NavType encoding
+	// (2 = DR only, 3 = GNSS + DR), or a fused solution would be reported as
+	// dead-reckoning-only and vice versa.
+	NmeaParser parser;
+	QSignalSpy spy(&parser, &NmeaParser::deadReckoningObservation);
+
+	// SolType 2 = GNSS + DR.
+	parser.addData("$PQTMDRPVA,1,75000,083737.000,2,31.12738291,117.26372910,34.212,5.267,"
+	               "3.212,2.928,0.238,4.346,0.392663,1.300793,0.030088*5E\r\n");
+	QCOMPARE(spy.count(), 1);
+	QCOMPARE(spy.at(0).at(0).value<GnssDeadReckoningObservation>().navigationType, 3);
+
+	// NavType 3 = GNSS + DR, already in the canonical encoding.
+	spy.clear();
+	parser.addData("$PQTMDRCAL,1,2,3*5C\r\n");
+	QCOMPARE(spy.count(), 1);
+	const auto cal = spy.at(0).at(0).value<GnssDeadReckoningObservation>();
+	QCOMPARE(cal.navigationType, 3);
+	QCOMPARE(cal.calibrationState, 2);
+}
+
+
+void GnssProtocolTest::nmeaDrDoesNotDemoteRtkFix()
+{
+	// PQTMDRPVA has no RTK fix type. Fusing it as a position would drop an
+	// RTK-fixed GGA to a plain 3D fix at every epoch, so it must only
+	// contribute dead-reckoning state.
+	GnssFusionEngine fusion;
+	NmeaParser parser;
+	QObject::connect(&parser, &NmeaParser::positionObservation, &parser,
+	                 [&fusion](const GnssPositionObservation& o) { fusion.ingest(o); });
+	QObject::connect(&parser, &NmeaParser::deadReckoningObservation, &parser,
+	                 [&fusion](const GnssDeadReckoningObservation& o) { fusion.ingest(o); });
+
+	// GGA with quality 4 = RTK fixed.
+	parser.addData("$GNGGA,193009.000,4728.045452,N,12145.534330,W,4,12,0.60,121.529,M,-17.177,M,1.0,0000*61\r\n");
+	QCOMPARE(fusion.solution().position.fixType, GnssFixType::RtkFixed);
+
+	parser.addData("$PQTMDRPVA,1,168835,193009.000,1,47.46742420,-121.75890550,121.529,"
+	               "-17.177,0.458,0.006,0.023,0.458,0.000000,0.000000,0.719060*64\r\n");
+	QCOMPARE(fusion.solution().position.fixType, GnssFixType::RtkFixed);
+	QCOMPARE(fusion.solution().drNavigationType, 1);
+
+	parser.addData("$PQTMDRCAL,1,0,1*5C\r\n");
+	QCOMPARE(fusion.solution().position.fixType, GnssFixType::RtkFixed);
+	QCOMPARE(fusion.solution().drCalibrationState, 0);
+	// PQTMDRCAL carries no attitude and must not erase PQTMDRPVA's.
+	QCOMPARE(fusion.solution().drNavigationType, 1);
+	QVERIFY(!std::isnan(fusion.solution().attitudeHeading));
+
+	// Nor may the next PQTMDRPVA erase PQTMDRCAL's calibration state: the two
+	// sentences alternate every epoch, so a slot shared between them would
+	// flip the calibration state to unknown at the DRPVA rate.
+	parser.addData("$PQTMDRPVA,1,168835,193009.000,1,47.46742420,-121.75890550,121.529,"
+	               "-17.177,0.458,0.006,0.023,0.458,0.000000,0.000000,0.719060*64\r\n");
+	QCOMPARE(fusion.solution().drCalibrationState, 0);
+	QCOMPARE(fusion.solution().drNavigationType, 1);
 }
 
 

@@ -37,6 +37,7 @@
 namespace OpenOrienteering {
 
 class GnssRawLogger;
+class HyfixReceiver;
 class NtripClient;
 class UbxParser;
 class NmeaParser;
@@ -140,6 +141,7 @@ private slots:
 	void onSatelliteObservation(const OpenOrienteering::GnssSatelliteObservation& observation);
 	void onCovarianceObservation(const OpenOrienteering::GnssCovarianceObservation& observation);
 	void onStatusObservation(const OpenOrienteering::GnssStatusObservation& observation);
+	void onDeadReckoningObservation(const OpenOrienteering::GnssDeadReckoningObservation& observation);
 	void onVersionObservation(const OpenOrienteering::GnssVersionObservation& observation);
 
 	// Message statistics
@@ -171,6 +173,9 @@ private:
 	void resetSessionState();
 	void updateSolution();
 	void updateNtripGga();
+	/// Write correction bytes to the receiver, through the HYFIX pacer when a
+	/// GEO-PULSE is attached. Returns false when the bytes could not be queued.
+	bool writeCorrections(const QByteArray& data);
 
 	GnssState m_state;
 
@@ -179,6 +184,10 @@ private:
 	std::unique_ptr<UbxParser> m_ubxParser;
 	std::unique_ptr<NmeaParser> m_nmeaParser;
 	std::unique_ptr<RtcmFramer> m_rtcmFramer;
+	std::unique_ptr<HyfixReceiver> m_hyfix;
+	/// Correction bytes the HYFIX pacer had already dropped when last read, so
+	/// that only the new drops are added to the session total.
+	qint64 m_hyfixDroppedReported = 0;
 	GnssFusionEngine m_fusion;
 
 	bool m_protocolDetected = false;

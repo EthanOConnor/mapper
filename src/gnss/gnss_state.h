@@ -28,6 +28,7 @@
 #include <QString>
 
 #include "gnss_solution.h"
+#include "protocol/hyfix_protocol.h"
 
 namespace OpenOrienteering {
 
@@ -130,6 +131,10 @@ struct GnssState
 	QString receiverSwVersion;
 	QString receiverHwVersion;
 	QString receiverModel;    ///< Derived from MON-VER extension strings
+
+	// -- HYFIX GEO-PULSE facts, when one is connected --
+	HyfixDeviceInfo hyfix;
+	int hyfixQueuedCorrectionBytes = 0;
 
 	// -- Per-constellation satellite counts --
 	static constexpr int kMaxConstellations = 8;

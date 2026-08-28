@@ -60,6 +60,20 @@ private slots:
 	void nmeaGstAccuracy();
 	void nmeaRtkUereFallback();
 
+	// HYFIX GEO-PULSE tests
+	void hyfixDeviceNameRecognition();
+	void hyfixCommandFraming();
+	void hyfixReplyParsing();
+	void hyfixMessageConfigReplies();
+	void hyfixRateSnapsToSupportedInterval();
+	void hyfixIdentifiesFromStreamAndBringsUp();
+	void hyfixPacesCorrectionsOverBluetooth();
+	void hyfixWritesCorrectionsDirectlyOverSerial();
+	void nmeaDrPvaParsing();
+	void nmeaDrCalParsing();
+	void nmeaDrSolutionTypeEncodingIsNormalized();
+	void nmeaDrDoesNotDemoteRtkFix();
+
 	// Protocol detector tests
 	void detectUbx();
 	void detectNmea();

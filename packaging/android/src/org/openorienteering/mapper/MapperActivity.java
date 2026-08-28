@@ -61,6 +61,12 @@ public class MapperActivity extends QtActivity
 		instance = this;
 	}
 
+	/** The current activity instance, or null before onCreate. */
+	public static MapperActivity currentActivity()
+	{
+		return instance;
+	}
+	
 	/** Preserve a document intent delivered to the single activity instance. */
 	@Override
 	public void onNewIntent(Intent intent)

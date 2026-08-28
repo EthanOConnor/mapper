@@ -19,6 +19,8 @@
 
 #include "ble_device_model.h"
 
+#include "protocol/hyfix_protocol.h"
+
 namespace OpenOrienteering {
 
 
@@ -43,7 +45,10 @@ QVariant BleDeviceModel::data(const QModelIndex& index, int role) const
 
 	const auto& device = m_devices[index.row()];
 	switch (role) {
-	case NameRole:    return device.name;
+	// A GEO-PULSE advertises as GEOPULSE_<serial>, which tells a user nothing
+	// about what the device is. Show the product name in the picker while
+	// keeping the advertised name for matching and reconnection.
+	case NameRole:    return HyfixProtocol::friendlyName(device.name);
 	case AddressRole: return device.address;
 	case RssiRole:    return device.rssi;
 	case IsKnownRole: return device.isKnown;

@@ -23,6 +23,20 @@
 #if defined(MAPPER_GNSS_BLE_COREBLUETOOTH)
 #  include "gnss/transport/ble_discovery_agent.h"
 #endif
+#if defined(MAPPER_GNSS_BLE)
+#  include <QBluetoothAddress>
+#  include <QBluetoothDeviceDiscoveryAgent>
+#  include <QPermissions>
+#  include <QBluetoothDeviceInfo>
+#  include <QBluetoothUuid>
+#  include "gnss/transport/ble_transport.h"
+#endif
+#if defined(MAPPER_GNSS_SERIAL)
+#  include "gnss/transport/serial_transport.h"
+#endif
+#if defined(MAPPER_GNSS_ANDROID_USB_SERIAL)
+#  include "gnss/transport/android_usb_serial_transport.h"
+#endif
 
 namespace OpenOrienteering {
 
@@ -87,6 +101,59 @@ void GnssController::loadActiveNtripProfile()
 	m_session->setNtripClient(std::move(client));
 }
 
+std::unique_ptr<GnssTransport> GnssController::createSavedTransport()
+{
+	auto& settings = Settings::getInstance();
+	const auto address = settings.gnssDeviceAddress();
+	if (address.isEmpty())
+		return {};
+
+	// The GNSS settings page stores the chosen endpoint with a scheme prefix.
+	const auto serial_prefix = QLatin1String("serial:");
+	if (address.startsWith(serial_prefix))
+	{
+#if defined(MAPPER_GNSS_SERIAL)
+		auto port = address.mid(serial_prefix.size());
+		if (port.isEmpty())
+			return {};
+		return std::unique_ptr<GnssTransport>(new SerialTransport(port));
+#else
+		return {};
+#endif
+	}
+
+	const auto android_usb_prefix = QLatin1String("android-usb:");
+	if (address.startsWith(android_usb_prefix))
+	{
+#if defined(MAPPER_GNSS_ANDROID_USB_SERIAL)
+		auto device = address.mid(android_usb_prefix.size());
+		if (device.isEmpty())
+			return {};
+		return std::unique_ptr<GnssTransport>(
+		  new AndroidUsbSerialTransport(device, settings.gnssDeviceName()));
+#else
+		return {};
+#endif
+	}
+
+#if defined(MAPPER_GNSS_BLE)
+	QBluetoothAddress bluetooth_address(address);
+	if (!bluetooth_address.isNull())
+	{
+		return std::unique_ptr<GnssTransport>(
+		  new BleTransport(bluetooth_address, settings.gnssDeviceName()));
+	}
+	// Apple platforms identify BLE devices by UUID instead of address.
+	const QUuid uuid(address);
+	if (!uuid.isNull())
+	{
+		return std::unique_ptr<GnssTransport>(
+		  new BleTransport(QBluetoothUuid(uuid), settings.gnssDeviceName()));
+	}
+#endif
+	return {};
+}
+
 void GnssController::connectExternal(QWidget* parent)
 {
 	ensureSession();
@@ -95,6 +162,18 @@ void GnssController::connectExternal(QWidget* parent)
 		emit sessionChanged(m_session);
 		return;
 	}
+
+	// A wired receiver, or a Bluetooth one already chosen, needs no scan: it
+	// is addressed directly. Discovery is only for finding a receiver in the
+	// first place.
+	if (auto transport = createSavedTransport())
+	{
+		m_session->setTransport(std::move(transport));
+		m_session->start();
+		emit sessionChanged(m_session);
+		return;
+	}
+
 	startDiscovery(parent);
 }
 
@@ -147,6 +226,103 @@ void GnssController::startDiscovery(QWidget* parent, bool force_picker)
 		QTimer::singleShot(2500, this, [this, generation] {
 			if (generation == m_discovery_generation && !isActive()
 			    && m_discovery)
+				showDevicePicker(m_picker_parent);
+		});
+	}
+#elif defined(MAPPER_GNSS_BLE)
+	// Qt Bluetooth does not request the platform permission itself; Qt 6.6+
+	// explicitly leaves that to the application. Without it, discovery fails
+	// with MissingPermissionsError on a fresh Android install, and macOS
+	// terminates an app that touches CoreBluetooth unprompted.
+	QBluetoothPermission permission;
+	permission.setCommunicationModes(QBluetoothPermission::Access);
+	auto* application = QCoreApplication::instance();
+	switch (application->checkPermission(permission))
+	{
+	case Qt::PermissionStatus::Undetermined:
+		application->requestPermission(permission, this,
+		    [this, force_picker](const QPermission& result) {
+			if (result.status() == Qt::PermissionStatus::Granted)
+			{
+				startDiscovery(m_picker_parent, force_picker);
+			}
+			else
+			{
+				emit errorOccurred(tr("GNSS"),
+				                   tr("Bluetooth permission was not granted."));
+				emit connectionCancelled();
+			}
+		});
+		return;
+	case Qt::PermissionStatus::Denied:
+		emit errorOccurred(tr("GNSS"),
+		                   tr("Bluetooth permission was not granted."));
+		emit connectionCancelled();
+		return;
+	case Qt::PermissionStatus::Granted:
+		break;
+	}
+
+	delete m_qt_discovery;
+	m_qt_discovery = new QBluetoothDeviceDiscoveryAgent(this);
+	m_qt_discovery->setLowEnergyDiscoveryTimeout(15000);
+
+	connect(m_qt_discovery, &QBluetoothDeviceDiscoveryAgent::deviceDiscovered,
+	        this, [this](const QBluetoothDeviceInfo& info) {
+		if (!(info.coreConfigurations()
+		      & QBluetoothDeviceInfo::LowEnergyCoreConfiguration))
+			return;
+		if (info.name().isEmpty())
+			return;
+		BleDeviceInfo device;
+		device.name = info.name();
+		// Apple platforms report no Bluetooth address; the platform device
+		// UUID is the stable identity there.
+		device.address = info.address().isNull()
+		    ? info.deviceUuid().toString(QUuid::WithoutBraces)
+		    : info.address().toString();
+		device.rssi = info.rssi();
+		m_device_model->addOrUpdate(device);
+	});
+	connect(m_qt_discovery,
+	        &QBluetoothDeviceDiscoveryAgent::errorOccurred,
+	        this, [this](QBluetoothDeviceDiscoveryAgent::Error) {
+		if (m_qt_discovery)
+			emit errorOccurred(tr("GNSS"), m_qt_discovery->errorString());
+	});
+
+	auto generation = m_discovery_generation;
+	auto saved_address = Settings::getInstance().gnssDeviceAddress();
+	auto auto_connect = !force_picker
+	                 && Settings::getInstance().gnssAutoConnect()
+	                 && !saved_address.isEmpty();
+	connect(m_device_model, &QAbstractItemModel::rowsInserted,
+	        m_qt_discovery, [this, generation, saved_address, auto_connect](
+	                          const QModelIndex&, int first, int last) {
+		if (!auto_connect || generation != m_discovery_generation
+		    || !m_qt_discovery || isActive())
+			return;
+		for (int row = first; row <= last; ++row)
+		{
+			if (m_device_model->deviceAt(row).address == saved_address)
+			{
+				connectDevice(row);
+				return;
+			}
+		}
+	});
+
+	m_qt_discovery->start(QBluetoothDeviceDiscoveryAgent::LowEnergyMethod);
+
+	if (!auto_connect)
+		showDevicePicker(parent);
+	else
+	{
+		// A saved receiver normally appears immediately. If it does not, make
+		// the state visible rather than leaving the GPS action apparently idle.
+		QTimer::singleShot(2500, this, [this, generation] {
+			if (generation == m_discovery_generation && !isActive()
+			    && m_qt_discovery)
 				showDevicePicker(m_picker_parent);
 		});
 	}
@@ -247,6 +423,36 @@ void GnssController::connectDevice(int row)
 	Settings::getInstance().setGnssDeviceName(device.name);
 	m_session->start();
 	emit sessionChanged(m_session);
+#elif defined(MAPPER_GNSS_BLE)
+	if (m_qt_discovery)
+	{
+		m_qt_discovery->stop();
+		m_qt_discovery->deleteLater();
+		m_qt_discovery = nullptr;
+	}
+	std::unique_ptr<GnssTransport> transport;
+	QBluetoothAddress bluetooth_address(device.address);
+	if (!bluetooth_address.isNull())
+	{
+		transport.reset(new BleTransport(bluetooth_address, device.name));
+	}
+	else
+	{
+		const QUuid uuid(device.address);
+		if (uuid.isNull())
+		{
+			if (m_device_dialog)
+				m_device_dialog->showScanPage(
+				  tr("That receiver is no longer available. Scan again and try again."));
+			return;
+		}
+		transport.reset(new BleTransport(QBluetoothUuid(uuid), device.name));
+	}
+	m_session->setTransport(std::move(transport));
+	Settings::getInstance().setGnssDeviceAddress(device.address);
+	Settings::getInstance().setGnssDeviceName(device.name);
+	m_session->start();
+	emit sessionChanged(m_session);
 #else
 	Q_UNUSED(device)
 #endif
@@ -261,6 +467,14 @@ void GnssController::finishDiscovery()
 		m_discovery->stopScan();
 		delete m_discovery;
 		m_discovery = nullptr;
+	}
+#endif
+#if defined(MAPPER_GNSS_BLE)
+	if (m_qt_discovery)
+	{
+		m_qt_discovery->stop();
+		m_qt_discovery->deleteLater();
+		m_qt_discovery = nullptr;
 	}
 #endif
 }

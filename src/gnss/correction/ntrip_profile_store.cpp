@@ -117,19 +117,49 @@ bool writePassword(const QString& account, const QString& password, QString* err
 	return false;
 }
 #else
-bool readPassword(const QString&, QString&, QString*)
+// Without a platform keychain, passwords are kept in QSettings, scrambled so
+// they do not sit in the settings file as recognizable plain text. This is
+// obfuscation, not encryption: anyone with the settings file and this source
+// can recover them. NTRIP credentials are low-value (they gate a correction
+// stream, not user data), and refusing to store them would make every
+// authenticated correction service unusable on Windows, Linux, and Android.
+QString settingsPasswordKey(const QString& account)
 {
+	return QStringLiteral("Gnss/ntrip_credentials/") + account;
+}
+
+QByteArray scramblePassword(const QString& account, const QByteArray& data)
+{
+	const auto key = QCryptographicHash::hash(
+	  QByteArrayLiteral("mapper-ntrip:") + account.toUtf8(),
+	  QCryptographicHash::Sha256);
+	auto out = data;
+	for (int i = 0; i < out.size(); ++i)
+		out[i] = static_cast<char>(out[i] ^ key[i % key.size()]);
+	return out;
+}
+
+bool readPassword(const QString& account, QString& password, QString*)
+{
+	const auto stored = QSettings().value(
+	  settingsPasswordKey(account)).toByteArray();
+	if (!stored.isEmpty())
+	{
+		password = QString::fromUtf8(
+		  scramblePassword(account, QByteArray::fromBase64(stored)));
+	}
 	return true;
 }
 
-bool writePassword(const QString&, const QString& password, QString* error)
+bool writePassword(const QString& account, const QString& password, QString*)
 {
+	QSettings settings;
 	if (password.isEmpty())
-		return true;
-	if (error)
-		*error = storeError(
-		  "Secure NTRIP password storage is unavailable on this platform.");
-	return false;
+		settings.remove(settingsPasswordKey(account));
+	else
+		settings.setValue(settingsPasswordKey(account),
+		                  scramblePassword(account, password.toUtf8()).toBase64());
+	return true;
 }
 #endif
 

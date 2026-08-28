@@ -394,6 +394,30 @@ void GnssDetailPanel::setupUi()
 	receiver_last_data_label = new QLabel(QStringLiteral("--"));
 	form->addRow(tr("Last receiver data:"), receiver_last_data_label);
 
+	// --- GEO-PULSE section ---
+	// The GEO-PULSE reports facts no generic receiver does — the rate it
+	// actually accepted, which link it expects corrections on, and whether its
+	// dead-reckoning is calibrated. The rows stay hidden for other receivers.
+	{
+		auto* hyfix_form = new QFormLayout();
+		hyfix_form->setContentsMargins(0, 0, 0, 0);
+		hyfix_form->addRow(Util::Headline::create(tr("HYFIX GEO-PULSE")));
+
+		hyfix_firmware_label = new QLabel(QStringLiteral("--"));
+		hyfix_form->addRow(tr("Firmware:"), hyfix_firmware_label);
+		hyfix_rate_label = new QLabel(QStringLiteral("--"));
+		hyfix_form->addRow(tr("Position rate:"), hyfix_rate_label);
+		hyfix_mode_label = new QLabel(QStringLiteral("--"));
+		hyfix_form->addRow(tr("Work mode:"), hyfix_mode_label);
+		hyfix_dr_label = new QLabel(QStringLiteral("--"));
+		hyfix_form->addRow(tr("Dead reckoning:"), hyfix_dr_label);
+
+		hyfix_section = new QWidget();
+		hyfix_section->setLayout(hyfix_form);
+		hyfix_section->setVisible(false);
+		form->addRow(hyfix_section);
+	}
+
 	// --- Messages section ---
 	form->addRow(Util::Headline::create(tr("Messages")));
 
@@ -674,9 +698,64 @@ void GnssDetailPanel::updateState(const GnssState& state)
 	    ? state.lastReceiverDataTime.toLocalTime().toString(QStringLiteral("HH:mm:ss.zzz"))
 	    : QStringLiteral("--"));
 
+	// GEO-PULSE section
+	const auto& hyfix = state.hyfix;
+	hyfix_section->setVisible(hyfix.identified);
+	if (hyfix.identified)
+	{
+		QString firmware = hyfix.productFirmware.isEmpty() ? QStringLiteral("--") : hyfix.productFirmware;
+		if (!hyfix.gnssFirmware.isEmpty())
+			//: %1 is the product firmware version, %2 the GNSS module firmware version
+			firmware = tr("%1 (GNSS %2)").arg(firmware, hyfix.gnssFirmware);
+		hyfix_firmware_label->setText(firmware);
+
+		if (hyfix.nmeaIntervalMs > 0)
+		{
+			hyfix_rate_label->setText(tr("%1 ms (%2 Hz)")
+			  .arg(hyfix.nmeaIntervalMs)
+			  .arg(1000.0 / hyfix.nmeaIntervalMs, 0, 'g', 2));
+		}
+		else
+		{
+			hyfix_rate_label->setText(QStringLiteral("--"));
+		}
+
+		QString mode = hyfix.workMode.isEmpty() ? QStringLiteral("--") : hyfix.workMode;
+		if (!hyfix.correctionLink.isEmpty())
+			//: %1 is a receiver work mode, %2 the link its corrections arrive on
+			mode = tr("%1, corrections via %2").arg(mode, hyfix.correctionLink);
+		hyfix_mode_label->setText(mode);
+
+		hyfix_dr_label->setText(hyfixDeadReckoningText(hyfix));
+	}
+
 	bool connection_active = connected
 	                      || state.transportState == GnssTransportState::Reconnecting;
 	connect_button->setText(connection_active ? tr("Disconnect") : tr("Connect"));
+}
+
+
+QString GnssDetailPanel::hyfixDeadReckoningText(const HyfixDeviceInfo& info)
+{
+	QString calibration;
+	switch (info.drCalibrationState) {
+	case 0:  calibration = tr("not calibrated"); break;
+	case 1:  calibration = tr("lightly calibrated"); break;
+	case 2:  calibration = tr("calibrated"); break;
+	case 3:  calibration = tr("calibrated, high-precision heading"); break;
+	default: calibration = tr("unknown"); break;
+	}
+
+	QString navigation;
+	switch (info.drNavType) {
+	case 0:  navigation = tr("no position"); break;
+	case 1:  navigation = tr("GNSS only"); break;
+	case 2:  navigation = tr("dead reckoning only"); break;
+	case 3:  navigation = tr("GNSS + dead reckoning"); break;
+	default: return calibration;
+	}
+	//: %1 is a dead-reckoning calibration state, %2 how the solution is computed
+	return tr("%1, %2").arg(calibration, navigation);
 }
 
 
