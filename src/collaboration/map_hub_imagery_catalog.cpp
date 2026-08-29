@@ -113,13 +113,18 @@ QJsonObject coverageGeometry(const QJsonObject& layer)
 	if (!west.isDouble() || !south.isDouble()
 	    || !east.isDouble() || !north.isDouble())
 		return {};
+	// The ring must be wrapped as a QJsonValue: brace-initializing a
+	// QJsonArray from a single QJsonArray element selects the copy
+	// constructor on MSVC and older Clang (CWG 1467/2137), flattening
+	// the polygon's nesting.
+	auto const ring = QJsonArray {
+		QJsonArray { west, south }, QJsonArray { east, south },
+		QJsonArray { east, north }, QJsonArray { west, north },
+		QJsonArray { west, south },
+	};
 	return {
 		{ QStringLiteral("type"), QStringLiteral("Polygon") },
-		{ QStringLiteral("coordinates"), QJsonArray { QJsonArray {
-			QJsonArray { west, south }, QJsonArray { east, south },
-			QJsonArray { east, north }, QJsonArray { west, north },
-			QJsonArray { west, south },
-		} } },
+		{ QStringLiteral("coordinates"), QJsonArray { QJsonValue { ring } } },
 	};
 }
 

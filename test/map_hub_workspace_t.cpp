@@ -1286,13 +1286,17 @@ void MapHubWorkspaceTest::preservesPublishedTileMatrixLimits() {
                {QStringLiteral("matrixHeight"), 2},
            }}},
   };
+  // The ring is wrapped as a QJsonValue: brace-initializing a QJsonArray from
+  // a single QJsonArray element selects the copy constructor on MSVC and
+  // older Clang (CWG 1467/2137), flattening the polygon's nesting.
+  QJsonArray coverage_ring{QJsonArray{-122.24, 47.56},
+                           QJsonArray{-122.22, 47.56},
+                           QJsonArray{-122.22, 47.58},
+                           QJsonArray{-122.24, 47.58},
+                           QJsonArray{-122.24, 47.56}};
   QJsonObject coverage{
       {QStringLiteral("type"), QStringLiteral("Polygon")},
-      {QStringLiteral("coordinates"),
-       QJsonArray{
-           QJsonArray{QJsonArray{-122.24, 47.56}, QJsonArray{-122.22, 47.56},
-                      QJsonArray{-122.22, 47.58}, QJsonArray{-122.24, 47.58},
-                      QJsonArray{-122.24, 47.56}}}},
+      {QStringLiteral("coordinates"), QJsonArray{QJsonValue{coverage_ring}}},
   };
   QJsonObject manifest{
       {QStringLiteral("id"), QStringLiteral("project-id")},
