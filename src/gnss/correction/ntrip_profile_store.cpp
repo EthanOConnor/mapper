@@ -130,9 +130,11 @@ QString settingsPasswordKey(const QString& account)
 
 QByteArray scramblePassword(const QString& account, const QByteArray& data)
 {
-	const auto key = QCryptographicHash::hash(
-	  QByteArrayLiteral("mapper-ntrip:") + account.toUtf8(),
-	  QCryptographicHash::Sha256);
+	// Concatenate explicitly: with QT_USE_QSTRINGBUILDER the + expression is
+	// a QStringBuilder, which Qt 6's QByteArrayView-taking hash() rejects.
+	auto salted = QByteArrayLiteral("mapper-ntrip:");
+	salted += account.toUtf8();
+	const auto key = QCryptographicHash::hash(salted, QCryptographicHash::Sha256);
 	auto out = data;
 	for (int i = 0; i < out.size(); ++i)
 		out[i] = static_cast<char>(out[i] ^ key[i % key.size()]);
