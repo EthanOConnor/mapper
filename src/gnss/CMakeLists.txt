@@ -50,6 +50,10 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 set(MAPPER_GNSS_PRIVATE_LIBRARIES Qt6::Network minmea)
+if(WIN32)
+	# tcp_transport.cpp calls setsockopt() directly for keepalive/nodelay.
+	list(APPEND MAPPER_GNSS_PRIVATE_LIBRARIES ws2_32)
+endif()
 
 if(Mapper_GLEAN_SOURCE_DIR)
 	if(NOT EXISTS "${Mapper_GLEAN_SOURCE_DIR}/include/glean/ubx.h")
