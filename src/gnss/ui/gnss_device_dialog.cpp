@@ -19,6 +19,7 @@
 
 #include "gnss_device_dialog.h"
 
+#include <QKeyEvent>
 #include <QLabel>
 #include <QListView>
 #include <QPushButton>
@@ -99,6 +100,17 @@ void GnssDeviceDialog::setupUi()
 }
 
 
+void GnssDeviceDialog::keyPressEvent(QKeyEvent* event)
+{
+	if (event->key() == Qt::Key_Back)
+	{
+		reject();
+		return;
+	}
+	QDialog::keyPressEvent(event);
+}
+
+
 void GnssDeviceDialog::setupScanPage()
 {
 	scan_page = new QWidget();
@@ -148,6 +160,13 @@ void GnssDeviceDialog::setupScanPage()
 		emit refreshRequested();
 	});
 	layout->addWidget(scan_button);
+
+	// Leave without changing anything. On phones this is the only way out:
+	// the scan page otherwise traps the user in the dialog.
+	auto* close_button = new QPushButton(tr("Cancel"));
+	close_button->setMinimumHeight(44);
+	connect(close_button, &QPushButton::clicked, this, &QDialog::reject);
+	layout->addWidget(close_button);
 }
 
 

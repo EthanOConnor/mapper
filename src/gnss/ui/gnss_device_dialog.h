@@ -24,6 +24,7 @@
 #include <QDialog>
 #include <QString>
 
+class QKeyEvent;
 class QLabel;
 class QListView;
 class QPushButton;
@@ -47,6 +48,13 @@ class GnssDeviceDialog : public QDialog
 public:
 	explicit GnssDeviceDialog(QWidget* parent = nullptr);
 	~GnssDeviceDialog() override;
+
+protected:
+	/// Android delivers the system back gesture as Qt::Key_Back; treat it
+	/// like Escape so the dialog can always be left.
+	void keyPressEvent(QKeyEvent* event) override;
+
+public:
 
 	/// Set the device model for scan results.
 	void setDeviceModel(BleDeviceModel* model);
