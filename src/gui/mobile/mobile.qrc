@@ -1,0 +1,6 @@
+<RCC>
+    <qresource prefix="/mobile">
+        <file alias="MobileSettings.qml">qml/MobileSettings.qml</file>
+        <file alias="HomeScreen.qml">qml/HomeScreen.qml</file>
+    </qresource>
+</RCC>

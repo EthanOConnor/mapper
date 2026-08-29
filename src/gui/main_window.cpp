@@ -97,6 +97,9 @@
 #include "gui/home_screen_controller.h"
 #include "gui/map_hub_dialog.h"
 #include "gui/settings_dialog.h"
+#ifdef MAPPER_MOBILE_QUICK_UI
+#include "gui/mobile/mobile_settings_dialog.h"
+#endif
 #include "gui/util_gui.h"
 #include "gui/map/map_editor.h"
 #include "gui/map/new_map_dialog.h"
@@ -4387,6 +4390,14 @@ void MainWindow::toggleFullscreenMode()
 
 void MainWindow::showSettings()
 {
+#ifdef MAPPER_MOBILE_QUICK_UI
+	if (Settings::mobileModeEnforced())
+	{
+		MobileSettingsDialog dialog(this);
+		dialog.exec();
+		return;
+	}
+#endif
 	SettingsDialog dialog(this);
 	dialog.exec();
 }

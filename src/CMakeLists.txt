@@ -381,12 +381,28 @@ set(Mapper_Common_HEADERS
   
 )
 
+# Touch-first Qt Quick screens for mobile mode. Optional: without the Quick
+# modules the classic widget screens remain in place everywhere.
+find_package(Qt6 COMPONENTS QuickWidgets QuickControls2)
+if(TARGET Qt6::QuickWidgets AND TARGET Qt6::QuickControls2)
+	list(APPEND Mapper_Common_SRCS
+	  gui/mobile/home_screen_widget_quick.cpp
+	  gui/mobile/mobile_settings_dialog.cpp
+	)
+	qt_add_resources(Mapper_Mobile_RCC "${CMAKE_CURRENT_SOURCE_DIR}/gui/mobile/mobile.qrc")
+	list(APPEND Mapper_RESOURCES_RCC ${Mapper_Mobile_RCC})
+endif()
+
 set(CMAKE_AUTOMOC ON)
 add_library(Mapper_Common STATIC
   ${Mapper_Common_SRCS}
   ${Mapper_Common_HEADERS}   # for IDE
   ${Mapper_RESOURCES_RCC}
 )
+if(TARGET Qt6::QuickWidgets AND TARGET Qt6::QuickControls2)
+	target_compile_definitions(Mapper_Common PRIVATE MAPPER_MOBILE_QUICK_UI)
+	target_link_libraries(Mapper_Common PRIVATE Qt6::QuickWidgets Qt6::QuickControls2)
+endif()
 mapper_target_defaults(Mapper_Common)
 target_include_directories(Mapper_Common PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 qt_add_resources(Mapper_Common "mapper-translations"

@@ -265,6 +265,10 @@ int main(int argc, char** argv)
 		qapp.setDocumentWindow(first_window);
 		
 		first_window->applicationStateChanged();
+
+		// Temporary UI-iteration hook.
+		if (qEnvironmentVariableIsSet("MAPPER_DEBUG_OPEN_SETTINGS"))
+			QTimer::singleShot(800, first_window, &MainWindow::showSettings);
 		
 #ifdef MAPPER_USE_KDSINGLEAPPLICATION
 		connectPrimaryInstance(single_app);

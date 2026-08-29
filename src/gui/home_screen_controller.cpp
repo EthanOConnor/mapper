@@ -26,6 +26,9 @@
 #include "settings.h"
 #include "gui/main_window.h"
 #include "gui/widgets/home_screen_widget.h"
+#ifdef MAPPER_MOBILE_QUICK_UI
+#include "gui/mobile/home_screen_widget_quick.h"
+#endif
 
 
 namespace OpenOrienteering {
@@ -51,7 +54,11 @@ void HomeScreenController::attach(MainWindow* window)
 	
 	if (Settings::mobileModeEnforced())
 	{
+#ifdef MAPPER_MOBILE_QUICK_UI
+		widget = new HomeScreenWidgetQuick(this);
+#else
 		widget = new HomeScreenWidgetMobile(this);
+#endif
 	}
 	else
 	{
