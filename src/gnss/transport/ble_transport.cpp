@@ -95,6 +95,13 @@ bool BleTransport::write(const QByteArray& data)
 	// Write to the RX characteristic (phone → receiver).
 	// Use WriteWithoutResponse for throughput when the characteristic supports it,
 	// otherwise fall back to WriteWithResponse.
+	//
+	// A true return means "queued with the Qt BLE stack", nothing deeper: for
+	// write-without-response Qt provides no completion or error signal, so OS
+	// or peripheral acceptance is unobservable here. With-response write
+	// failures do surface asynchronously as CharacteristicWriteError through
+	// onServiceError(). Callers accounting "sent" bytes are accounting this
+	// tier, the deepest one the platform exposes.
 	auto writeMode = m_rxChar.properties().testFlag(QLowEnergyCharacteristic::WriteNoResponse)
 	    ? QLowEnergyService::WriteWithoutResponse
 	    : QLowEnergyService::WriteWithResponse;

@@ -1191,6 +1191,12 @@ void GnssProtocolTest::hyfixPacesCorrectionsOverBluetooth()
 	QCOMPARE(writes.count(), 0);
 	QCOMPARE(receiver.pendingCorrectionBytes(), 1500);
 
+	// A readback that is not the full expected state — ROVER, NTRIPCLI, and
+	// this link — keeps the hold, even when the link field matches.
+	receiver.handleIncomingData("+HYFIX,WORKMODE,BASE,NTRIPSVR,BT#\r\n");
+	QVERIFY(!receiver.correctionsReleased());
+	QCOMPARE(writes.count(), 0);
+
 	// The WORKMODE acknowledgement releases the hold; the first chunk leaves
 	// immediately, capped at the vendor chunk size.
 	receiver.handleIncomingData("+HYFIX,WORKMODE,OK#\r\n");
@@ -1263,6 +1269,11 @@ void GnssProtocolTest::hyfixReplyExtractorResyncsInBinaryStream()
 	receiver.handleIncomingData(noise);
 	QVERIFY(receiver.isIdentified());
 	QCOMPARE(receiver.info().productFirmware, QStringLiteral("3.8.2"));
+
+	// A '+' past the prefix is content, not a restart: the SN reply's Base64
+	// ciphertext legitimately contains one.
+	receiver.handleIncomingData("+HYFIX,SN,38182BF816ED,CR18io9a+HlzDUfmLG/HSg==#\r\n");
+	QCOMPARE(receiver.info().serialNumber, QStringLiteral("38182BF816ED"));
 
 	// Binary that never resolves into a reply identifies nothing.
 	HyfixReceiver quiet;

@@ -103,6 +103,9 @@ void HyfixReceiver::begin()
 
 	m_corrections_released = false;
 	m_release_fallback_timer.stop();
+	// begin() opens a session (fresh connection or reconnect), so the
+	// once-per-session USB warning re-arms here.
+	m_usb_warning_emitted = false;
 
 	enqueueCommand(kConnectSettleMs, HyfixProtocol::queryVersion());
 	m_command_timer.start(m_command_queue.first().delay_ms);
@@ -179,11 +182,11 @@ void HyfixReceiver::handleIncomingData(const QByteArray& data)
 {
 	// RTCM and other binary records share this stream, and a 0x2b frame byte
 	// looks like the '+' that opens a reply. The accumulator therefore
-	// resynchronizes aggressively on the `+HYFIX,` prefix: a '+' always
-	// restarts it (a genuine reply never contains one past position 0, so a
-	// later '+' means the current accumulation was binary noise in front of a
-	// real reply), and any byte that breaks the prefix discards the
-	// accumulation instead of letting frame bytes hide a reply behind it.
+	// resynchronizes on the `+HYFIX,` prefix: any byte that breaks the
+	// prefix discards the accumulation, and while the prefix is still being
+	// matched a fresh '+' restarts it — so binary noise in front of a real
+	// reply cannot hide it. Once the full prefix has matched, a '+' is
+	// content: the SN reply's Base64 ciphertext legitimately contains one.
 	static const char kReplyPrefix[] = "+HYFIX,";
 	constexpr int kReplyPrefixLength = int(sizeof(kReplyPrefix)) - 1;
 
@@ -201,7 +204,8 @@ void HyfixReceiver::handleIncomingData(const QByteArray& data)
 			continue;
 		}
 
-		if (c == '+')
+		const auto in_prefix = m_line_buffer.size() < kReplyPrefixLength;
+		if (c == '+' && in_prefix)
 		{
 			m_line_buffer.clear();
 			m_line_buffer.append(c);
@@ -238,15 +242,22 @@ void HyfixReceiver::handleLine(const QByteArray& line)
 	if (!m_info.lastError.isEmpty() && m_info.lastError != previous_error)
 		emit errorOccurred(m_info.lastError);
 
-	// The proven RTK bring-up delivered no RTCM before the receiver had
-	// acknowledged the work mode naming the host link, so that reply is what
-	// releases the correction hold-off: either the `OK` acknowledgement of
-	// our own WORKMODE command, or a readback confirming the expected link.
+	// The only bench-proven RTK bring-up delivered no RTCM before the
+	// receiver had acknowledged the work mode naming the host link, so that
+	// reply is what releases the correction hold-off: either the `OK`
+	// acknowledgement of our own WORKMODE command, or a readback confirming
+	// the full expected state — ROVER, NTRIPCLI, and the host link. A
+	// partial match (e.g. a BASE mode that happens to name the same link)
+	// keeps the hold.
 	if (!m_corrections_released && reply.verb == QLatin1String("WORKMODE"))
 	{
 		const auto acknowledged = !reply.fields.isEmpty()
 		                          && reply.fields.first() == QLatin1String("OK");
-		if (acknowledged || m_info.correctionLink == HyfixProtocol::linkToken(m_link))
+		const auto readback_matches = reply.fields.size() >= 3
+		    && reply.fields.at(0) == QLatin1String("ROVER")
+		    && reply.fields.at(1) == QLatin1String("NTRIPCLI")
+		    && reply.fields.at(2) == HyfixProtocol::linkToken(m_link);
+		if (acknowledged || readback_matches)
 			releaseCorrections();
 	}
 

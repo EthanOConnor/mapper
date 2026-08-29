@@ -119,9 +119,13 @@ void GnssSession::setupParsers()
 				appendRawEntry('T', data);
 		}
 	});
-	// Correction chunks are accounted here, against the actual transport
-	// write result, not when a caster block is accepted into the pacer:
-	// "sent to receiver" means the transport took the bytes, nothing earlier.
+	// Correction chunks are accounted here, against the transport write
+	// result, not when a caster block is accepted into the pacer. "Sent to
+	// receiver" therefore means "accepted by the transport layer" — the
+	// deepest tier the platforms expose. BLE write-without-response has no
+	// completion signal, so even a true write() only proves submission to
+	// the Qt stack; asynchronous write errors still arrive via the
+	// transport's errorOccurred.
 	connect(m_hyfix.get(), &HyfixReceiver::correctionWriteRequested,
 	        this, [this](const QByteArray& data) {
 		const auto connected = m_transport
