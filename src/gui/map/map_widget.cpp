@@ -568,13 +568,12 @@ void MapWidget::finishCameraInteraction()
 	camera_interaction_registered = false;
 	coverage_context_timer.stop();
 	RasterResourceManager::instance().endInteraction();
-	auto const content_refresh_needed =
-		render_context_update_scheduled || template_refresh_deferred;
 	if (render_context_update_scheduled)
 		render_context_timer.start(0);
-	// Admit the newest complete content generation once, at the idle boundary.
-	if (content_refresh_needed)
-		scheduleFrameUpdate();
+	// Admit the newest complete content generation at the idle boundary. The
+	// frame update is unconditional: the presented frame may be a passless
+	// camera frame, and a content frame must always reconcile it.
+	scheduleFrameUpdate();
 }
 
 void MapWidget::viewChanged(MapView::ChangeFlags changes)
@@ -1303,6 +1302,11 @@ void MapWidget::renderFrame()
 		auto frame = frame_planner.cameraFrame(
 			frame_view, retained_content_frame->revision);
 		vello_canvas->setCameraFrame(std::move(frame));
+		// A camera frame planned after input went quiescent must still reach
+		// the idle boundary, even if the settling call raced with a pending
+		// interaction state. Re-arm the idle timer so a content frame always
+		// reconciles the presented camera frame.
+		settleCameraInteraction();
 		return;
 	}
 
