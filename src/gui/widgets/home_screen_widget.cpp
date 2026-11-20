@@ -422,10 +422,13 @@ HomeScreenWidgetMobile::HomeScreenWidgetMobile(HomeScreenController *controller,
   file_list_widget->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
   file_list_widget->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
   file_list_widget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+  // The list is transparent over the window, so its text must use the window's
+  // text color; the item-view text color stays dark in dark mode.
   file_list_widget->setStyleSheet(QStringLiteral(
-      "QListWidget { background: transparent; border: 0; }"
-      "QListWidget::item { padding: 12px 8px; border-bottom: 1px solid "
-      "palette(midlight); }"));
+      "QListWidget { background: transparent; border: 0; "
+      "color: palette(window-text); }"
+      "QListWidget::item { padding: 12px 8px; color: palette(window-text); "
+      "border-bottom: 1px solid palette(midlight); }"));
   connect(file_list_widget, &QListWidget::itemClicked, this,
           &HomeScreenWidgetMobile::itemClicked);
   content_layout->addWidget(file_list_widget);
