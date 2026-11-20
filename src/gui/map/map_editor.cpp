@@ -256,19 +256,28 @@ namespace {
 #endif
 		}
 		auto geometry = splitter->geometry();
+		// Without initial sizes the splitter gives the child only its minimal
+		// size hint (a couple of table rows on a phone). Start the child with a
+		// usable share of the screen; the handle still lets the user resize it.
 		if (geometry.height() > geometry.width())
 		{
 			splitter->setOrientation(Qt::Vertical);
 			splitter->addWidget(child);
 			splitter->addWidget(placeholder);
+			splitter->setStretchFactor(0, 3);
+			splitter->setStretchFactor(1, 2);
+			splitter->setSizes({ geometry.height() * 3 / 5, geometry.height() * 2 / 5 });
 		}
 		else
 		{
 			splitter->setOrientation(Qt::Horizontal);
 			splitter->addWidget(placeholder);
 			splitter->addWidget(child);
+			splitter->setStretchFactor(0, 11);
+			splitter->setStretchFactor(1, 9);
+			splitter->setSizes({ geometry.width() * 11 / 20, geometry.width() * 9 / 20 });
 		}
-		
+
 		return splitter;
 	}
 	
