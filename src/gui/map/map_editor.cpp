@@ -223,9 +223,53 @@ namespace {
 	 * side, spanning the full height. In portrait mode, the child is placed
 	 * on the top, spanning the full width.
 	 */
+	/**
+	 * The splitter behind a mobile dock substitute.
+	 *
+	 * Sizes set before the splitter is shown do not survive its first layout,
+	 * which leaves the child at its minimal size hint (a couple of table rows
+	 * on a phone). So the child gets a usable share of the screen each time
+	 * the splitter is shown or resized; the handle still resizes it in between.
+	 */
+	class DockSubstituteSplitter : public QSplitter
+	{
+	public:
+		using QSplitter::QSplitter;
+
+	protected:
+		void showEvent(QShowEvent* event) override
+		{
+			QSplitter::showEvent(event);
+			applyShares();
+			for (int i = 0; i < count(); ++i)
+			{
+				if (widget(i)->testAttribute(Qt::WA_NativeWindow))
+					widget(i)->raise();
+			}
+		}
+
+		void resizeEvent(QResizeEvent* event) override
+		{
+			QSplitter::resizeEvent(event);
+			applyShares();
+		}
+
+	private:
+		void applyShares()
+		{
+			if (count() != 2)
+				return;
+			// Portrait: the child is on top. Landscape: the child is on the right.
+			if (orientation() == Qt::Vertical)
+				setSizes({ height() * 3 / 5, height() * 2 / 5 });
+			else
+				setSizes({ width() * 11 / 20, width() * 9 / 20 });
+		}
+	};
+
 	QSplitter* createDockWidgetSubstitute(MainWindow* window, QWidget* child)
 	{
-		auto* splitter = new QSplitter(window);
+		auto* splitter = new DockSubstituteSplitter(window);
 		splitter->setChildrenCollapsible(false);
 		
 		auto* placeholder = new QWidget();
@@ -233,6 +277,13 @@ namespace {
 		splitter->setAttribute(Qt::WA_NoSystemBackground, true);
 		placeholder->setAttribute(Qt::WA_NoSystemBackground, true);
 		child->setAutoFillBackground(true);
+		// The map renders into a native view, which is composited above
+		// non-native widgets regardless of stacking order: the map hid all of
+		// the child except the strip above it. Like the map's own tool bars,
+		// give the child its own native view (but not the transparent
+		// placeholder or the splitter, which must keep showing the map).
+		child->setAttribute(Qt::WA_DontCreateNativeAncestors, true);
+		child->setAttribute(Qt::WA_NativeWindow, true);
 		
 		auto update_geometry = [window, splitter] {
 			auto geometry = window->rect();
@@ -256,26 +307,17 @@ namespace {
 #endif
 		}
 		auto geometry = splitter->geometry();
-		// Without initial sizes the splitter gives the child only its minimal
-		// size hint (a couple of table rows on a phone). Start the child with a
-		// usable share of the screen; the handle still lets the user resize it.
 		if (geometry.height() > geometry.width())
 		{
 			splitter->setOrientation(Qt::Vertical);
 			splitter->addWidget(child);
 			splitter->addWidget(placeholder);
-			splitter->setStretchFactor(0, 3);
-			splitter->setStretchFactor(1, 2);
-			splitter->setSizes({ geometry.height() * 3 / 5, geometry.height() * 2 / 5 });
 		}
 		else
 		{
 			splitter->setOrientation(Qt::Horizontal);
 			splitter->addWidget(placeholder);
 			splitter->addWidget(child);
-			splitter->setStretchFactor(0, 11);
-			splitter->setStretchFactor(1, 9);
-			splitter->setSizes({ geometry.width() * 11 / 20, geometry.width() * 9 / 20 });
 		}
 
 		return splitter;
