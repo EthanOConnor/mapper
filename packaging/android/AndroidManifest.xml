@@ -11,7 +11,10 @@
          and below; the runtime SCAN/CONNECT pair covers Android 12+. -->
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
-    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+    <!-- Scans only find GNSS receivers; without neverForLocation, Android 12+
+         withholds scan results until location permission is also granted. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <!-- Cabled GNSS receivers via the USB serial transport. Not required:
          the app is fully functional without USB host support. -->

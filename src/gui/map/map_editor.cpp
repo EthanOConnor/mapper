@@ -47,6 +47,7 @@
 #include <QDialog>
 #include <QDir>
 #include <QDockWidget>
+#include <QStandardPaths>
 #include <QDebug>
 #include <QEvent>
 #include <QFileInfo>
@@ -4316,9 +4317,23 @@ void MapEditorController::enableGPSDisplay(bool enable)
 			}
 			gpx_file_path = QDir{draft_directory}.filePath(gpx_filename);
 #else
-			gpx_file_path =
-				QFileInfo(window->currentPath()).absoluteDir().canonicalPath()
-				+ QLatin1Char('/') + gpx_filename;
+			const auto map_dir =
+				QFileInfo(window->currentPath()).absoluteDir().canonicalPath();
+			if (!map_dir.isEmpty() && QFileInfo(map_dir).isWritable())
+			{
+				gpx_file_path = map_dir + QLatin1Char('/') + gpx_filename;
+			}
+			else
+			{
+				// Maps opened through Android's document picker have a
+				// content:// path with no writable folder; keep the track in
+				// the app's own storage instead.
+				QDir track_dir{QStandardPaths::writableLocation(
+					QStandardPaths::AppDataLocation)
+					+ QLatin1String("/gps-tracks")};
+				track_dir.mkpath(QStringLiteral("."));
+				gpx_file_path = track_dir.filePath(gpx_filename);
+			}
 #endif
 			
 			bool new_template = true;  // Indicates that we really add a new template.
