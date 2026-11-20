@@ -930,6 +930,11 @@ bool Template::preLoadSetup(QWidget* /*dialog_parent*/)
 #if defined(Q_OS_IOS)
 bool Template::prepareAuxiliaryDocumentSnapshot()
 {
+	// Online templates (tile services such as Map Hub layers) have no file
+	// to snapshot; they load from their source configuration.
+	if (template_path.isEmpty())
+		return true;
+
 	if (auxiliary_document_snapshot
 	    && !auxiliary_document_snapshot_path.isEmpty())
 	{

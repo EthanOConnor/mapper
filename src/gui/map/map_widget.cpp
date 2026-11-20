@@ -601,16 +601,22 @@ void MapWidget::visibilityChanged(MapView::VisibilityFeature feature, bool activ
 		else if (temp && temp->getTemplateState() == Template::Unloaded && active)
 		{
 			// The template must be loaded.
+#if !defined(Q_OS_IOS)
+			// On iOS, showing a cursor tooltip from a touch event crashes in
+			// QIOSWindow::requestActivateWindow(), and there is no cursor anyway.
 			QToolTip::showText(QCursor::pos(),
 			                   qApp->translate("OpenOrienteering::MainWindow", "Opening %1")
 			                   .arg(temp->getTemplateFilename()) );
+#endif
 			// Use a small delay so that some UI events can be processed first.
 			QPointer<MapWidget> widget(this);
 			QTimer::singleShot(10, temp, ([temp, widget]() {
 				if (temp->getTemplateState() != Template::Loaded)
 				{
 					temp->loadTemplateFile();
+#if !defined(Q_OS_IOS)
 					QToolTip::hideText();
+#endif
 					if (temp->getTemplateState() == Template::Invalid)
 						QMessageBox::warning(widget.data(),
 						                     qApp->translate("OpenOrienteering::MainWindow", "Error"),

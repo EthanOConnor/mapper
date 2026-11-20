@@ -206,6 +206,10 @@ void MobileSettingsBridge::chooseReceiver()
 void MobileSettingsBridge::useSystemLocation()
 {
 	auto& settings = Settings::getInstance();
+	// Drop the live connection too; otherwise an auto-connected receiver
+	// stays in use and is saved again on its next state update.
+	GnssController::instance().disconnectExternal();
+	settings.setPositionSource({});
 	settings.setGnssDeviceAddress({});
 	settings.setGnssDeviceName({});
 	emit receiverChanged();

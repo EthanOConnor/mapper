@@ -144,6 +144,13 @@ Rectangle {
         id: stack
         anchors.fill: parent
         initialItem: categoriesPage
+        // A text field on a popped page can keep active focus, so the next
+        // field tapped never asks iOS for the keyboard. Reset on every page change.
+        onCurrentItemChanged: {
+            Qt.inputMethod.hide()
+            if (currentItem)
+                currentItem.forceActiveFocus()
+        }
     }
 
     // ---------- Categories ----------
@@ -264,13 +271,35 @@ Rectangle {
                 property alias placeholder: field.placeholderText
                 property alias echoMode: field.echoMode
                 property alias inputMethodHints: field.inputMethodHints
+                property bool showPaste: false
                 Layout.fillWidth: true
                 Layout.leftMargin: 20
                 Layout.rightMargin: 20
                 Layout.topMargin: 10
                 spacing: 0
                 Label { id: fieldLabel; font.pixelSize: 13; opacity: 0.6 }
-                TextField { id: field; Layout.fillWidth: true; font.pixelSize: 16 }
+                RowLayout {
+                    Layout.fillWidth: true
+                    TextField {
+                        id: field
+                        Layout.fillWidth: true
+                        font.pixelSize: 16
+                        onPressed: {
+                            forceActiveFocus()
+                            Qt.inputMethod.show()
+                        }
+                    }
+                    // iOS offers no paste menu in Qt password fields.
+                    Button {
+                        visible: showPaste
+                        flat: true
+                        text: qsTr("Paste")
+                        onClicked: {
+                            field.forceActiveFocus()
+                            field.paste()
+                        }
+                    }
+                }
             }
 
             FieldRow { id: nameField; label: qsTr("Profile name"); text: editPage.profile.name ?? "" }
@@ -300,6 +329,7 @@ Rectangle {
                 label: (editPage.profile.hasPassword ?? false)
                        ? qsTr("Password (leave empty to keep saved)") : qsTr("Password")
                 echoMode: TextInput.Password
+                showPaste: true
             }
             SettingSwitch {
                 id: tlsSwitch
