@@ -690,7 +690,8 @@ bool TextObjectEditorHelper::keyPressEvent(QKeyEvent* event)
 	auto calcNewCursorPosition = [this](int offset) {
 		Q_ASSERT(qAbs(offset) == 1);
 		const int new_cursor_position = cursor_position + offset;
-		if (pristine_text.at(new_cursor_position).isLowSurrogate())
+		if (new_cursor_position >= 0 && new_cursor_position < pristine_text.size()
+		    && pristine_text.at(new_cursor_position).isLowSurrogate())
 			return new_cursor_position + offset;
 		return new_cursor_position;
 	};
