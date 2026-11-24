@@ -61,6 +61,14 @@ add_custom_command(OUTPUT "${PROJECT_BINARY_DIR}/gdal/mapper-osmconf.ini"
   WORKING_DIRECTORY "${PROJECT_BINARY_DIR}"
 )
 
+if(Mapper_DEVELOPMENT_BUILD)
+	# Stage GDAL's data files at "data:/gdal" during development, like the
+	# installation step does for packaged builds. GdalManager sets GDAL_DATA
+	# from this location; without it, a static GDAL falls back to the data
+	# path recorded at its own build time, which need not exist at runtime.
+	file(COPY "${Mapper_GDAL_DATA_DIR}/" DESTINATION "${PROJECT_BINARY_DIR}/gdal")
+endif()
+
 
 # Utility to dump GDAL format information
 

@@ -89,6 +89,7 @@
 #include "fileformats/ocd_types_v12.h"
 #include "fileformats/simple_course_export.h"
 #include "fileformats/xml_file_format.h"
+#include "mapper_resource.h"
 #include "templates/template.h"
 #include "undo/undo.h"
 #include "undo/undo_manager.h"
@@ -579,8 +580,12 @@ void FileFormatTest::initTestCase()
 	QCoreApplication::setApplicationName(QString::fromLatin1(metaObject()->className()));
 	QVERIFY2(QDir::home().exists(), "The home dir must be writable in order to use QSettings.");
 	
+	// Register the "data:" search paths so that GdalManager can locate
+	// data:/gdal (GDAL_DATA, OSM_CONFIG_FILE), like Mapper's main().
+	// The test data locations are appended below.
+	MapperResource::setSeachPaths();
 	doStaticInitializations();
-	
+
 	const auto prefix = QString::fromLatin1("data");
 	QDir::addSearchPath(prefix, QDir(QString::fromUtf8(MAPPER_TEST_SOURCE_DIR)).absoluteFilePath(prefix));
 	QDir::addSearchPath(prefix, QDir(QString::fromUtf8(MAPPER_TEST_SOURCE_DIR)).absoluteFilePath(QStringLiteral("..")));

@@ -69,6 +69,7 @@
 #include "fileformats/xml_file_format_p.h"
 #include "gdal/ogr_template.h"
 #include "gdal/gdal_manager.h"
+#include "mapper_resource.h"
 #include "templates/template.h"
 #include "templates/template_image.h"
 #include "templates/template_table_model.h"
@@ -122,6 +123,9 @@ private slots:
 		QVERIFY2(QDir::home().exists(), "The home dir must be writable in order to use QSettings.");
 		
 		Q_INIT_RESOURCE(resources);
+		// Register the "data:" search paths so that GdalManager can locate
+		// data:/gdal (GDAL_DATA, OSM_CONFIG_FILE), like Mapper's main().
+		MapperResource::setSeachPaths();
 		doStaticInitializations();
 		// Static map initializations
 		Map map;
