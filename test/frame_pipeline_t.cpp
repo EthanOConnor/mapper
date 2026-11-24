@@ -648,6 +648,19 @@ void FramePipelineTest::mapWidgetUsesTheFrameContract()
 		             return types.join(u',');
 	             }())));
 	QVERIFY(release_index > handoff_index);
+	// Complete the two-finger touch sequence so Qt's QPinchGestureRecognizer
+	// (active on Linux/Windows) exits pinching mode before verifying that the
+	// frame contract settles back to a full content frame.
+	QTouchEvent second_touch_end(
+		QEvent::TouchEnd, &touch_device, Qt::NoModifier,
+		{
+			QEventPoint(0, QEventPoint::State::Released,
+			            drag_end, global_end),
+			QEventPoint(1, QEventPoint::State::Released,
+			            QPointF(405, 280),
+			            QPointF(native_surface->mapToGlobal(QPoint(405, 280))))
+		});
+	QCoreApplication::sendEvent(native_surface, &second_touch_end);
 	widget.removeEventFilter(&touch_probe);
 
 	auto const frame_is_current = [canvas] {

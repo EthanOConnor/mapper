@@ -1607,10 +1607,14 @@ void MapWidget::wheelEvent(QWheelEvent* event)
 	{
 		if (view)
 		{
-			beginCameraInteraction();
 			auto const old_zoom = view->getZoom();
 			auto degrees = vertical_delta / 8.0;
 			auto num_steps = degrees / 15.0;
+			auto const at_zoom_limit =
+				(num_steps > 0 && (old_zoom >= MapView::zoom_in_limit || qFuzzyCompare(old_zoom, MapView::zoom_in_limit)))
+				|| (num_steps < 0 && (old_zoom <= MapView::zoom_out_limit || qFuzzyCompare(old_zoom, MapView::zoom_out_limit)));
+			if (!at_zoom_limit)
+				beginCameraInteraction();
 			auto cursor_pos_view = viewportToView(event->position());
 			bool preserve_cursor_pos = (event->modifiers() & Qt::ControlModifier) == 0;
 			if (num_steps < 0 && !Settings::getInstance().getSettingCached(Settings::MapEditor_ZoomOutAwayFromCursor).toBool())
