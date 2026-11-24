@@ -36,6 +36,7 @@ private slots:
 	void servesFreshDiskCacheOffline();
 	void servesHostnameDiskCacheOfflineWithoutDns();
 	void timesOutWithoutBlockingTheCaller();
+	void destroysManagerSafelyWithPendingDelivery();
 };
 
 #endif

@@ -1145,4 +1145,38 @@ void TileNetworkManagerTest::timesOutWithoutBlockingTheCaller()
 	server.releaseAll();
 }
 
+void TileNetworkManagerTest::destroysManagerSafelyWithPendingDelivery()
+{
+	MiniHttpServer server;
+	QTemporaryDir directory;
+	QVERIFY(directory.isValid());
+	for (int i = 0; i < 20; ++i)
+	{
+		{
+			TileNetworkManager manager(configFor(directory));
+			manager.submit(request(server.url(QStringLiteral("/ok")), 1, i + 1));
+			QTRY_COMPARE_WITH_TIMEOUT(server.paths().size(), i + 1, 2000);
+			// Let the worker receive the response and queue delivery to the
+			// facade without pumping the main-thread event loop yet.
+			QThread::msleep(20);
+		}
+		QCoreApplication::processEvents();
+	}
+
+	// Destroying the manager directly from a finished() slot must not touch the
+	// worker afterward to acknowledge result capacity.
+	auto manager = std::make_unique<TileNetworkManager>(configFor(directory));
+	bool delivered = false;
+	connect(manager.get(), &TileNetworkManager::finished, this,
+	        [&manager, &delivered](TileNetworkManager::Token,
+	                               const TileNetworkResult&) {
+		        delivered = true;
+		        manager.reset();
+	        });
+	manager->submit(request(server.url(QStringLiteral("/ok")), 2, 1));
+	QTRY_VERIFY_WITH_TIMEOUT(delivered, 2000);
+	QVERIFY(!manager);
+	QCoreApplication::processEvents();
+}
+
 QTEST_GUILESS_MAIN(TileNetworkManagerTest)

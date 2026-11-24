@@ -237,6 +237,7 @@ private:
 	};
 	NetworkModeSnapshot networkModeSnapshot() const;
 	quint64 privateOriginGeneration(const QString& origin) const;
+	void acknowledgeDeliveredResult(qint64 reserved_response_bytes);
 
 	Config config_;
 	QThread* network_thread_ = nullptr;

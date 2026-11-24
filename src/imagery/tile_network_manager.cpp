@@ -421,15 +421,15 @@ public:
 		wake_timer_ = new QTimer(this);
 		wake_timer_->setSingleShot(true);
 		connect(wake_timer_, &QTimer::timeout, this, [this] { dispatch(); });
-		auto* state_prune_timer = new QTimer(this);
-		state_prune_timer->setInterval(std::chrono::minutes(1));
-		connect(state_prune_timer, &QTimer::timeout, this, [this] {
+		state_prune_timer_ = new QTimer(this);
+		state_prune_timer_->setInterval(std::chrono::minutes(1));
+		connect(state_prune_timer_, &QTimer::timeout, this, [this] {
 			pruneNegativeCache();
 			pruneClientHistory();
 			pruneHostBackoff();
 			pruneDestinationCache();
 		});
-		state_prune_timer->start();
+		state_prune_timer_->start();
 
 		network_ = new QNetworkAccessManager(this);
 		network_->setCookieJar(new RejectingCookieJar(network_));
@@ -462,11 +462,22 @@ public:
 		shutting_down_ = true;
 		if (wake_timer_)
 			wake_timer_->stop();
+		if (state_prune_timer_)
+			state_prune_timer_->stop();
+		auto const active_entries = active_replies_.values();
+		for (auto const& entry : active_entries)
+		{
+			if (entry->first_byte_timer)
+				entry->first_byte_timer->stop();
+			if (entry->absolute_timer)
+				entry->absolute_timer->stop();
+		}
 		auto const active_replies = active_replies_.keys();
 		for (auto* reply : active_replies)
 		{
 			disconnect(reply, nullptr, this, nullptr);
 			reply->abort();
+			reply->deleteLater();
 		}
 		for (auto const lookup_id : std::as_const(destination_lookups_))
 			QHostInfo::abortHostLookup(lookup_id);
@@ -485,11 +496,27 @@ public:
 		active_total_ = 0;
 		outstanding_results_ = 0;
 		outstanding_response_bytes_ = 0;
+		// Destroy deferred-deleted QNetworkReply objects while QNetworkAccessManager
+		// is still alive so their internal HTTP thread cleanup finishes cleanly
+		// before ~QNetworkAccessManager tears down its network backend.
+		QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
 		if (network_)
 		{
 			delete network_;
 			network_ = nullptr;
 		}
+	}
+
+	void acknowledgeResult(qint64 reserved_response_bytes)
+	{
+		Q_ASSERT(QThread::currentThread() == thread());
+		if (shutting_down_)
+			return;
+		--outstanding_results_;
+		outstanding_response_bytes_ -= reserved_response_bytes;
+		Q_ASSERT(outstanding_results_ >= 0);
+		Q_ASSERT(outstanding_response_bytes_ >= 0);
+		dispatch();
 	}
 
 	void submit(Token token, TileNetworkRequest request)
@@ -741,6 +768,8 @@ private:
 		int retries = 0;
 		qint64 not_before = 0;
 		QPointer<QNetworkReply> reply;
+		QPointer<QTimer> first_byte_timer;
+		QPointer<QTimer> absolute_timer;
 		QByteArray body;
 		QString active_host;
 		bool cancelled = false;
@@ -1049,16 +1078,6 @@ private:
 		entry->reserved_response_bytes = 0;
 		Q_ASSERT(outstanding_results_ >= 0);
 		Q_ASSERT(outstanding_response_bytes_ >= 0);
-	}
-
-	void acknowledgeResult(qint64 reserved_response_bytes)
-	{
-		Q_ASSERT(QThread::currentThread() == thread());
-		--outstanding_results_;
-		outstanding_response_bytes_ -= reserved_response_bytes;
-		Q_ASSERT(outstanding_results_ >= 0);
-		Q_ASSERT(outstanding_response_bytes_ >= 0);
-		dispatch();
 	}
 
 	void enqueue(const std::shared_ptr<Entry>& entry)
@@ -1485,31 +1504,40 @@ private:
 			reply, &QNetworkReply::finished, this,
 			[this, entry] { replyFinished(entry); },
 			Qt::QueuedConnection);
-		QTimer::singleShot(
-			config_.first_byte_timeout,
-			reply,
-			[entry] {
-				if (entry->reply && entry->reply->isRunning()
-				    && !entry->received_metadata)
-				{
-					entry->absolute_timeout = true;
-					entry->reply->abort();
-				}
-			});
-		QTimer::singleShot(
-			config_.absolute_timeout,
-			reply,
-			[entry] {
-				if (entry->reply && entry->reply->isRunning())
-				{
-					entry->absolute_timeout = true;
-					entry->reply->abort();
-				}
-			});
+		auto* first_byte_timer = new QTimer(reply);
+		first_byte_timer->setSingleShot(true);
+		connect(first_byte_timer, &QTimer::timeout, reply, [entry] {
+			if (entry->reply && entry->reply->isRunning()
+			    && !entry->received_metadata)
+			{
+				entry->absolute_timeout = true;
+				entry->reply->abort();
+			}
+		});
+		entry->first_byte_timer = first_byte_timer;
+		first_byte_timer->start(config_.first_byte_timeout);
+
+		auto* absolute_timer = new QTimer(reply);
+		absolute_timer->setSingleShot(true);
+		connect(absolute_timer, &QTimer::timeout, reply, [entry] {
+			if (entry->reply && entry->reply->isRunning())
+			{
+				entry->absolute_timeout = true;
+				entry->reply->abort();
+			}
+		});
+		entry->absolute_timer = absolute_timer;
+		absolute_timer->start(config_.absolute_timeout);
 	}
 
 	void releaseActive(const std::shared_ptr<Entry>& entry)
 	{
+		if (entry->first_byte_timer)
+			entry->first_byte_timer->stop();
+		entry->first_byte_timer = nullptr;
+		if (entry->absolute_timer)
+			entry->absolute_timer->stop();
+		entry->absolute_timer = nullptr;
 		auto* reply = entry->reply.data();
 		if (reply)
 			active_replies_.remove(reply);
@@ -1893,74 +1921,63 @@ private:
 				acknowledgeResult(reserved_response_bytes);
 			return;
 		}
-		QPointer<Worker> worker(this);
 		QMetaObject::invokeMethod(
 			facade,
-			[facade, worker, token, result = std::move(result),
+			[facade, token, result = std::move(result),
 			 reserved, reserved_response_bytes,
 			 guard = std::move(guard)]() mutable {
-				if (facade)
+				if (!facade)
+					return;
+				if (result.outcome
+				      != TileNetworkResult::Outcome::Cancelled
+				    && result.outcome
+				      != TileNetworkResult::Outcome::Rejected)
 				{
-					if (result.outcome
-					      != TileNetworkResult::Outcome::Cancelled
-					    && result.outcome
-					      != TileNetworkResult::Outcome::Rejected)
+					auto const credential_changed =
+						guard.credential_generation != 0
+						&& facade->credentialGeneration(
+							guard.credential_origin)
+						     != guard.credential_generation;
+					auto const private_permission_changed =
+						guard.private_permission_generation != 0
+						&& facade->privateOriginGeneration(
+							guard.private_permission_origin)
+						     != guard.private_permission_generation;
+					if (credential_changed)
 					{
-						auto const credential_changed =
-							guard.credential_generation != 0
-							&& facade->credentialGeneration(
-								guard.credential_origin)
-							     != guard.credential_generation;
-						auto const private_permission_changed =
-							guard.private_permission_generation != 0
-							&& facade->privateOriginGeneration(
-								guard.private_permission_origin)
-							     != guard.private_permission_generation;
-						if (credential_changed)
-						{
-							result.body.clear();
-							result.outcome =
-								TileNetworkResult::Outcome::Cancelled;
-							result.error_string = TileNetworkManager::tr(
-								"The imagery account changed before the response was delivered.");
-						}
-						else if (private_permission_changed)
-						{
-							result.body.clear();
-							result.outcome =
-								TileNetworkResult::Outcome::Rejected;
-							result.private_network_rejected = true;
-							result.private_network_rejected_url =
-								guard.private_permission_url;
-							result.private_network_permission_revoked = true;
-							result.error_string = TileNetworkManager::tr(
-								"Permission for the private imagery origin changed before the response was delivered.");
-						}
-						else if (!guard.cache_only_request
-						         && guard.network_mode_generation != 0
-						         && facade->networkModeSnapshot().generation
-						              != guard.network_mode_generation)
-						{
-							result.body.clear();
-							result.outcome =
-								TileNetworkResult::Outcome::OfflineMiss;
-							result.error_string = TileNetworkManager::tr(
-								"The imagery request was stopped because offline mode was enabled.");
-						}
+						result.body.clear();
+						result.outcome =
+							TileNetworkResult::Outcome::Cancelled;
+						result.error_string = TileNetworkManager::tr(
+							"The imagery account changed before the response was delivered.");
 					}
-					emit facade->finished(token, result);
+					else if (private_permission_changed)
+					{
+						result.body.clear();
+						result.outcome =
+							TileNetworkResult::Outcome::Rejected;
+						result.private_network_rejected = true;
+						result.private_network_rejected_url =
+							guard.private_permission_url;
+						result.private_network_permission_revoked = true;
+						result.error_string = TileNetworkManager::tr(
+							"Permission for the private imagery origin changed before the response was delivered.");
+					}
+					else if (!guard.cache_only_request
+					         && guard.network_mode_generation != 0
+					         && facade->networkModeSnapshot().generation
+					              != guard.network_mode_generation)
+					{
+						result.body.clear();
+						result.outcome =
+							TileNetworkResult::Outcome::OfflineMiss;
+						result.error_string = TileNetworkManager::tr(
+							"The imagery request was stopped because offline mode was enabled.");
+					}
 				}
-				if (reserved && worker)
-				{
-					QMetaObject::invokeMethod(
-						worker,
-						[worker, reserved_response_bytes] {
-							if (worker)
-								worker->acknowledgeResult(
-									reserved_response_bytes);
-						},
-						Qt::QueuedConnection);
-				}
+				emit facade->finished(token, result);
+				if (reserved && facade)
+					facade->acknowledgeDeliveredResult(reserved_response_bytes);
 			},
 			Qt::QueuedConnection);
 	}
@@ -1972,6 +1989,7 @@ private:
 	QElapsedTimer clock_;
 	QNetworkAccessManager* network_ = nullptr;
 	QTimer* wake_timer_ = nullptr;
+	QTimer* state_prune_timer_ = nullptr;
 	bool shutting_down_ = false;
 	quint64 next_sequence_ = 1;
 	quint64 next_service_ = 1;
@@ -2059,12 +2077,28 @@ TileNetworkManager::~TileNetworkManager()
 	if (!network_thread_ || !worker_)
 		return;
 	QMetaObject::invokeMethod(
-		worker_, [worker = worker_] { worker->shutdown(); },
+		worker_,
+		[worker = worker_] {
+			worker->shutdown();
+			worker->deleteLater();
+		},
 		Qt::BlockingQueuedConnection);
-	QMetaObject::invokeMethod(worker_, &QObject::deleteLater, Qt::QueuedConnection);
 	network_thread_->quit();
 	network_thread_->wait();
 	worker_ = nullptr;
+}
+
+void TileNetworkManager::acknowledgeDeliveredResult(
+	qint64 reserved_response_bytes)
+{
+	if (!worker_)
+		return;
+	QMetaObject::invokeMethod(
+		worker_,
+		[worker = worker_, reserved_response_bytes] {
+			worker->acknowledgeResult(reserved_response_bytes);
+		},
+		Qt::QueuedConnection);
 }
 
 Q_APPLICATION_STATIC(TileNetworkManager, application_tile_network_manager)
