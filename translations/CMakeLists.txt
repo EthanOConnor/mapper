@@ -29,6 +29,7 @@ set(Mapper_translations
   OpenOrienteering_eo.ts
   OpenOrienteering_es.ts
   OpenOrienteering_et.ts
+  OpenOrienteering_eu.ts
   OpenOrienteering_fi.ts
   OpenOrienteering_fr.ts
   OpenOrienteering_he.ts
@@ -57,7 +58,7 @@ set(Mapper_translations ${Mapper_translations} PARENT_SCOPE)
 
 # Translation files which are updated but not deployed.
 set(Mapper_translations_template
-  OpenOrienteering_eu.ts
+  OpenOrienteering_ca.ts
   OpenOrienteering_template.ts
 )
 
@@ -80,6 +81,7 @@ set(map_symbols_translations
   map_symbols_pt.ts
   map_symbols_ru.ts
   map_symbols_sv.ts
+  map_symbols_ta.ts
   map_symbols_tr.ts
   map_symbols_uk.ts
   map_symbols_zh_CN.ts
@@ -290,7 +292,7 @@ endmacro()
 
 if(UNIX AND NOT APPLE AND NOT ANDROID)
 	set(update_source )
-	if(Mapper_DEVELOPMENT_BUILD)
+	if(Mapper_DEVELOPMENT_BUILD OR "$ENV{MAPPER_CI_FORCE_UPDATES}")
 		# Only development builds are allowed to update the source directories.
 		set(update_sources
 		  COMMAND "${CMAKE_COMMAND}" -E copy_if_different "../packaging/linux/Mapper.desktop" "${PROJECT_SOURCE_DIR}/packaging/linux/"

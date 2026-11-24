@@ -40,6 +40,7 @@
 #include <QPagedPaintDevice>
 #include <QPaintEngine> // IWYU pragma: keep
 #include <QPainter>
+#include <QPainterPath>
 #include <QPageLayout>
 #include <QPdfWriter>
 #include <QPointF>
@@ -73,6 +74,20 @@
 namespace OpenOrienteering {
 
 namespace {
+
+/*
+ * Across a range of Qt versions, QPainter has inconsistent handling of pure
+ * QRectF bounds for clipping: The coordinates are rounded to integers. This
+ * leads to visual glitches in MapPrinter output. QPainterPath is handled more
+ * consistently. This function marks the handling of the quirk.
+ * The QPainterPath pattern is also used as a fallback in QPainter::setClipRect.
+ */
+void setExactClipRect(QPainter* painter, const QRectF& rect)
+{
+	QPainterPath path;
+	path.addRect(rect);
+	painter->setClipPath(path, Qt::ReplaceClip);
+}
 
 #if defined(QT_PRINTSUPPORT_LIB)
 bool requiresPrecisionPageSpool(const QPainter* painter)
@@ -108,7 +123,7 @@ bool renderFramePasses(QPainter* painter,
 	frame.vector_passes = passes;
 	painter->save();
 	painter->setWorldTransform(camera, false);
-	painter->setClipRect(clip, Qt::ReplaceClip);
+	setExactClipRect(painter, clip);
 	auto const result = render::QPainterFrameRenderer().render(*painter, frame);
 	painter->restore();
 	return result.status == render::FrameStatus::Presented;
@@ -1126,7 +1141,12 @@ void MapPrinter::finishOutput(bool cancelled)
 }
 
 
-void MapPrinter::drawPage(QPainter* device_painter, const QRectF& page_extent, QImage* page_buffer) const
+void MapPrinter::drawPage(
+        QPainter* device_painter,
+        const QRectF& page_extent,
+        QImage* page_buffer,
+        RenderConfig::Options render_options
+) const
 {
 	// Determine transformation and clipping for page extent and region
 	const qreal units_per_mm = options.resolution / 25.4;
@@ -1137,18 +1157,26 @@ void MapPrinter::drawPage(QPainter* device_painter, const QRectF& page_extent, Q
 	transform.scale(scale_adjustment, scale_adjustment);
 	// Translate and clip for margins and print area
 	transform.translate(-page_extent.left(), -page_extent.top());
-	drawPage(device_painter, page_extent, transform, page_buffer);
+	drawPage(device_painter, page_extent, transform, page_buffer, render_options);
 }
 
-void MapPrinter::drawPage(QPainter* device_painter, const QRectF& page_extent, const QTransform& page_extent_transform, QImage* page_buffer) const
+void MapPrinter::drawPage(
+        QPainter* device_painter,
+        const QRectF& page_extent,
+        const QTransform& page_extent_transform,
+        QImage* page_buffer,
+        RenderConfig::Options render_options
+) const
 {
 	// Logical units per mm
 	const qreal units_per_mm = options.resolution / 25.4;
 	
 	const auto saved_hints  = device_painter->renderHints();
-	const auto render_hints = saved_hints
-	                          | QPainter::Antialiasing
-	                          | QPainter::SmoothPixmapTransform;
+	auto render_hints       = saved_hints | QPainter::SmoothPixmapTransform;
+	if (render_options.testFlag(RenderConfig::DisableAntialiasing))
+		render_hints &= ~QPainter::Antialiasing;
+	else
+		render_hints |= QPainter::Antialiasing;
 	
 	const auto page_region_used = page_extent.intersected(print_area);
 	if (!output_templates.empty()
@@ -1164,7 +1192,7 @@ void MapPrinter::drawPage(QPainter* device_painter, const QRectF& page_extent, c
 	const auto output_request = render::RenderRequest {
 		render::fromQRectF(page_region_used),
 		output_scaling,
-		RenderConfig::NoOptions,
+		render_options,
 		1,
 	};
 	auto const snapshot = map.publishRenderSnapshot();
@@ -1476,10 +1504,7 @@ void MapPrinter::drawSeparationPages(QPagedPaintDevice* device, QPainter* device
 		}
 
 		painter->translate(-page_extent.left(), -page_extent.top());
-		painter->setClipRect(
-			page_extent.intersected(print_area).adjusted(-10, 10, 10, 10),
-			Qt::ReplaceClip
-		);
+		setExactClipRect(painter, page_extent.intersected(print_area).adjusted(-10, 10, 10, 10));
 		auto const request = render::RenderRequest {
 			render::fromQRectF(page_extent),
 			scale,

@@ -365,7 +365,7 @@
     <message>
         <location filename="../src/gui/color_dialog.cpp" line="185"/>
         <source>Cyan</source>
-        <translation type="unfinished">Cyan</translation>
+        <translation>Camgöbeği</translation>
     </message>
     <message>
         <location filename="../src/gui/color_dialog.cpp" line="190"/>
@@ -5021,7 +5021,7 @@ varsa fare tekerleği ile yakınlaştırın/uzaklaştırın.</translation>
     </message>
     <message>
         <location filename="../src/gui/widgets/measure_widget.cpp" line="138"/>
-        <source>The minimimum area is %1 %2.</source>
+        <source>The minimum area is %1 %2.</source>
         <translation>Minimum alan %1 %2&apos;dir.</translation>
     </message>
     <message>

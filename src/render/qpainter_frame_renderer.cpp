@@ -77,7 +77,7 @@ FrameCompletion QPainterFrameRenderer::render(QPainter& painter, const FramePack
 			QPainter layer_painter(&layer);
 			layer_painter.setRenderHints(painter.renderHints());
 			layer_painter.setWorldTransform(pass_transform);
-			renderer.render(layer_painter, *pass.scene, true);
+			renderer.render(layer_painter, *pass.scene, layer_painter.testRenderHint(QPainter::Antialiasing));
 			layer_painter.end();
 			applyOpacity(layer, pass.opacity);
 
@@ -92,7 +92,7 @@ FrameCompletion QPainterFrameRenderer::render(QPainter& painter, const FramePack
 		painter.setWorldTransform(pass_transform, false);
 		painter.setCompositionMode(compositionMode(pass.blend));
 		painter.setOpacity(painter.opacity() * pass.opacity);
-		renderer.render(painter, *pass.scene, true);
+		renderer.render(painter, *pass.scene, painter.testRenderHint(QPainter::Antialiasing));
 		painter.restore();
 	}
 	painter.restore();
