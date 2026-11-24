@@ -521,12 +521,10 @@ impl SceneBuilder {
         if self.group_depth != 0 {
             return;
         }
-        let seal = u64::from(self.scene.encoding().n_path_segments) >= batch_segment_budget()
-            || {
-                let bump = self.load.estimate(self.scale_hint);
-                bump.lines >= BUMP_LINES_CAPACITY / 8
-                    || bump.crossings >= BUMP_SEGMENTS_CAPACITY / 8
-            };
+        let seal = u64::from(self.scene.encoding().n_path_segments) >= batch_segment_budget() || {
+            let bump = self.load.estimate(self.scale_hint);
+            bump.lines >= BUMP_LINES_CAPACITY / 8 || bump.crossings >= BUMP_SEGMENTS_CAPACITY / 8
+        };
         if seal {
             self.scenes.push(SubScene {
                 scene: std::mem::replace(&mut self.scene, Scene::new()),
@@ -692,8 +690,7 @@ fn scene_fill_ellipse(scene: &mut SceneBuilder, bounds: ffi::Rect, brush: ffi::C
     scene.command_count += 1;
     scene.split_before_append();
     if let Some(bounds) = rect(bounds) {
-        let perimeter =
-            2.0 * (bounds.width() + bounds.height()) * scene.measure_scale();
+        let perimeter = 2.0 * (bounds.width() + bounds.height()) * scene.measure_scale();
         scene.load.add(LoadTally {
             lines: 4.0,
             curve_subdivisions: 4.0 * perimeter.max(0.0).sqrt(),
@@ -1664,7 +1661,7 @@ fn batch_segment_budget() -> u64 {
 /// accumulate in an intermediate texture first, and the pass blend and
 /// opacity apply when that texture is composited onto the frame.
 enum RenderStep {
-    Batch(Scene),
+    Batch(Box<Scene>),
     Group {
         batches: Vec<Scene>,
         blend: u8,
@@ -1758,7 +1755,10 @@ fn compose_steps(frame: &FrameBuilder) -> Result<Vec<RenderStep>, &'static str> 
         let composited = pass.blend != 0 || (pass.opacity < 1.0 && pass.scenes.len() > 1);
         if composited {
             if batch_appends > 0 {
-                steps.push(RenderStep::Batch(std::mem::replace(&mut scene, Scene::new())));
+                steps.push(RenderStep::Batch(Box::new(std::mem::replace(
+                    &mut scene,
+                    Scene::new(),
+                ))));
                 batch_load = BatchLoad::default();
                 batch_appends = 0;
             }
@@ -1799,7 +1799,10 @@ fn compose_steps(frame: &FrameBuilder) -> Result<Vec<RenderStep>, &'static str> 
                 warn_over_capacity_scene(load);
             }
             if batch_appends > 0 && batch_load.saturated_by(load) {
-                steps.push(RenderStep::Batch(std::mem::replace(&mut scene, Scene::new())));
+                steps.push(RenderStep::Batch(Box::new(std::mem::replace(
+                    &mut scene,
+                    Scene::new(),
+                ))));
                 batch_load = BatchLoad::default();
                 batch_appends = 0;
             }
@@ -1821,7 +1824,7 @@ fn compose_steps(frame: &FrameBuilder) -> Result<Vec<RenderStep>, &'static str> 
         }
     }
     if batch_appends > 0 || steps.is_empty() {
-        steps.push(RenderStep::Batch(scene));
+        steps.push(RenderStep::Batch(Box::new(scene)));
     }
     Ok(steps)
 }
@@ -1947,7 +1950,9 @@ fn render_steps(
                 // premultiplied color over transparent: each batch's
                 // straight-alpha vello output blends in with straight-alpha
                 // source factors.
-                let group_view = ctx.compositor.target_view(ctx.device, ctx.width, ctx.height);
+                let group_view = ctx
+                    .compositor
+                    .target_view(ctx.device, ctx.width, ctx.height);
                 let mut encoder =
                     ctx.device
                         .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -1971,8 +1976,13 @@ fn render_steps(
                 });
                 ctx.queue.submit(Some(encoder.finish()));
                 for scene in batches {
-                    ctx.renderer
-                        .render_to_texture(ctx.device, ctx.queue, scene, ctx.render_view, &params)?;
+                    ctx.renderer.render_to_texture(
+                        ctx.device,
+                        ctx.queue,
+                        scene,
+                        ctx.render_view,
+                        &params,
+                    )?;
                     let mut encoder =
                         ctx.device
                             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -2602,7 +2612,11 @@ mod tests {
         let lines_each = 10_000;
         let fills = 2 * budget / lines_each + 2;
         let retained = recorded_fills(fills, lines_each);
-        assert!(retained.scenes.len() >= 2, "{} sub-scenes", retained.scenes.len());
+        assert!(
+            retained.scenes.len() >= 2,
+            "{} sub-scenes",
+            retained.scenes.len()
+        );
         assert_eq!(retained.command_count, fills as u64);
         for sub_scene in retained.scenes.iter() {
             let segments = u64::from(sub_scene.scene.encoding().n_path_segments);
